@@ -1,6 +1,6 @@
 ---
-"@plakboek/db": patch
-"@plakboek/permissions": patch
+'@plakboek/db': patch
+'@plakboek/permissions': patch
 ---
 
 Fix `@plakboek/db`'s README to stop documenting `withMigrationLock` as an
