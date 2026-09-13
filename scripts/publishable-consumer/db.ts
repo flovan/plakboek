@@ -8,6 +8,18 @@ import {
   type RunMigrationsResult,
 } from '@plakboek/db';
 
+if (typeof createDb !== 'function') {
+  process.exit(1);
+}
+
+if (typeof runMigrations !== 'function') {
+  process.exit(1);
+}
+
+if (typeof MigrationChecksumMismatchError !== 'function') {
+  process.exit(1);
+}
+
 function makeDb(connectionString: string): Db {
   return createDb({ connectionString });
 }
@@ -24,9 +36,11 @@ const exampleMigration: Migration = {
   transactional: true,
 };
 
+// Must not open a connection: no createDb()/runMigrations() call here, just
+// the type-of checks and type assignments above.
 console.log(
+  'db.ts: createDb/runMigrations/MigrationChecksumMismatchError are exported as functions (no connection opened)',
   typeof makeDb,
   typeof applyMigrations,
-  typeof MigrationChecksumMismatchError,
   exampleMigration.name,
 );

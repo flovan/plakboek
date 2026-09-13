@@ -66,7 +66,10 @@ EOF
 echo "==> Installing packed tarballs into the consumer"
 (
   cd "$CONSUMER_DIR"
-  npm install --no-audit --no-fund --ignore-scripts "$TARBALL_DIR"/*.tgz
+  # @types/node: the probes call process.exit() for their runtime assertions,
+  # which needs Node's ambient types to type-check here -- it is not part of
+  # either published package's own type surface.
+  npm install --no-audit --no-fund --ignore-scripts "$TARBALL_DIR"/*.tgz @types/node
 )
 
 echo "==> Copying consumer probes"
@@ -81,12 +84,14 @@ cat > "$CONSUMER_DIR/tsconfig.json" << 'EOF'
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": []
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "types": ["node"]
   },
   "include": ["*.ts"]
 }
 EOF
-# skipLibCheck is true (plan 01-03, D-16): @plakboek/db's own .d.mts type-checks
+# skipLibCheck is true (plan 01-03, D-16): @plakboek/db's own .d.ts type-checks
 # clean (see packages/db typecheck script), but drizzle-orm ships .d.ts files
 # for EVERY dialect (singlestore, sqlite, mysql, ...) under one package, and
 # those unrelated dialects' declarations do not compile standalone without
@@ -99,7 +104,7 @@ echo "==> Type-checking consumer probes against the packed types"
 "$REPO_ROOT/node_modules/.bin/tsc" -p "$CONSUMER_DIR/tsconfig.json"
 
 echo "==> Running consumer probes at runtime"
-for probe in "$CONSUMER_DIR"/*.mjs; do
+for probe in "$CONSUMER_DIR"/*.ts; do
   node "$probe"
 done
 

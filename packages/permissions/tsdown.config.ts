@@ -6,5 +6,5 @@ export default defineConfig({
   platform: 'neutral',
   dts: true,
   clean: true,
-  fixedExtension: true,
+  fixedExtension: false,
 });

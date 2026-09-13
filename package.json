@@ -28,7 +28,7 @@
     "vitest": "catalog:"
   },
   "engines": {
-    "node": ">=22.16"
+    "node": ">=22.18"
   },
   "packageManager": "pnpm@12.4.1"
 }
