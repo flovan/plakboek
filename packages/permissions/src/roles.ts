@@ -29,28 +29,27 @@ export type RolePermissionList = readonly (Permission | DeprecatedPermission)[];
  * reserved key (D-12); any other lowercase-kebab role key maps to its own
  * permission list.
  */
-export type RoleConfig = {
+export type RoleConfig = Readonly<Record<string, RolePermissionList>> & {
   readonly superadmin: RolePermissionList;
-  readonly [roleKey: string]: RolePermissionList;
 };
 
 /** The validated, normalized result of `defineRoles`/`validateRoleConfig`:
  * every role's permissions are deduped, catalogue-ordered `Permission`
  * strings (deprecated aliases already resolved to their canonical name). */
-export type DefinedRoles<K extends string = string> = {
-  readonly [P in K]: readonly Permission[];
-};
+export type DefinedRoles<K extends string = string> = Readonly<
+  Record<K, readonly Permission[]>
+>;
 
 /** Emitted once per deprecated permission string accepted into a role. */
-export interface DeprecatedPermissionEvent {
+export type DeprecatedPermissionEvent = {
   readonly roleKey: string;
   readonly alias: string;
   readonly permission: Permission;
-}
+};
 
-export interface DefineRolesOptions {
+export type DefineRolesOptions = {
   onDeprecatedPermission?: (event: DeprecatedPermissionEvent) => void;
-}
+};
 
 export type RoleConfigIssueCode =
   | 'MISSING_SUPERADMIN'
@@ -60,12 +59,12 @@ export type RoleConfigIssueCode =
   | 'INVALID_PERMISSION_LIST'
   | 'INVALID_ROLE_CONFIG';
 
-export interface RoleConfigIssue {
+export type RoleConfigIssue = {
   readonly code: RoleConfigIssueCode;
   readonly roleKey?: string;
   readonly value?: string;
   readonly message: string;
-}
+};
 
 /** Thrown by `defineRoles`/`validateRoleConfig` with every problem found in
  * the config, collected before throwing once (never one-issue-at-a-time). */
@@ -92,6 +91,7 @@ export class RoleConfigError extends Error {
 const ROLE_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 function defaultOnDeprecatedPermission(event: DeprecatedPermissionEvent): void {
+  // oxlint-disable-next-line no-console -- this is the documented default fallback hook (D-09); a host overrides `onDeprecatedPermission` to route elsewhere
   console.warn(
     `[@plakboek/permissions] role "${event.roleKey}" uses deprecated permission "${event.alias}"; rename it to "${event.permission}"`,
   );

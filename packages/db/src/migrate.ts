@@ -17,11 +17,11 @@ import { MIGRATIONS } from './migrations/index.js';
  * independently-committed, existence-guarded statements separated by
  * `STATEMENT_BREAKPOINT` (`transactional: false`) -- required for
  * statements Postgres refuses inside a transaction block. */
-export interface Migration {
+export type Migration = {
   readonly name: string;
   readonly sql: string;
   readonly transactional: boolean;
-}
+};
 
 /** Bookkeeping table created (if missing) by every run. */
 export const MIGRATIONS_TABLE = 'plakboek_migrations';
@@ -112,16 +112,16 @@ export class MigrationFailedError extends Error {
   }
 }
 
-export interface RunMigrationsOptions {
+export type RunMigrationsOptions = {
   readonly connectionString: string;
   readonly lockWaitMs?: number;
   readonly lockPollIntervalMs?: number;
-}
+};
 
-export interface RunMigrationsResult {
+export type RunMigrationsResult = {
   readonly applied: readonly string[];
   readonly alreadyApplied: readonly string[];
-}
+};
 
 const MIGRATION_NAME_PATTERN = /^\d{4}_[a-z0-9_]+$/;
 
@@ -172,10 +172,10 @@ export function assertValidRegistry(migrations: readonly Migration[]): void {
   }
 }
 
-interface AppliedRow {
+type AppliedRow = {
   readonly name: string;
   readonly checksum: string;
-}
+};
 
 async function ensureBookkeepingTable(client: Client): Promise<void> {
   await client.query(
@@ -262,7 +262,6 @@ async function applyNonTransactional(
 
   for (const [index, statement] of statements.entries()) {
     try {
-      // oxlint-disable-next-line no-await-in-loop -- statements within one migration must apply in order
       await client.query(statement);
     } catch (error) {
       throw new MigrationFailedError(migration.name, index, error);
@@ -294,10 +293,8 @@ export async function applyPendingMigrations(
   const applied: string[] = [];
   for (const migration of pending) {
     if (migration.transactional) {
-      // oxlint-disable-next-line no-await-in-loop -- migrations must apply in registry order, one at a time
       await applyTransactional(client, migration);
     } else {
-      // oxlint-disable-next-line no-await-in-loop -- migrations must apply in registry order, one at a time
       await applyNonTransactional(client, migration);
     }
     applied.push(migration.name);
@@ -335,5 +332,5 @@ export async function migrateWithRegistry(
 export async function runMigrations(
   options: RunMigrationsOptions,
 ): Promise<RunMigrationsResult> {
-  return migrateWithRegistry({ ...options, migrations: MIGRATIONS });
+  return await migrateWithRegistry({ ...options, migrations: MIGRATIONS });
 }

@@ -117,10 +117,10 @@ describe('migrateWithRegistry (integration)', () => {
       caught = error;
     }
 
-    expect(caught).toBeInstanceOf(MigrationChecksumMismatchError);
-    if (caught instanceof MigrationChecksumMismatchError) {
-      expect(caught.migrationName).toBe('0001_create_alpha');
-    }
+    const checksumError =
+      caught instanceof MigrationChecksumMismatchError ? caught : undefined;
+    expect(checksumError).toBeInstanceOf(MigrationChecksumMismatchError);
+    expect(checksumError?.migrationName).toBe('0001_create_alpha');
     expect(await bookkeepingRowCount(testDb.connectionString)).toBe(2);
   });
 
@@ -141,10 +141,10 @@ describe('migrateWithRegistry (integration)', () => {
       caught = error;
     }
 
-    expect(caught).toBeInstanceOf(UnknownAppliedMigrationError);
-    if (caught instanceof UnknownAppliedMigrationError) {
-      expect(caught.migrationName).toBe('0002_create_beta');
-    }
+    const unknownAppliedError =
+      caught instanceof UnknownAppliedMigrationError ? caught : undefined;
+    expect(unknownAppliedError).toBeInstanceOf(UnknownAppliedMigrationError);
+    expect(unknownAppliedError?.migrationName).toBe('0002_create_beta');
   });
 
   it('throws MigrationOrderError when a new migration is inserted before an already-applied one', async () => {
@@ -184,10 +184,10 @@ describe('migrateWithRegistry (integration)', () => {
       caught = error;
     }
 
-    expect(caught).toBeInstanceOf(MigrationFailedError);
-    if (caught instanceof MigrationFailedError) {
-      expect(caught.migrationName).toBe('0001_broken_tx');
-    }
+    const failedError =
+      caught instanceof MigrationFailedError ? caught : undefined;
+    expect(failedError).toBeInstanceOf(MigrationFailedError);
+    expect(failedError?.migrationName).toBe('0001_broken_tx');
     expect(await tableExists(testDb.connectionString, 'broken_tx_a')).toBe(
       false,
     );
@@ -218,8 +218,7 @@ describe('migrateWithRegistry (integration)', () => {
 
     expect(caught).toBeInstanceOf(MigrationChecksumMismatchError);
     expect(String(caught)).not.toContain(authSubstring);
-    if (caught instanceof Error) {
-      expect(caught.message).not.toContain(authSubstring);
-    }
+    const caughtError = caught instanceof Error ? caught : undefined;
+    expect(caughtError?.message).not.toContain(authSubstring);
   });
 });

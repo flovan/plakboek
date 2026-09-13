@@ -20,17 +20,17 @@
 
 /** A Lingui MessageDescriptor-compatible plain object: `id` is the Lingui
  * message key, `message` is the English source text. */
-export interface PermissionMessage {
+export type PermissionMessage = {
   readonly id: string;
   readonly message: string;
-}
+};
 
 /** Metadata carried by every catalogue entry. */
-export interface PermissionMeta {
+export type PermissionMeta = {
   readonly group: PermissionGroup;
   readonly label: PermissionMessage;
   readonly description: PermissionMessage;
-}
+};
 
 /** The 12 v1 permission groups, in catalogue table order. */
 export type PermissionGroup =

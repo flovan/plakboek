@@ -14,28 +14,28 @@ import type { DefinedRoles } from './roles.js';
  * map. Carries only the role key, the opaque user id (when known), when it
  * happened, and how many prior lookups for this same key were suppressed
  * by the rate limit -- never anything else about the user (T-01-23). */
-export interface OrphanedRoleEvent {
+export type OrphanedRoleEvent = {
   readonly roleKey: string;
   readonly userId?: string;
   readonly occurredAt: Date;
   readonly suppressedCount: number;
-}
+};
 
 export type OrphanedRoleHook = (event: OrphanedRoleEvent) => void;
 
-export interface PermissionResolverOptions {
+export type PermissionResolverOptions = {
   onOrphanedRole?: OrphanedRoleHook;
   rateLimitMs?: number;
   now?: () => number;
-}
+};
 
-export interface PermissionResolver {
+export type PermissionResolver = {
   resolve(
     roleKey: string,
     context?: { userId?: string },
   ): ReadonlySet<Permission>;
   isKnownRole(roleKey: string): boolean;
-}
+};
 
 const DEFAULT_RATE_LIMIT_MS = 60_000;
 
@@ -47,15 +47,16 @@ const MAX_TRACKED_KEYS = 1000;
 
 function defaultOnOrphanedRole(event: OrphanedRoleEvent): void {
   const userPart = event.userId !== undefined ? ` (user ${event.userId})` : '';
+  // oxlint-disable-next-line no-console -- this is the documented default fallback hook (D-15); a host overrides `onOrphanedRole` to route elsewhere
   console.warn(
     `[@plakboek/permissions] orphaned role key "${event.roleKey}"${userPart} -- denying all permissions`,
   );
 }
 
-interface OrphanKeyState {
+type OrphanKeyState = {
   lastEmittedAt: number;
   suppressed: number;
-}
+};
 
 /**
  * Build a resolver over a validated role map (the output of `defineRoles`).
@@ -117,6 +118,7 @@ export function createPermissionResolver(
       hook(event);
     } catch (error) {
       try {
+        // oxlint-disable-next-line no-console -- last-resort fallback when a host-supplied hook itself throws (T-01-18); nothing else can report this
         console.error(
           `[@plakboek/permissions] onOrphanedRole hook threw while handling role "${roleKey}"`,
           error,
@@ -136,7 +138,6 @@ export function createPermissionResolver(
     // consumer, or an `as never` escape hatch) and passed e.g. `null`/`42`
     // -- resolve() must still behave sanely (deny + report) rather than
     // crash on a bad Map lookup key.
-    // oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- see comment above
     const roleKey = String(roleKeyInput);
     const known = roleMap.get(roleKey);
     if (known !== undefined) {

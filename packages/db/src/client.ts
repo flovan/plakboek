@@ -1,16 +1,16 @@
 import postgres, { type Sql } from 'postgres';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 
-export interface CreateDbOptions {
+export type CreateDbOptions = {
   readonly connectionString: string;
   readonly maxConnections?: number;
-}
+};
 
-export interface Db {
+export type Db = {
   readonly db: PostgresJsDatabase;
   readonly sql: Sql;
   close(): Promise<void>;
-}
+};
 
 export class DbConfigError extends Error {
   constructor(message: string) {

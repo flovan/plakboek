@@ -107,9 +107,9 @@ describe('concurrent migrators cannot double-apply (success criterion 5)', () =>
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
     const [firstRejected] = rejected;
-    if (firstRejected?.status === 'rejected') {
-      expect(firstRejected.reason).toBeInstanceOf(MigrationLockTimeoutError);
-    }
+    const rejectedReason =
+      firstRejected?.status === 'rejected' ? firstRejected.reason : undefined;
+    expect(rejectedReason).toBeInstanceOf(MigrationLockTimeoutError);
 
     expect(await tableExists(testDb.connectionString, 'race_target')).toBe(
       true,

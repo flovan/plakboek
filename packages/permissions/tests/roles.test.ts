@@ -154,9 +154,7 @@ describe('UNKNOWN_PERMISSION', () => {
     const error = captureRoleConfigError(() =>
       defineRoles({
         ...defaultRoles,
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- intentional bypass, see comment above
         client: ['pages:read', 'totally:unknown' as never],
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- intentional bypass, see comment above
         writer: ['another:unknown' as never],
       }),
     );
@@ -251,13 +249,15 @@ describe('type level', () => {
     expect(() => {
       // @ts-expect-error -- RoleConfig requires a "superadmin" key
       defineRoles({ editor: ['pages:read'] });
-    }).toThrow();
+    }).toThrow(
+      'role config must define a "superadmin" role holding ALL_PERMISSIONS',
+    );
   });
 
   it('compiles with @ts-expect-error and still throws at runtime for an unknown permission string', () => {
     expect(() => {
       // @ts-expect-error -- "pages:own-edit" is not a valid Permission or DeprecatedPermission
       defineRoles({ superadmin: ALL_PERMISSIONS, editor: ['pages:own-edit'] });
-    }).toThrow();
+    }).toThrow('role "editor" references unknown permission "pages:own-edit"');
   });
 });

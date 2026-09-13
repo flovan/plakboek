@@ -76,11 +76,11 @@ describe('re-running after a partial non-transactional failure completes cleanly
       caught = error;
     }
 
-    expect(caught).toBeInstanceOf(MigrationFailedError);
-    if (caught instanceof MigrationFailedError) {
-      expect(caught.migrationName).toBe('0001_partial_split');
-      expect(caught.statementIndex).toBe(2);
-    }
+    const failedError =
+      caught instanceof MigrationFailedError ? caught : undefined;
+    expect(failedError).toBeInstanceOf(MigrationFailedError);
+    expect(failedError?.migrationName).toBe('0001_partial_split');
+    expect(failedError?.statementIndex).toBe(2);
     expect(await tableExists(testDb.connectionString, 'partial_a')).toBe(true);
     expect(await tableExists(testDb.connectionString, 'partial_a_id_idx')).toBe(
       true,
@@ -130,10 +130,10 @@ describe('re-running after a partial transactional failure completes cleanly', (
       caught = error;
     }
 
-    expect(caught).toBeInstanceOf(MigrationFailedError);
-    if (caught instanceof MigrationFailedError) {
-      expect(caught.migrationName).toBe('0001_partial_tx');
-    }
+    const failedError =
+      caught instanceof MigrationFailedError ? caught : undefined;
+    expect(failedError).toBeInstanceOf(MigrationFailedError);
+    expect(failedError?.migrationName).toBe('0001_partial_tx');
     expect(await tableExists(testDb.connectionString, 'partial_tx_a')).toBe(
       false,
     );

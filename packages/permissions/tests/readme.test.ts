@@ -36,10 +36,10 @@ function formatWithOxfmt(markdown: string): string {
   });
 }
 
-interface Split {
+type Split = {
   before: string;
   after: string;
-}
+};
 
 function splitOnMarkers(content: string): Split {
   const startIndex = content.indexOf(START_MARKER);

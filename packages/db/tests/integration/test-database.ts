@@ -3,10 +3,10 @@ import { Client } from 'pg';
 
 const DATABASE_NAME_PATTERN = /^[a-z0-9_]+$/;
 
-export interface TestDatabase {
+export type TestDatabase = {
   readonly connectionString: string;
   drop(): Promise<void>;
-}
+};
 
 function requireTestDatabaseUrl(): string {
   const url = process.env.TEST_DATABASE_URL;

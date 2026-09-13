@@ -20,7 +20,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function noop(): void {}
+function noop(): void {
+  // Placeholder for `releaseA` until the Promise executor below assigns the
+  // real resolver -- never actually invoked in that shape.
+}
 
 /**
  * A fresh, connected pg.Client with a no-op "error" listener attached. Every
@@ -69,19 +72,23 @@ describe('withMigrationLock (integration)', () => {
     const start = Date.now();
     let caught: unknown;
     try {
-      await withMigrationLock(clientB, async () => {}, {
-        waitMs: 300,
-        pollIntervalMs: 50,
-      });
+      await withMigrationLock(
+        clientB,
+        async () => {
+          // B's callback does nothing -- this test only cares about the
+          // wait/timeout behavior of acquiring the lock itself.
+        },
+        { waitMs: 300, pollIntervalMs: 50 },
+      );
     } catch (error) {
       caught = error;
     }
     const elapsed = Date.now() - start;
 
-    expect(caught).toBeInstanceOf(MigrationLockTimeoutError);
-    if (caught instanceof MigrationLockTimeoutError) {
-      expect(caught.waitedMs).toBeGreaterThanOrEqual(300);
-    }
+    const lockTimeoutError =
+      caught instanceof MigrationLockTimeoutError ? caught : undefined;
+    expect(lockTimeoutError).toBeInstanceOf(MigrationLockTimeoutError);
+    expect(lockTimeoutError?.waitedMs).toBeGreaterThanOrEqual(300);
     expect(elapsed).toBeGreaterThanOrEqual(300);
 
     releaseA();
@@ -204,7 +211,10 @@ describe('withMigrationLock (integration)', () => {
 
     let caught: unknown;
     try {
-      await withMigrationLock(client, async () => {});
+      await withMigrationLock(client, async () => {
+        // No-op callback -- this test only checks that lock_timeout is
+        // unaffected by acquiring and releasing the lock.
+      });
     } catch (error) {
       caught = error;
     }

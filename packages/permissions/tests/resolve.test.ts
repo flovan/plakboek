@@ -152,9 +152,7 @@ describe('orphaned role keys (D-15, USER-10)', () => {
     // `as never` intentionally bypasses the `roleKey: string` parameter type
     // to exercise resolve()'s runtime String() coercion for non-string
     // input (e.g. a caller ignoring the type, or a JS consumer).
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- intentional bypass, see comment above
     expect(resolver.resolve(null as never).size).toBe(0);
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- intentional bypass, see comment above
     expect(resolver.resolve(42 as never).size).toBe(0);
     expect(events.map((event) => event.roleKey)).toStrictEqual(['null', '42']);
   });

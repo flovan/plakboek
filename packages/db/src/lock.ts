@@ -20,10 +20,10 @@ export class MigrationLockTimeoutError extends Error {
   }
 }
 
-export interface LockOptions {
+export type LockOptions = {
   readonly waitMs?: number;
   readonly pollIntervalMs?: number;
-}
+};
 
 const DEFAULT_WAIT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 250;
@@ -54,13 +54,11 @@ async function acquire(
 ): Promise<void> {
   const start = Date.now();
   for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- sequential polling against one client is the point of this loop
     if (await tryAcquire(client)) return;
     const elapsedMs = Date.now() - start;
     if (elapsedMs >= waitMs) {
       throw new MigrationLockTimeoutError(elapsedMs);
     }
-    // oxlint-disable-next-line no-await-in-loop -- bounded wait between polls, inherently sequential
     await sleep(pollIntervalMs);
   }
 }
