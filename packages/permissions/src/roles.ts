@@ -7,14 +7,9 @@
  * `defaultRoles` and overriding/adding keys (D-14) -- there is no
  * inheritance, `extends`, or wildcard: a role's permissions are exactly
  * what its list contains.
- *
- * RED-phase stub: every exported type is in its final shape so
- * `tests/roles.test.ts` resolves and each test fails on its own assertion
- * or thrown error, never on a module-load crash. `defaultRoles` is plain
- * data (not "behavior"), so it already carries its real content here;
- * `validateRoleConfig`/`defineRoles` throw until the GREEN commit.
  */
 import { ALL_PERMISSIONS, type Permission } from "./catalogue.js";
+import { DEPRECATED_PERMISSION_ALIASES, resolvePermissionName } from "./deprecated.js";
 import type { DeprecatedPermission } from "./deprecated.js";
 
 /** A single role's permission list, as a host writes it: canonical
@@ -75,22 +70,151 @@ export class RoleConfigError extends Error {
 	readonly issues: readonly RoleConfigIssue[];
 
 	constructor(issues: readonly RoleConfigIssue[]) {
-		super("[@plakboek/permissions] invalid role config: not implemented");
+		super(
+			[
+				"[@plakboek/permissions] invalid role config:",
+				...issues.map((issue) => issue.message),
+			].join("\n"),
+		);
 		this.name = "RoleConfigError";
 		this.issues = issues;
 	}
+}
+
+/** A role key must be lowercase-kebab: starts with a letter, then letters,
+ * digits or hyphens. Rejects case variants ("Editor"), whitespace
+ * (" editor"), and inherited-property-name lookalikes ("__proto__",
+ * "constructor", "toString") without any special-casing -- none of those
+ * match the pattern. */
+const ROLE_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+function defaultOnDeprecatedPermission(event: DeprecatedPermissionEvent): void {
+	console.warn(
+		`[@plakboek/permissions] role "${event.roleKey}" uses deprecated permission "${event.alias}"; rename it to "${event.permission}"`,
+	);
+}
+
+/** Narrows `unknown` to a plain, non-array object without an `as` cast. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Narrows `unknown` to `string[]` without an `as` cast. */
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 /**
  * Module-level validator used directly by tests (not re-exported from
  * `index.ts`). `defineRoles` calls this with the shipped deprecated-alias
  * table; tests call it directly to inject a custom alias table.
+ *
+ * Collects every problem before throwing once. On success, every role's
+ * permissions are deduped and reordered to catalogue declaration order
+ * (`ALL_PERMISSIONS` filtered by membership), then frozen; the returned
+ * container object is frozen too (T-01-20).
  */
 export function validateRoleConfig(
-	_input: unknown,
-	_options?: DefineRolesOptions & { aliases?: Readonly<Record<string, Permission>> },
+	input: unknown,
+	options?: DefineRolesOptions & { aliases?: Readonly<Record<string, Permission>> },
 ): DefinedRoles {
-	throw new Error("validateRoleConfig: not implemented");
+	const issues: RoleConfigIssue[] = [];
+	const aliases = options?.aliases ?? DEPRECATED_PERMISSION_ALIASES;
+	const onDeprecatedPermission = options?.onDeprecatedPermission ?? defaultOnDeprecatedPermission;
+
+	if (!isPlainObject(input)) {
+		issues.push({
+			code: "INVALID_ROLE_CONFIG",
+			message: "role config must be a plain object mapping role keys to permission lists",
+		});
+		throw new RoleConfigError(issues);
+	}
+
+	const roleKeys = Object.keys(input);
+	const normalized = new Map<string, Permission[]>();
+
+	for (const roleKey of roleKeys) {
+		if (!ROLE_KEY_PATTERN.test(roleKey)) {
+			issues.push({
+				code: "INVALID_ROLE_KEY",
+				roleKey,
+				message: `role key "${roleKey}" must match ${ROLE_KEY_PATTERN.source}`,
+			});
+			continue;
+		}
+
+		const rawList = input[roleKey];
+		if (!isStringArray(rawList)) {
+			issues.push({
+				code: "INVALID_PERMISSION_LIST",
+				roleKey,
+				message: `role "${roleKey}" must be an array of permission strings`,
+			});
+			continue;
+		}
+
+		const resolvedPermissions: Permission[] = [];
+		for (const value of rawList) {
+			const resolution = resolvePermissionName(value, aliases);
+			if (resolution.kind === "canonical") {
+				resolvedPermissions.push(resolution.permission);
+			} else if (resolution.kind === "deprecated") {
+				resolvedPermissions.push(resolution.permission);
+				onDeprecatedPermission({
+					roleKey,
+					alias: resolution.alias,
+					permission: resolution.permission,
+				});
+			} else {
+				issues.push({
+					code: "UNKNOWN_PERMISSION",
+					roleKey,
+					value,
+					message: `role "${roleKey}" references unknown permission "${value}"`,
+				});
+			}
+		}
+		normalized.set(roleKey, resolvedPermissions);
+	}
+
+	if (!Object.hasOwn(input, "superadmin")) {
+		issues.push({
+			code: "MISSING_SUPERADMIN",
+			message: 'role config must define a "superadmin" role holding ALL_PERMISSIONS',
+		});
+	} else {
+		const superadminPermissions = normalized.get("superadmin");
+		if (superadminPermissions !== undefined) {
+			const superadminSet = new Set(superadminPermissions);
+			const holdsAllPermissions =
+				superadminSet.size === ALL_PERMISSIONS.length &&
+				ALL_PERMISSIONS.every((permission) => superadminSet.has(permission));
+			if (!holdsAllPermissions) {
+				issues.push({
+					code: "SUPERADMIN_NOT_ALL_PERMISSIONS",
+					roleKey: "superadmin",
+					message:
+						'role "superadmin" must hold exactly ALL_PERMISSIONS -- use `superadmin: ALL_PERMISSIONS`',
+				});
+			}
+		}
+	}
+
+	if (issues.length > 0) {
+		throw new RoleConfigError(issues);
+	}
+
+	const result: Record<string, readonly Permission[]> = {};
+	for (const roleKey of roleKeys) {
+		const resolved = normalized.get(roleKey);
+		if (resolved === undefined) continue;
+		const memberSet = new Set(resolved);
+		result[roleKey] = Object.freeze(
+			ALL_PERMISSIONS.filter((permission) => memberSet.has(permission)),
+		);
+	}
+
+	return Object.freeze(result);
 }
 
 /**
@@ -99,10 +223,10 @@ export function validateRoleConfig(
  * frozen, deduped, catalogue-ordered permission map per role.
  */
 export function defineRoles<const T extends RoleConfig>(
-	_roles: T,
-	_options?: DefineRolesOptions,
+	roles: T,
+	options?: DefineRolesOptions,
 ): DefinedRoles<Extract<keyof T, string>> {
-	throw new Error("defineRoles: not implemented");
+	return validateRoleConfig(roles, options);
 }
 
 // Superadmin-only permissions (the 8 not held by the shipped `admin` role):
