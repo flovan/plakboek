@@ -206,6 +206,8 @@ describe("migrateWithRegistry (integration)", () => {
 
 		expect(caught).toBeInstanceOf(MigrationChecksumMismatchError);
 		expect(String(caught)).not.toContain(authSubstring);
-		expect((caught as Error).message).not.toContain(authSubstring);
+		if (caught instanceof Error) {
+			expect(caught.message).not.toContain(authSubstring);
+		}
 	});
 });
