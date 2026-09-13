@@ -23,12 +23,9 @@ describe("resolvePermissionName", () => {
 		});
 	});
 
-	it.each(["pages:own-edit", "__proto__", "constructor"])(
-		"classifies %s as unknown",
-		(value) => {
-			expect(resolvePermissionName(value)).toStrictEqual({ kind: "unknown", value });
-		},
-	);
+	it.each(["pages:own-edit", "__proto__", "constructor"])("classifies %s as unknown", (value) => {
+		expect(resolvePermissionName(value)).toStrictEqual({ kind: "unknown", value });
+	});
 });
 
 describe("DEPRECATED_PERMISSION_ALIASES", () => {
