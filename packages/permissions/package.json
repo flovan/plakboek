@@ -22,7 +22,8 @@
 		"build": "tsdown",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit -p tsconfig.json",
-		"check": "publint --strict && attw --pack . --profile esm-only"
+		"check": "publint --strict && attw --pack . --profile esm-only",
+		"docs:permissions": "UPDATE_PERMISSIONS_TABLE=1 vitest run tests/readme.test.ts"
 	},
 	"devDependencies": {
 		"@arethetypeswrong/cli": "catalog:",
