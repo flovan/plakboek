@@ -80,12 +80,20 @@ cat > "$CONSUMER_DIR/tsconfig.json" << 'EOF'
     "target": "ES2023",
     "strict": true,
     "noEmit": true,
-    "skipLibCheck": false,
+    "skipLibCheck": true,
     "types": []
   },
   "include": ["*.ts"]
 }
 EOF
+# skipLibCheck is true (plan 01-03, D-16): @plakboek/db's own .d.mts type-checks
+# clean (see packages/db typecheck script), but drizzle-orm ships .d.ts files
+# for EVERY dialect (singlestore, sqlite, mysql, ...) under one package, and
+# those unrelated dialects' declarations do not compile standalone without
+# their own optional peer deps (mysql2, @types/node's Buffer, etc.) present in
+# this throwaway consumer. Every error observed here is inside
+# node_modules/drizzle-orm or node_modules/postgres, never node_modules/@plakboek
+# -- confirmed by re-running with skipLibCheck:false and grepping the output.
 
 echo "==> Type-checking consumer probes against the packed types"
 "$REPO_ROOT/node_modules/.bin/tsc" -p "$CONSUMER_DIR/tsconfig.json"

@@ -3,5 +3,11 @@
 	"compilerOptions": {
 		"types": ["node"]
 	},
-	"include": ["src", "tests", "tsdown.config.ts", "vitest.config.ts", "vitest.integration.config.ts"]
+	"include": [
+		"src",
+		"tests",
+		"tsdown.config.ts",
+		"vitest.config.ts",
+		"vitest.integration.config.ts"
+	]
 }
