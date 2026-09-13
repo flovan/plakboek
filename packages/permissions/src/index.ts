@@ -17,3 +17,10 @@ export type {
 	RoleConfigIssueCode,
 } from "./roles.js";
 export { defineRoles, defaultRoles, RoleConfigError } from "./roles.js";
+export type {
+	OrphanedRoleEvent,
+	OrphanedRoleHook,
+	PermissionResolver,
+	PermissionResolverOptions,
+} from "./resolve.js";
+export { createPermissionResolver } from "./resolve.js";
