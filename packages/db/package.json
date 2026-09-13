@@ -53,6 +53,6 @@
     "drizzle-orm": "catalog:"
   },
   "engines": {
-    "node": ">=22.16"
+    "node": ">=22.18"
   }
 }
