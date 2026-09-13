@@ -1,0 +1,46 @@
+{
+	"name": "@plakboek/db",
+	"version": "0.1.0",
+	"description": "Postgres connection factory and migration-lock primitives for Plakboek CMS installations",
+	"license": "MIT",
+	"files": ["dist"],
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"default": "./dist/index.mjs"
+		},
+		"./package.json": "./package.json"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"build": "tsdown",
+		"test": "vitest run",
+		"test:integration": "vitest run --config vitest.integration.config.ts",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"check": "publint --strict && attw --pack . --profile esm-only"
+	},
+	"dependencies": {
+		"postgres": "catalog:",
+		"pg": "catalog:"
+	},
+	"peerDependencies": {
+		"drizzle-orm": "catalog:"
+	},
+	"devDependencies": {
+		"drizzle-orm": "catalog:",
+		"@types/pg": "catalog:",
+		"@types/node": "catalog:",
+		"@arethetypeswrong/cli": "catalog:",
+		"publint": "catalog:",
+		"tsdown": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	},
+	"engines": {
+		"node": ">=22.16"
+	}
+}
