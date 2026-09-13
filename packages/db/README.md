@@ -8,11 +8,11 @@ for Plakboek CMS installations.
 - `createDb` -- a Drizzle (`drizzle-orm/postgres-js`) connection factory
   over the `postgres` (porsager) driver.
 - `runMigrations` -- applies this package's own statically registered
-  migrations, holding a Postgres advisory lock for the whole run so
-  concurrent migrators can never double-apply (D-03). What Phase 6's deploy
-  step invokes.
-- `withMigrationLock`, `MigrationLockTimeoutError` -- the session-scoped
-  advisory lock primitive `runMigrations` wraps around every run.
+  migrations, taking a session-scoped Postgres advisory lock internally for
+  the whole run so concurrent migrators can never double-apply (D-03). What
+  Phase 6's deploy step invokes.
+- `MigrationLockTimeoutError` -- thrown by `runMigrations` when another
+  migrator still holds that advisory lock after `lockWaitMs`.
 - The migration authoring convention every migration -- this package's own
   and every host/host-extension migration -- follows: see
   [`MIGRATIONS.md`](./MIGRATIONS.md).
