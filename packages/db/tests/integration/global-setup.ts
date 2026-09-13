@@ -1,4 +1,4 @@
-import { Client } from "pg";
+import { Client } from 'pg';
 
 /**
  * Vitest globalSetup for the real-Postgres integration suite. Fails loudly
@@ -9,27 +9,29 @@ import { Client } from "pg";
  * the thrown message (T-01-09).
  */
 export default async function setup(): Promise<void> {
-	const connectionString = process.env.TEST_DATABASE_URL;
-	if (!connectionString || connectionString.length === 0) {
-		throw new Error(
-			"TEST_DATABASE_URL is not set: run `docker compose up -d --wait postgres` and export the value from .env.example",
-		);
-	}
+  const connectionString = process.env.TEST_DATABASE_URL;
+  if (!connectionString || connectionString.length === 0) {
+    throw new Error(
+      'TEST_DATABASE_URL is not set: run `docker compose up -d --wait postgres` and export the value from .env.example',
+    );
+  }
 
-	const { hostname, port, password } = new URL(connectionString);
-	const client = new Client({ connectionString });
+  const { hostname, port, password } = new URL(connectionString);
+  const client = new Client({ connectionString });
 
-	try {
-		await client.connect();
-		await client.query("SELECT 1");
-	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error);
-		const redactedReason = password ? reason.split(password).join("<redacted>") : reason;
-		throw new Error(
-			`Could not reach Postgres at ${hostname}:${port || "5432"} using TEST_DATABASE_URL -- run \`docker compose up -d --wait postgres\` first (${redactedReason})`,
-			{ cause: error },
-		);
-	} finally {
-		await client.end();
-	}
+  try {
+    await client.connect();
+    await client.query('SELECT 1');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const redactedReason = password
+      ? reason.split(password).join('<redacted>')
+      : reason;
+    throw new Error(
+      `Could not reach Postgres at ${hostname}:${port || '5432'} using TEST_DATABASE_URL -- run \`docker compose up -d --wait postgres\` first (${redactedReason})`,
+      { cause: error },
+    );
+  } finally {
+    await client.end();
+  }
 }

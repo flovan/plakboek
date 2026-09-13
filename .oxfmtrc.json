@@ -1,17 +1,17 @@
 {
-	"$schema": "./node_modules/oxfmt/configuration_schema.json",
-	"printWidth": 80,
-	"useTabs": false,
-	"singleQuote": true,
-	"trailingComma": "all",
-	"ignorePatterns": [
-		"**/dist/**",
-		"**/node_modules/**",
-		".planning/**",
-		".claude/**",
-		".gsd/**",
-		"**/.github/**",
-		"pnpm-lock.yaml",
-		"**/CHANGELOG.md"
-	]
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 80,
+  "useTabs": false,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    ".planning/**",
+    ".claude/**",
+    ".gsd/**",
+    "**/.github/**",
+    "pnpm-lock.yaml",
+    "**/CHANGELOG.md"
+  ]
 }

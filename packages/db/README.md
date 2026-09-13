@@ -29,11 +29,11 @@ one this package was built against.
 ## `createDb`
 
 ```ts
-import { createDb } from "@plakboek/db";
+import { createDb } from '@plakboek/db';
 
 const { db, sql, close } = createDb({
-	connectionString: process.env.DATABASE_URL!,
-	maxConnections: 10, // optional, default 10
+  connectionString: process.env.DATABASE_URL!,
+  maxConnections: 10, // optional, default 10
 });
 
 // db: a drizzle-orm/postgres-js database instance
@@ -48,12 +48,12 @@ an error -- `DbConfigError` always names the two expected schemes instead.
 ## `runMigrations`
 
 ```ts
-import { runMigrations } from "@plakboek/db";
+import { runMigrations } from '@plakboek/db';
 
 const result = await runMigrations({
-	connectionString: process.env.DATABASE_URL!,
-	lockWaitMs: 60_000, // optional, default 60000
-	lockPollIntervalMs: 250, // optional, default 250
+  connectionString: process.env.DATABASE_URL!,
+  lockWaitMs: 60_000, // optional, default 60000
+  lockPollIntervalMs: 250, // optional, default 250
 });
 
 // result.applied: names of migrations applied by this call

@@ -1,48 +1,48 @@
 {
-	"name": "@plakboek/db",
-	"version": "0.1.0",
-	"description": "Postgres connection factory and migration-lock primitives for Plakboek CMS installations",
-	"license": "MIT",
-	"files": [
-		"dist"
-	],
-	"type": "module",
-	"sideEffects": false,
-	"exports": {
-		".": {
-			"types": "./dist/index.d.mts",
-			"default": "./dist/index.mjs"
-		},
-		"./package.json": "./package.json"
-	},
-	"publishConfig": {
-		"access": "public"
-	},
-	"scripts": {
-		"build": "tsdown",
-		"test": "vitest run",
-		"test:integration": "vitest run --config vitest.integration.config.ts",
-		"typecheck": "tsc --noEmit -p tsconfig.json",
-		"check": "publint --strict && attw --pack . --profile esm-only"
-	},
-	"dependencies": {
-		"pg": "catalog:",
-		"postgres": "catalog:"
-	},
-	"devDependencies": {
-		"@arethetypeswrong/cli": "catalog:",
-		"@types/node": "catalog:",
-		"@types/pg": "catalog:",
-		"drizzle-orm": "catalog:",
-		"publint": "catalog:",
-		"tsdown": "catalog:",
-		"typescript": "catalog:",
-		"vitest": "catalog:"
-	},
-	"peerDependencies": {
-		"drizzle-orm": "catalog:"
-	},
-	"engines": {
-		"node": ">=22.16"
-	}
+  "name": "@plakboek/db",
+  "version": "0.1.0",
+  "description": "Postgres connection factory and migration-lock primitives for Plakboek CMS installations",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "publint --strict && attw --pack . --profile esm-only"
+  },
+  "dependencies": {
+    "pg": "catalog:",
+    "postgres": "catalog:"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "drizzle-orm": "catalog:",
+    "publint": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "drizzle-orm": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.16"
+  }
 }

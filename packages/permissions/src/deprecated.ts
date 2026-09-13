@@ -1,4 +1,4 @@
-import { isPermission, type Permission } from "./catalogue.js";
+import { isPermission, type Permission } from './catalogue.js';
 
 /**
  * D-09 breaking-change policy for permission strings:
@@ -20,7 +20,10 @@ import { isPermission, type Permission } from "./catalogue.js";
  * is intentional and still a literal type, not `string`: the first entry
  * added here narrows it to a real literal union, it never widens.
  */
-export const DEPRECATED_PERMISSION_ALIASES = {} as const satisfies Record<string, Permission>;
+export const DEPRECATED_PERMISSION_ALIASES = {} as const satisfies Record<
+  string,
+  Permission
+>;
 
 Object.freeze(DEPRECATED_PERMISSION_ALIASES);
 
@@ -30,9 +33,13 @@ export type DeprecatedPermission = keyof typeof DEPRECATED_PERMISSION_ALIASES;
 /** The result of classifying an arbitrary string against the catalogue and
  * the deprecated-alias table. */
 export type PermissionNameResolution =
-	| { readonly kind: "canonical"; readonly permission: Permission }
-	| { readonly kind: "deprecated"; readonly alias: string; readonly permission: Permission }
-	| { readonly kind: "unknown"; readonly value: string };
+  | { readonly kind: 'canonical'; readonly permission: Permission }
+  | {
+      readonly kind: 'deprecated';
+      readonly alias: string;
+      readonly permission: Permission;
+    }
+  | { readonly kind: 'unknown'; readonly value: string };
 
 /**
  * Classify an arbitrary string as a canonical permission, a deprecated
@@ -46,20 +53,20 @@ export type PermissionNameResolution =
  * always classified as unknown, never as a hit (T-01-08).
  */
 export function resolvePermissionName(
-	value: string,
-	aliases: Readonly<Record<string, Permission>> = DEPRECATED_PERMISSION_ALIASES,
+  value: string,
+  aliases: Readonly<Record<string, Permission>> = DEPRECATED_PERMISSION_ALIASES,
 ): PermissionNameResolution {
-	if (isPermission(value)) {
-		return { kind: "canonical", permission: value };
-	}
-	if (Object.hasOwn(aliases, value)) {
-		// `noUncheckedIndexedAccess` still types this access as
-		// `Permission | undefined` despite the `hasOwn` guard above -- the
-		// explicit check keeps the narrowing sound without an unsafe assertion.
-		const permission = aliases[value];
-		if (permission !== undefined) {
-			return { kind: "deprecated", alias: value, permission };
-		}
-	}
-	return { kind: "unknown", value };
+  if (isPermission(value)) {
+    return { kind: 'canonical', permission: value };
+  }
+  if (Object.hasOwn(aliases, value)) {
+    // `noUncheckedIndexedAccess` still types this access as
+    // `Permission | undefined` despite the `hasOwn` guard above -- the
+    // explicit check keeps the narrowing sound without an unsafe assertion.
+    const permission = aliases[value];
+    if (permission !== undefined) {
+      return { kind: 'deprecated', alias: value, permission };
+    }
+  }
+  return { kind: 'unknown', value };
 }

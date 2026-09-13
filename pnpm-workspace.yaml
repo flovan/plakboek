@@ -9,7 +9,7 @@ strictStorePkgContentCheck: true
 verifyDepsBeforeRun: error
 # Reviewed benign trust downgrades (publish-method changes, not takeovers).
 trustPolicyExclude:
-  - "undici-types@6.21.0" # provenance -> none; @types/node's pinned transitive dep, published 2023 (pre-provenance rollout), repo is nodejs/undici
+  - 'undici-types@6.21.0' # provenance -> none; @types/node's pinned transitive dep, published 2023 (pre-provenance rollout), repo is nodejs/undici
 
 packages:
   - packages/*
@@ -22,11 +22,11 @@ catalog:
   oxlint-tsgolint: ^7.0.2001
   oxfmt: ^0.67.0
   publint: ^0.3.24
-  "@arethetypeswrong/cli": ^0.18.5
-  "@changesets/cli": ^2.31.1
-  "@changesets/changelog-github": ^0.7.0
-  "@types/node": ^22.20.2
+  '@arethetypeswrong/cli': ^0.18.5
+  '@changesets/cli': ^2.31.1
+  '@changesets/changelog-github': ^0.7.0
+  '@types/node': ^22.20.2
   drizzle-orm: ^0.45.2
   postgres: ^3.4.9
   pg: ^8.23.0
-  "@types/pg": ^8.23.1
+  '@types/pg': ^8.23.1

@@ -1,4 +1,4 @@
-import type { Migration } from "../migrate.js";
+import type { Migration } from '../migrate.js';
 
 /**
  * The static migration registry for @plakboek/db (D-03).

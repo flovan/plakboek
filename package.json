@@ -1,34 +1,34 @@
 {
-	"name": "plakboek-workspace",
-	"private": true,
-	"type": "module",
-	"scripts": {
-		"build": "pnpm -r run build",
-		"test": "pnpm -r run test",
-		"test:integration": "pnpm -r --if-present run test:integration",
-		"typecheck": "pnpm -r run typecheck",
-		"check": "pnpm -r run check",
-		"lint": "oxlint --type-aware --deny-warnings",
-		"format": "oxfmt",
-		"format:check": "oxfmt --check",
-		"verify:publishable": "bash scripts/verify-publishable.sh",
-		"changeset": "changeset"
-	},
-	"devDependencies": {
-		"@arethetypeswrong/cli": "catalog:",
-		"@changesets/changelog-github": "catalog:",
-		"@changesets/cli": "catalog:",
-		"@types/node": "catalog:",
-		"oxfmt": "catalog:",
-		"oxlint": "catalog:",
-		"oxlint-tsgolint": "catalog:",
-		"publint": "catalog:",
-		"tsdown": "catalog:",
-		"typescript": "catalog:",
-		"vitest": "catalog:"
-	},
-	"engines": {
-		"node": ">=22.16"
-	},
-	"packageManager": "pnpm@12.4.1"
+  "name": "plakboek-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "test:integration": "pnpm -r --if-present run test:integration",
+    "typecheck": "pnpm -r run typecheck",
+    "check": "pnpm -r run check",
+    "lint": "oxlint --type-aware --deny-warnings",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "verify:publishable": "bash scripts/verify-publishable.sh",
+    "changeset": "changeset"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "catalog:",
+    "@changesets/changelog-github": "catalog:",
+    "@changesets/cli": "catalog:",
+    "@types/node": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "publint": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.16"
+  },
+  "packageManager": "pnpm@12.4.1"
 }

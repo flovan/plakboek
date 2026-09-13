@@ -1,12 +1,12 @@
 {
-	"extends": "../../tsconfig.base.json",
-	"compilerOptions": {
-		// The base config sets `types: []` to keep implicit @types resolution
-		// out of published output. Node's ambient globals (`console`, used by
-		// the D-09/D-15 default warning hooks and their tests) still need
-		// @types/node's declarations for typecheck -- this is dev-time-only
-		// and does not add a runtime dependency (D-16).
-		"types": ["node"]
-	},
-	"include": ["src", "tests", "tsdown.config.ts"]
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The base config sets `types: []` to keep implicit @types resolution
+    // out of published output. Node's ambient globals (`console`, used by
+    // the D-09/D-15 default warning hooks and their tests) still need
+    // @types/node's declarations for typecheck -- this is dev-time-only
+    // and does not add a runtime dependency (D-16).
+    "types": ["node"]
+  },
+  "include": ["src", "tests", "tsdown.config.ts"]
 }

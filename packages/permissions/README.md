@@ -89,12 +89,16 @@ handled elsewhere). The shipped defaults work unmodified; add or replace
 roles by spreading `defaultRoles`:
 
 ```ts
-import { defineRoles, defaultRoles, ALL_PERMISSIONS } from "@plakboek/permissions";
+import {
+  defineRoles,
+  defaultRoles,
+  ALL_PERMISSIONS,
+} from '@plakboek/permissions';
 
 const roles = defineRoles({
-	...defaultRoles,
-	// A host-specific role: exactly these two permissions, nothing inherited.
-	client: ["pages:read", "pages:edit"],
+  ...defaultRoles,
+  // A host-specific role: exactly these two permissions, nothing inherited.
+  client: ['pages:read', 'pages:edit'],
 });
 ```
 
@@ -103,8 +107,8 @@ const roles = defineRoles({
 
 ```ts
 defineRoles({
-	superadmin: ALL_PERMISSIONS,
-	// ...
+  superadmin: ALL_PERMISSIONS,
+  // ...
 });
 ```
 
@@ -123,16 +127,16 @@ resolves to an **empty permission set**, and the event is reported once,
 rate-limited per key, through an injectable hook (D-15):
 
 ```ts
-import { createPermissionResolver } from "@plakboek/permissions";
+import { createPermissionResolver } from '@plakboek/permissions';
 
 const resolver = createPermissionResolver(roles, {
-	onOrphanedRole(event) {
-		// event: { roleKey, userId?, occurredAt, suppressedCount }
-	},
-	rateLimitMs: 60_000, // default: one warning per role key per 60s
+  onOrphanedRole(event) {
+    // event: { roleKey, userId?, occurredAt, suppressedCount }
+  },
+  rateLimitMs: 60_000, // default: one warning per role key per 60s
 });
 
-resolver.resolve("some-role-key", { userId: user.id });
+resolver.resolve('some-role-key', { userId: user.id });
 ```
 
 `OrphanedRoleEvent` carries only `roleKey`, the opaque `userId` (when
