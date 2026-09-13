@@ -1,0 +1,11 @@
+{
+	"$schema": "https://unpkg.com/@changesets/config@3.0.2/schema.json",
+	"changelog": ["@changesets/changelog-github", { "repo": "flovan/plakboek" }],
+	"commit": false,
+	"fixed": [["@plakboek/permissions", "@plakboek/db"]],
+	"linked": [],
+	"access": "public",
+	"baseBranch": "main",
+	"updateInternalDependencies": "patch",
+	"ignore": []
+}
