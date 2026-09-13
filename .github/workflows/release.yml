@@ -66,11 +66,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@v6
+      # No dependency caching in this job: it is the only one that holds
+      # id-token: write. actions/cache (which setup-node's `cache` input
+      # wraps) restores across branches/PRs of this repo, so a cache entry
+      # poisoned from a lower-privilege branch could otherwise be restored
+      # here and run with OIDC publish credentials. The version and ci jobs
+      # keep `cache: pnpm` -- they never hold id-token: write.
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-          cache: pnpm
       - id: npm-version
         run: echo "version=$(npm --version)" >> "$GITHUB_OUTPUT"
       - name: Verify npm meets the trusted-publishing floor (>=11.5.1)
