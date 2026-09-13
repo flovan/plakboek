@@ -52,7 +52,8 @@ annotation pointing back at this document and reports the package as
 `bootstrap-required` in its summary line -- it never attempts to publish
 that package itself.
 
-To bootstrap a package (maintainer only, requires npm 2FA):
+To bootstrap a package (maintainer only, requires account-level 2FA on the
+npm account -- classic auth, not a token):
 
 ```sh
 pnpm run build
@@ -60,18 +61,35 @@ pnpm --dir packages/<name> pack --pack-destination .release-bootstrap
 npm publish .release-bootstrap/plakboek-<name>-<version>.tgz --access public
 ```
 
+Run this from an interactive terminal so npm's web-based 2FA flow can open
+a browser tab for you to approve. In a non-interactive shell (CI runner,
+piped command, etc.) the web flow cannot complete and `npm publish` fails
+with `EOTP`; pass a current TOTP code directly instead:
+`npm publish <tarball> --access public --otp=<code>`. If you use the
+npmjs.com website fallback below, its publish-permission dialog must have
+**"npm publish"** checked as an allowed action for the trusted publisher to
+actually be able to publish later.
+
 Then bind the newly published package to this repository's release
-workflow as a trusted publisher:
+workflow as a trusted publisher. `npm trust` requires npm `>=11.15.0` and,
+since 2026-05-20, the registry rejects the command without an explicit
+permission flag -- the local npm floor for this repo (11.12.1) is too old,
+so invoke a current npm via `npx`:
 
 ```sh
-npm trust github @plakboek/<name> --file release.yml --repository flovan/plakboek --yes
+npx -y npm@11.19.1 trust github @plakboek/<name> --file release.yml --repository flovan/plakboek --allow-publish --yes
 ```
 
-Verify the binding:
+Verify the binding (also requires npm `>=11.15.0`):
 
 ```sh
-npm trust list @plakboek/<name>
+npx -y npm@11.19.1 trust list @plakboek/<name>
 ```
+
+`npm trust list` prompts for a one-time password even to read the current
+configuration -- it cannot be run non-interactively (e.g. from CI or an
+automated agent). Run it from an interactive terminal and complete the
+OTP/web-auth prompt.
 
 If `npm trust github` is refused or unavailable, configure the same
 relationship from the npm website instead: open the package on npmjs.com,
@@ -118,6 +136,14 @@ Trusted publishing requires npm `>=11.5.1`. The `publish` job runs on Node
 22 LTS bundles an older npm; if this check ever fails, npm itself changed
 its floor or Node 24's bundled version regressed -- add an explicit `npm
 install -g npm@latest` step to the job rather than lowering the check.
+
+**`npm trust` fails with `E400`.** Since 2026-05-20 the registry requires
+an explicit permission flag (`--allow-publish`) on `npm trust github`, and
+the command itself needs npm `>=11.15.0` -- older than the trusted-publish
+floor above. `E400` from `npm trust` means either the flag is missing or
+the npm binary running the command predates 11.15.0; run it via
+`npx -y npm@11.19.1 trust github ...` as shown in the bootstrap section
+rather than the repo's pinned/local npm.
 
 ## Deferred follow-up
 
