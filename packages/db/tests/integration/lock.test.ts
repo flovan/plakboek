@@ -1,6 +1,10 @@
 import { Client } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
-import { MigrationLockTimeoutError, MIGRATION_LOCK_KEY, withMigrationLock } from "../../src/lock.js";
+import {
+	MigrationLockTimeoutError,
+	MIGRATION_LOCK_KEY,
+	withMigrationLock,
+} from "../../src/lock.js";
 import { createTestDatabase, type TestDatabase } from "./test-database.js";
 
 let testDb: TestDatabase | undefined;
@@ -15,6 +19,8 @@ afterEach(async () => {
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+function noop(): void {}
 
 /**
  * A fresh, connected pg.Client with a no-op "error" listener attached. Every
@@ -48,7 +54,7 @@ describe("withMigrationLock (integration)", () => {
 		const clientA = await connectClient(testDb.connectionString);
 		const clientB = await connectClient(testDb.connectionString);
 
-		let releaseA: () => void = () => {};
+		let releaseA: () => void = noop;
 		const releaseAPromise = new Promise<void>((resolve) => {
 			releaseA = resolve;
 		});

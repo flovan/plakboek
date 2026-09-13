@@ -27,6 +27,7 @@ export default async function setup(): Promise<void> {
 		const redactedReason = password ? reason.split(password).join("<redacted>") : reason;
 		throw new Error(
 			`Could not reach Postgres at ${hostname}:${port || "5432"} using TEST_DATABASE_URL -- run \`docker compose up -d --wait postgres\` first (${redactedReason})`,
+			{ cause: error },
 		);
 	} finally {
 		await client.end();
