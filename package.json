@@ -1,0 +1,34 @@
+{
+  "name": "plakboek-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.4.1",
+  "engines": {
+    "node": ">=22.16"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "test:integration": "pnpm -r --if-present run test:integration",
+    "typecheck": "pnpm -r run typecheck",
+    "check": "pnpm -r run check",
+    "lint": "oxlint --type-aware --deny-warnings",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "verify:publishable": "bash scripts/verify-publishable.sh",
+    "changeset": "changeset"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "tsdown": "catalog:",
+    "vitest": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "oxfmt": "catalog:",
+    "publint": "catalog:",
+    "@arethetypeswrong/cli": "catalog:",
+    "@changesets/cli": "catalog:",
+    "@changesets/changelog-github": "catalog:",
+    "@types/node": "catalog:"
+  }
+}
