@@ -1,6 +1,6 @@
 {
   "name": "@plakboek/permissions",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Frozen permission catalogue and role types for Plakboek CMS installations",
   "homepage": "https://github.com/flovan/plakboek/tree/main/packages/permissions#readme",
   "bugs": {
