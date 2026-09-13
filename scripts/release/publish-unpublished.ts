@@ -5,7 +5,7 @@
 // without publishing it (see RELEASING.md). Run with --dry-run to perform
 // every check and print the publish command instead of running it.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -87,7 +87,12 @@ function hasCatalogOrWorkspaceSpecifier(manifest: PackageManifest): boolean {
 }
 
 function packAndValidate(name: string, dir: string): string {
-  const destination = tmpdir();
+  // A fresh directory per package: packing every package into the shared
+  // OS tmpdir() left prior packages' tarballs sitting alongside the new
+  // one, and `.sort().pop()` (last alphabetically) could then pick a
+  // leftover tarball from an earlier iteration instead of the one just
+  // packed here.
+  const destination = mkdtempSync(join(tmpdir(), 'plakboek-release-'));
   execFileSync(
     'pnpm',
     ['--dir', dir, 'pack', '--pack-destination', destination],
