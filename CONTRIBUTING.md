@@ -6,7 +6,7 @@ installation that depends on them.
 
 ## Local setup
 
-Requirements: Node `>=22.16` and pnpm (the exact version is pinned via the
+Requirements: Node `>=22.18` and pnpm (the exact version is pinned via the
 `packageManager` field in the root `package.json`; `corepack enable` will
 pick it up automatically).
 
@@ -29,6 +29,18 @@ pnpm run format:check       # oxfmt, checks only
 pnpm run check               # publint + attw per package
 pnpm run verify:publishable  # pack every package, install into a throwaway non-workspace consumer, type-check and import it at runtime
 ```
+
+## Code style
+
+Formatting is enforced by `oxfmt` (`.oxfmtrc.json`): 2-space indentation, no
+tabs, single quotes, trailing commas everywhere, 80-column print width.
+`pnpm run format:check` runs in CI; `pnpm run format` writes the fix. Linting
+is `oxlint --type-aware --deny-warnings` (`.oxlintrc.json`), including
+type-aware TypeScript rules -- `type` aliases over `interface`, `Record<>`
+over index signatures, no floating/misused promises, and vitest-authoring
+rules for the test suites. A rule violation you genuinely need to keep needs
+a line-level `// oxlint-disable-next-line <rule> -- <reason>` comment, not a
+config-wide disable.
 
 ## Changesets
 

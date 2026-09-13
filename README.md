@@ -17,7 +17,7 @@ React Router v7 (framework mode, SSR) · React 19 · TypeScript · Tailwind · P
 
 ## Development
 
-Requirements: Node `>=22.16` and pnpm (version pinned via the `packageManager` field in `package.json`).
+Requirements: Node `>=22.18` and pnpm (version pinned via the `packageManager` field in `package.json`).
 
 ```sh
 docker compose up -d --wait postgres   # local Postgres for integration tests
