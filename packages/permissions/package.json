@@ -1,36 +1,38 @@
 {
-  "name": "@plakboek/permissions",
-  "version": "0.1.0",
-  "type": "module",
-  "license": "MIT",
-  "description": "Frozen permission catalogue and role types for Plakboek CMS installations",
-  "sideEffects": false,
-  "files": ["dist"],
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.mts",
-      "default": "./dist/index.mjs"
-    },
-    "./package.json": "./package.json"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "engines": {
-    "node": ">=22.16"
-  },
-  "scripts": {
-    "build": "tsdown",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "check": "publint --strict && attw --pack . --profile esm-only"
-  },
-  "devDependencies": {
-    "typescript": "catalog:",
-    "tsdown": "catalog:",
-    "vitest": "catalog:",
-    "publint": "catalog:",
-    "@arethetypeswrong/cli": "catalog:",
-    "@types/node": "catalog:"
-  }
+	"name": "@plakboek/permissions",
+	"version": "0.1.0",
+	"description": "Frozen permission catalogue and role types for Plakboek CMS installations",
+	"license": "MIT",
+	"files": [
+		"dist"
+	],
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"default": "./dist/index.mjs"
+		},
+		"./package.json": "./package.json"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"build": "tsdown",
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"check": "publint --strict && attw --pack . --profile esm-only"
+	},
+	"devDependencies": {
+		"@arethetypeswrong/cli": "catalog:",
+		"@types/node": "catalog:",
+		"publint": "catalog:",
+		"tsdown": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	},
+	"engines": {
+		"node": ">=22.16"
+	}
 }

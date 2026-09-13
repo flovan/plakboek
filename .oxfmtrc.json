@@ -1,0 +1,10 @@
+{
+	"useTabs": true,
+	"ignorePatterns": [
+		"**/dist/**",
+		"**/node_modules/**",
+		".planning/**",
+		"pnpm-lock.yaml",
+		"**/CHANGELOG.md"
+	]
+}

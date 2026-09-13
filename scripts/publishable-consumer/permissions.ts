@@ -1,9 +1,4 @@
-import {
-  ALL_PERMISSIONS,
-  isPermission,
-  PERMISSIONS,
-  type Permission,
-} from "@plakboek/permissions";
+import { ALL_PERMISSIONS, isPermission, PERMISSIONS, type Permission } from "@plakboek/permissions";
 
 const permission: Permission = "pages:publish";
 
@@ -11,9 +6,9 @@ const permission: Permission = "pages:publish";
 const invalidPermission: Permission = "pages:own-edit";
 
 console.log(
-  permission,
-  invalidPermission,
-  isPermission(permission),
-  PERMISSIONS[permission].group,
-  ALL_PERMISSIONS.length,
+	permission,
+	invalidPermission,
+	isPermission(permission),
+	PERMISSIONS[permission].group,
+	ALL_PERMISSIONS.length,
 );
