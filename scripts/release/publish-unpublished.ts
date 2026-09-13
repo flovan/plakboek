@@ -5,9 +5,15 @@
 // without publishing it (see RELEASING.md). Run with --dry-run to perform
 // every check and print the publish command instead of running it.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 type DependencyMap = Record<string, string>;
 
@@ -92,42 +98,50 @@ function packAndValidate(name: string, dir: string): string {
   // one, and `.sort().pop()` (last alphabetically) could then pick a
   // leftover tarball from an earlier iteration instead of the one just
   // packed here.
+  // Cleaned up by the caller (via dirname(tarballPath)) once the tarball it
+  // packs has been published or skipped; cleaned up here directly if
+  // packing/validation itself fails before a tarball path is ever returned.
   const destination = mkdtempSync(join(tmpdir(), 'plakboek-release-'));
-  execFileSync(
-    'pnpm',
-    ['--dir', dir, 'pack', '--pack-destination', destination],
-    {
-      stdio: ['ignore', 'ignore', 'inherit'],
-    },
-  );
-  const tarballName = readdirSync(destination)
-    .filter((fileName) => fileName.endsWith('.tgz'))
-    .sort()
-    .pop();
-  if (!tarballName) {
-    throw new Error(
-      `pnpm pack produced no tarball for ${name} in ${destination}`,
+  try {
+    execFileSync(
+      'pnpm',
+      ['--dir', dir, 'pack', '--pack-destination', destination],
+      {
+        stdio: ['ignore', 'ignore', 'inherit'],
+      },
     );
-  }
-  const tarballPath = join(destination, tarballName);
-  const packedManifestRaw = execFileSync(
-    'tar',
-    ['-xOzf', tarballPath, 'package/package.json'],
-    { encoding: 'utf8' },
-  );
-  const packedManifest = readJsonString<PackageManifest>(packedManifestRaw);
+    const tarballName = readdirSync(destination)
+      .filter((fileName) => fileName.endsWith('.tgz'))
+      .sort()
+      .pop();
+    if (!tarballName) {
+      throw new Error(
+        `pnpm pack produced no tarball for ${name} in ${destination}`,
+      );
+    }
+    const tarballPath = join(destination, tarballName);
+    const packedManifestRaw = execFileSync(
+      'tar',
+      ['-xOzf', tarballPath, 'package/package.json'],
+      { encoding: 'utf8' },
+    );
+    const packedManifest = readJsonString<PackageManifest>(packedManifestRaw);
 
-  if (hasCatalogOrWorkspaceSpecifier(packedManifest)) {
-    throw new Error(
-      `${name}: packed manifest in ${tarballName} still contains a catalog: or workspace: specifier`,
-    );
+    if (hasCatalogOrWorkspaceSpecifier(packedManifest)) {
+      throw new Error(
+        `${name}: packed manifest in ${tarballName} still contains a catalog: or workspace: specifier`,
+      );
+    }
+    if (packedManifest.repository?.url !== EXPECTED_REPOSITORY_URL) {
+      throw new Error(
+        `${name}: packed manifest repository.url is '${packedManifest.repository?.url}', expected '${EXPECTED_REPOSITORY_URL}'`,
+      );
+    }
+    return tarballPath;
+  } catch (error) {
+    rmSync(destination, { recursive: true, force: true });
+    throw error;
   }
-  if (packedManifest.repository?.url !== EXPECTED_REPOSITORY_URL) {
-    throw new Error(
-      `${name}: packed manifest repository.url is '${packedManifest.repository?.url}', expected '${EXPECTED_REPOSITORY_URL}'`,
-    );
-  }
-  return tarballPath;
 }
 
 function readJsonString<T>(raw: string): T {
@@ -194,14 +208,18 @@ function main(): void {
     }
 
     const tarballPath = packAndValidate(name, dir);
-    const publishArgs = [tarballPath, '--access', 'public', '--provenance'];
+    try {
+      const publishArgs = [tarballPath, '--access', 'public', '--provenance'];
 
-    if (DRY_RUN) {
-      console.log(`release: would run: npm publish ${publishArgs.join(' ')}`);
-    } else {
-      execFileSync('npm', ['publish', ...publishArgs], { stdio: 'inherit' });
+      if (DRY_RUN) {
+        console.log(`release: would run: npm publish ${publishArgs.join(' ')}`);
+      } else {
+        execFileSync('npm', ['publish', ...publishArgs], { stdio: 'inherit' });
+      }
+      published.push(name);
+    } finally {
+      rmSync(dirname(tarballPath), { recursive: true, force: true });
     }
-    published.push(name);
   }
 
   console.log(
