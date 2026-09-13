@@ -2,7 +2,16 @@
   "name": "@plakboek/db",
   "version": "0.1.0",
   "description": "Postgres connection factory and migration-lock primitives for Plakboek CMS installations",
+  "homepage": "https://github.com/flovan/plakboek/tree/main/packages/db#readme",
+  "bugs": {
+    "url": "https://github.com/flovan/plakboek/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flovan/plakboek.git",
+    "directory": "packages/db"
+  },
   "files": [
     "dist"
   ],

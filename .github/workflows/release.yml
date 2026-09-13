@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
+    steps:
+      # Third-party actions are referenced by major version tag for Phase 1
+      # (user decision, 2026-09-13); pinning by commit SHA is a deferred
+      # follow-up (T-01-48).
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create or update the Version packages PR
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: pnpm run release:version
+          commit: "ci: version packages"
+          title: "Version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  ci:
+    name: CI
+    needs: version
+    if: needs.version.outputs.hasChangesets == 'false'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish
+    needs: [version, ci]
+    if: needs.version.outputs.hasChangesets == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - id: npm-version
+        run: echo "version=$(npm --version)" >> "$GITHUB_OUTPUT"
+      - name: Verify npm meets the trusted-publishing floor (>=11.5.1)
+        run: |
+          node -e "
+            const [major, minor, patch] = process.env.NPM_VERSION.split('.').map(Number);
+            const ok = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+            process.exit(ok ? 0 : 1);
+          "
+        env:
+          NPM_VERSION: ${{ steps.npm-version.outputs.version }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: node scripts/release/publish-unpublished.ts

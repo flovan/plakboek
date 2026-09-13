@@ -12,7 +12,8 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "verify:publishable": "bash scripts/verify-publishable.sh",
-    "changeset": "changeset"
+    "changeset": "changeset",
+    "release:version": "changeset version && pnpm install --no-frozen-lockfile"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "catalog:",

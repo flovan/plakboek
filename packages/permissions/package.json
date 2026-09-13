@@ -2,7 +2,16 @@
   "name": "@plakboek/permissions",
   "version": "0.1.0",
   "description": "Frozen permission catalogue and role types for Plakboek CMS installations",
+  "homepage": "https://github.com/flovan/plakboek/tree/main/packages/permissions#readme",
+  "bugs": {
+    "url": "https://github.com/flovan/plakboek/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flovan/plakboek.git",
+    "directory": "packages/permissions"
+  },
   "files": [
     "dist"
   ],
