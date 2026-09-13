@@ -180,10 +180,10 @@ type AppliedRow = {
 async function ensureBookkeepingTable(client: Client): Promise<void> {
   await client.query(
     `CREATE TABLE IF NOT EXISTS ${MIGRATIONS_TABLE} (
-			name text PRIMARY KEY,
-			checksum text NOT NULL,
-			applied_at timestamptz NOT NULL DEFAULT now()
-		)`,
+      name text PRIMARY KEY,
+      checksum text NOT NULL,
+      applied_at timestamptz NOT NULL DEFAULT now()
+    )`,
   );
 }
 
