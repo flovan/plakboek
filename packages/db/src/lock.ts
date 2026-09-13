@@ -91,7 +91,15 @@ async function runGuarded<T>(fn: () => Promise<T>): Promise<Outcome<T>> {
  *
  * The unlock query always runs after `fn` settles (success or failure) --
  * this is expressed as unconditional sequential code (not a `try/finally`)
- * so returning `outcome.value` never needs an unsafe cast to narrow `T`.
+ * so returning `outcome.value` never needs an unsafe cast to narrow `T`. The
+ * unlock query itself is guarded the same way `fn` is: if `fn` already
+ * succeeded (its work is already durable in Postgres) and the unlock query
+ * then fails -- e.g. the connection drops between commit and unlock -- that
+ * failure is logged rather than thrown, so a lock-release problem can never
+ * discard an already-successful `outcome.value`. Postgres releases a
+ * session-scoped advisory lock automatically once the session disconnects,
+ * so a failed unlock does not leave the lock stuck. If `fn` itself failed,
+ * `fn`'s error is what gets thrown regardless of the unlock outcome.
  */
 export async function withMigrationLock<T>(
   client: Client,
@@ -105,13 +113,26 @@ export async function withMigrationLock<T>(
 
   const outcome = await runGuarded(fn);
 
-  const unlockResult = await client.query<{ unlocked: boolean }>(
-    'SELECT pg_advisory_unlock($1::bigint) AS unlocked',
-    [MIGRATION_LOCK_KEY],
+  const unlockOutcome = await runGuarded(() =>
+    client.query<{ unlocked: boolean }>(
+      'SELECT pg_advisory_unlock($1::bigint) AS unlocked',
+      [MIGRATION_LOCK_KEY],
+    ),
   );
-  const unlocked = unlockResult.rows[0]?.unlocked ?? false;
 
   if (outcome.ok) {
+    if (!unlockOutcome.ok) {
+      // fn already succeeded and committed its work -- never let a failure
+      // to release the lock discard that result. See the doc comment above.
+      // oxlint-disable-next-line no-console -- last-resort report: outcome.value must not be lost over a lock-release failure
+      console.error(
+        '@plakboek/db: migrations applied successfully, but releasing the migration lock failed -- the lock releases automatically once this session disconnects',
+        unlockOutcome.error,
+      );
+      return outcome.value;
+    }
+
+    const unlocked = unlockOutcome.value.rows[0]?.unlocked ?? false;
     if (!unlocked) {
       throw new Error(
         '@plakboek/db: migration lock was not held at release -- this indicates a bug in withMigrationLock or an external pg_advisory_unlock call on the same key',
