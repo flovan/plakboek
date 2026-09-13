@@ -1,6 +1,6 @@
 {
   "name": "@plakboek/db",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Postgres connection factory and migration-lock primitives for Plakboek CMS installations",
   "homepage": "https://github.com/flovan/plakboek/tree/main/packages/db#readme",
   "bugs": {
