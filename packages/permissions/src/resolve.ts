@@ -34,6 +34,26 @@ export interface PermissionResolver {
 	isKnownRole(roleKey: string): boolean;
 }
 
+const DEFAULT_RATE_LIMIT_MS = 60_000;
+
+/** Cap on distinct orphaned role keys tracked for rate limiting (T-01-22) --
+ * without it, an attacker (or a persistently misconfigured client) sending
+ * arbitrarily many distinct bogus role keys could grow this state without
+ * bound. The oldest-inserted key is evicted to make room for a new one. */
+const MAX_TRACKED_KEYS = 1000;
+
+function defaultOnOrphanedRole(event: OrphanedRoleEvent): void {
+	const userPart = event.userId !== undefined ? ` (user ${event.userId})` : "";
+	console.warn(
+		`[@plakboek/permissions] orphaned role key "${event.roleKey}"${userPart} -- denying all permissions`,
+	);
+}
+
+interface OrphanKeyState {
+	lastEmittedAt: number;
+	suppressed: number;
+}
+
 /**
  * Build a resolver over a validated role map (the output of `defineRoles`).
  * `resolve` never throws: an unknown role key returns an empty set and
@@ -41,8 +61,82 @@ export interface PermissionResolver {
  * rate-limited independently per key.
  */
 export function createPermissionResolver(
-	_roles: DefinedRoles,
-	_options?: PermissionResolverOptions,
+	roles: DefinedRoles,
+	options?: PermissionResolverOptions,
 ): PermissionResolver {
-	throw new Error("createPermissionResolver: not implemented");
+	// Snapshotted into a Map at creation: Map.has/get never consult the
+	// prototype chain, so "__proto__"/"constructor"/"toString" role keys are
+	// always treated as absent, never as an inherited Object.prototype member
+	// (T-01-17).
+	const roleMap = new Map<string, readonly Permission[]>(Object.entries(roles));
+	const rateLimitMs = options?.rateLimitMs ?? DEFAULT_RATE_LIMIT_MS;
+	const now = options?.now ?? Date.now;
+	const hook = options?.onOrphanedRole ?? defaultOnOrphanedRole;
+	const orphanState = new Map<string, OrphanKeyState>();
+
+	function isKnownRole(roleKey: string): boolean {
+		return roleMap.has(roleKey);
+	}
+
+	function emitOrphanedRoleEvent(roleKey: string, userId: string | undefined): void {
+		const nowMs = now();
+		const state = orphanState.get(roleKey);
+
+		if (state !== undefined && nowMs - state.lastEmittedAt < rateLimitMs) {
+			state.suppressed += 1;
+			return;
+		}
+
+		const suppressedCount = state?.suppressed ?? 0;
+
+		if (state === undefined && orphanState.size >= MAX_TRACKED_KEYS) {
+			const oldestKey = orphanState.keys().next().value;
+			if (oldestKey !== undefined) {
+				orphanState.delete(oldestKey);
+			}
+		}
+		orphanState.set(roleKey, { lastEmittedAt: nowMs, suppressed: 0 });
+
+		const event: OrphanedRoleEvent = {
+			roleKey,
+			...(userId !== undefined ? { userId } : {}),
+			occurredAt: new Date(nowMs),
+			suppressedCount,
+		};
+
+		// A broken/slow host-supplied hook must never turn a permission check
+		// into an unhandled exception (T-01-18) -- the decision itself (an
+		// empty Set) is already made before this function runs.
+		try {
+			hook(event);
+		} catch (error) {
+			try {
+				console.error(
+					`[@plakboek/permissions] onOrphanedRole hook threw while handling role "${roleKey}"`,
+					error,
+				);
+			} catch {
+				// Never let a broken console/logger escape either.
+			}
+		}
+	}
+
+	function resolve(roleKeyInput: string, context?: { userId?: string }): ReadonlySet<Permission> {
+		// `String()` is a no-op for the declared `string` type but a real
+		// defensive coercion for a caller that bypassed TypeScript (a plain-JS
+		// consumer, or an `as never` escape hatch) and passed e.g. `null`/`42`
+		// -- resolve() must still behave sanely (deny + report) rather than
+		// crash on a bad Map lookup key.
+		// oxlint-disable-next-line typescript/no-unnecessary-type-conversion -- see comment above
+		const roleKey = String(roleKeyInput);
+		const known = roleMap.get(roleKey);
+		if (known !== undefined) {
+			return new Set(known);
+		}
+
+		emitOrphanedRoleEvent(roleKey, context?.userId);
+		return new Set();
+	}
+
+	return { resolve, isKnownRole };
 }
