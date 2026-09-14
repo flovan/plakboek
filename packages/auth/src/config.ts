@@ -13,6 +13,7 @@ import {
   betterAuth,
   type Auth as BetterAuthInstance,
   type BetterAuthOptions,
+  type BetterAuthPlugin,
 } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
@@ -58,11 +59,11 @@ export type CreateAuthOptions = {
   /** Defaults to `renderAuthEmail`. */
   readonly renderEmail?: RenderAuthEmail;
   /**
-   * Receives every failure to deliver a password-reset or magic-link
-   * message. Those sends are detached from the request (D-15), so the
-   * requester never learns of the failure; this hook is where the host
-   * does. Defaults to one `console.error` line naming only the error type
-   * and, for a `MailSendError`, the recipient's domain.
+   * Receives every failure to deliver a magic-link message or an emailed
+   * second-factor code. The magic-link send is detached from the request
+   * (D-15), so the requester never learns of the failure; this hook is
+   * where the host does. Defaults to one `console.error` line naming only
+   * the error type and, for a `MailSendError`, the recipient's domain.
    */
   readonly onMailDeliveryError?: (error: unknown) => void;
 };
@@ -92,6 +93,10 @@ export const SESSION_EXPIRES_IN_SECONDS = 30 * SECONDS_PER_DAY;
  * refresh happens at most once a day rather than on every request. */
 export const SESSION_UPDATE_AGE_SECONDS = SECONDS_PER_DAY;
 
+/** D-12 as amended: an impersonation session lapses 8 hours after it
+ * starts, if the explicit stop has not ended it sooner. */
+export const IMPERSONATION_SESSION_TTL_SECONDS = 8 * SECONDS_PER_HOUR;
+
 /** AUTH-03: set-password and reset-password links are valid for 48 hours. */
 export const SET_PASSWORD_TOKEN_TTL_SECONDS = 48 * SECONDS_PER_HOUR;
 
@@ -113,6 +118,32 @@ export const TWO_FACTOR_LOCKOUT = Object.freeze({
 const DEFAULT_APP_NAME = 'Plakboek';
 
 /**
+ * better-auth HTTP routes this package keeps closed. Each one would bypass
+ * a protection the package builds around the same action:
+ *
+ * - `/sign-up/email`: users are created only by the first-user path and by
+ *   invitation, never by self-registration.
+ * - `/admin/impersonate-user`, `/admin/stop-impersonating`: impersonation
+ *   runs only through the audited start and stop (D-11), which call
+ *   `auth.api` server-side.
+ * - `/request-password-reset`, `/reset-password`, `/reset-password/:token`:
+ *   set and reset run only through the package's transactional
+ *   single-use-token flow (D-09).
+ *
+ * A closed route answers 404 to any HTTP request, whatever its method,
+ * trailing slashes or query string. Server-side `auth.api` calls are not
+ * affected.
+ */
+export const DISABLED_AUTH_PATHS: readonly string[] = Object.freeze([
+  '/sign-up/email',
+  '/admin/impersonate-user',
+  '/admin/stop-impersonating',
+  '/request-password-reset',
+  '/reset-password',
+  '/reset-password/:token',
+]);
+
+/**
  * The admin plugin's own access-control vocabulary, used as nothing more
  * than the coarse gate on the plugin's endpoints. Every real authorization
  * decision runs through `@plakboek/permissions`; no catalogue permission is
@@ -120,9 +151,10 @@ const DEFAULT_APP_NAME = 'Plakboek';
  *
  * The plugin's user-management endpoints (create, set role, ban, set
  * password, remove) would bypass the audit log, so no role is granted them:
- * user management goes through this package's own audited functions. The
- * superadmin may reach the impersonation endpoint, which this package wraps
- * with its own audited start and stop.
+ * user management goes through this package's own audited functions. Only
+ * the superadmin may call the impersonation endpoint, and only server-side:
+ * its HTTP routes are closed, and this package's audited start and stop
+ * call it through `auth.api`.
  */
 const adminAccessControl = createAccessControl(defaultStatements);
 const ADMIN_PLUGIN_ROLES = {
@@ -148,6 +180,66 @@ const PASSWORD_SETTING_PATHS: ReadonlySet<string> = new Set([
   '/sign-up/email',
   '/admin/create-user',
 ]);
+
+/** A request path relative to the auth base path, without trailing
+ * slashes -- the same form better-auth matches `disabledPaths` against. */
+function authRelativePath(requestUrl: string, baseURL: string): string {
+  const basePath = new URL(baseURL).pathname.replace(/\/+$/, '');
+  const pathname = new URL(requestUrl).pathname.replace(/\/+$/, '') || '/';
+  if (basePath === '') {
+    return pathname;
+  }
+  if (pathname === basePath) {
+    return '/';
+  }
+  return pathname.startsWith(`${basePath}/`)
+    ? pathname.slice(basePath.length)
+    : pathname;
+}
+
+/** Whether `path` matches a route pattern, where a `:name` segment stands
+ * for any one non-empty segment. */
+function matchesRoute(pattern: string, path: string): boolean {
+  const expected = pattern.split('/');
+  const actual = path.split('/');
+  return (
+    expected.length === actual.length &&
+    expected.every((segment, index) => {
+      const candidate = actual[index] ?? '';
+      return segment.startsWith(':') ? candidate !== '' : segment === candidate;
+    })
+  );
+}
+
+type ClosedRoutesPlugin = {
+  readonly id: 'plakboek-closed-routes';
+  readonly onRequest: (
+    request: Request,
+    ctx: { readonly baseURL: string },
+  ) => Promise<{ response: Response } | undefined>;
+};
+
+/**
+ * Applies `DISABLED_AUTH_PATHS` to every HTTP request. better-auth's own
+ * `disabledPaths` compares the request path to each entry as a literal
+ * string, so an entry with a `:token` segment never matches a real URL;
+ * this matcher gives those entries effect. Like `disabledPaths`, it runs
+ * only in better-auth's HTTP router, so server-side `auth.api` calls pass.
+ */
+const closedRoutes = {
+  id: 'plakboek-closed-routes',
+  onRequest: (request, ctx) => {
+    const path = authRelativePath(request.url, ctx.baseURL);
+    const closed = DISABLED_AUTH_PATHS.some((pattern) =>
+      matchesRoute(pattern, path),
+    );
+    return Promise.resolve(
+      closed
+        ? { response: new Response('Not Found', { status: 404 }) }
+        : undefined,
+    );
+  },
+} satisfies ClosedRoutesPlugin & BetterAuthPlugin;
 
 function isParseableUrl(value: string): boolean {
   try {
@@ -292,6 +384,7 @@ function assertCreateAuthOptions(options: CreateAuthOptions): void {
  * option interface so the published declaration names these types instead
  * of inlining their endpoint schemas. */
 type AuthPlugins = [
+  ClosedRoutesPlugin,
   ReturnType<typeof admin<AdminOptions>>,
   ReturnType<typeof twoFactor<TwoFactorOptions>>,
   ReturnType<typeof magicLink>,
@@ -328,13 +421,12 @@ export function createAuth(options: CreateAuthOptions): Auth {
   }
 
   const plugins: AuthPlugins = [
+    closedRoutes,
     admin<AdminOptions>({
       adminRoles: IMPERSONATION_PROTECTED_ROLES,
       roles: ADMIN_PLUGIN_ROLES,
-      // D-12: an impersonation session ends through the explicit stop
-      // action. The plugin has no "never expires" setting, so it lives as
-      // long as an ordinary session and never times out before one does.
-      impersonationSessionDuration: SESSION_EXPIRES_IN_SECONDS,
+      // D-12 as amended: ended by the explicit stop, or lapsed after 8 hours.
+      impersonationSessionDuration: IMPERSONATION_SESSION_TTL_SECONDS,
     }),
     twoFactor<TwoFactorOptions>({
       issuer: options.appName ?? DEFAULT_APP_NAME,
@@ -403,34 +495,18 @@ export function createAuth(options: CreateAuthOptions): Auth {
       schema,
       transaction: true,
     }),
+    // Sign-in only. better-auth's reset routes are closed and it is given
+    // no reset sender or reset-token options: set and reset belong to the
+    // package's own single-use-token flow.
     emailAndPassword: {
       enabled: true,
       minPasswordLength: options.minPasswordLength ?? PASSWORD_MIN_LENGTH,
-      resetPasswordTokenExpiresIn: SET_PASSWORD_TOKEN_TTL_SECONDS,
-      revokeSessionsOnPasswordReset: true,
-      // D-15: the send is dispatched, never awaited. better-auth only calls
-      // this for a registered address, so awaiting an SMTP round trip here
-      // would let response time reveal which addresses are registered.
-      sendResetPassword: async ({ user, url }) => {
-        try {
-          const message = renderEmail('reset-password', {
-            to: user.email,
-            name: user.name,
-            url,
-            expiresInHours: String(
-              SET_PASSWORD_TOKEN_TTL_SECONDS / SECONDS_PER_HOUR,
-            ),
-          });
-          void options.mail.send(message).catch(reportMailDeliveryError);
-        } catch (error) {
-          reportMailDeliveryError(error);
-        }
-      },
     },
     session: {
       expiresIn: SESSION_EXPIRES_IN_SECONDS,
       updateAge: SESSION_UPDATE_AGE_SECONDS,
     },
+    disabledPaths: [...DISABLED_AUTH_PATHS],
     hooks: {
       before: enforcePasswordPolicy,
     },

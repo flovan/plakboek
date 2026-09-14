@@ -217,8 +217,8 @@ describe('closed better-auth HTTP routes', () => {
 
   it('leaves email-and-password sign-in on, with no built-in reset behind the closed routes', () => {
     const auth = createAuth(baseOptions());
-    const emailAndPassword = auth.options.emailAndPassword ?? {};
-    expect(emailAndPassword.enabled).toBe(true);
+    const emailAndPassword = auth.options.emailAndPassword;
+    expect(emailAndPassword?.enabled).toBe(true);
     expect(emailAndPassword).not.toHaveProperty('sendResetPassword');
     expect(emailAndPassword).not.toHaveProperty('resetPasswordTokenExpiresIn');
     expect(emailAndPassword).not.toHaveProperty(
