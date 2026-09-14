@@ -30,3 +30,11 @@ catalog:
   postgres: ^3.4.9
   pg: ^8.23.0
   '@types/pg': ^8.23.1
+  better-auth: ^1.7.4
+  nodemailer: ^10.0.9
+  '@react-email/components': ^1.0.12
+  '@react-email/render': ^2.1.0
+  react: ^19.2.0
+  react-dom: ^19.2.0
+  '@types/react': ^19.2.0
+  '@types/react-dom': ^19.2.0
