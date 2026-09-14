@@ -84,13 +84,54 @@ async function createPasswordUser(
   return created.userId;
 }
 
-function sessionCookieOf(headers: Headers): string {
+/** The `name=value` pair of one non-empty cookie a response sets. */
+function cookiePair(headers: Headers, name: string): string {
   const pair = headers
     .getSetCookie()
     .map((cookie) => cookie.split(';')[0] ?? '')
-    .find((candidate) => candidate.startsWith(`${SESSION_COOKIE}=`));
+    .find(
+      (candidate) =>
+        candidate.startsWith(`${name}=`) && candidate.length > name.length + 1,
+    );
   expect(pair).toBeDefined();
   return pair ?? '';
+}
+
+function sessionCookieOf(headers: Headers): string {
+  return cookiePair(headers, SESSION_COOKIE);
+}
+
+/** Lets every detached promise chain settle: the magic-link send is
+ * dispatched without being awaited (D-15). */
+async function flushDetached(): Promise<void> {
+  for (let round = 0; round < 3; round += 1) {
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+}
+
+type StoredVerification = {
+  readonly identifier: string;
+  readonly value: string;
+};
+
+async function storedVerifications(handle: Db): Promise<StoredVerification[]> {
+  return [
+    ...(await handle.sql<StoredVerification[]>`
+      SELECT identifier, value FROM verification
+    `),
+  ];
+}
+
+/** Asserts no stored verification row holds `secret` in any form that
+ * contains it verbatim. */
+function expectNotAtRest(rows: StoredVerification[], secret: string): void {
+  expect(secret.length).toBeGreaterThan(0);
+  for (const row of rows) {
+    expect(row.identifier).not.toContain(secret);
+    expect(row.value).not.toContain(secret);
+  }
 }
 
 async function signedInCookie(auth: Auth, email: string): Promise<string> {
@@ -283,6 +324,76 @@ describe('closed better-auth HTTP routes', () => {
 
       const session = await auth.api.getSession({
         headers: new Headers({ cookie: sessionCookieOf(response.headers) }),
+      });
+      expect(session?.user.id).toBe(userId);
+    });
+  });
+});
+
+describe('one-time credentials are hashed at rest', () => {
+  it('stores a magic link without its token, and the delivered link still signs in', async () => {
+    await withFixture(async (fixture) => {
+      const { auth, handle, mail } = fixture;
+      const userId = await createPasswordUser(fixture, OWNER);
+
+      await auth.api.signInMagicLink({
+        body: { email: OWNER },
+        headers: new Headers(),
+      });
+      await flushDetached();
+      expect(mail.sent).toHaveLength(1);
+      const link =
+        /https?:\/\/\S*magic-link\/verify\S*/.exec(mail.sent[0]?.text ?? '')?.[0] ??
+        '';
+      const token = new URL(link).searchParams.get('token') ?? '';
+
+      const rows = await storedVerifications(handle);
+      expect(rows.filter((row) => row.value.includes(OWNER))).toHaveLength(1);
+      expectNotAtRest(rows, token);
+
+      const response = await auth.handler(new Request(link));
+      expect(response.status).toBe(302);
+      const session = await auth.api.getSession({
+        headers: new Headers({ cookie: sessionCookieOf(response.headers) }),
+      });
+      expect(session?.user.id).toBe(userId);
+    });
+  });
+
+  it('stores an emailed second-factor code without the code, and the delivered code still verifies', async () => {
+    await withFixture(async (fixture) => {
+      const { auth, handle, mail } = fixture;
+      const userId = await createPasswordUser(fixture, OWNER);
+      await auth.api.enableTwoFactor({
+        body: { password: PASSWORD, method: 'otp' },
+        headers: new Headers({ cookie: await signedInCookie(auth, OWNER) }),
+      });
+
+      const challenge = await auth.api.signInEmail({
+        body: { email: OWNER, password: PASSWORD },
+        returnHeaders: true,
+      });
+      expect(challenge.response).toMatchObject({ twoFactorRedirect: true });
+      const pending = new Headers({
+        cookie: cookiePair(challenge.headers, 'better-auth.two_factor'),
+      });
+      await auth.api.sendTwoFactorOTP({ body: {}, headers: pending });
+      expect(mail.sent).toHaveLength(1);
+      const code = /\b(\d{6})\b/.exec(mail.sent[0]?.text ?? '')?.[1] ?? '';
+
+      const rows = await storedVerifications(handle);
+      expect(
+        rows.filter((row) => row.identifier.startsWith('2fa-otp-')),
+      ).toHaveLength(1);
+      expectNotAtRest(rows, code);
+
+      const verified = await auth.api.verifyTwoFactorOTP({
+        body: { code },
+        headers: pending,
+        returnHeaders: true,
+      });
+      const session = await auth.api.getSession({
+        headers: new Headers({ cookie: sessionCookieOf(verified.headers) }),
       });
       expect(session?.user.id).toBe(userId);
     });

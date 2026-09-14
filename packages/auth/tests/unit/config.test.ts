@@ -187,8 +187,10 @@ describe('policy constants', () => {
     expect(pluginOption(auth, 'magic-link')).toMatchObject({
       expiresIn: MAGIC_LINK_TTL_SECONDS,
       disableSignUp: true,
+      storeToken: 'hashed',
     });
     expect(pluginOption(auth, 'two-factor')).toMatchObject({
+      otpOptions: { storeOTP: 'hashed' },
       accountLockout: { enabled: true, ...TWO_FACTOR_LOCKOUT },
     });
     expect(pluginOption(auth, 'admin')).toMatchObject({
