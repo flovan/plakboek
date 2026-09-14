@@ -75,7 +75,7 @@ type SendOtp = (data: {
 
 function resetPasswordSender(auth: ReturnType<typeof createAuth>) {
   const send: unknown = Reflect.get(
-    auth.options.emailAndPassword,
+    auth.options.emailAndPassword ?? {},
     'sendResetPassword',
   );
   expect(send).toBeTypeOf('function');
@@ -164,7 +164,7 @@ describe('createAuth option validation', () => {
 
   it('accepts a minPasswordLength above the policy floor', () => {
     const auth = createAuth(baseOptions({ minPasswordLength: 16 }));
-    expect(auth.options.emailAndPassword.minPasswordLength).toBe(16);
+    expect(auth.options.emailAndPassword?.minPasswordLength).toBe(16);
   });
 
   it('rejects an onMailDeliveryError that is not a function', () => {

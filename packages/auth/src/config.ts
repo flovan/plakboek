@@ -9,10 +9,20 @@
  * same value instead of restating it.
  */
 import type { DefinedRoles } from '@plakboek/permissions';
-import { betterAuth } from 'better-auth';
+import {
+  betterAuth,
+  type Auth as BetterAuthInstance,
+  type BetterAuthOptions,
+} from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
-import { admin, magicLink, twoFactor } from 'better-auth/plugins';
+import {
+  admin,
+  magicLink,
+  twoFactor,
+  type AdminOptions,
+  type TwoFactorOptions,
+} from 'better-auth/plugins';
 import { createAccessControl } from 'better-auth/plugins/access';
 import { defaultStatements } from 'better-auth/plugins/admin/access';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -278,13 +288,29 @@ function assertCreateAuthOptions(options: CreateAuthOptions): void {
   }
 }
 
+/** The plugin tuple `createAuth` installs, each instantiated with its
+ * option interface so the published declaration names these types instead
+ * of inlining their endpoint schemas. */
+type AuthPlugins = [
+  ReturnType<typeof admin<AdminOptions>>,
+  ReturnType<typeof twoFactor<TwoFactorOptions>>,
+  ReturnType<typeof magicLink>,
+];
+
+type PlakboekAuthOptions = BetterAuthOptions & {
+  readonly plugins: AuthPlugins;
+};
+
+/** The better-auth instance `createAuth` returns. */
+export type Auth = BetterAuthInstance<PlakboekAuthOptions>;
+
 /**
  * Builds the better-auth instance for one installation. The drizzle adapter
  * has transactions switched on -- not its default -- so multi-step adapter
  * operations share one Postgres transaction; single-use token consumption
  * (AUTH-11) depends on it.
  */
-export function createAuth(options: CreateAuthOptions) {
+export function createAuth(options: CreateAuthOptions): Auth {
   assertCreateAuthOptions(options);
 
   const renderEmail = options.renderEmail ?? renderAuthEmail;
@@ -301,7 +327,74 @@ export function createAuth(options: CreateAuthOptions) {
     }
   }
 
-  return betterAuth({
+  const plugins: AuthPlugins = [
+    admin<AdminOptions>({
+      adminRoles: IMPERSONATION_PROTECTED_ROLES,
+      roles: ADMIN_PLUGIN_ROLES,
+      // D-12: an impersonation session ends through the explicit stop
+      // action. The plugin has no "never expires" setting, so it lives as
+      // long as an ordinary session and never times out before one does.
+      impersonationSessionDuration: SESSION_EXPIRES_IN_SECONDS,
+    }),
+    twoFactor<TwoFactorOptions>({
+      issuer: options.appName ?? DEFAULT_APP_NAME,
+      totpOptions: {},
+      otpOptions: {
+        period: TWO_FACTOR_CODE_TTL_SECONDS / SECONDS_PER_MINUTE,
+        // Runs only after the password step succeeded, so there is no
+        // enumeration surface and the send is awaited. The plugin
+        // swallows a rejection here, so it is reported, not rethrown.
+        sendOTP: async ({ user, otp }) => {
+          try {
+            await options.mail.send(
+              renderEmail('two-factor-code', {
+                to: user.email,
+                code: otp,
+                expiresInMinutes: String(
+                  TWO_FACTOR_CODE_TTL_SECONDS / SECONDS_PER_MINUTE,
+                ),
+              }),
+            );
+          } catch (error) {
+            reportMailDeliveryError(error);
+          }
+        },
+      },
+      accountLockout: {
+        enabled: true,
+        maxFailedAttempts: TWO_FACTOR_LOCKOUT.maxFailedAttempts,
+        durationSeconds: TWO_FACTOR_LOCKOUT.durationSeconds,
+      },
+    }),
+    magicLink({
+      expiresIn: MAGIC_LINK_TTL_SECONDS,
+      // Users are invited, never self-registered: a link for an unknown
+      // address must not create an account when followed.
+      disableSignUp: true,
+      // D-15: the lookup runs on both paths; only a registered address
+      // gets a message, and that send is dispatched, never awaited.
+      sendMagicLink: async ({ email, url }, ctx) => {
+        const found = await ctx?.context.internalAdapter.findUserByEmail(email);
+        if (found === null || found === undefined) {
+          return;
+        }
+        try {
+          const message = renderEmail('magic-link', {
+            to: found.user.email,
+            url,
+            expiresInMinutes: String(
+              MAGIC_LINK_TTL_SECONDS / SECONDS_PER_MINUTE,
+            ),
+          });
+          void options.mail.send(message).catch(reportMailDeliveryError);
+        } catch (error) {
+          reportMailDeliveryError(error);
+        }
+      },
+    }),
+  ];
+
+  return betterAuth<PlakboekAuthOptions>({
     appName: options.appName ?? DEFAULT_APP_NAME,
     baseURL: options.baseURL,
     secret: options.secret,
@@ -341,74 +434,6 @@ export function createAuth(options: CreateAuthOptions) {
     hooks: {
       before: enforcePasswordPolicy,
     },
-    plugins: [
-      admin({
-        adminRoles: IMPERSONATION_PROTECTED_ROLES,
-        roles: ADMIN_PLUGIN_ROLES,
-        // D-12: an impersonation session ends through the explicit stop
-        // action. The plugin has no "never expires" setting, so it lives as
-        // long as an ordinary session and never times out before one does.
-        impersonationSessionDuration: SESSION_EXPIRES_IN_SECONDS,
-      }),
-      twoFactor({
-        issuer: options.appName ?? DEFAULT_APP_NAME,
-        totpOptions: {},
-        otpOptions: {
-          period: TWO_FACTOR_CODE_TTL_SECONDS / SECONDS_PER_MINUTE,
-          // Runs only after the password step succeeded, so there is no
-          // enumeration surface and the send is awaited. The plugin
-          // swallows a rejection here, so it is reported, not rethrown.
-          sendOTP: async ({ user, otp }) => {
-            try {
-              await options.mail.send(
-                renderEmail('two-factor-code', {
-                  to: user.email,
-                  code: otp,
-                  expiresInMinutes: String(
-                    TWO_FACTOR_CODE_TTL_SECONDS / SECONDS_PER_MINUTE,
-                  ),
-                }),
-              );
-            } catch (error) {
-              reportMailDeliveryError(error);
-            }
-          },
-        },
-        accountLockout: {
-          enabled: true,
-          maxFailedAttempts: TWO_FACTOR_LOCKOUT.maxFailedAttempts,
-          durationSeconds: TWO_FACTOR_LOCKOUT.durationSeconds,
-        },
-      }),
-      magicLink({
-        expiresIn: MAGIC_LINK_TTL_SECONDS,
-        // Users are invited, never self-registered: a link for an unknown
-        // address must not create an account when followed.
-        disableSignUp: true,
-        // D-15: the lookup runs on both paths; only a registered address
-        // gets a message, and that send is dispatched, never awaited.
-        sendMagicLink: async ({ email, url }, ctx) => {
-          const found =
-            await ctx?.context.internalAdapter.findUserByEmail(email);
-          if (found === null || found === undefined) {
-            return;
-          }
-          try {
-            const message = renderEmail('magic-link', {
-              to: found.user.email,
-              url,
-              expiresInMinutes: String(
-                MAGIC_LINK_TTL_SECONDS / SECONDS_PER_MINUTE,
-              ),
-            });
-            void options.mail.send(message).catch(reportMailDeliveryError);
-          } catch (error) {
-            reportMailDeliveryError(error);
-          }
-        },
-      }),
-    ],
+    plugins,
   });
 }
-
-export type Auth = ReturnType<typeof createAuth>;
