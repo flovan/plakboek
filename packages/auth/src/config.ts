@@ -433,6 +433,8 @@ export function createAuth(options: CreateAuthOptions): Auth {
       totpOptions: {},
       otpOptions: {
         period: TWO_FACTOR_CODE_TTL_SECONDS / SECONDS_PER_MINUTE,
+        // The code is kept as a SHA-256 digest, never as the six digits.
+        storeOTP: 'hashed',
         // Runs only after the password step succeeded, so there is no
         // enumeration surface and the send is awaited. The plugin
         // swallows a rejection here, so it is reported, not rethrown.
@@ -460,6 +462,9 @@ export function createAuth(options: CreateAuthOptions): Auth {
     }),
     magicLink({
       expiresIn: MAGIC_LINK_TTL_SECONDS,
+      // The link's token is kept as a SHA-256 digest, so a read of the
+      // verification table does not yield a working login link.
+      storeToken: 'hashed',
       // Users are invited, never self-registered: a link for an unknown
       // address must not create an account when followed.
       disableSignUp: true,

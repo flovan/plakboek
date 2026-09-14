@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createDb, runMigrations, type Db } from '@plakboek/db';
 import { defaultRoles, defineRoles } from '@plakboek/permissions';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -108,6 +108,12 @@ function tokenOf(link: string): string {
   return new URL(link).searchParams.get('token') ?? '';
 }
 
+/** The identifier a token is stored under: its SHA-256 digest, base64url
+ * without padding, because the plugin stores tokens hashed. */
+function storedIdentifier(token: string): string {
+  return createHash('sha256').update(token).digest('base64url');
+}
+
 /** Follows a link exactly as a browser would, through the HTTP handler. */
 async function follow(auth: Auth, link: string) {
   const response = await auth.handler(new Request(link));
@@ -138,7 +144,7 @@ async function age(handle: Db, token: string, interval: string) {
     UPDATE verification
     SET expires_at = expires_at - ${interval}::interval,
         created_at = created_at - ${interval}::interval
-    WHERE identifier = ${token}
+    WHERE identifier = ${storedIdentifier(token)}
   `;
 }
 
@@ -177,7 +183,7 @@ describe('magic link sign-in (AUTH-09, D-10)', () => {
       const token = tokenOf(linkFrom(mail.sent[0]));
       const [row] = await handle.sql<{ expiresAtMs: number }[]>`
         SELECT (extract(epoch FROM expires_at) * 1000)::float8 AS "expiresAtMs"
-        FROM verification WHERE identifier = ${token}
+        FROM verification WHERE identifier = ${storedIdentifier(token)}
       `;
       expect(row?.expiresAtMs).toBeGreaterThanOrEqual(
         before + MAGIC_LINK_WINDOW_MS - TOLERANCE_MS,
@@ -225,13 +231,20 @@ describe('magic link sign-in (AUTH-09, D-10)', () => {
       expect(mail.sent).toHaveLength(sentForKnown);
       expect(mail.sent.map((message) => message.to)).not.toContain(UNKNOWN);
 
-      // Even a link recovered for the unknown address cannot register it.
+      // Even a working link for the unknown address cannot register it.
+      // The stored identifier is a digest, not a usable token, so the issued
+      // row is re-keyed to a token this test holds.
       const [issued] = await handle.sql<{ identifier: string }[]>`
         SELECT identifier FROM verification WHERE value LIKE ${`%${UNKNOWN}%`}
       `;
       expect(issued).toBeDefined();
+      const token = randomBytes(24).toString('base64url');
+      await handle.sql`
+        UPDATE verification SET identifier = ${storedIdentifier(token)}
+        WHERE identifier = ${issued?.identifier ?? ''}
+      `;
       const link = new URL('/api/auth/magic-link/verify', BASE_URL);
-      link.searchParams.set('token', issued?.identifier ?? '');
+      link.searchParams.set('token', token);
       link.searchParams.set('callbackURL', '/');
       const followed = await follow(auth, link.toString());
 

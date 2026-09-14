@@ -343,8 +343,9 @@ describe('one-time credentials are hashed at rest', () => {
       await flushDetached();
       expect(mail.sent).toHaveLength(1);
       const link =
-        /https?:\/\/\S*magic-link\/verify\S*/.exec(mail.sent[0]?.text ?? '')?.[0] ??
-        '';
+        /https?:\/\/\S*magic-link\/verify\S*/.exec(
+          mail.sent[0]?.text ?? '',
+        )?.[0] ?? '';
       const token = new URL(link).searchParams.get('token') ?? '';
 
       const rows = await storedVerifications(handle);
