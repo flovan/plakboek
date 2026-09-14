@@ -611,6 +611,8 @@ describe('impersonation refusals (D-11, D-13)', () => {
         action: 'impersonation.refused',
         entityType: 'user',
         entityId: otherOwner.userId,
+        outcome: 'denied',
+        beforeIsNull: true,
         after: { reason: 'target-is-superadmin' },
       }),
     ]);
@@ -690,7 +692,9 @@ describe('impersonation refusals (D-11, D-13)', () => {
       actorUserId: delegate.userId,
       actorRoleKey: 'delegate',
       impersonatorUserId: owner.userId,
+      permission: 'users:impersonate',
       entityId: editor.userId,
+      outcome: 'denied',
       after: { reason: 'already-impersonating' },
     });
   });

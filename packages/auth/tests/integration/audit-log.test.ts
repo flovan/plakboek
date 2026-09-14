@@ -452,6 +452,113 @@ describe('audited mutations (USER-08, D-05, D-06)', () => {
   });
 });
 
+describe('a refusal for a reason other than a missing permission', () => {
+  it('records it as denied, with both identities and its reason redacted, and throws nothing', async () => {
+    const { handle, resolver, superadmin, admin, editor } = fixture();
+    const recorder = createAuditRecorder({ db: handle.db, resolver });
+
+    // The acting role holds the permission: the row is denied because the
+    // caller refused the attempt, not because the check failed.
+    await recorder.recordDenied(
+      { ...admin, impersonatedBy: superadmin.userId },
+      {
+        permission: 'users:edit',
+        action: 'user.update.refused',
+        entityType: 'user',
+        entityId: editor.userId,
+        before: { name: 'Editor', password: 'before-password-never-stored' },
+        after: {
+          reason: 'target-is-locked',
+          password: 'after-password-never-stored',
+        },
+      },
+    );
+
+    expect(await nameOf(editor.userId)).toBe('Editor');
+    const rows = await auditRows();
+    expect(rows).toEqual([
+      {
+        actorUserId: admin.userId,
+        actorRoleKey: 'admin',
+        impersonatorUserId: superadmin.userId,
+        permission: 'users:edit',
+        action: 'user.update.refused',
+        entityType: 'user',
+        entityId: editor.userId,
+        outcome: 'denied',
+        beforeIsNull: false,
+        afterIsNull: false,
+        before: { name: 'Editor', password: '[redacted]' },
+        after: { reason: 'target-is-locked', password: '[redacted]' },
+      },
+    ]);
+    expect(JSON.stringify(rows)).not.toContain('password-never-stored');
+  });
+
+  it('stores omitted states as SQL NULL', async () => {
+    const { handle, resolver, superadmin, editor } = fixture();
+
+    await createAuditRecorder({ db: handle.db, resolver }).recordDenied(
+      superadmin,
+      {
+        permission: 'users:impersonate',
+        action: 'impersonation.refused',
+        entityType: 'user',
+        entityId: editor.userId,
+      },
+    );
+
+    expect(await auditRows()).toEqual([
+      expect.objectContaining({
+        actorUserId: superadmin.userId,
+        outcome: 'denied',
+        beforeIsNull: true,
+        afterIsNull: true,
+      }),
+    ]);
+  });
+
+  it('throws AuditWriteError and calls the hook once when the row cannot be written', async () => {
+    const { handle, resolver, editor } = fixture();
+    const failures: AuditWriteFailure[] = [];
+    const acting: AuditActor = {
+      userId: randomUUID(),
+      roleKey: SUPERADMIN_ROLE_KEY,
+    };
+
+    const error: unknown = await createAuditRecorder({
+      db: handle.db,
+      resolver,
+      onAuditWriteFailed: (failure) => {
+        failures.push(failure);
+      },
+    })
+      .recordDenied(acting, {
+        permission: 'users:impersonate',
+        action: 'impersonation.refused',
+        entityType: 'user',
+        entityId: editor.userId,
+        after: { reason: 'target-is-superadmin' },
+      })
+      .then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+    expect(error).toBeInstanceOf(AuditWriteError);
+    expect(await auditRows()).toEqual([]);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({
+      permission: 'users:impersonate',
+      action: 'impersonation.refused',
+      entityType: 'user',
+      entityId: editor.userId,
+      actorUserId: acting.userId,
+    });
+    expect(failures[0]?.error).toBe(error);
+  });
+});
+
 describe('a failed audit write (T-02-24, T-02-29)', () => {
   const failureCases = [
     {

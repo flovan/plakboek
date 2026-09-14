@@ -92,6 +92,15 @@ export type AuditRecorder = {
     entry: AuditEntryInput,
     mutation: AuditedMutation<T>,
   ): Promise<T>;
+  /**
+   * Records an attempt the caller refused for a reason other than a missing
+   * permission, e.g. a forbidden target. The row's `outcome` is `'denied'`;
+   * no permission check runs and nothing is mutated. `entry.before` and
+   * `entry.after` are redacted like any other row, so name the reason in
+   * `after`. A failed insert reports through `onAuditWriteFailed` and throws
+   * `AuditWriteError`.
+   */
+  recordDenied(actor: AuditActor, entry: AuditEntryInput): Promise<void>;
 };
 
 /** Thrown when the actor's role lacks the permission. Carries the
@@ -314,6 +323,9 @@ export function createAuditRecorder(deps: AuditDeps): AuditRecorder {
       mutation: AuditedMutation<T>,
     ): Promise<T> {
       return runAuditedMutation(bound, actor, entry, mutation);
+    },
+    recordDenied(): Promise<void> {
+      return Promise.resolve();
     },
   };
 }
