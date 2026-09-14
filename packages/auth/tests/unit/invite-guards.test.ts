@@ -238,6 +238,8 @@ const ROLES: Readonly<Record<string, ReadonlySet<Permission>>> = {
   superadmin: holding(...ALL_PERMISSIONS),
   'no-create': allExcept('users:create'),
   'no-reset': allExcept('users:reset-password'),
+  'create-only': holding('users:create'),
+  'reset-only': holding('users:reset-password'),
 };
 
 function deps(
@@ -407,7 +409,7 @@ describe('inviteUser guards (AUTH-02)', () => {
 });
 
 describe('resendSetPasswordLink guards (AUTH-04)', () => {
-  it('refuses a caller without users:reset-password, records the denial and issues nothing', async () => {
+  it('refuses a caller holding only users:reset-password, records the denial and issues nothing', async () => {
     const { tx, statements } = fakeDatabase({ users: [KNOWN] });
     const recorder = fakeRecorder(tx, ROLES);
     const mail = recordingSender();
@@ -417,18 +419,49 @@ describe('resendSetPasswordLink guards (AUTH-04)', () => {
         { recorder, mail, baseURL: BASE_URL },
         {
           email: KNOWN.email,
-          actor: { userId: 'user-inviter', roleKey: 'no-reset' },
+          actor: { userId: 'user-helper', roleKey: 'reset-only' },
         },
       ),
     ).rejects.toBeInstanceOf(PermissionDeniedError);
 
     expect(recorder.denied.map((denial) => denial.entry.permission)).toEqual([
-      'users:reset-password',
+      'users:create',
     ]);
     expect(recorder.denied[0]?.entry.action).toBe('user.resend-set-password');
     expect(recorder.allowed).toEqual([]);
+    expect(statements).toEqual([]);
     expect(insertsInto(statements, 'verification')).toBe(0);
     expect(mail.sent).toEqual([]);
+  });
+
+  it('lets a caller holding only users:create resend, and records the allowed entry', async () => {
+    const { tx, statements } = fakeDatabase({ users: [KNOWN] });
+    const recorder = fakeRecorder(tx, ROLES);
+    const mail = recordingSender();
+    const actor: AuditActor = {
+      userId: 'user-inviter',
+      roleKey: 'create-only',
+    };
+
+    await expect(
+      resendSetPasswordLink(
+        { recorder, mail, baseURL: BASE_URL },
+        { email: KNOWN.email, actor },
+      ),
+    ).resolves.toEqual({ delivered: true });
+
+    expect(recorder.denied).toEqual([]);
+    expect(
+      recorder.allowed.map((allowed) => ({
+        actor: allowed.actor,
+        permission: allowed.entry.permission,
+        action: allowed.entry.action,
+      })),
+    ).toEqual([
+      { actor, permission: 'users:create', action: 'user.resend-set-password' },
+    ]);
+    expect(insertsInto(statements, 'verification')).toBe(1);
+    expect(mail.sent.map((message) => message.to)).toEqual([KNOWN.email]);
   });
 
   it('returns the same outcome for an unknown address as for a known one, and sends nothing for it', async () => {

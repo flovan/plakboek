@@ -47,7 +47,13 @@ const PASSWORD = 'a freshly chosen passphrase';
 const LINK_PATTERN = /https?:\/\/\S+[?&]token=[\w-]+/;
 const HOUR_SECONDS = 60 * 60;
 
-const roles = defineRoles(defaultRoles);
+/** The shipped roles, plus one role per permission a resend could be gated
+ * on, each holding that permission alone. */
+const roles = defineRoles({
+  ...defaultRoles,
+  inviter: ['users:create'],
+  'password-helper': ['users:reset-password'],
+});
 
 type ControlledSender = MailSender & {
   readonly sent: MailMessage[];
@@ -491,6 +497,59 @@ describe('resending a link (AUTH-04, D-09)', () => {
     expect(await signsIn(INVITEE, PASSWORD)).toBe(userId);
   });
 
+  it('lets a role holding only users:create resend, with an allowed row naming that permission', async () => {
+    const { superadmin } = await seedInstallation();
+    const { userId } = await invite(superadmin);
+    const inviter = await createActor('inviter@example.com', 'inviter');
+    const auditBefore = (await auditRows()).length;
+
+    await expect(resend(inviter)).resolves.toEqual({ delivered: true });
+
+    const recorded = (await auditRows()).slice(auditBefore);
+    expect(recorded).toEqual([
+      expect.objectContaining({
+        action: 'user.resend-set-password',
+        outcome: 'allowed',
+        actorUserId: inviter.userId,
+        actorRoleKey: 'inviter',
+        permission: 'users:create',
+      }),
+    ]);
+    expect(fixture().mail.sent).toHaveLength(2);
+    expect(await outstandingLinks(userId, 'set-password')).toBe(1);
+    await expect(complete('set-password', lastToken())).resolves.toEqual({
+      userId,
+    });
+  });
+
+  it('refuses a role holding only users:reset-password, with a denied row, no new link and no message', async () => {
+    const { superadmin } = await seedInstallation();
+    const { userId } = await invite(superadmin);
+    const invitedLink = lastToken();
+    const helper = await createActor('helper@example.com', 'password-helper');
+    const auditBefore = (await auditRows()).length;
+
+    await expect(resend(helper)).rejects.toBeInstanceOf(PermissionDeniedError);
+
+    const recorded = (await auditRows()).slice(auditBefore);
+    expect(recorded).toEqual([
+      expect.objectContaining({
+        action: 'user.resend-set-password',
+        outcome: 'denied',
+        actorUserId: helper.userId,
+        actorRoleKey: 'password-helper',
+        permission: 'users:create',
+        after: null,
+      }),
+    ]);
+    expect(fixture().mail.sent).toHaveLength(1);
+    expect(await outstandingLinks(userId, 'set-password')).toBe(1);
+    // A new link would have ended the invited one.
+    await expect(complete('set-password', invitedLink)).resolves.toEqual({
+      userId,
+    });
+  });
+
   it('sends nothing and keeps no link for an address with no user, with the same outcome', async () => {
     const { superadmin } = await seedInstallation();
 
@@ -610,7 +669,7 @@ describe('audit coverage of invites and resends (USER-08)', () => {
       action: 'user.resend-set-password',
       outcome: 'allowed',
       actorUserId: superadmin.userId,
-      permission: 'users:reset-password',
+      permission: 'users:create',
       entityType: 'user',
       beforeIsNull: true,
       after: {
@@ -653,7 +712,7 @@ describe('audit coverage of invites and resends (USER-08)', () => {
       expect.objectContaining({
         action: 'user.resend-set-password',
         actorUserId: editor.userId,
-        permission: 'users:reset-password',
+        permission: 'users:create',
         after: null,
       }),
     ]);
