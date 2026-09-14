@@ -67,10 +67,11 @@ order. A second overlapping call either observes the first call's
 migrations as already applied, or throws `MigrationLockTimeoutError` if it
 gives up waiting for the lock before the first call finishes.
 
-`MIGRATIONS` ships empty at `0.1.0` -- no product schema exists before
-Phase 2. See [`MIGRATIONS.md`](./MIGRATIONS.md) for how later phases add to
-it, the transactional-vs-existence-guarded-statement decision, and what
-each thrown error class means.
+`MIGRATIONS` starts with `0001_auth_core`, which creates the authentication
+tables (`"user"`, `session`, `account`, `verification`, `two_factor`) and
+the append-only `audit_log`. See [`MIGRATIONS.md`](./MIGRATIONS.md) for how
+later migrations are added, the transactional-vs-existence-guarded-statement
+decision, and what each thrown error class means.
 
 ## Errors
 

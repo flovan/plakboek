@@ -15,10 +15,42 @@ const MIGRATIONS_DIR = fileURLToPath(
 );
 const INDEX_PATH = path.join(MIGRATIONS_DIR, 'index.ts');
 
+const STATIC_IMPORT_PATTERN =
+  /^import\s*\{\s*migration\s+as\s+(\w+)\s*\}\s*from\s*'\.\/(\d{4}_[a-z0-9_]+)\.js';$/gm;
+const REGISTRY_ARRAY_PATTERN = /Object\.freeze\(\[([^\]]*)\]\)/;
+
 describe('shipped MIGRATIONS registry', () => {
   it('is a frozen array and passes assertValidRegistry', () => {
     expect(Object.isFrozen(MIGRATIONS)).toBe(true);
     expect(() => assertValidRegistry(MIGRATIONS)).not.toThrow();
+  });
+
+  it('ships 0001_auth_core as its first entry', () => {
+    expect(MIGRATIONS.map((migration) => migration.name)).toContain(
+      '0001_auth_core',
+    );
+    expect(MIGRATIONS[0]?.name).toBe('0001_auth_core');
+  });
+
+  it("gives every entry the name of the file it is imported from, in the array's order", () => {
+    const indexSource = readFileSync(INDEX_PATH, 'utf8');
+    const fileByBinding = new Map(
+      Array.from(indexSource.matchAll(STATIC_IMPORT_PATTERN), (match) => [
+        match[1],
+        match[2],
+      ]),
+    );
+    const arrayBody = REGISTRY_ARRAY_PATTERN.exec(indexSource)?.[1] ?? '';
+    const bindingsInOrder = arrayBody
+      .split(',')
+      .map((binding) => binding.trim())
+      .filter((binding) => binding.length > 0);
+
+    expect(bindingsInOrder).toHaveLength(MIGRATIONS.length);
+    expect(fileByBinding.size).toBe(MIGRATIONS.length);
+    expect(
+      bindingsInOrder.map((binding) => fileByBinding.get(binding)),
+    ).toEqual(MIGRATIONS.map((migration) => migration.name));
   });
 });
 
