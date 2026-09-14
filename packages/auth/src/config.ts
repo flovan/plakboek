@@ -26,6 +26,7 @@ import {
 } from 'better-auth/plugins';
 import { createAccessControl } from 'better-auth/plugins/access';
 import { defaultStatements } from 'better-auth/plugins/admin/access';
+import { eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { renderAuthEmail, type AuthEmailKind } from './email/render.js';
 import {
@@ -291,6 +292,55 @@ const enforcePasswordPolicy = createAuthMiddleware(async (ctx) => {
   }
 });
 
+type SessionHooks = NonNullable<
+  NonNullable<BetterAuthOptions['databaseHooks']>['session']
+>;
+type SessionUpdateBeforeHook = NonNullable<
+  NonNullable<SessionHooks['update']>['before']
+>;
+
+/**
+ * D-12 as amended: an impersonation session lapses at the expiry it was
+ * issued with, never later. better-auth refreshes any session read without
+ * its signed `dont_remember` cookie to `SESSION_EXPIRES_IN_SECONDS` from
+ * now, impersonation sessions included, so whoever holds the session cookie
+ * alone could keep an impersonation alive for 30 days. This hook is the one
+ * place that is stopped: an update never moves `expires_at` past the stored
+ * value of a session whose stored `impersonated_by` is set. Every other
+ * session keeps sliding (D-01), and refresh stays enabled.
+ *
+ * better-auth hands the hook the update payload and the endpoint context,
+ * but not the row being updated. Its refresh updates the session it has
+ * just read onto the context, so that session's token names the row, and
+ * the row itself is read back rather than trusting the context's copy.
+ */
+function capImpersonationExpiry(
+  db: PostgresJsDatabase,
+): SessionUpdateBeforeHook {
+  return async (update, context) => {
+    const token = context?.context.session?.session.token;
+    if (update.expiresAt === undefined || typeof token !== 'string') {
+      return;
+    }
+    const [stored] = await db
+      .select({
+        expiresAt: schema.session.expiresAt,
+        impersonatedBy: schema.session.impersonatedBy,
+      })
+      .from(schema.session)
+      .where(eq(schema.session.token, token))
+      .limit(1);
+    if (
+      stored === undefined ||
+      stored.impersonatedBy === null ||
+      new Date(update.expiresAt) <= stored.expiresAt
+    ) {
+      return;
+    }
+    return { data: { expiresAt: stored.expiresAt } };
+  };
+}
+
 /** The fallback for `onMailDeliveryError`: one line, no address, no url,
  * no token -- only what failed and, when known, the recipient's domain. */
 function defaultOnMailDeliveryError(error: unknown): void {
@@ -510,6 +560,11 @@ export function createAuth(options: CreateAuthOptions): Auth {
     session: {
       expiresIn: SESSION_EXPIRES_IN_SECONDS,
       updateAge: SESSION_UPDATE_AGE_SECONDS,
+    },
+    databaseHooks: {
+      session: {
+        update: { before: capImpersonationExpiry(options.db) },
+      },
     },
     disabledPaths: [...DISABLED_AUTH_PATHS],
     hooks: {
