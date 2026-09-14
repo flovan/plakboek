@@ -13,7 +13,8 @@
  * neither does. There is no best-effort, fire-and-forget or
  * catch-and-continue audit write: a failed insert rolls the mutation back
  * and surfaces as `AuditWriteError`. Refusals are recorded too, with
- * `outcome` `'denied'`.
+ * `outcome` `'denied'`: a missing permission by `run` itself, and a refusal
+ * the caller makes for its own reason through `recordDenied`.
  *
  * `audit_log` is append-only. Nothing in this package updates its rows, and
  * the retention prune (`pruneAuditLog`, D-07) is the sole statement that
@@ -211,6 +212,45 @@ type AuditRowInput = {
   readonly createdAt: Date;
 };
 
+/** The stored columns of one audit row. Every write path shapes its row
+ * here, so none can skip the redaction of `before` and `after`. */
+function auditRowValues(
+  actor: AuditActor,
+  entry: AuditEntryInput,
+  row: AuditRowInput,
+) {
+  return {
+    actorUserId: actor.userId,
+    actorRoleKey: actor.roleKey,
+    impersonatorUserId: actor.impersonatedBy ?? null,
+    permission: entry.permission,
+    action: entry.action,
+    entityType: entry.entityType,
+    entityId: entry.entityId ?? null,
+    outcome: row.outcome,
+    before: toJsonColumn(redactAuditPayload(row.before)),
+    after: toJsonColumn(redactAuditPayload(row.after)),
+    createdAt: row.createdAt,
+  };
+}
+
+function auditWriteFailure(
+  actor: AuditActor,
+  entry: AuditEntryInput,
+  occurredAt: Date,
+  error: AuditWriteError,
+): AuditWriteFailure {
+  return {
+    permission: entry.permission,
+    action: entry.action,
+    entityType: entry.entityType,
+    ...(entry.entityId !== undefined ? { entityId: entry.entityId } : {}),
+    actorUserId: actor.userId,
+    occurredAt,
+    error,
+  };
+}
+
 /**
  * Checks `entry.permission` against the actor's role, then -- inside one
  * transaction -- either records the refusal and throws
@@ -243,19 +283,7 @@ export async function runAuditedMutation<T>(
     row: AuditRowInput,
   ): Promise<void> {
     try {
-      await tx.insert(auditLog).values({
-        actorUserId: actor.userId,
-        actorRoleKey: actor.roleKey,
-        impersonatorUserId: actor.impersonatedBy ?? null,
-        permission: entry.permission,
-        action: entry.action,
-        entityType: entry.entityType,
-        entityId: entry.entityId ?? null,
-        outcome: row.outcome,
-        before: toJsonColumn(redactAuditPayload(row.before)),
-        after: toJsonColumn(redactAuditPayload(row.after)),
-        createdAt: row.createdAt,
-      });
+      await tx.insert(auditLog).values(auditRowValues(actor, entry, row));
     } catch (error) {
       writeFailure = new AuditWriteError(entry.permission, entry.action, error);
       throw writeFailure;
@@ -290,15 +318,7 @@ export async function runAuditedMutation<T>(
     if (writeFailure !== undefined) {
       reportAuditWriteFailure(
         deps.onAuditWriteFailed ?? defaultOnAuditWriteFailed,
-        {
-          permission: entry.permission,
-          action: entry.action,
-          entityType: entry.entityType,
-          ...(entry.entityId !== undefined ? { entityId: entry.entityId } : {}),
-          actorUserId: actor.userId,
-          occurredAt: now(),
-          error: writeFailure,
-        },
+        auditWriteFailure(actor, entry, now(), writeFailure),
       );
     }
     throw error;
@@ -308,6 +328,37 @@ export async function runAuditedMutation<T>(
     throw new PermissionDeniedError(entry.permission, actor.roleKey);
   }
   return outcome.result;
+}
+
+/** `AuditRecorder.recordDenied`: one `denied` row for a refusal the caller
+ * made itself. A single insert, so it needs no transaction of its own. */
+async function recordDeniedEntry(
+  deps: AuditDeps,
+  actor: AuditActor,
+  entry: AuditEntryInput,
+): Promise<void> {
+  const now = deps.now ?? (() => new Date());
+  try {
+    await deps.db.insert(auditLog).values(
+      auditRowValues(actor, entry, {
+        outcome: 'denied',
+        before: entry.before,
+        after: entry.after,
+        createdAt: now(),
+      }),
+    );
+  } catch (error) {
+    const writeFailure = new AuditWriteError(
+      entry.permission,
+      entry.action,
+      error,
+    );
+    reportAuditWriteFailure(
+      deps.onAuditWriteFailed ?? defaultOnAuditWriteFailed,
+      auditWriteFailure(actor, entry, now(), writeFailure),
+    );
+    throw writeFailure;
+  }
 }
 
 /**
@@ -324,8 +375,8 @@ export function createAuditRecorder(deps: AuditDeps): AuditRecorder {
     ): Promise<T> {
       return runAuditedMutation(bound, actor, entry, mutation);
     },
-    recordDenied(): Promise<void> {
-      return Promise.resolve();
+    recordDenied(actor: AuditActor, entry: AuditEntryInput): Promise<void> {
+      return recordDeniedEntry(bound, actor, entry);
     },
   };
 }

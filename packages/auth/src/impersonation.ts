@@ -172,8 +172,8 @@ const IMPERSONATE_PERMISSION = 'users:impersonate';
 
 /** Audit actions this module records. `impersonation.refused` records a
  * start that passed the permission check and was then refused by a rule in
- * this module; its `outcome` reflects the permission decision and its
- * `after` names the reason. */
+ * this module; its `outcome` is `'denied'` and its `after` names the
+ * reason. */
 const START_ACTION = 'impersonation.start';
 const STOP_ACTION = 'impersonation.stop';
 const REFUSED_ACTION = 'impersonation.refused';
@@ -316,15 +316,11 @@ export async function startImpersonation(
       (error instanceof ImpersonationSessionError &&
         error.reason === 'already-impersonating')
     ) {
-      await deps.recorder.run(
-        actor,
-        {
-          ...entry,
-          action: REFUSED_ACTION,
-          after: { reason: error.reason },
-        },
-        () => Promise.resolve({ result: undefined }),
-      );
+      await deps.recorder.recordDenied(actor, {
+        ...entry,
+        action: REFUSED_ACTION,
+        after: { reason: error.reason },
+      });
     }
     throw error;
   }
