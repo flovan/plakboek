@@ -3,6 +3,8 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AuthConfigError,
+  DISABLED_AUTH_PATHS,
+  IMPERSONATION_SESSION_TTL_SECONDS,
   MAGIC_LINK_TTL_SECONDS,
   SESSION_EXPIRES_IN_SECONDS,
   SESSION_UPDATE_AGE_SECONDS,
@@ -12,7 +14,6 @@ import {
   createAuth,
   type CreateAuthOptions,
 } from '../../src/config.js';
-import { renderAuthEmail } from '../../src/email/render.js';
 import {
   MailSendError,
   type MailMessage,
@@ -57,12 +58,6 @@ async function flushDetached(): Promise<void> {
   }
 }
 
-type SendResetPassword = (data: {
-  user: { id: string; email: string; name: string };
-  url: string;
-  token: string;
-}) => Promise<void>;
-
 type SendMagicLink = (
   data: { email: string; url: string; token: string },
   ctx: unknown,
@@ -72,15 +67,6 @@ type SendOtp = (data: {
   user: { id: string; email: string; name: string };
   otp: string;
 }) => Promise<void>;
-
-function resetPasswordSender(auth: ReturnType<typeof createAuth>) {
-  const send: unknown = Reflect.get(
-    auth.options.emailAndPassword ?? {},
-    'sendResetPassword',
-  );
-  expect(send).toBeTypeOf('function');
-  return send as SendResetPassword;
-}
 
 function pluginOption(
   auth: ReturnType<typeof createAuth>,
@@ -180,6 +166,7 @@ describe('createAuth option validation', () => {
 describe('policy constants', () => {
   it('holds the locked session, token, magic-link and lockout values', () => {
     expect(SESSION_EXPIRES_IN_SECONDS).toBe(2_592_000);
+    expect(IMPERSONATION_SESSION_TTL_SECONDS).toBe(28_800);
     expect(SESSION_UPDATE_AGE_SECONDS).toBe(86_400);
     expect(SET_PASSWORD_TOKEN_TTL_SECONDS).toBe(172_800);
     expect(MAGIC_LINK_TTL_SECONDS).toBe(900);
@@ -197,10 +184,6 @@ describe('policy constants', () => {
       expiresIn: SESSION_EXPIRES_IN_SECONDS,
       updateAge: SESSION_UPDATE_AGE_SECONDS,
     });
-    expect(auth.options.emailAndPassword).toMatchObject({
-      resetPasswordTokenExpiresIn: SET_PASSWORD_TOKEN_TTL_SECONDS,
-      revokeSessionsOnPasswordReset: true,
-    });
     expect(pluginOption(auth, 'magic-link')).toMatchObject({
       expiresIn: MAGIC_LINK_TTL_SECONDS,
       disableSignUp: true,
@@ -209,8 +192,38 @@ describe('policy constants', () => {
       accountLockout: { enabled: true, ...TWO_FACTOR_LOCKOUT },
     });
     expect(pluginOption(auth, 'admin')).toMatchObject({
-      impersonationSessionDuration: SESSION_EXPIRES_IN_SECONDS,
+      impersonationSessionDuration: IMPERSONATION_SESSION_TTL_SECONDS,
     });
+  });
+});
+
+describe('closed better-auth HTTP routes', () => {
+  it('lists sign-up, direct impersonation and every built-in reset route', () => {
+    expect([...DISABLED_AUTH_PATHS].toSorted()).toEqual([
+      '/admin/impersonate-user',
+      '/admin/stop-impersonating',
+      '/request-password-reset',
+      '/reset-password',
+      '/reset-password/:token',
+      '/sign-up/email',
+    ]);
+    expect(Object.isFrozen(DISABLED_AUTH_PATHS)).toBe(true);
+  });
+
+  it('hands the list to better-auth as disabledPaths', () => {
+    const auth = createAuth(baseOptions());
+    expect(auth.options.disabledPaths).toEqual([...DISABLED_AUTH_PATHS]);
+  });
+
+  it('leaves email-and-password sign-in on, with no built-in reset behind the closed routes', () => {
+    const auth = createAuth(baseOptions());
+    const emailAndPassword = auth.options.emailAndPassword ?? {};
+    expect(emailAndPassword.enabled).toBe(true);
+    expect(emailAndPassword).not.toHaveProperty('sendResetPassword');
+    expect(emailAndPassword).not.toHaveProperty('resetPasswordTokenExpiresIn');
+    expect(emailAndPassword).not.toHaveProperty(
+      'revokeSessionsOnPasswordReset',
+    );
   });
 });
 
@@ -224,55 +237,6 @@ describe('unauthenticated mail paths (D-15)', () => {
     process.off('unhandledRejection', onUnhandled);
     unhandled.length = 0;
     vi.restoreAllMocks();
-  });
-
-  it('renders the reset message from the policy constant and returns before the send settles', async () => {
-    const sent: MailMessage[] = [];
-    const neverSettles: MailSender = {
-      send: (message) => {
-        sent.push(message);
-        return new Promise<void>(() => undefined);
-      },
-    };
-    const auth = createAuth(baseOptions({ mail: neverSettles }));
-
-    await resetPasswordSender(auth)({
-      user: USER,
-      url: 'http://localhost:3000/api/auth/reset-password/abc',
-      token: 'abc',
-    });
-
-    expect(sent).toHaveLength(1);
-    const expected = renderAuthEmail('reset-password', {
-      to: USER.email,
-      name: USER.name,
-      url: 'http://localhost:3000/api/auth/reset-password/abc',
-      expiresInHours: '48',
-    });
-    expect(sent[0]).toEqual(expected);
-  });
-
-  it('reports a rejected reset send through onMailDeliveryError exactly once', async () => {
-    process.on('unhandledRejection', onUnhandled);
-    const failure = new MailSendError(USER.email);
-    const onMailDeliveryError = vi.fn<(error: unknown) => void>();
-    const auth = createAuth(
-      baseOptions({
-        mail: { send: () => Promise.reject(failure) },
-        onMailDeliveryError,
-      }),
-    );
-
-    await resetPasswordSender(auth)({
-      user: USER,
-      url: 'http://localhost:3000/api/auth/reset-password/abc',
-      token: 'abc',
-    });
-    await flushDetached();
-
-    expect(onMailDeliveryError).toHaveBeenCalledTimes(1);
-    expect(onMailDeliveryError).toHaveBeenCalledWith(failure);
-    expect(unhandled).toEqual([]);
   });
 
   it('keeps a throwing hook from escaping and falls back to the default line', async () => {
@@ -291,11 +255,14 @@ describe('unauthenticated mail paths (D-15)', () => {
       }),
     );
 
-    await resetPasswordSender(auth)({
-      user: USER,
-      url: 'http://localhost:3000/api/auth/reset-password/abc',
-      token: 'abc',
-    });
+    await magicLinkSender(auth)(
+      {
+        email: USER.email,
+        url: 'http://localhost:3000/api/auth/magic-link/verify?token=t',
+        token: 't',
+      },
+      lookupContext(new Set([USER.email])),
+    );
     await flushDetached();
 
     expect(unhandled).toEqual([]);

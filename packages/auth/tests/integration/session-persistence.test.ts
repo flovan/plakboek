@@ -328,7 +328,7 @@ describe("password policy on better-auth's own credential paths (AUTH-06, D-08)"
 
   it('rejects a short new password on change and on reset, without spending the reset link', async () => {
     await withFixture(async (fixture) => {
-      await createPasswordUser(fixture, 'ada@example.com');
+      const userId = await createPasswordUser(fixture, 'ada@example.com');
       const { cookieHeader } = await signIn(fixture.auth, 'ada@example.com');
 
       await expect(
@@ -338,29 +338,27 @@ describe("password policy on better-auth's own credential paths (AUTH-06, D-08)"
         }),
       ).rejects.toMatchObject({ body: { code: 'PASSWORD_TOO_SHORT' } });
 
-      await fixture.auth.api.requestPasswordReset({
-        body: { email: 'ada@example.com' },
+      // better-auth's reset request is closed (no sendResetPassword, and
+      // the route is disabled), so the link it would have issued is seeded
+      // in its own identifier format for the server-side endpoint to spend.
+      const context = await fixture.auth.$context;
+      const token = randomUUID();
+      await context.internalAdapter.createVerificationValue({
+        identifier: `reset-password:${token}`,
+        value: userId,
+        expiresAt: new Date(Date.now() + ONE_HOUR_MS),
       });
-      // The reset send is dispatched without being awaited (D-15).
-      await new Promise<void>((resolve) => {
-        setImmediate(resolve);
-      });
-      expect(fixture.mail.sent).toHaveLength(1);
-      const token = /reset-password\/([A-Za-z0-9]+)/.exec(
-        fixture.mail.sent[0]?.text ?? '',
-      )?.[1];
-      expect(token).toBeDefined();
 
       for (const newPassword of [ELEVEN, SIX_EMOJI]) {
         await expect(
           fixture.auth.api.resetPassword({
-            body: { token: token ?? '', newPassword },
+            body: { token, newPassword },
           }),
         ).rejects.toMatchObject({ body: { code: 'PASSWORD_TOO_SHORT' } });
       }
 
       const reset = await fixture.auth.api.resetPassword({
-        body: { token: token ?? '', newPassword: 'b'.repeat(12) },
+        body: { token, newPassword: 'b'.repeat(12) },
       });
       expect(reset.status).toBe(true);
     });
