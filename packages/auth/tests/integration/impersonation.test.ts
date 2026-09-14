@@ -197,7 +197,19 @@ class CookieJar {
         .join('; '),
     });
   }
+
+  /** Request headers carrying one cookie and nothing else, as a client that
+   * kept only that cookie would send. */
+  only(name: string): Headers {
+    const value = this.#cookies.get(name);
+    if (value === undefined) {
+      throw new Error(`the cookie jar holds no ${name} cookie`);
+    }
+    return new Headers({ cookie: `${name}=${value}` });
+  }
 }
+
+const SESSION_COOKIE = 'better-auth.session_token';
 
 async function signedIn(person: Person): Promise<CookieJar> {
   const { headers } = await fixture().auth.api.signInEmail({
@@ -461,6 +473,110 @@ describe('audited impersonation start and stop (D-11, D-12)', () => {
     );
     expect(error.reason).toBe('not-impersonating');
     expect(await auditRows()).toEqual([]);
+  });
+});
+
+describe('an impersonation expiry cannot be extended (D-12, D-01)', () => {
+  /**
+   * better-auth refreshes a session on read once
+   * `expires_at - SESSION_EXPIRES_IN_SECONDS + SESSION_UPDATE_AGE_SECONDS`
+   * is in the past, which an 8-hour session satisfies from the moment it is
+   * issued. `updated_at` is back-dated past the update age as well, so the
+   * read is a refresh whichever of the two instants decides it.
+   */
+  async function agedImpersonation(target: Person) {
+    const { handle } = fixture();
+    const issuedFrom = Date.now();
+    const { jar, result } = await impersonate(target);
+    const issuedUntil = Date.now();
+    await handle.sql`
+      UPDATE session SET updated_at = updated_at - interval '25 hours'
+      WHERE token = ${result.sessionToken}
+    `;
+    const issued = (await sessionByToken(result.sessionToken))?.expiresAtMs;
+    expect(issued).toBeGreaterThanOrEqual(
+      issuedFrom + IMPERSONATION_SESSION_TTL_SECONDS * 1000 - TOLERANCE_MS,
+    );
+    expect(issued).toBeLessThanOrEqual(
+      issuedUntil + IMPERSONATION_SESSION_TTL_SECONDS * 1000 + TOLERANCE_MS,
+    );
+    return { jar, result, issued: issued ?? Number.NaN };
+  }
+
+  it('keeps expires_at at issue + 8 hours when read with only the session token cookie', async () => {
+    const { owner, editor, auth } = fixture();
+    const { jar, result, issued } = await agedImpersonation(editor);
+
+    const found = await auth.api.getSession({
+      headers: jar.only(SESSION_COOKIE),
+    });
+
+    expect(found?.user.id).toBe(editor.userId);
+    expect(Reflect.get(found?.session ?? {}, 'impersonatedBy')).toBe(
+      owner.userId,
+    );
+    expect((await sessionByToken(result.sessionToken))?.expiresAtMs).toBe(
+      issued,
+    );
+    expect(found?.session.expiresAt.getTime()).toBe(issued);
+  });
+
+  it('keeps expires_at at issue + 8 hours when read with the full cookie set', async () => {
+    const { editor, auth } = fixture();
+    const { jar, result, issued } = await agedImpersonation(editor);
+
+    const found = await auth.api.getSession({ headers: jar.headers() });
+
+    expect(found?.user.id).toBe(editor.userId);
+    expect((await sessionByToken(result.sessionToken))?.expiresAtMs).toBe(
+      issued,
+    );
+  });
+
+  it('keeps expires_at at issue + 8 hours when a protected endpoint reads the session', async () => {
+    const { editor, auth } = fixture();
+    const { jar, result, issued } = await agedImpersonation(editor);
+
+    // The endpoint's session middleware rejects an unauthenticated request,
+    // so resolving proves the impersonation session was read. The admin
+    // plugin leaves impersonation sessions out of the list itself.
+    await expect(
+      auth.api.listSessions({ headers: jar.only(SESSION_COOKIE) }),
+    ).resolves.toBeInstanceOf(Array);
+
+    expect((await sessionByToken(result.sessionToken))?.expiresAtMs).toBe(
+      issued,
+    );
+  });
+
+  it('still slides a normal session to thirty days when read the same way', async () => {
+    const { owner, auth, handle } = fixture();
+    const jar = await signedIn(owner);
+    const own = await auth.api.getSession({ headers: jar.headers() });
+    const token = own?.session.token ?? '';
+
+    // Past the one-day update age, the way session-persistence proves D-01.
+    await handle.sql`
+      UPDATE session
+      SET expires_at = expires_at - interval '25 hours',
+          created_at = created_at - interval '25 hours',
+          updated_at = updated_at - interval '25 hours'
+      WHERE token = ${token}
+    `;
+    const aged = (await sessionByToken(token))?.expiresAtMs ?? Number.NaN;
+
+    const readFrom = Date.now();
+    await auth.api.getSession({ headers: jar.only(SESSION_COOKIE) });
+    const readUntil = Date.now();
+
+    const slid = (await sessionByToken(token))?.expiresAtMs ?? Number.NaN;
+    expect(slid).toBeGreaterThan(aged);
+    expect(slid).toBeGreaterThanOrEqual(
+      readFrom + SESSION_EXPIRES_IN_SECONDS * 1000 - TOLERANCE_MS,
+    );
+    expect(slid).toBeLessThanOrEqual(
+      readUntil + SESSION_EXPIRES_IN_SECONDS * 1000 + TOLERANCE_MS,
+    );
   });
 });
 
