@@ -17,11 +17,20 @@
  * through `onDeliveryError` instead of reaching the caller.
  *
  * Neither the address, nor the link, nor the token is ever logged.
+ *
+ * Completing a link checks the new password against the policy before the
+ * link is spent, so a too-short attempt leaves the user's only valid link
+ * usable. The credential write, the revocation of the user's sessions and
+ * the audit row then all run inside the transaction that consumes the link:
+ * they commit together, or the link survives (AUTH-11).
  */
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import type { Permission, PermissionResolver } from '@plakboek/permissions';
+import { and, eq, like, or } from 'drizzle-orm';
+import { createAuditRecorder, type AuditFailureHook } from './audit.js';
 import {
   SET_PASSWORD_TOKEN_TTL_SECONDS,
+  type Auth,
   type RenderAuthEmail,
 } from './config.js';
 import { renderAuthEmail } from './email/render.js';
@@ -30,8 +39,15 @@ import {
   type MailMessage,
   type MailSender,
 } from './email/types.js';
-import { user } from './schema.js';
-import { issueSingleUseToken, type TokenDatabase } from './tokens.js';
+import { assertPasswordPolicy } from './password-policy.js';
+import { account, session, user, verification } from './schema.js';
+import {
+  InvalidOrExpiredTokenError,
+  consumeSingleUseToken,
+  issueSingleUseToken,
+  type TokenDatabase,
+  type TokenTransaction,
+} from './tokens.js';
 
 /** The two link purposes this module issues. Each is also the name of the
  * email template sent for it. */
@@ -290,4 +306,236 @@ export async function requestPasswordLink(
     }
   }
   return OUTCOME;
+}
+
+export type CompleteSetPasswordDeps = {
+  /** The database, or an enclosing transaction (the consumption then nests
+   * as a savepoint). */
+  readonly db: TokenDatabase;
+  /** Supplies better-auth's own password hasher. No better-auth endpoint is
+   * called. */
+  readonly auth: Pick<Auth, '$context'>;
+  /** Passed to the audit recorder. */
+  readonly onAuditWriteFailed?: AuditFailureHook;
+  readonly now?: () => Date;
+};
+
+export type CompleteSetPasswordInput = {
+  readonly purpose: PasswordLinkPurpose;
+  readonly token: string;
+  readonly newPassword: string;
+};
+
+/** The `audit_log.action` recorded when a link sets a user's password. */
+export const CREDENTIAL_SET_ACTION = 'credential.set';
+
+/** The permission the audit row names for a credential set through a link.
+ * The link holder is granted it for that one row; see `linkHolderResolver`. */
+const CREDENTIAL_SET_PERMISSION: Permission = 'users:reset-password';
+
+/** better-auth's provider id for email-and-password credentials. */
+const CREDENTIAL_PROVIDER_ID = 'credential';
+
+/**
+ * Thrown when the credential could not be written. The transaction rolled
+ * back, so the link is still valid. The message names the error types and
+ * SQLSTATE codes along the cause chain and nothing else: a failed query's
+ * own message quotes its parameters, and here one of them is the new
+ * password's hash, so that error is deliberately not kept as `cause`.
+ */
+export class CredentialWriteError extends Error {
+  readonly code: string | undefined;
+
+  constructor(failure: unknown) {
+    const chain = describeFailure(failure);
+    super(
+      `@plakboek/auth: could not write the credential; the link is still valid (${chain.description})`,
+    );
+    this.name = 'CredentialWriteError';
+    this.code = chain.code;
+  }
+}
+
+const MAX_FAILURE_DEPTH = 3;
+
+function describeFailure(failure: unknown): {
+  readonly description: string;
+  readonly code: string | undefined;
+} {
+  const parts: string[] = [];
+  let code: string | undefined;
+  let current = failure;
+  for (let depth = 0; depth < MAX_FAILURE_DEPTH; depth += 1) {
+    if (!(current instanceof Error)) break;
+    const currentCode: unknown = Reflect.get(current, 'code');
+    if (typeof currentCode === 'string') {
+      code ??= currentCode;
+      parts.push(`${current.name} ${currentCode}`);
+    } else {
+      parts.push(current.name);
+    }
+    current = current.cause;
+  }
+  return {
+    description: parts.length > 0 ? parts.join(' <- ') : 'unknown error',
+    code,
+  };
+}
+
+/**
+ * The permission decision for a credential set through a link. The link is
+ * the authorisation: `consumeSingleUseToken` has already proven, in this
+ * transaction, that its holder was sent it for `subjectId`. So the recorder
+ * is handed a resolver that grants exactly the credential-set permission,
+ * to exactly that user, and nothing else. The user's own role is not
+ * consulted, because an editor resetting their own password holds no user
+ * management permission.
+ */
+function linkHolderResolver(subjectId: string): PermissionResolver {
+  const granted: ReadonlySet<Permission> = new Set([CREDENTIAL_SET_PERMISSION]);
+  const nothing: ReadonlySet<Permission> = new Set();
+  return {
+    resolve: (_roleKey, context) =>
+      context?.userId === subjectId ? granted : nothing,
+    isKnownRole: () => true,
+  };
+}
+
+/** Sets the user's email-and-password credential: updates the existing
+ * credential account, or creates one when the user has none yet. */
+async function writeCredential(
+  tx: TokenTransaction,
+  userId: string,
+  passwordHash: string,
+  at: Date,
+): Promise<void> {
+  try {
+    const updated = await tx
+      .update(account)
+      .set({ password: passwordHash, updatedAt: at })
+      .where(
+        and(
+          eq(account.userId, userId),
+          eq(account.providerId, CREDENTIAL_PROVIDER_ID),
+        ),
+      )
+      .returning({ id: account.id });
+    if (updated.length === 0) {
+      await tx.insert(account).values({
+        id: randomUUID(),
+        accountId: userId,
+        providerId: CREDENTIAL_PROVIDER_ID,
+        userId,
+        password: passwordHash,
+        createdAt: at,
+        updatedAt: at,
+      });
+    }
+  } catch (error) {
+    throw new CredentialWriteError(error);
+  }
+}
+
+/**
+ * Sets a user's password through a set-password or reset-password link and
+ * returns the id of the user whose credential changed.
+ *
+ * 1. `assertPasswordPolicy` runs first. A too-short password throws
+ *    `PasswordPolicyError` and spends nothing, so a typo does not cost the
+ *    user their only valid link (D-08, D-09).
+ * 2. The password is hashed with better-auth's own hasher, outside any
+ *    transaction.
+ * 3. The link is consumed, and in that same transaction:
+ *    - the user row is locked, so credential writes for one user serialise;
+ *    - the credential account is updated, or created when there is none;
+ *    - every session of the user is deleted, and every session in which the
+ *      user is impersonating someone, so a session stolen before a reset
+ *      does not survive it;
+ *    - every other outstanding set-password or reset-password link for the
+ *      user is deleted;
+ *    - one `credential.set` audit row is written, naming the user as actor
+ *      and entity.
+ *
+ * A failure anywhere rolls all of it back, the link included. A bad, spent
+ * or expired link throws `InvalidOrExpiredTokenError`, as does a link whose
+ * user no longer exists. A failed credential write throws
+ * `CredentialWriteError`.
+ *
+ * better-auth's own reset endpoint consumes the token and writes the
+ * password in two separate adapter calls, and its routes are closed. Never
+ * call it, even server-side.
+ */
+export async function completeSetPassword(
+  deps: CompleteSetPasswordDeps,
+  input: CompleteSetPasswordInput,
+): Promise<{ readonly userId: string }> {
+  const purpose = knownLinkPurpose(input.purpose);
+  assertPasswordPolicy(input.newPassword);
+
+  const context = await deps.auth.$context;
+  const passwordHash = await context.password.hash(input.newPassword);
+  const now = deps.now ?? (() => new Date());
+
+  return await consumeSingleUseToken(
+    deps.db,
+    { purpose, token: input.token },
+    async (tx, userId) => {
+      const [subject] = await tx
+        .select({ id: user.id, roleKey: user.role })
+        .from(user)
+        .where(eq(user.id, userId))
+        .for('update');
+      if (subject === undefined) {
+        throw new InvalidOrExpiredTokenError(purpose);
+      }
+
+      const recorder = createAuditRecorder({
+        db: tx,
+        resolver: linkHolderResolver(userId),
+        now,
+        ...(deps.onAuditWriteFailed === undefined
+          ? {}
+          : { onAuditWriteFailed: deps.onAuditWriteFailed }),
+      });
+
+      return await recorder.run(
+        { userId, roleKey: subject.roleKey ?? '' },
+        {
+          permission: CREDENTIAL_SET_PERMISSION,
+          action: CREDENTIAL_SET_ACTION,
+          entityType: 'user',
+          entityId: userId,
+        },
+        async (audited) => {
+          await writeCredential(audited, userId, passwordHash, now());
+          const revoked = await audited
+            .delete(session)
+            .where(
+              or(
+                eq(session.userId, userId),
+                eq(session.impersonatedBy, userId),
+              ),
+            )
+            .returning({ id: session.id });
+          await audited
+            .delete(verification)
+            .where(
+              and(
+                eq(verification.value, userId),
+                or(
+                  ...PASSWORD_LINK_PURPOSES.map((linkPurpose) =>
+                    like(verification.identifier, `${linkPurpose}:%`),
+                  ),
+                ),
+              ),
+            );
+          return {
+            result: { userId },
+            after: { purpose, revokedSessionCount: revoked.length },
+          };
+        },
+      );
+    },
+    { now },
+  );
 }
