@@ -38,13 +38,13 @@
   "dependencies": {
     "@plakboek/db": "workspace:*",
     "@plakboek/permissions": "workspace:*",
-    "@react-email/components": "catalog:",
-    "@react-email/render": "catalog:",
     "better-auth": "catalog:",
+    "html-to-text": "catalog:",
     "nodemailer": "catalog:"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "catalog:",
+    "@types/html-to-text": "catalog:",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "@types/react": "catalog:",
