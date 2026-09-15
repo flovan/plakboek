@@ -18,6 +18,7 @@
  * `impersonationSessionDuration` (8 hours, D-12 as amended) runs out. This
  * module adds no timer, sweep or expiry logic of its own.
  */
+import type { Permission } from '@plakboek/permissions';
 import { eq } from 'drizzle-orm';
 import type {
   AuditActor,
@@ -98,7 +99,7 @@ export type ImpersonatableSession = {
  * The audit actor for anything done while holding `session`. This is what
  * makes D-11's two-sided accountability hold: during an impersonation, the
  * impersonated user is recorded as the actor, because theirs are the
- * permissions being used, and the acting superadmin rides along in
+ * permissions being used, and the impersonating user rides along in
  * `impersonator_user_id`, so the row names both people. Every call site
  * derives its actor here, so none can drop half of it.
  *
@@ -167,8 +168,11 @@ export class ImpersonationSessionError extends Error {
   }
 }
 
-/** The permission every impersonation start and stop is checked against. */
-const IMPERSONATE_PERMISSION = 'users:impersonate';
+/** The permission every impersonation start and stop is checked against.
+ * `config.ts` also reads this to derive the admin plugin's role map, so the
+ * audited check and the plugin's gate can never name different
+ * permissions. */
+export const IMPERSONATE_PERMISSION: Permission = 'users:impersonate';
 
 /** Audit actions this module records. `impersonation.refused` records a
  * start that passed the permission check and was then refused by a rule in
@@ -328,14 +332,14 @@ export async function startImpersonation(
 
 /**
  * Ends the impersonation the session `headers` present, and restores the
- * acting superadmin's own session.
+ * impersonating user's own session.
  *
  * A session that is missing or has lapsed refuses with
  * `ImpersonationSessionError('no-session')`, and one that is not
  * impersonating with `'not-impersonating'`; neither writes a row. Otherwise
- * the stop runs through the audited permission check with the acting
- * superadmin as the actor, so the `impersonation.stop` row is attributed to
- * the human who ended it; its entity is the impersonated user and its
+ * the stop runs through the audited permission check with the impersonating
+ * user as the actor, so the `impersonation.stop` row is attributed to the
+ * human who ended it; its entity is the impersonated user and its
  * `before` holds the expiry the stop pre-empted.
  *
  * The plugin deletes the impersonation session through its own connection.

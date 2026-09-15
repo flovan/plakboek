@@ -11,6 +11,7 @@
 import {
   createPermissionResolver,
   type DefinedRoles,
+  type PermissionResolver,
 } from '@plakboek/permissions';
 import {
   betterAuth,
@@ -44,7 +45,10 @@ import {
   type MailSender,
 } from './email/types.js';
 import { SUPERADMIN_ROLE_KEY } from './first-user.js';
-import { auditActorFromSession } from './impersonation.js';
+import {
+  IMPERSONATE_PERMISSION,
+  auditActorFromSession,
+} from './impersonation.js';
 import {
   PASSWORD_MIN_LENGTH,
   PasswordPolicyError,
@@ -145,7 +149,7 @@ const DEFAULT_APP_NAME = 'Plakboek';
  * - Every other `/admin/*` route: creating, updating, banning, removing
  *   users, setting roles and passwords, and listing or revoking sessions
  *   would skip the first-user rule, the audit log (D-06) and the set/reset
- *   flow. The plugin role map already refuses every caller; closing the
+ *   flow. The plugin role map grants no role those statements; closing the
  *   routes means a later change to that map cannot reopen them.
  * - `/request-password-reset`, `/reset-password`, `/reset-password/:token`:
  *   set and reset run only through the package's transactional
@@ -195,18 +199,59 @@ export const DISABLED_AUTH_PATHS: readonly string[] = Object.freeze([
  *
  * The plugin's user-management endpoints (create, set role, ban, set
  * password, remove) would bypass the audit log, so no role is granted them:
- * user management goes through this package's own audited functions. Only
- * the superadmin may call the impersonation endpoint, and only server-side:
- * every admin-plugin HTTP route is closed, and this package's audited start
- * and stop call it through `auth.api`.
+ * user management goes through this package's own audited functions. The
+ * plugin's access-control vocabulary is a coarse gate derived from the
+ * host's role map: a role holds the plugin's impersonate statement exactly
+ * when its catalogue permissions include `users:impersonate`, so the
+ * audited check in `startImpersonation` and the plugin's gate always agree.
+ * No role is granted a user-management statement, and the impersonation
+ * endpoint is still reachable only server-side through the audited start
+ * and stop: every admin-plugin HTTP route is closed, and this package's
+ * audited start and stop call it through `auth.api`.
  */
 const adminAccessControl = createAccessControl(defaultStatements);
-const ADMIN_PLUGIN_ROLES = {
-  [SUPERADMIN_ROLE_KEY]: adminAccessControl.newRole({
-    user: ['impersonate'],
-    session: [],
-  }),
-};
+
+/**
+ * Builds the admin plugin's role map from the host's `roles` and the same
+ * `resolver` the audit recorder uses: a role key gets the plugin's
+ * impersonate statement exactly when `resolver.resolve(key)` holds
+ * `IMPERSONATE_PERMISSION`, and no role gets any other plugin statement
+ * (never `impersonate-admins`, never a user-management one). Role keys
+ * without the permission are left out of the map entirely; the plugin
+ * treats a missing key as holding nothing, so a user whose stored role key
+ * is orphaned holds nothing at the plugin either, matching the resolver's
+ * own denial. The keys come from the map itself, so `resolve` never takes
+ * its orphaned-role warning path here.
+ *
+ * If the result lacks `SUPERADMIN_ROLE_KEY`, that key is added holding
+ * nothing: the plugin throws at construction when an `adminRoles` entry is
+ * not a key of its `roles`, and `defineRoles` requires `superadmin` to hold
+ * `ALL_PERMISSIONS` (so this branch is unreachable for a validated map) --
+ * this keeps `createAuth` from throwing a raw `BetterAuthError` for a
+ * hand-built map that skips validation.
+ */
+function adminPluginRoles(
+  roles: DefinedRoles,
+  resolver: PermissionResolver,
+): Record<string, ReturnType<typeof adminAccessControl.newRole>> {
+  const map: Record<string, ReturnType<typeof adminAccessControl.newRole>> =
+    {};
+  for (const roleKey of Object.keys(roles)) {
+    if (resolver.resolve(roleKey).has(IMPERSONATE_PERMISSION)) {
+      map[roleKey] = adminAccessControl.newRole({
+        user: ['impersonate'],
+        session: [],
+      });
+    }
+  }
+  if (!Object.hasOwn(map, SUPERADMIN_ROLE_KEY)) {
+    map[SUPERADMIN_ROLE_KEY] = adminAccessControl.newRole({
+      user: [],
+      session: [],
+    });
+  }
+  return map;
+}
 
 /**
  * Roles the admin plugin refuses as impersonation targets unless the actor
@@ -594,11 +639,13 @@ export function createAuth(options: CreateAuthOptions): Auth {
   const renderEmail = options.renderEmail ?? renderAuthEmail;
   const onMailDeliveryError =
     options.onMailDeliveryError ?? defaultOnMailDeliveryError;
-  // Two-factor rows are self-service rows, so the resolver is never asked;
-  // it is the recorder's required dependency, built from the host's roles.
+  // The resolver is the recorder's required dependency, built from the
+  // host's roles; it also derives the admin plugin's role map below, so the
+  // audited check and the plugin's gate can never disagree.
+  const resolver = createPermissionResolver(options.roles);
   const recorder = createAuditRecorder({
     db: options.db,
-    resolver: createPermissionResolver(options.roles),
+    resolver,
     ...(options.onAuditWriteFailed === undefined
       ? {}
       : { onAuditWriteFailed: options.onAuditWriteFailed }),
@@ -618,7 +665,7 @@ export function createAuth(options: CreateAuthOptions): Auth {
     closedRoutes,
     admin<AdminOptions>({
       adminRoles: IMPERSONATION_PROTECTED_ROLES,
-      roles: ADMIN_PLUGIN_ROLES,
+      roles: adminPluginRoles(options.roles, resolver),
       // D-12 as amended: ended by the explicit stop, or lapsed after 8 hours.
       impersonationSessionDuration: IMPERSONATION_SESSION_TTL_SECONDS,
     }),
