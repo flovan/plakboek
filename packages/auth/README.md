@@ -3,7 +3,7 @@
 better-auth wiring, invite, audit and impersonation primitives for Plakboek
 CMS installations: session issuance/validation, email/password with a
 length-only strength rule, two-factor authentication (TOTP and email OTP),
-magic links, superadmin impersonation, and the audit-log hook every
+magic links, audited impersonation, and the audit-log hook every
 permission-gated mutation writes through.
 
 ## Install
@@ -52,11 +52,11 @@ audited paths described here.
 
 ### Passwords
 
-| Export                 | Kind     | Purpose                                                                     |
-| ---------------------- | -------- | --------------------------------------------------------------------------- |
-| `PASSWORD_MIN_LENGTH`  | constant | `12`: the minimum length, counted in code points, with no composition rules |
-| `assertPasswordPolicy` | function | Throws `PasswordPolicyError` for a password below the minimum               |
-| `PasswordPolicyError`  | class    | Carries `minLength`; never the rejected password                            |
+| Export                 | Kind     | Purpose                                                                                                                                                                            |
+| ---------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PASSWORD_MIN_LENGTH`  | constant | `12`: the floor, counted in code points, with no composition rules; `createAuth`'s `minPasswordLength` may raise it but never lower it                                             |
+| `assertPasswordPolicy` | function | Throws `PasswordPolicyError` for a password below `PASSWORD_MIN_LENGTH`, or below a higher `minLength` passed as the second argument; a non-integer `minLength` throws `TypeError` |
+| `PasswordPolicyError`  | class    | Carries `minLength`, the minimum that was enforced; never the rejected password                                                                                                    |
 
 ### Users
 
@@ -122,20 +122,20 @@ audited paths described here.
 
 ### Password links
 
-| Export                       | Kind     | Purpose                                                                                                                                                  |
-| ---------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `requestPasswordLink`        | function | Emails a set-password or reset-password link; the same work and the same result for any address, and the send is not awaited                             |
-| `completeSetPassword`        | function | Checks the policy, then in one transaction consumes the link, writes the credential, revokes sessions and other links, and writes a `credential.set` row |
-| `CredentialWriteError`       | class    | The credential write failed; carries error types and SQLSTATE and deliberately has no `cause`, which would quote the password hash                       |
-| `PASSWORD_LINK_PATHS`        | constant | Frozen landing paths `/cms/set-password` and `/cms/reset-password`; the token travels in `?token=`                                                       |
-| `CREDENTIAL_SET_ACTION`      | constant | `'credential.set'`                                                                                                                                       |
-| `PasswordLinkPurpose`        | type     | `'set-password'` or `'reset-password'`                                                                                                                   |
-| `PasswordLinkRequestOutcome` | type     | `{ delivered: true }`, the only outcome                                                                                                                  |
-| `PasswordLinkProbe`          | type     | Test observation points fired on both the known-address and unknown-address branch                                                                       |
-| `RequestPasswordLinkDeps`    | type     | `db`, `mail`, `baseURL`, and optionally `renderEmail`, `onDeliveryError`, `probe`                                                                        |
-| `RequestPasswordLinkInput`   | type     | `email`, `purpose`                                                                                                                                       |
-| `CompleteSetPasswordDeps`    | type     | `db`, `auth` (for better-auth's hasher), and optionally `onAuditWriteFailed`, `now`                                                                      |
-| `CompleteSetPasswordInput`   | type     | `purpose`, `token`, `newPassword`                                                                                                                        |
+| Export                       | Kind     | Purpose                                                                                                                                                                                                |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `requestPasswordLink`        | function | Emails a set-password or reset-password link; the same work and the same result for any address, and the send is not awaited                                                                           |
+| `completeSetPassword`        | function | Checks the password against the minimum `createAuth` configured, then in one transaction consumes the link, writes the credential, revokes sessions and other links, and writes a `credential.set` row |
+| `CredentialWriteError`       | class    | The credential write failed; carries error types and SQLSTATE and deliberately has no `cause`, which would quote the password hash                                                                     |
+| `PASSWORD_LINK_PATHS`        | constant | Frozen landing paths `/cms/set-password` and `/cms/reset-password`; the token travels in `?token=`                                                                                                     |
+| `CREDENTIAL_SET_ACTION`      | constant | `'credential.set'`                                                                                                                                                                                     |
+| `PasswordLinkPurpose`        | type     | `'set-password'` or `'reset-password'`                                                                                                                                                                 |
+| `PasswordLinkRequestOutcome` | type     | `{ delivered: true }`, the only outcome                                                                                                                                                                |
+| `PasswordLinkProbe`          | type     | Test observation points fired on both the known-address and unknown-address branch                                                                                                                     |
+| `RequestPasswordLinkDeps`    | type     | `db`, `mail`, `baseURL`, and optionally `renderEmail`, `onDeliveryError`, `probe`                                                                                                                      |
+| `RequestPasswordLinkInput`   | type     | `email`, `purpose`                                                                                                                                                                                     |
+| `CompleteSetPasswordDeps`    | type     | `db`, `auth` (better-auth's hasher and the configured `minPasswordLength`), and optionally `onAuditWriteFailed`, `now`                                                                                 |
+| `CompleteSetPasswordInput`   | type     | `purpose`, `token`, `newPassword`                                                                                                                                                                      |
 
 ### Invitations
 
@@ -159,9 +159,9 @@ audited paths described here.
 | Export                              | Kind     | Purpose                                                                                                                                                             |
 | ----------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `startImpersonation`                | function | Audited start from the request `headers`: needs `users:impersonate`, refuses superadmin and self targets, returns `sessionToken`, `expiresAt` and `responseHeaders` |
-| `stopImpersonation`                 | function | Audited stop from the request `headers`; restores the superadmin's session and returns the same shape                                                               |
+| `stopImpersonation`                 | function | Audited stop from the request `headers`; restores the impersonating user's own session and returns the same shape                                                   |
 | `assertImpersonationTargetAllowed`  | function | Throws `ImpersonationTargetForbiddenError` for a superadmin or self target                                                                                          |
-| `auditActorFromSession`             | function | The audit actor for a session: the impersonated user acts and the superadmin is recorded as `impersonatedBy`                                                        |
+| `auditActorFromSession`             | function | The audit actor for a session: the impersonated user acts and the impersonating user is recorded as `impersonatedBy`                                                |
 | `ImpersonationTargetForbiddenError` | class    | Carries `targetUserId` and `reason`                                                                                                                                 |
 | `ImpersonationSessionError`         | class    | The presented session cannot start or stop: `no-session`, `not-impersonating` or `already-impersonating`                                                            |
 | `ImpersonatableSession`             | type     | `userId`, `roleKey`, and `impersonatedBy` while impersonating                                                                                                       |
@@ -365,10 +365,12 @@ Why they are closed:
 - **Every admin-plugin route.** Creating, updating, banning or removing a
   user, setting a role or password, and listing or revoking sessions over
   these routes would skip the first-user rule, the audit log and the
-  set-password flow. The plugin's role map already refuses every caller;
-  closing the routes means a later change to that map cannot reopen them.
-  Impersonation runs only through the audited `startImpersonation` and
-  `stopImpersonation`, which call the plugin through `auth.api`.
+  set-password flow. The plugin's role map grants its impersonate statement
+  only to roles holding `users:impersonate`, and no user-management
+  statement to any role; closing the routes means a later change to that
+  map cannot reopen them. Impersonation runs only through the audited
+  `startImpersonation` and `stopImpersonation`, which call the plugin
+  through `auth.api`.
 - **The built-in reset routes.** Set and reset run only through the
   transactional single-use-token flow above.
 - **Self-service account routes.** Changing your own password, name or
@@ -403,8 +405,13 @@ not affected.
   sooner, whatever cookies later requests carry; ordinary sessions keep
   sliding. `startImpersonation` and `stopImpersonation` take the request
   headers, and the route must forward their `responseHeaders` to the
-  browser, or the stop cannot find the superadmin's session. Never extend
-  a session's `expiresAt` through better-auth's adapter directly.
+  browser, or the stop cannot find the impersonating user's session. Never
+  extend a session's `expiresAt` through better-auth's adapter directly.
+- **`users:impersonate` is what lets a role impersonate.** The shipped
+  roles grant it only to `superadmin`. A host role given it can start and
+  stop impersonations through `startImpersonation` and `stopImpersonation`,
+  every row names both people (D-11), and a superadmin is never a target
+  (D-13). A role that should never act as another user must not hold it.
 - **Report mail delivery failures.** Unauthenticated sends are
   fire-and-forget (see Mail delivery); pass `onMailDeliveryError` and
   `onDeliveryError` so failures reach monitoring.
@@ -545,6 +552,7 @@ root:
 | AUTH-06     | `tests/unit/password-policy.test.ts`                      | rejects one character below the minimum and accepts exactly the minimum                             | unit        |
 | AUTH-06     | `tests/integration/set-password.test.ts`                  | rejects a password below the minimum before spending the link                                       | integration |
 | AUTH-06     | `tests/integration/session-persistence.test.ts`           | rejects a short new password on change and on reset, without spending the reset link                | integration |
+| AUTH-06     | `tests/integration/set-password.test.ts`                  | enforces the raised minimum when a link completes, and spends the link only at that minimum         | integration |
 | AUTH-07     | `tests/integration/two-factor.test.ts`                    | enables an emailed code: exactly one message, and its code verifies                                 | integration |
 | AUTH-07     | `tests/integration/two-factor.test.ts`                    | locks after five failures mixed across both factors and unlocks on its own                          | integration |
 | AUTH-08     | `tests/integration/two-factor.test.ts`                    | enrols an authenticator app: its code verifies, a code from another secret does not                 | integration |
@@ -560,6 +568,7 @@ root:
 | USER-08     | `tests/integration/audit-log.test.ts`                     | records a granted mutation with its actor, permission, entity and after state                       | integration |
 | USER-08     | `tests/integration/audit-log.test.ts`                     | leaves the entity untouched when permission is denied and records the refusal                       | integration |
 | USER-08     | `tests/integration/impersonation.test.ts`                 | records an action taken while impersonating with both identities on one row                         | integration |
+| USER-08     | `tests/integration/impersonation.test.ts`                 | lets a host role holding users:impersonate start and stop, recording both rows                      | integration |
 | USER-08     | `tests/integration/invite.test.ts`                        | writes one allowed row per invite and resend, naming the acting superadmin and no address or token  | integration |
 | USER-08     | `tests/integration/set-password.test.ts`                  | writes one audit row naming the user whose credential changed                                       | integration |
 | USER-08     | `tests/integration/two-factor.test.ts`                    | writes one two-factor.enabled row when an authenticator is enabled, with no secret in it            | integration |
