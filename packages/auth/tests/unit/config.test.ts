@@ -200,7 +200,7 @@ describe('policy constants', () => {
 });
 
 describe('closed better-auth HTTP routes', () => {
-  it('lists sign-up, every admin-plugin route and every built-in reset route', () => {
+  it('lists sign-up, every admin-plugin route, every built-in reset route and every self-service account route', () => {
     expect([...DISABLED_AUTH_PATHS].toSorted()).toEqual([
       '/admin/ban-user',
       '/admin/create-user',
@@ -217,10 +217,15 @@ describe('closed better-auth HTTP routes', () => {
       '/admin/stop-impersonating',
       '/admin/unban-user',
       '/admin/update-user',
+      '/change-email',
+      '/change-password',
+      '/delete-user',
+      '/delete-user/callback',
       '/request-password-reset',
       '/reset-password',
       '/reset-password/:token',
       '/sign-up/email',
+      '/update-user',
     ]);
     expect(Object.isFrozen(DISABLED_AUTH_PATHS)).toBe(true);
   });

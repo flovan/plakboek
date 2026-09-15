@@ -160,6 +160,26 @@ async function rowCounts(handle: Db): Promise<RowCounts> {
   return row ?? { users: -1, sessions: -1, verifications: -1, accounts: -1 };
 }
 
+type StoredIdentity = {
+  readonly id: string;
+  readonly name: string;
+  readonly email: string;
+  readonly passwordHash: string | null;
+};
+
+/** Every user's name, address and password hash, so a closed route that
+ * changed a value without adding or removing a row still fails. */
+async function storedIdentities(handle: Db): Promise<StoredIdentity[]> {
+  return [
+    ...(await handle.sql<StoredIdentity[]>`
+      SELECT u.id, u.name, u.email, a.password AS "passwordHash"
+      FROM "user" u
+      LEFT JOIN account a ON a.user_id = u.id AND a.provider_id = 'credential'
+      ORDER BY u.id
+    `),
+  ];
+}
+
 type RouteIds = { readonly editorId: string };
 
 type ClosedRoute = {
@@ -177,7 +197,8 @@ type ClosedRoute = {
  * `DISABLED_AUTH_PATHS`, so dropping a path from the constant fails its
  * case. Each request is one the open route would act on: a valid sign-up,
  * a superadmin impersonating a real editor, a reset for a real address, a
- * role change or password change for a real user.
+ * role change or password change for a real user, and the signed-in user
+ * changing their own password, name or address or deleting their account.
  */
 const CLOSED_ROUTES: readonly ClosedRoute[] = [
   {
@@ -299,7 +320,42 @@ const CLOSED_ROUTES: readonly ClosedRoute[] = [
     path: '/admin/update-user',
     body: ({ editorId }) => ({ userId: editorId, data: { name: 'Renamed' } }),
   },
+  {
+    route: '/change-password',
+    method: 'POST',
+    path: '/change-password',
+    body: () => ({ currentPassword: PASSWORD, newPassword: 'd'.repeat(12) }),
+  },
+  {
+    route: '/update-user',
+    method: 'POST',
+    path: '/update-user',
+    body: () => ({ name: 'Renamed' }),
+  },
+  {
+    route: '/change-email',
+    method: 'POST',
+    path: '/change-email',
+    body: () => ({ newEmail: 'changed@example.com' }),
+  },
+  {
+    route: '/delete-user',
+    method: 'POST',
+    path: '/delete-user',
+    body: () => ({ password: PASSWORD }),
+  },
+  {
+    route: '/delete-user/callback',
+    method: 'GET',
+    path: '/delete-user/callback',
+    query: () => 'token=not-a-token&callbackURL=%2F',
+  },
 ];
+
+/** The body both closing mechanisms answer with. An endpoint that refuses
+ * on its own, as `/delete-user` does while account deletion is not
+ * enabled, answers 404 with a different body. */
+const CLOSED_BODY = 'Not Found';
 
 /** Spellings of one path a lax matcher might let through. */
 function variantsOf(
@@ -336,6 +392,7 @@ describe('closed better-auth HTTP routes', () => {
         const editorId = await createPasswordUser(fixture, EDITOR);
         const cookie = await signedInCookie(auth, OWNER);
         const before = await rowCounts(handle);
+        const identitiesBefore = await storedIdentities(handle);
 
         for (const variant of variantsOf(route, { editorId })) {
           const response = await auth.handler(
@@ -353,13 +410,22 @@ describe('closed better-auth HTTP routes', () => {
                 : { body: JSON.stringify(route.body({ editorId })) }),
             }),
           );
-          expect({ variant: variant.name, status: response.status }).toEqual({
+          // The exact spelling must be refused by the closure itself, not by
+          // the endpoint behind it.
+          const exact = variant.name === 'exact';
+          expect({
+            variant: variant.name,
+            status: response.status,
+            ...(exact ? { body: await response.text() } : {}),
+          }).toEqual({
             variant: variant.name,
             status: 404,
+            ...(exact ? { body: CLOSED_BODY } : {}),
           });
         }
 
         expect(await rowCounts(handle)).toEqual(before);
+        expect(await storedIdentities(handle)).toEqual(identitiesBefore);
         expect(mail.sent).toEqual([]);
       });
     },
