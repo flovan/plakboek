@@ -485,6 +485,7 @@ function assertCreateAuthOptions(options: CreateAuthOptions): void {
     minPasswordLength,
     renderEmail,
     onMailDeliveryError,
+    onAuditWriteFailed,
   } = options;
 
   if (
@@ -544,6 +545,15 @@ function assertCreateAuthOptions(options: CreateAuthOptions): void {
   ) {
     throw new AuthConfigError(
       'onMailDeliveryError must be a function when supplied',
+    );
+  }
+
+  if (
+    onAuditWriteFailed !== undefined &&
+    typeof onAuditWriteFailed !== 'function'
+  ) {
+    throw new AuthConfigError(
+      'onAuditWriteFailed must be a function when supplied',
     );
   }
 }
