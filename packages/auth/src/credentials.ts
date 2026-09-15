@@ -5,12 +5,19 @@
  *
  * The unknown-address branch is load-bearing. It does the same work as the
  * known-address branch instead of returning early: the same user lookup,
- * the same token issue against `verification` (for a random subject, rolled
- * back so nothing persists), and the same message render (discarded, never
- * sent). Replacing it with an early return reintroduces the enumeration side
- * channel the Phase 2 roadmap note exists to close, because the response
- * time would then show which addresses are registered. A generic message
- * with an early return is still that side channel.
+ * the same token issue against `verification` (for a random subject, whose
+ * row is deleted again before the commit so nothing persists), and the same
+ * message render (discarded, never sent). Replacing it with an early return
+ * reintroduces the enumeration side channel the Phase 2 roadmap note exists
+ * to close, because the response time would then show which addresses are
+ * registered. A generic message with an early return is still that side
+ * channel.
+ *
+ * Both branches also end their database work the same way: the same
+ * statements, then `COMMIT`. A rollback on only one branch would skip the
+ * WAL flush a commit waits for, which is a timing difference of its own.
+ * What remains is that the unknown branch's discard deletes one row where
+ * the known branch's deletes none.
  *
  * The mail send is dispatched, never awaited (D-15). An SMTP round trip is
  * slow enough to reveal the branch by timing, so its failure is reported
@@ -193,15 +200,6 @@ function reportDeliveryError(
   }
 }
 
-/** Thrown inside the unknown-address transaction to roll it back. Caught
- * by `requestPasswordLink` itself; it never escapes. */
-class RehearsalDiscarded extends Error {
-  constructor() {
-    super('@plakboek/auth: discarded the unknown-address rehearsal');
-    this.name = 'RehearsalDiscarded';
-  }
-}
-
 function assertRequestDeps(deps: RequestPasswordLinkDeps): void {
   if (
     typeof deps.mail !== 'object' ||
@@ -233,8 +231,10 @@ function assertRequestDeps(deps: RequestPasswordLinkDeps): void {
  * 1. Look the address up in `user`.
  * 2. In one transaction, issue a token through `issueSingleUseToken`: for
  *    the user, or for a random subject that matches no one. The user's
- *    transaction commits, and its issue removes every earlier outstanding
- *    link of that purpose (D-09). The other rolls back, so no row is left.
+ *    issue removes every earlier outstanding link of that purpose (D-09).
+ *    Then discard every link of one subject: the rehearsal's own subject,
+ *    so no row is left, or for the user a fresh random subject that has
+ *    none. Both transactions commit.
  * 3. Render the message for the purpose. The user's message is dispatched
  *    without being awaited; the other is discarded.
  *
@@ -260,26 +260,31 @@ export async function requestPasswordLink(
     .limit(1);
 
   let token = '';
-  try {
-    await deps.db.transaction(async (tx) => {
-      const issued = await issueSingleUseToken(tx, {
-        subjectId: found?.id ?? randomUUID(),
-        purpose,
-        ttlSeconds: SET_PASSWORD_TOKEN_TTL_SECONDS,
-      });
-      token = issued.token;
-      deps.probe?.onTokenGenerated?.();
-      deps.probe?.onVerificationQuery?.();
-      if (found === undefined) {
-        // Roll the rehearsal back: nothing it wrote may persist.
-        throw new RehearsalDiscarded();
-      }
+  await deps.db.transaction(async (tx) => {
+    const rehearsalSubjectId = randomUUID();
+    const issued = await issueSingleUseToken(tx, {
+      subjectId: found?.id ?? rehearsalSubjectId,
+      purpose,
+      ttlSeconds: SET_PASSWORD_TOKEN_TTL_SECONDS,
     });
-  } catch (error) {
-    if (!(error instanceof RehearsalDiscarded)) {
-      throw error;
-    }
-  }
+    token = issued.token;
+    deps.probe?.onTokenGenerated?.();
+    deps.probe?.onVerificationQuery?.();
+    // The same statement on both branches. For an unknown address it
+    // removes the rehearsal's row, so nothing it wrote persists; for a user
+    // it names a subject no link was issued to and removes nothing.
+    await tx
+      .delete(verification)
+      .where(
+        and(
+          eq(
+            verification.value,
+            found === undefined ? rehearsalSubjectId : randomUUID(),
+          ),
+          like(verification.identifier, `${purpose}:%`),
+        ),
+      );
+  });
 
   let message: MailMessage;
   try {
