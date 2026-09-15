@@ -313,27 +313,33 @@ function passwordBeingSet(path: string, body: unknown): unknown {
 
 /**
  * Runs `assertPasswordPolicy` in front of every better-auth endpoint that
- * stores a password. better-auth's own `minPasswordLength` check counts
- * UTF-16 code units, so six emoji would pass it; the policy counts code
- * points, and this hook makes the two agree.
+ * stores a password, against the installation's configured minimum.
+ * better-auth's own `minPasswordLength` check counts UTF-16 code units, so
+ * six emoji would pass it; the policy counts code points, and this hook
+ * makes the two agree.
  */
-const enforcePasswordPolicy = createAuthMiddleware(async (ctx) => {
-  const candidate = passwordBeingSet(ctx.path, ctx.body);
-  if (candidate === undefined) {
-    return;
-  }
-  try {
-    assertPasswordPolicy(typeof candidate === 'string' ? candidate : '');
-  } catch (error) {
-    if (error instanceof PasswordPolicyError) {
-      throw APIError.from('BAD_REQUEST', {
-        code: 'PASSWORD_TOO_SHORT',
-        message: error.message,
-      });
+function enforcePasswordPolicy(minLength: number) {
+  return createAuthMiddleware(async (ctx) => {
+    const candidate = passwordBeingSet(ctx.path, ctx.body);
+    if (candidate === undefined) {
+      return;
     }
-    throw error;
-  }
-});
+    try {
+      assertPasswordPolicy(
+        typeof candidate === 'string' ? candidate : '',
+        minLength,
+      );
+    } catch (error) {
+      if (error instanceof PasswordPolicyError) {
+        throw APIError.from('BAD_REQUEST', {
+          code: 'PASSWORD_TOO_SHORT',
+          message: error.message,
+        });
+      }
+      throw error;
+    }
+  });
+}
 
 /** The audit action for each two-factor endpoint whose successful call is
  * audited. Both stay open; they change how the user signs in, so D-06 holds
@@ -584,6 +590,7 @@ export type Auth = BetterAuthInstance<PlakboekAuthOptions>;
 export function createAuth(options: CreateAuthOptions): Auth {
   assertCreateAuthOptions(options);
 
+  const minPasswordLength = options.minPasswordLength ?? PASSWORD_MIN_LENGTH;
   const renderEmail = options.renderEmail ?? renderAuthEmail;
   const onMailDeliveryError =
     options.onMailDeliveryError ?? defaultOnMailDeliveryError;
@@ -692,7 +699,7 @@ export function createAuth(options: CreateAuthOptions): Auth {
     // package's own single-use-token flow.
     emailAndPassword: {
       enabled: true,
-      minPasswordLength: options.minPasswordLength ?? PASSWORD_MIN_LENGTH,
+      minPasswordLength,
     },
     session: {
       expiresIn: SESSION_EXPIRES_IN_SECONDS,
@@ -705,7 +712,7 @@ export function createAuth(options: CreateAuthOptions): Auth {
     },
     disabledPaths: [...DISABLED_AUTH_PATHS],
     hooks: {
-      before: enforcePasswordPolicy,
+      before: enforcePasswordPolicy(minPasswordLength),
       after: auditTwoFactorChanges(recorder),
     },
     plugins,

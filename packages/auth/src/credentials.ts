@@ -317,7 +317,8 @@ export type CompleteSetPasswordDeps = {
   /** The database, or an enclosing transaction (the consumption then nests
    * as a savepoint). */
   readonly db: TokenDatabase;
-  /** Supplies better-auth's own password hasher. No better-auth endpoint is
+  /** Supplies better-auth's own password hasher and the installation's
+   * configured minimum password length. No better-auth endpoint is
    * called. */
   readonly auth: Pick<Auth, '$context'>;
   /** Passed to the audit recorder. */
@@ -445,9 +446,9 @@ async function writeCredential(
  * Sets a user's password through a set-password or reset-password link and
  * returns the id of the user whose credential changed.
  *
- * 1. `assertPasswordPolicy` runs first. A too-short password throws
- *    `PasswordPolicyError` and spends nothing, so a typo does not cost the
- *    user their only valid link (D-08, D-09).
+ * 1. The password is checked against the minimum `createAuth` configured.
+ *    A too-short password throws `PasswordPolicyError` and spends nothing,
+ *    so a typo does not cost the user their only valid link (D-08, D-09).
  * 2. The password is hashed with better-auth's own hasher, outside any
  *    transaction.
  * 3. The link is consumed, and in that same transaction:
@@ -475,9 +476,12 @@ export async function completeSetPassword(
   input: CompleteSetPasswordInput,
 ): Promise<{ readonly userId: string }> {
   const purpose = knownLinkPurpose(input.purpose);
-  assertPasswordPolicy(input.newPassword);
-
   const context = await deps.auth.$context;
+  assertPasswordPolicy(
+    input.newPassword,
+    context.password.config.minPasswordLength,
+  );
+
   const passwordHash = await context.password.hash(input.newPassword);
   const now = deps.now ?? (() => new Date());
 
