@@ -256,6 +256,87 @@ describe('closed better-auth HTTP routes', () => {
   });
 });
 
+type PluginRole = {
+  readonly authorize: (request: Record<string, string[]>) => {
+    readonly success: boolean;
+  };
+};
+
+function isPluginRole(value: unknown): value is PluginRole {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof Reflect.get(value, 'authorize') === 'function'
+  );
+}
+
+/** Whether the plugin's role map authorizes `request` for `roleKey`, the
+ * same lookup better-auth's own `hasPermission` performs -- a missing entry
+ * authorizes nothing. */
+function pluginAuthorizes(
+  roles: unknown,
+  roleKey: string,
+  request: Record<string, string[]>,
+): boolean {
+  const entry: unknown =
+    typeof roles === 'object' && roles !== null
+      ? Reflect.get(roles, roleKey)
+      : undefined;
+  if (!isPluginRole(entry)) {
+    return false;
+  }
+  return entry.authorize(request).success;
+}
+
+describe('the admin plugin role map', () => {
+  it("grants the plugin's impersonate statement exactly to the roles holding users:impersonate", () => {
+    const roles = defineRoles({
+      ...defaultRoles,
+      delegate: ['users:read', 'users:impersonate'],
+    });
+    const auth = createAuth(baseOptions({ roles }));
+    const pluginRoles = Reflect.get(pluginOption(auth, 'admin') ?? {}, 'roles');
+
+    const impersonateRequest = { user: ['impersonate'] };
+    expect({
+      superadmin: pluginAuthorizes(pluginRoles, 'superadmin', impersonateRequest),
+      admin: pluginAuthorizes(pluginRoles, 'admin', impersonateRequest),
+      editor: pluginAuthorizes(pluginRoles, 'editor', impersonateRequest),
+      delegate: pluginAuthorizes(pluginRoles, 'delegate', impersonateRequest),
+      orphan: pluginAuthorizes(pluginRoles, 'orphan', impersonateRequest),
+    }).toEqual({
+      superadmin: true,
+      admin: false,
+      editor: false,
+      delegate: true,
+      orphan: false,
+    });
+
+    for (const roleKey of ['superadmin', 'delegate']) {
+      expect(pluginAuthorizes(pluginRoles, roleKey, { user: ['create'] })).toBe(
+        false,
+      );
+      expect(
+        pluginAuthorizes(pluginRoles, roleKey, { user: ['set-role'] }),
+      ).toBe(false);
+      expect(
+        pluginAuthorizes(pluginRoles, roleKey, {
+          user: ['impersonate-admins'],
+        }),
+      ).toBe(false);
+      expect(
+        pluginAuthorizes(pluginRoles, roleKey, { session: ['revoke'] }),
+      ).toBe(false);
+    }
+
+    const adminRolesOption = Reflect.get(
+      pluginOption(auth, 'admin') ?? {},
+      'adminRoles',
+    );
+    expect(adminRolesOption).toEqual(['superadmin']);
+  });
+});
+
 describe('unauthenticated mail paths (D-15)', () => {
   const unhandled: unknown[] = [];
   const onUnhandled = (reason: unknown) => {

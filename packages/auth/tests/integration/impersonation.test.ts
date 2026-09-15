@@ -38,7 +38,9 @@ const TOLERANCE_MS = 5000;
 
 /** The shipped roles plus one host role that holds `users:impersonate`
  * without being superadmin, so a nested start can pass the permission
- * check and prove this module's own refusal. */
+ * check and prove this module's own refusal. The delegate role also proves
+ * that a host role holding `users:impersonate` can start and stop an
+ * impersonation. */
 const roles = defineRoles({
   ...defaultRoles,
   delegate: ['users:read', 'users:impersonate'],
@@ -463,6 +465,60 @@ describe('audited impersonation start and stop (D-11, D-12)', () => {
     ]);
   });
 
+  it('lets a host role holding users:impersonate start and stop, recording both rows', async () => {
+    const { editor, delegate, deps } = fixture();
+    const jar = await signedIn(delegate);
+
+    const started = await startImpersonation(deps, {
+      headers: jar.headers(),
+      targetUserId: editor.userId,
+    });
+    jar.apply(started.responseHeaders);
+
+    const stored = await sessionByToken(started.sessionToken);
+    expect(stored?.userId).toBe(editor.userId);
+    expect(stored?.impersonatedBy).toBe(delegate.userId);
+
+    expect(await auditRows()).toEqual([
+      {
+        actorUserId: delegate.userId,
+        actorRoleKey: 'delegate',
+        impersonatorUserId: null,
+        permission: 'users:impersonate',
+        action: 'impersonation.start',
+        entityType: 'user',
+        entityId: editor.userId,
+        outcome: 'allowed',
+        beforeIsNull: true,
+        afterIsNull: false,
+        before: null,
+        after: {
+          targetRoleKey: 'editor',
+          expiresAt: started.expiresAt.toISOString(),
+        },
+      },
+    ]);
+
+    const stopped = await stopImpersonation(deps, { headers: jar.headers() });
+    jar.apply(stopped.responseHeaders);
+
+    const rows = await auditRows();
+    expect(rows.map((row) => row.action)).toEqual([
+      'impersonation.start',
+      'impersonation.stop',
+    ]);
+    expect(rows[1]).toMatchObject({
+      actorUserId: delegate.userId,
+      actorRoleKey: 'delegate',
+      entityId: editor.userId,
+      outcome: 'allowed',
+    });
+
+    const restored = await sessionByToken(stopped.sessionToken);
+    expect(restored?.userId).toBe(delegate.userId);
+    expect(restored?.impersonatedBy).toBeNull();
+  });
+
   it('refuses to stop a session that is not impersonating, writing nothing', async () => {
     const { owner, deps } = fixture();
     const jar = await signedIn(owner);
@@ -613,6 +669,31 @@ describe('impersonation refusals (D-11, D-13)', () => {
         entityId: otherOwner.userId,
         outcome: 'denied',
         beforeIsNull: true,
+        after: { reason: 'target-is-superadmin' },
+      }),
+    ]);
+  });
+
+  it('refuses a superadmin target for a host role too, and records the attempt', async () => {
+    const { owner, delegate, deps } = fixture();
+    const jar = await signedIn(delegate);
+
+    const error = await refusal(
+      startImpersonation(deps, {
+        headers: jar.headers(),
+        targetUserId: owner.userId,
+      }),
+      ImpersonationTargetForbiddenError,
+    );
+    expect(error.reason).toBe('target-is-superadmin');
+
+    expect(await impersonatedSessionCount()).toBe(0);
+    expect(await auditRows()).toEqual([
+      expect.objectContaining({
+        actorUserId: delegate.userId,
+        actorRoleKey: 'delegate',
+        action: 'impersonation.refused',
+        outcome: 'denied',
         after: { reason: 'target-is-superadmin' },
       }),
     ]);
