@@ -160,21 +160,24 @@ async function rowCounts(handle: Db): Promise<RowCounts> {
   return row ?? { users: -1, sessions: -1, verifications: -1, accounts: -1 };
 }
 
+type RouteIds = { readonly editorId: string };
+
 type ClosedRoute = {
   /** The path as better-auth registers it. */
   readonly route: string;
   readonly method: 'GET' | 'POST';
   /** A concrete path for the route, before any variant is applied. */
   readonly path: string;
-  readonly query?: string;
-  readonly body?: (ids: { readonly editorId: string }) => unknown;
+  readonly query?: (ids: RouteIds) => string;
+  readonly body?: (ids: RouteIds) => unknown;
 };
 
 /**
  * One request per closed route, written out here rather than read from
  * `DISABLED_AUTH_PATHS`, so dropping a path from the constant fails its
  * case. Each request is one the open route would act on: a valid sign-up,
- * a superadmin impersonating a real editor, a reset for a real address.
+ * a superadmin impersonating a real editor, a reset for a real address, a
+ * role change or password change for a real user.
  */
 const CLOSED_ROUTES: readonly ClosedRoute[] = [
   {
@@ -211,13 +214,99 @@ const CLOSED_ROUTES: readonly ClosedRoute[] = [
     route: '/reset-password/:token',
     method: 'GET',
     path: '/reset-password/not-a-token',
-    query: 'callbackURL=%2F',
+    query: () => 'callbackURL=%2F',
+  },
+  {
+    route: '/admin/ban-user',
+    method: 'POST',
+    path: '/admin/ban-user',
+    body: ({ editorId }) => ({ userId: editorId, banReason: 'probe' }),
+  },
+  {
+    route: '/admin/create-user',
+    method: 'POST',
+    path: '/admin/create-user',
+    body: () => ({
+      email: 'created@example.com',
+      name: 'Created',
+      password: PASSWORD,
+      role: 'superadmin',
+    }),
+  },
+  {
+    route: '/admin/get-user',
+    method: 'GET',
+    path: '/admin/get-user',
+    query: ({ editorId }) => `id=${editorId}`,
+  },
+  {
+    route: '/admin/has-permission',
+    method: 'POST',
+    path: '/admin/has-permission',
+    body: () => ({ permissions: { user: ['impersonate'] } }),
+  },
+  {
+    route: '/admin/list-user-sessions',
+    method: 'POST',
+    path: '/admin/list-user-sessions',
+    body: ({ editorId }) => ({ userId: editorId }),
+  },
+  {
+    route: '/admin/list-users',
+    method: 'GET',
+    path: '/admin/list-users',
+    query: () => 'limit=10',
+  },
+  {
+    route: '/admin/remove-user',
+    method: 'POST',
+    path: '/admin/remove-user',
+    body: ({ editorId }) => ({ userId: editorId }),
+  },
+  {
+    route: '/admin/revoke-user-session',
+    method: 'POST',
+    path: '/admin/revoke-user-session',
+    body: () => ({ sessionToken: 'not-a-session-token' }),
+  },
+  {
+    route: '/admin/revoke-user-sessions',
+    method: 'POST',
+    path: '/admin/revoke-user-sessions',
+    body: ({ editorId }) => ({ userId: editorId }),
+  },
+  {
+    route: '/admin/set-role',
+    method: 'POST',
+    path: '/admin/set-role',
+    body: ({ editorId }) => ({ userId: editorId, role: 'superadmin' }),
+  },
+  {
+    route: '/admin/set-user-password',
+    method: 'POST',
+    path: '/admin/set-user-password',
+    body: ({ editorId }) => ({ userId: editorId, newPassword: 'c'.repeat(12) }),
+  },
+  {
+    route: '/admin/unban-user',
+    method: 'POST',
+    path: '/admin/unban-user',
+    body: ({ editorId }) => ({ userId: editorId }),
+  },
+  {
+    route: '/admin/update-user',
+    method: 'POST',
+    path: '/admin/update-user',
+    body: ({ editorId }) => ({ userId: editorId, data: { name: 'Renamed' } }),
   },
 ];
 
 /** Spellings of one path a lax matcher might let through. */
-function variantsOf(route: ClosedRoute): { name: string; url: string }[] {
-  const query = route.query === undefined ? '' : `?${route.query}`;
+function variantsOf(
+  route: ClosedRoute,
+  ids: RouteIds,
+): { name: string; url: string }[] {
+  const query = route.query === undefined ? '' : `?${route.query(ids)}`;
   const withProbe = route.query === undefined ? '?probe=1' : `${query}&probe=1`;
   const lastChar = route.path.at(-1) ?? '';
   const encodedLast = `%${lastChar.charCodeAt(0).toString(16).toUpperCase()}`;
@@ -248,7 +337,7 @@ describe('closed better-auth HTTP routes', () => {
         const cookie = await signedInCookie(auth, OWNER);
         const before = await rowCounts(handle);
 
-        for (const variant of variantsOf(route)) {
+        for (const variant of variantsOf(route, { editorId })) {
           const response = await auth.handler(
             new Request(variant.url, {
               method: route.method,
@@ -276,7 +365,7 @@ describe('closed better-auth HTTP routes', () => {
     },
   );
 
-  it('still lets a superadmin impersonate through auth.api, for eight hours', async () => {
+  it('still lets a superadmin impersonate and stop through auth.api, for eight hours', async () => {
     await withFixture(async (fixture) => {
       const { auth, handle } = fixture;
       const ownerId = await createPasswordUser(fixture, OWNER);
@@ -287,15 +376,17 @@ describe('closed better-auth HTTP routes', () => {
       const impersonation = await auth.api.impersonateUser({
         body: { userId: editorId },
         headers: new Headers({ cookie }),
+        returnHeaders: true,
       });
       const after = Date.now();
+      const impersonationToken = impersonation.response.session.token;
 
       const [row] = await handle.sql<
         { userId: string; impersonatedBy: string | null; expiresAtMs: number }[]
       >`
         SELECT user_id AS "userId", impersonated_by AS "impersonatedBy",
                (extract(epoch FROM expires_at) * 1000)::float8 AS "expiresAtMs"
-        FROM session WHERE token = ${impersonation.session.token}
+        FROM session WHERE token = ${impersonationToken}
       `;
       expect(row?.userId).toBe(editorId);
       expect(row?.impersonatedBy).toBe(ownerId);
@@ -305,6 +396,23 @@ describe('closed better-auth HTTP routes', () => {
       expect(row?.expiresAtMs).toBeLessThanOrEqual(
         after + EIGHT_HOURS_MS + TOLERANCE_MS,
       );
+
+      // The stop needs every cookie the start set: the impersonation session
+      // token and the signed admin_session cookie that names the superadmin.
+      const impersonationCookies = impersonation.headers
+        .getSetCookie()
+        .map((setCookie) => setCookie.split(';')[0] ?? '')
+        .filter((pair) => pair.length > 0 && !pair.endsWith('='))
+        .join('; ');
+      const stopped = await auth.api.stopImpersonating({
+        headers: new Headers({ cookie: impersonationCookies }),
+      });
+      expect(stopped.user.id).toBe(ownerId);
+      const [remaining] = await handle.sql<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM session
+        WHERE token = ${impersonationToken}
+      `;
+      expect(remaining?.count).toBe(0);
     });
   });
 

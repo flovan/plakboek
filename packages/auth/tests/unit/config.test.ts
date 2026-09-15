@@ -200,10 +200,23 @@ describe('policy constants', () => {
 });
 
 describe('closed better-auth HTTP routes', () => {
-  it('lists sign-up, direct impersonation and every built-in reset route', () => {
+  it('lists sign-up, every admin-plugin route and every built-in reset route', () => {
     expect([...DISABLED_AUTH_PATHS].toSorted()).toEqual([
+      '/admin/ban-user',
+      '/admin/create-user',
+      '/admin/get-user',
+      '/admin/has-permission',
       '/admin/impersonate-user',
+      '/admin/list-user-sessions',
+      '/admin/list-users',
+      '/admin/remove-user',
+      '/admin/revoke-user-session',
+      '/admin/revoke-user-sessions',
+      '/admin/set-role',
+      '/admin/set-user-password',
       '/admin/stop-impersonating',
+      '/admin/unban-user',
+      '/admin/update-user',
       '/request-password-reset',
       '/reset-password',
       '/reset-password/:token',
