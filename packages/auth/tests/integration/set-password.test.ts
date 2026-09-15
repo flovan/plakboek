@@ -24,6 +24,10 @@ const SHORT_PASSWORD = 'eleven char';
 const SESSION_COOKIE = 'better-auth.session_token';
 const LINK_PATTERN = /https?:\/\/\S+[?&]token=[\w-]+/;
 
+/** An installation that raises the configured minimum above the floor
+ * (AUTH-06). */
+const RAISED_MINIMUM = 16;
+
 const roles = defineRoles(defaultRoles);
 
 type RecordingSender = MailSender & { readonly sent: MailMessage[] };
@@ -45,6 +49,20 @@ function fixture(): Fixture {
     throw new Error('the per-test database fixture is not set up');
   }
   return current;
+}
+
+/** A second `createAuth` instance over the same fixture database, raising
+ * the configured minimum above the floor. */
+function raisedMinimumAuth(): Auth {
+  const { handle, mail } = fixture();
+  return createAuth({
+    db: handle.db,
+    baseURL: BASE_URL,
+    secret: SECRET,
+    mail,
+    roles,
+    minPasswordLength: RAISED_MINIMUM,
+  });
 }
 
 function recordingSender(): RecordingSender {
@@ -529,5 +547,70 @@ describe('the credential change is audited (USER-08)', () => {
     expect(serialised).not.toContain(
       createHash('sha256').update(token).digest('base64url'),
     );
+  });
+});
+
+describe('an installation that raises the password minimum (AUTH-06)', () => {
+  it('enforces the raised minimum when a link completes, and spends the link only at that minimum', async () => {
+    const email = 'editor@example.com';
+    const userId = await createEditor(email, { withPassword: true });
+    const token = await requestLink(email, 'reset-password');
+    const auth = raisedMinimumAuth();
+
+    await expect(
+      completeSetPassword(
+        { db: fixture().handle.db, auth },
+        {
+          purpose: 'reset-password',
+          token,
+          newPassword: 'a'.repeat(RAISED_MINIMUM - 1),
+        },
+      ),
+    ).rejects.toMatchObject({ minLength: RAISED_MINIMUM });
+    expect(await outstandingLinks(userId, 'reset-password')).toBe(1);
+    expect(await auditRowCount()).toBe(0);
+
+    await expect(
+      completeSetPassword(
+        { db: fixture().handle.db, auth },
+        {
+          purpose: 'reset-password',
+          token,
+          newPassword: 'a'.repeat(RAISED_MINIMUM),
+        },
+      ),
+    ).resolves.toEqual({ userId });
+    expect(await outstandingLinks(userId, 'reset-password')).toBe(0);
+  });
+
+  it("enforces the raised minimum on better-auth's own password-setting endpoints", async () => {
+    const auth = raisedMinimumAuth();
+    const email = 'new@example.com';
+
+    // 15 astral characters are 30 UTF-16 code units, so better-auth's own
+    // code-unit check at 16 lets them through and only this package's
+    // policy hook can refuse them. That is why this case is
+    // integration-level: before the fix it deterministically creates the
+    // user.
+    await expect(
+      auth.api.signUpEmail({
+        body: {
+          email,
+          name: 'New',
+          password: '\u{1F510}'.repeat(RAISED_MINIMUM - 1),
+        },
+      }),
+    ).rejects.toMatchObject({
+      body: {
+        code: 'PASSWORD_TOO_SHORT',
+        message: expect.stringContaining(String(RAISED_MINIMUM)),
+      },
+    });
+
+    expect(
+      await countRows(fixture().handle.sql<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM "user" WHERE email = ${email}
+      `),
+    ).toBe(0);
   });
 });

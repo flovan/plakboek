@@ -14,6 +14,20 @@ function captureError(candidate: unknown): unknown {
   return undefined;
 }
 
+/** Like `captureError`, but forwards a second `minLength` argument the way
+ * a plain-JS caller could, even one outside the declared type. */
+function captureErrorWithMinLength(
+  candidate: unknown,
+  minLength: unknown,
+): unknown {
+  try {
+    Reflect.apply(assertPasswordPolicy, undefined, [candidate, minLength]);
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
 describe('password policy', () => {
   it('sets the minimum length to 12', () => {
     expect(PASSWORD_MIN_LENGTH).toBe(12);
@@ -73,5 +87,45 @@ describe('password policy', () => {
       name: 'PasswordPolicyError',
       minLength: PASSWORD_MIN_LENGTH,
     });
+  });
+});
+
+describe('a raised minimum', () => {
+  it('rejects one character below a raised minimum and accepts exactly it', () => {
+    const error = captureErrorWithMinLength('a'.repeat(15), 16);
+    expect(error).toBeInstanceOf(PasswordPolicyError);
+    expect(error).toMatchObject({ minLength: 16 });
+    expect(
+      assertPasswordPolicy('a'.repeat(16), 16),
+    ).toBeUndefined();
+  });
+
+  it('still counts a raised minimum in code points, not UTF-16 code units', () => {
+    const error = captureErrorWithMinLength('\u{1F600}'.repeat(15), 16);
+    expect(error).toBeInstanceOf(PasswordPolicyError);
+    expect(
+      assertPasswordPolicy('\u{1F600}'.repeat(16), 16),
+    ).toBeUndefined();
+  });
+
+  it('never enforces a minimum below the floor', () => {
+    const error = captureErrorWithMinLength('a'.repeat(11), 8);
+    expect(error).toBeInstanceOf(PasswordPolicyError);
+    expect(error).toMatchObject({ minLength: PASSWORD_MIN_LENGTH });
+    expect(assertPasswordPolicy('a'.repeat(12), 8)).toBeUndefined();
+  });
+
+  it('throws TypeError for a non-integer minLength, not PasswordPolicyError', () => {
+    for (const badMinLength of [12.5, Number.NaN, '16']) {
+      const error = captureErrorWithMinLength('a'.repeat(32), badMinLength);
+      expect(error).toBeInstanceOf(TypeError);
+      expect(error).not.toBeInstanceOf(PasswordPolicyError);
+    }
+  });
+
+  it('throws TypeError for a non-integer minLength even for a short candidate', () => {
+    const error = captureErrorWithMinLength('short', '16');
+    expect(error).toBeInstanceOf(TypeError);
+    expect(error).not.toBeInstanceOf(PasswordPolicyError);
   });
 });
