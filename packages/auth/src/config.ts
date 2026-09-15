@@ -127,6 +127,11 @@ const DEFAULT_APP_NAME = 'Plakboek';
  * - `/admin/impersonate-user`, `/admin/stop-impersonating`: impersonation
  *   runs only through the audited start and stop (D-11), which call
  *   `auth.api` server-side.
+ * - Every other `/admin/*` route: creating, updating, banning, removing
+ *   users, setting roles and passwords, and listing or revoking sessions
+ *   would skip the first-user rule, the audit log (D-06) and the set/reset
+ *   flow. The plugin role map already refuses every caller; closing the
+ *   routes means a later change to that map cannot reopen them.
  * - `/request-password-reset`, `/reset-password`, `/reset-password/:token`:
  *   set and reset run only through the package's transactional
  *   single-use-token flow (D-09).
@@ -137,8 +142,21 @@ const DEFAULT_APP_NAME = 'Plakboek';
  */
 export const DISABLED_AUTH_PATHS: readonly string[] = Object.freeze([
   '/sign-up/email',
+  '/admin/ban-user',
+  '/admin/create-user',
+  '/admin/get-user',
+  '/admin/has-permission',
   '/admin/impersonate-user',
+  '/admin/list-user-sessions',
+  '/admin/list-users',
+  '/admin/remove-user',
+  '/admin/revoke-user-session',
+  '/admin/revoke-user-sessions',
+  '/admin/set-role',
+  '/admin/set-user-password',
   '/admin/stop-impersonating',
+  '/admin/unban-user',
+  '/admin/update-user',
   '/request-password-reset',
   '/reset-password',
   '/reset-password/:token',
@@ -154,8 +172,8 @@ export const DISABLED_AUTH_PATHS: readonly string[] = Object.freeze([
  * password, remove) would bypass the audit log, so no role is granted them:
  * user management goes through this package's own audited functions. Only
  * the superadmin may call the impersonation endpoint, and only server-side:
- * its HTTP routes are closed, and this package's audited start and stop
- * call it through `auth.api`.
+ * every admin-plugin HTTP route is closed, and this package's audited start
+ * and stop call it through `auth.api`.
  */
 const adminAccessControl = createAccessControl(defaultStatements);
 const ADMIN_PLUGIN_ROLES = {
