@@ -161,6 +161,15 @@ describe('createAuth option validation', () => {
     expect(error).toBeInstanceOf(AuthConfigError);
     expect((error as Error).message).toContain('onMailDeliveryError');
   });
+
+  it('rejects an onAuditWriteFailed that is not a function', () => {
+    const error = captureError({
+      ...baseOptions(),
+      onAuditWriteFailed: 'log',
+    });
+    expect(error).toBeInstanceOf(AuthConfigError);
+    expect((error as Error).message).toContain('onAuditWriteFailed');
+  });
 });
 
 describe('policy constants', () => {
