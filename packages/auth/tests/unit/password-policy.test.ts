@@ -95,17 +95,13 @@ describe('a raised minimum', () => {
     const error = captureErrorWithMinLength('a'.repeat(15), 16);
     expect(error).toBeInstanceOf(PasswordPolicyError);
     expect(error).toMatchObject({ minLength: 16 });
-    expect(
-      assertPasswordPolicy('a'.repeat(16), 16),
-    ).toBeUndefined();
+    expect(assertPasswordPolicy('a'.repeat(16), 16)).toBeUndefined();
   });
 
   it('still counts a raised minimum in code points, not UTF-16 code units', () => {
     const error = captureErrorWithMinLength('\u{1F600}'.repeat(15), 16);
     expect(error).toBeInstanceOf(PasswordPolicyError);
-    expect(
-      assertPasswordPolicy('\u{1F600}'.repeat(16), 16),
-    ).toBeUndefined();
+    expect(assertPasswordPolicy('\u{1F600}'.repeat(16), 16)).toBeUndefined();
   });
 
   it('never enforces a minimum below the floor', () => {

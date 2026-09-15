@@ -299,7 +299,11 @@ describe('the admin plugin role map', () => {
 
     const impersonateRequest = { user: ['impersonate'] };
     expect({
-      superadmin: pluginAuthorizes(pluginRoles, 'superadmin', impersonateRequest),
+      superadmin: pluginAuthorizes(
+        pluginRoles,
+        'superadmin',
+        impersonateRequest,
+      ),
       admin: pluginAuthorizes(pluginRoles, 'admin', impersonateRequest),
       editor: pluginAuthorizes(pluginRoles, 'editor', impersonateRequest),
       delegate: pluginAuthorizes(pluginRoles, 'delegate', impersonateRequest),

@@ -234,8 +234,7 @@ function adminPluginRoles(
   roles: DefinedRoles,
   resolver: PermissionResolver,
 ): Record<string, ReturnType<typeof adminAccessControl.newRole>> {
-  const map: Record<string, ReturnType<typeof adminAccessControl.newRole>> =
-    {};
+  const map: Record<string, ReturnType<typeof adminAccessControl.newRole>> = {};
   for (const roleKey of Object.keys(roles)) {
     if (resolver.resolve(roleKey).has(IMPERSONATE_PERMISSION)) {
       map[roleKey] = adminAccessControl.newRole({
