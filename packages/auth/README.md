@@ -499,3 +499,61 @@ schedule it, once the hosting choice is made:
 This package deliberately ships no scheduler, no queue and no job registry:
 `pruneAuditLog` is its only retention entry point. Choosing what calls it
 is a hosting decision for Phase 6, not a gap in Phase 2.
+
+## Requirement coverage
+
+Each Phase 2 requirement and the automated cases that prove it. Paths are
+relative to `packages/auth`. Two commands run them, from the repository
+root:
+
+- **unit:** `pnpm --filter @plakboek/auth run test`
+- **integration:** `docker compose up -d --wait postgres`, then
+  `TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:54329/postgres pnpm --filter @plakboek/auth run test:integration`
+
+| Requirement | Test file                                                 | Case                                                                                                | Command     |
+| ----------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ----------- |
+| AUTH-01     | `tests/integration/tracer-first-user-login-audit.test.ts` | runs the whole path against a real Postgres (the first user resolves to every catalogue permission) | integration |
+| AUTH-01     | `tests/integration/tracer-first-user-login-audit.test.ts` | grants superadmin to exactly one of two concurrent first-user creations                             | integration |
+| AUTH-01     | `tests/integration/invite.test.ts`                        | forces superadmin on the first user of an empty installation, whatever role was asked for           | integration |
+| AUTH-02     | `tests/integration/invite.test.ts`                        | creates the user with the requested role and mails one link that sets a password                    | integration |
+| AUTH-02     | `tests/integration/invite.test.ts`                        | keeps the user and the link when delivery fails, and a resend recovers                              | integration |
+| AUTH-02     | `tests/unit/invite-guards.test.ts`                        | refuses a caller without users:create, records the denial and creates nothing                       | unit        |
+| AUTH-03     | `tests/integration/invite.test.ts`                        | stops completing once the link is 48 hours old, and completes at 47 hours                           | integration |
+| AUTH-03     | `tests/integration/set-password.test.ts`                  | spends the link on success, so presenting it again is rejected                                      | integration |
+| AUTH-03     | `tests/unit/token-expiry.test.ts`                         | rejects a token at the exact instant of expiry                                                      | unit        |
+| AUTH-04     | `tests/integration/invite.test.ts`                        | invalidates the previously issued link, leaving exactly one valid link                              | integration |
+| AUTH-04     | `tests/integration/invite.test.ts`                        | issues a reset-password link, recorded in the audit log, for a user who already set a password      | integration |
+| AUTH-04     | `tests/integration/invite.test.ts`                        | lets a role holding only users:create resend, with an allowed row naming that permission            | integration |
+| AUTH-05     | `tests/integration/set-password.test.ts`                  | resets a password through the emailed link, and the new password signs in                           | integration |
+| AUTH-05     | `tests/integration/reset-timing.test.ts`                  | does the same counted work for a known and an unknown address                                       | integration |
+| AUTH-05     | `tests/unit/credentials-timing.test.ts`                   | resolves for a known address even when the send never settles                                       | unit        |
+| AUTH-06     | `tests/unit/password-policy.test.ts`                      | rejects one character below the minimum and accepts exactly the minimum                             | unit        |
+| AUTH-06     | `tests/integration/set-password.test.ts`                  | rejects a password below the minimum before spending the link                                       | integration |
+| AUTH-06     | `tests/integration/session-persistence.test.ts`           | rejects a short new password on change and on reset, without spending the reset link                | integration |
+| AUTH-07     | `tests/integration/two-factor.test.ts`                    | enables an emailed code: exactly one message, and its code verifies                                 | integration |
+| AUTH-07     | `tests/integration/two-factor.test.ts`                    | locks after five failures mixed across both factors and unlocks on its own                          | integration |
+| AUTH-08     | `tests/integration/two-factor.test.ts`                    | enrols an authenticator app: its code verifies, a code from another secret does not                 | integration |
+| AUTH-08     | `tests/unit/two-factor-gate.test.ts`                      | throws TwoFactorEnrolmentRequiredError for an unenrolled superadmin                                 | unit        |
+| AUTH-09     | `tests/integration/magic-link.test.ts`                    | delivers one link to an existing user that signs them in                                            | integration |
+| AUTH-09     | `tests/integration/magic-link.test.ts`                    | accepts a link just inside fifteen minutes and rejects one just past it                             | integration |
+| AUTH-09     | `tests/integration/magic-link.test.ts`                    | answers an unknown address in the same shape, sends nothing and creates nobody                      | integration |
+| AUTH-10     | `tests/integration/session-persistence.test.ts`           | survives a refresh: an independent instance resolves the same user from the cookie                  | integration |
+| AUTH-10     | `tests/integration/session-persistence.test.ts`           | slides the expiry forward only once the update age has passed                                       | integration |
+| AUTH-11     | `tests/integration/single-use.test.ts`                    | lets exactly one of two concurrent consumptions authorise                                           | integration |
+| AUTH-11     | `tests/integration/single-use.test.ts`                    | keeps the token valid when the authorised action fails, and propagates its error                    | integration |
+| AUTH-11     | `tests/integration/set-password.test.ts`                  | keeps the link and writes no credential when the credential write fails                             | integration |
+| USER-08     | `tests/integration/audit-log.test.ts`                     | records a granted mutation with its actor, permission, entity and after state                       | integration |
+| USER-08     | `tests/integration/audit-log.test.ts`                     | leaves the entity untouched when permission is denied and records the refusal                       | integration |
+| USER-08     | `tests/integration/impersonation.test.ts`                 | records an action taken while impersonating with both identities on one row                         | integration |
+| USER-08     | `tests/integration/invite.test.ts`                        | writes one allowed row per invite and resend, naming the acting superadmin and no address or token  | integration |
+| USER-08     | `tests/integration/set-password.test.ts`                  | writes one audit row naming the user whose credential changed                                       | integration |
+
+The five Phase 2 success criteria map onto those rows: the first user holds
+every permission (AUTH-01); an invited user's link works once and stops
+after use or 48 hours, with a superadmin able to resend (AUTH-02, AUTH-03,
+AUTH-04, AUTH-11); a user signs in with password plus second factor or with
+a magic link and stays signed in across a refresh (AUTH-07, AUTH-08,
+AUTH-09, AUTH-10); a reset completes through an emailed link and a password
+failing the strength rule is rejected where it is set (AUTH-05, AUTH-06);
+every data-changing action writes an audit record naming the acting user
+(USER-08).
