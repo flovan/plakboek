@@ -1,0 +1,69 @@
+{
+  "name": "@plakboek/auth",
+  "version": "0.1.0",
+  "description": "better-auth wiring, invite, audit and impersonation primitives for Plakboek CMS installations",
+  "homepage": "https://github.com/flovan/plakboek/tree/main/packages/auth#readme",
+  "bugs": {
+    "url": "https://github.com/flovan/plakboek/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flovan/plakboek.git",
+    "directory": "packages/auth"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "publint --strict && attw --pack . --profile esm-only"
+  },
+  "dependencies": {
+    "@plakboek/db": "workspace:*",
+    "@plakboek/permissions": "workspace:*",
+    "better-auth": "catalog:",
+    "html-to-text": "catalog:",
+    "nodemailer": "catalog:"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "catalog:",
+    "@types/html-to-text": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "drizzle-orm": "catalog:",
+    "pg": "catalog:",
+    "publint": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "drizzle-orm": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

@@ -1,0 +1,239 @@
+import { describe, expect, it } from 'vitest';
+import {
+  AUTH_EMAIL_KINDS,
+  renderAuthEmail,
+  type AuthEmailKind,
+} from '../../src/email/render.js';
+
+const URL_WITH_TOKEN = 'https://x.test/set?token=abc';
+
+const SAMPLE_DATA: Readonly<Record<AuthEmailKind, Record<string, string>>> = {
+  'set-password': { name: 'Ada', url: URL_WITH_TOKEN, expiresInHours: '48' },
+  'reset-password': {
+    name: 'Ada',
+    url: 'https://x.test/reset?token=abc',
+    expiresInHours: '48',
+  },
+  'magic-link': {
+    url: 'https://x.test/magic?token=abc',
+    expiresInMinutes: '15',
+  },
+  'two-factor-code': { code: '123456', expiresInMinutes: '10' },
+};
+
+/** The plain-text body split into trimmed lines. */
+function textLines(text: string): string[] {
+  return text.split('\n').map((line) => line.trim());
+}
+
+/** Calls the renderer with arguments outside its declared types, the way
+ * a plain-JS caller could, and returns what it threw. */
+function captureError(...args: unknown[]): unknown {
+  try {
+    Reflect.apply(renderAuthEmail, undefined, args);
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
+describe('renderAuthEmail', () => {
+  it('lists exactly the four transactional kinds, frozen', () => {
+    expect([...AUTH_EMAIL_KINDS]).toEqual([
+      'set-password',
+      'reset-password',
+      'magic-link',
+      'two-factor-code',
+    ]);
+    expect(Object.isFrozen(AUTH_EMAIL_KINDS)).toBe(true);
+  });
+
+  it('renders the set-password message with the url in both bodies', () => {
+    const message = renderAuthEmail('set-password', {
+      name: 'Ada',
+      url: URL_WITH_TOKEN,
+      expiresInHours: '48',
+    });
+
+    expect(message.html).toContain(URL_WITH_TOKEN);
+    expect(message.text).toContain(URL_WITH_TOKEN);
+    expect(message.subject).toMatch(/set/i);
+    expect(message.subject).toMatch(/password/i);
+    expect(message.html).toContain('48');
+    expect(message.text).toContain('48');
+  });
+
+  it('gives reset-password a different subject and body from set-password for the same data', () => {
+    const data = { name: 'Ada', url: URL_WITH_TOKEN, expiresInHours: '48' };
+    const setPassword = renderAuthEmail('set-password', data);
+    const resetPassword = renderAuthEmail('reset-password', data);
+
+    expect(resetPassword.subject).not.toBe(setPassword.subject);
+    expect(resetPassword.subject).toMatch(/reset/i);
+    expect(resetPassword.text).not.toBe(setPassword.text);
+    expect(resetPassword.html).toContain(URL_WITH_TOKEN);
+    expect(resetPassword.text).toContain(URL_WITH_TOKEN);
+  });
+
+  it('renders the magic-link message with its url and a 15 minute window', () => {
+    const url = 'https://x.test/magic?token=abc';
+    const message = renderAuthEmail('magic-link', {
+      url,
+      expiresInMinutes: '15',
+    });
+
+    expect(message.html).toContain(url);
+    expect(message.text).toContain(url);
+    expect(message.html).toContain('15');
+    expect(message.text).toContain('15');
+  });
+
+  it('renders the two-factor code and its window with no link of any kind', () => {
+    const message = renderAuthEmail('two-factor-code', {
+      code: '123456',
+      expiresInMinutes: '10',
+    });
+
+    expect(message.html).toContain('123456');
+    expect(message.text).toContain('123456');
+    expect(message.html).toContain('10');
+    expect(message.text).toContain('10');
+    for (const body of [message.html, message.text]) {
+      expect(body).not.toMatch(/https?:/i);
+      expect(body).not.toMatch(/<a[\s>]/i);
+      expect(body).not.toMatch(/href=/i);
+    }
+  });
+
+  it('escapes markup in a user-supplied display name', () => {
+    const hostile = '<img src=x onerror=alert(1)>';
+    const message = renderAuthEmail('set-password', {
+      name: hostile,
+      url: URL_WITH_TOKEN,
+      expiresInHours: '48',
+    });
+
+    expect(message.html).not.toContain(hostile);
+    expect(message.html).not.toMatch(/<img/i);
+    expect(message.html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
+
+  it('keeps an ampersand in a url intact in the plain-text body', () => {
+    const url = 'https://x.test/set?token=abc&callbackURL=%2Fadmin';
+    const message = renderAuthEmail('set-password', {
+      name: 'Ada',
+      url,
+      expiresInHours: '48',
+    });
+
+    expect(message.text).toContain(url);
+    expect(message.html).toContain(url.replace('&', '&amp;'));
+  });
+
+  it('returns a real plain-text alternative for every kind', () => {
+    for (const kind of AUTH_EMAIL_KINDS) {
+      const message = renderAuthEmail(kind, SAMPLE_DATA[kind]);
+      expect(message.subject.length).toBeGreaterThan(0);
+      expect(message.html.length).toBeGreaterThan(0);
+      expect(message.text.trim().length).toBeGreaterThan(0);
+      expect(message.text).not.toBe(message.html);
+      expect(message.text).not.toMatch(/<\/?(table|td|p|a|html|body)\b/i);
+    }
+  });
+
+  it('gives every kind a distinct subject', () => {
+    const subjects = AUTH_EMAIL_KINDS.map(
+      (kind) => renderAuthEmail(kind, SAMPLE_DATA[kind]).subject,
+    );
+    expect(new Set(subjects).size).toBe(AUTH_EMAIL_KINDS.length);
+  });
+
+  it('renders a full html document on presentation tables for every kind', () => {
+    for (const kind of AUTH_EMAIL_KINDS) {
+      const { html } = renderAuthEmail(kind, SAMPLE_DATA[kind]);
+      expect(html.startsWith('<!DOCTYPE html')).toBe(true);
+      expect(html).toMatch(/<table[^>]*role="presentation"/);
+      expect(html).not.toMatch(/<table(?![^>]*role="presentation")[^>]*>/);
+    }
+  });
+
+  it('puts the url on a line of its own in every link-bearing text body', () => {
+    for (const kind of [
+      'set-password',
+      'reset-password',
+      'magic-link',
+    ] as const) {
+      const data = SAMPLE_DATA[kind];
+      const message = renderAuthEmail(kind, data);
+      expect(textLines(message.text)).toContain(data.url);
+    }
+  });
+
+  it('keeps the preheader and the document head out of the plain-text body', () => {
+    for (const kind of AUTH_EMAIL_KINDS) {
+      const message = renderAuthEmail(kind, SAMPLE_DATA[kind]);
+      const preheader = /<div[^>]*display:none[^>]*>([^<]+)<\/div>/.exec(
+        message.html,
+      )?.[1];
+      const title = /<title>([^<]+)<\/title>/.exec(message.html)?.[1];
+
+      expect(preheader?.trim().length ?? 0).toBeGreaterThan(0);
+      expect(title?.trim().length ?? 0).toBeGreaterThan(0);
+      expect(message.text).not.toContain(preheader);
+      expect(textLines(message.text)).not.toContain(title);
+    }
+  });
+
+  it('fills to from data.to', () => {
+    const message = renderAuthEmail('magic-link', {
+      ...SAMPLE_DATA['magic-link'],
+      to: 'ada@x.test',
+    });
+    expect(message.to).toBe('ada@x.test');
+  });
+
+  it('throws for an unrecognised kind instead of returning an empty message', () => {
+    const error = captureError('welcome-back', { url: URL_WITH_TOKEN });
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toContain('@plakboek/auth');
+    expect(String(error)).toContain('welcome-back');
+  });
+
+  it('refuses to render a link-bearing message without a usable http(s) url', () => {
+    for (const data of [
+      { name: 'Ada', expiresInHours: '48' },
+      { name: 'Ada', url: '', expiresInHours: '48' },
+    ]) {
+      const error = captureError('set-password', data);
+      expect(error).toBeInstanceOf(Error);
+      expect(String(error)).toContain('url');
+    }
+
+    for (const url of [
+      'not a url',
+      'javascript:alert(1)',
+      'ftp://x.test/set?token=abc',
+    ]) {
+      const error = captureError('set-password', {
+        name: 'Ada',
+        url,
+        expiresInHours: '48',
+      });
+      expect(error).toBeInstanceOf(Error);
+      expect(String(error)).toContain('url');
+      expect(String(error)).not.toContain(url);
+    }
+  });
+
+  it('refuses to render a message without its code or validity window', () => {
+    for (const data of [
+      { expiresInMinutes: '10' },
+      { code: '', expiresInMinutes: '10' },
+      { code: '123456' },
+      { code: '123456', expiresInMinutes: 'soon' },
+      { code: '123456', expiresInMinutes: '0' },
+    ]) {
+      expect(captureError('two-factor-code', data)).toBeInstanceOf(Error);
+    }
+  });
+});

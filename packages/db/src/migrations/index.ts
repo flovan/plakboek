@@ -1,4 +1,5 @@
 import type { Migration } from '../migrate.js';
+import { migration as m0001 } from './0001_auth_core.js';
 
 /**
  * The static migration registry for @plakboek/db (D-03).
@@ -14,9 +15,9 @@ import type { Migration } from '../migrate.js';
  * Corrections are always a new, higher-numbered migration. See
  * ../../MIGRATIONS.md for the full authoring convention.
  *
- * MIGRATIONS ships empty at 0.1.0: no product table exists before Phase 2
- * introduces the first schema. The runner, bookkeeping table, advisory
- * lock, and every safety check are fully exercised through fixture
- * registries in this package's own tests (tests/fixtures/migrations.ts).
+ * `0001_auth_core` is the first shipped entry: the better-auth core tables
+ * and the audit log. The runner's failure modes (ordering, checksums,
+ * partial application, locking) are exercised through fixture registries in
+ * this package's own tests (tests/fixtures/migrations.ts).
  */
-export const MIGRATIONS: readonly Migration[] = Object.freeze([]);
+export const MIGRATIONS: readonly Migration[] = Object.freeze([m0001]);
