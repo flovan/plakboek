@@ -85,7 +85,10 @@ export const USER_INVITE_ACTION = 'user.invite';
 export const USER_RESEND_SET_PASSWORD_ACTION = 'user.resend-set-password';
 
 const INVITE_PERMISSION: Permission = 'users:create';
-const RESEND_PERMISSION: Permission = 'users:reset-password';
+/** The catalogue describes `users:create` as adding users and sending or
+ * resending their set-password emails, so a resend needs it too, and
+ * `users:reset-password` alone is not enough. */
+const RESEND_PERMISSION: Permission = 'users:create';
 
 /** better-auth's provider id for email-and-password credentials. */
 const CREDENTIAL_PROVIDER_ID = 'credential';
@@ -540,9 +543,10 @@ export async function inviteUser(
  * Resends a user's password link and returns the same `{ delivered: true }`
  * whether or not the address belongs to a user.
  *
- * `recorder.run` checks `users:reset-password`. In the audited transaction
- * the link is issued through `requestPasswordLink`, so an unknown address
- * gets the same rehearsed work and no message. The purpose comes from the
+ * `recorder.run` checks `users:create`, the permission that invites.
+ * `users:reset-password` alone is refused. In the audited transaction the
+ * link is issued through `requestPasswordLink`, so an unknown address gets
+ * the same rehearsed work and no message. The purpose comes from the
  * database: `set-password` for a user with no credential, `reset-password`
  * for one who already set a password, so a superadmin helping a locked-out
  * user is never silently ignored. The audit row's `after` names the user id
