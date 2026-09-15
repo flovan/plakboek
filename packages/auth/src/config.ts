@@ -28,6 +28,7 @@ import { createAccessControl } from 'better-auth/plugins/access';
 import { defaultStatements } from 'better-auth/plugins/admin/access';
 import { eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import type { AuditFailureHook } from './audit.js';
 import { renderAuthEmail, type AuthEmailKind } from './email/render.js';
 import {
   MailSendError,
@@ -67,6 +68,11 @@ export type CreateAuthOptions = {
    * the error type and, for a `MailSendError`, the recipient's domain.
    */
   readonly onMailDeliveryError?: (error: unknown) => void;
+  /**
+   * Receives every failure to write the audit row for a two-factor change.
+   * Defaults to the audit recorder's one `console.error` line.
+   */
+  readonly onAuditWriteFailed?: AuditFailureHook;
 };
 
 /** Thrown by `createAuth` for invalid options. Messages name the offending

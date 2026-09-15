@@ -2,6 +2,7 @@ import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { createDb, runMigrations, type Db } from '@plakboek/db';
 import { defaultRoles, defineRoles } from '@plakboek/permissions';
 import { describe, expect, it } from 'vitest';
+import type { AuditWriteFailure } from '../../src/audit.js';
 import { createAuth, type Auth } from '../../src/config.js';
 import type { MailMessage, MailSender } from '../../src/email/types.js';
 import { createUserWithRole } from '../../src/first-user.js';
@@ -207,6 +208,83 @@ async function lockState(handle: Db, userId: string): Promise<LockState> {
   return row ?? { failedVerificationCount: -1, lockedUntilMs: null };
 }
 
+type StoredAuditRow = {
+  readonly actorUserId: string | null;
+  readonly actorRoleKey: string;
+  readonly impersonatorUserId: string | null;
+  readonly permission: string;
+  readonly action: string;
+  readonly entityType: string;
+  readonly entityId: string | null;
+  readonly outcome: string;
+  readonly after: unknown;
+  /** The whole stored row as JSON text, for substring checks. */
+  readonly stored: string;
+};
+
+async function auditRows(handle: Db): Promise<StoredAuditRow[]> {
+  return [
+    ...(await handle.sql<StoredAuditRow[]>`
+      SELECT actor_user_id AS "actorUserId", actor_role_key AS "actorRoleKey",
+             impersonator_user_id AS "impersonatorUserId", permission, action,
+             entity_type AS "entityType", entity_id AS "entityId", outcome,
+             after, row_to_json(audit_log)::text AS stored
+      FROM audit_log ORDER BY id
+    `),
+  ];
+}
+
+/** Expects no row to contain any of `secrets`, each non-empty. */
+function expectNoSecrets(
+  rows: readonly StoredAuditRow[],
+  secrets: readonly string[],
+): void {
+  expect(secrets.length).toBeGreaterThan(0);
+  for (const secret of secrets) {
+    expect(secret.length).toBeGreaterThan(0);
+  }
+  for (const row of rows) {
+    expect({
+      action: row.action,
+      leaked: secrets.filter((secret) => row.stored.includes(secret)),
+    }).toEqual({ action: row.action, leaked: [] });
+  }
+}
+
+type StoredTwoFactor = {
+  readonly secret: string;
+  readonly backupCodes: string;
+};
+
+/** The fixture user's stored, encrypted authenticator secret and backup
+ * codes. */
+async function storedTwoFactor(
+  handle: Db,
+  userId: string,
+): Promise<StoredTwoFactor> {
+  const [row] = await handle.sql<StoredTwoFactor[]>`
+    SELECT secret, backup_codes AS "backupCodes"
+    FROM two_factor WHERE user_id = ${userId}
+  `;
+  expect(row).toBeDefined();
+  return row ?? { secret: '', backupCodes: '' };
+}
+
+/** Signs a user with an enrolled authenticator in and returns the session
+ * cookie. */
+async function signedInWithAuthenticator(
+  auth: Auth,
+  key: Buffer,
+): Promise<Headers> {
+  const pending = await challenge(auth);
+  const verified = await auth.api.verifyTOTP({
+    body: { code: authenticatorCode(key) },
+    headers: pending,
+    returnHeaders: true,
+  });
+  return cookieHeader(verified.headers, SESSION_COOKIE);
+}
+
 /** Enrols an authenticator app for the fixture user and returns its key. */
 async function enrolAuthenticator(fixture: Fixture): Promise<Buffer> {
   const session = await signedInSession(fixture.auth);
@@ -387,6 +465,238 @@ describe('two-factor authentication', () => {
         failedVerificationCount: 0,
         lockedUntilMs: null,
       });
+    });
+  });
+});
+
+/** The columns every self-service two-factor row shares. */
+function selfServiceRow(userId: string, roleKey: string) {
+  return {
+    actorUserId: userId,
+    actorRoleKey: roleKey,
+    impersonatorUserId: null,
+    permission: 'self',
+    entityType: 'user',
+    entityId: userId,
+    outcome: 'allowed',
+  };
+}
+
+describe('two-factor changes are audited (D-06)', () => {
+  it('writes one two-factor.enabled row when an authenticator is enabled, with no secret in it', async () => {
+    await withFixture(async (fixture) => {
+      const { auth, handle, userId } = fixture;
+      const session = await signedInSession(auth);
+
+      const enabled = await auth.api.enableTwoFactor({
+        body: { password: PASSWORD },
+        headers: session,
+      });
+
+      const rows = await auditRows(handle);
+      expect(rows).toEqual([
+        expect.objectContaining({
+          ...selfServiceRow(userId, 'superadmin'),
+          action: 'two-factor.enabled',
+          after: { method: 'totp' },
+        }),
+      ]);
+      const totpURI = totpUriOf(enabled);
+      const stored = await storedTwoFactor(handle, userId);
+      expectNoSecrets(rows, [
+        PASSWORD,
+        new URL(totpURI).searchParams.get('secret') ?? '',
+        keyFromUri(totpURI).toString('utf8'),
+        ...('backupCodes' in enabled ? enabled.backupCodes : []),
+        stored.secret,
+        stored.backupCodes,
+      ]);
+    });
+  });
+
+  it('writes one two-factor.disabled row when two-factor is disabled, and neither row holds a secret', async () => {
+    await withFixture(async (fixture) => {
+      const { auth, handle, userId } = fixture;
+      const session = await signedInSession(auth);
+      const enabled = await auth.api.enableTwoFactor({
+        body: { password: PASSWORD },
+        headers: session,
+      });
+      const totpURI = totpUriOf(enabled);
+      await auth.api.verifyTOTP({
+        body: { code: authenticatorCode(keyFromUri(totpURI)) },
+        headers: session,
+      });
+      const stored = await storedTwoFactor(handle, userId);
+      const current = await signedInWithAuthenticator(
+        auth,
+        keyFromUri(totpURI),
+      );
+
+      await auth.api.disableTwoFactor({
+        body: { password: PASSWORD },
+        headers: current,
+      });
+
+      expect(await twoFactorEnabled(handle, userId)).toBe(false);
+      const rows = await auditRows(handle);
+      expect(rows).toEqual([
+        expect.objectContaining({
+          ...selfServiceRow(userId, 'superadmin'),
+          action: 'two-factor.enabled',
+          after: { method: 'totp' },
+        }),
+        expect.objectContaining({
+          ...selfServiceRow(userId, 'superadmin'),
+          action: 'two-factor.disabled',
+          after: null,
+        }),
+      ]);
+      expectNoSecrets(rows, [
+        PASSWORD,
+        new URL(totpURI).searchParams.get('secret') ?? '',
+        keyFromUri(totpURI).toString('utf8'),
+        ...('backupCodes' in enabled ? enabled.backupCodes : []),
+        stored.secret,
+        stored.backupCodes,
+      ]);
+    });
+  });
+
+  it('writes no row when enabling or disabling is refused for a wrong password', async () => {
+    await withFixture(async (fixture) => {
+      const { auth, handle, userId } = fixture;
+      const session = await signedInSession(auth);
+
+      await expect(
+        auth.api.enableTwoFactor({
+          body: { password: 'not the password at all', method: 'otp' },
+          headers: session,
+        }),
+      ).rejects.toMatchObject({ body: { code: 'INVALID_PASSWORD' } });
+      expect(await twoFactorEnabled(handle, userId)).toBe(false);
+      expect(await auditRows(handle)).toEqual([]);
+
+      // Enabling emailed codes replaces the session; continue with the new one.
+      const enabled = await auth.api.enableTwoFactor({
+        body: { password: PASSWORD, method: 'otp' },
+        headers: session,
+        returnHeaders: true,
+      });
+      const actionsBefore = (await auditRows(handle)).map((row) => row.action);
+      await expect(
+        auth.api.disableTwoFactor({
+          body: { password: 'not the password at all' },
+          headers: cookieHeader(enabled.headers, SESSION_COOKIE),
+        }),
+      ).rejects.toMatchObject({ body: { code: 'INVALID_PASSWORD' } });
+      expect(await twoFactorEnabled(handle, userId)).toBe(true);
+      expect((await auditRows(handle)).map((row) => row.action)).toEqual(
+        actionsBefore,
+      );
+    });
+  });
+
+  it('names the impersonating superadmin on a row written while impersonating', async () => {
+    await withFixture(async (fixture) => {
+      const { auth, handle, userId: ownerId } = fixture;
+      const editor = await createUserWithRole(handle.db, {
+        id: randomUUID(),
+        email: 'grace@example.com',
+        name: 'Grace',
+        roleKey: 'editor',
+      });
+      const context = await auth.$context;
+      await context.internalAdapter.linkAccount({
+        userId: editor.userId,
+        providerId: 'credential',
+        accountId: editor.userId,
+        password: await context.password.hash(PASSWORD),
+      });
+      const impersonation = await auth.api.impersonateUser({
+        body: { userId: editor.userId },
+        headers: await signedInSession(auth),
+        returnHeaders: true,
+      });
+
+      // Every non-empty cookie the start set, as a browser would keep them.
+      const impersonationCookies = impersonation.headers
+        .getSetCookie()
+        .map((setCookie) => setCookie.split(';')[0] ?? '')
+        .filter((pair) => pair.length > 0 && !pair.endsWith('='))
+        .join('; ');
+
+      await auth.api.enableTwoFactor({
+        body: { password: PASSWORD, method: 'otp' },
+        headers: new Headers({ cookie: impersonationCookies }),
+      });
+
+      expect(await auditRows(handle)).toEqual([
+        expect.objectContaining({
+          ...selfServiceRow(editor.userId, 'editor'),
+          impersonatorUserId: ownerId,
+          action: 'two-factor.enabled',
+          after: { method: 'otp' },
+        }),
+      ]);
+    });
+  });
+
+  it('reports a failed audit write through onAuditWriteFailed, keeps the change and the session, and answers an error', async () => {
+    await withFixture(async (fixture) => {
+      const { handle, mail, userId } = fixture;
+      const failures: AuditWriteFailure[] = [];
+      const auth = createAuth({
+        db: handle.db,
+        baseURL: BASE_URL,
+        secret: SECRET,
+        mail,
+        roles,
+        onAuditWriteFailed: (failure) => {
+          failures.push(failure);
+        },
+      });
+      const session = await signedInSession(auth);
+      await handle.sql`
+        ALTER TABLE audit_log
+        ADD CONSTRAINT refuse_two_factor_rows
+        CHECK (action NOT LIKE 'two-factor.%')
+      `;
+
+      const response = await auth.handler(
+        new Request(`${BASE_URL}/api/auth/two-factor/enable`, {
+          method: 'POST',
+          headers: {
+            cookie: session.get('cookie') ?? '',
+            origin: BASE_URL,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ password: PASSWORD, method: 'otp' }),
+        }),
+      );
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({
+        code: 'AUDIT_WRITE_FAILED',
+      });
+      expect(failures).toEqual([
+        expect.objectContaining({
+          permission: 'self',
+          action: 'two-factor.enabled',
+          entityType: 'user',
+          entityId: userId,
+          actorUserId: userId,
+        }),
+      ]);
+      expect(await auditRows(handle)).toEqual([]);
+      // The plugin wrote the change before the hook ran; it is not undone.
+      expect(await twoFactorEnabled(handle, userId)).toBe(true);
+      // The plugin replaced the session, and the replacement still reaches
+      // the browser.
+      const resolved = await auth.api.getSession({
+        headers: cookieHeader(response.headers, SESSION_COOKIE),
+      });
+      expect(resolved?.user.id).toBe(userId);
     });
   });
 });
