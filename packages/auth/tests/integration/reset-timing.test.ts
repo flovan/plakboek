@@ -159,6 +159,27 @@ function trimmedMedian(durations: readonly number[]): number {
     : ((kept[middle - 1] ?? 0) + (kept[middle] ?? 0)) / 2;
 }
 
+/**
+ * Every statement the pool sends while `run` executes, in send order,
+ * trimmed and lower-cased, parameters left out. postgres.js hands each
+ * statement it sends to `options.debug`, transaction control included, so
+ * this is what the database receives.
+ */
+async function statementsOf(run: () => Promise<unknown>): Promise<string[]> {
+  const { options } = fixture().handle.sql;
+  const previous = options.debug;
+  const statements: string[] = [];
+  options.debug = (_connection, query) => {
+    statements.push(query.trim().toLowerCase());
+  };
+  try {
+    await run();
+  } finally {
+    options.debug = previous;
+  }
+  return statements;
+}
+
 async function timed(run: () => Promise<unknown>): Promise<number> {
   const started = performance.now();
   await run();
@@ -199,6 +220,34 @@ describe('a reset request reveals nothing about whether the address is registere
         SELECT count(*)::int AS count FROM verification
       `),
     ).toBe(1);
+  });
+
+  it('sends the same statements for a known and an unknown address, each ending in COMMIT', async () => {
+    // Warm the pool first, so no connection set-up lands in either log.
+    await request(KNOWN_EMAIL);
+    await request(UNKNOWN_EMAIL);
+
+    const known = await statementsOf(() => request(KNOWN_EMAIL));
+    const unknown = await statementsOf(() => request(UNKNOWN_EMAIL));
+
+    // A rollback needs no WAL flush and a commit does, so the unknown
+    // address must not be the one path that rolls back.
+    for (const [path, statements] of [
+      ['known', known],
+      ['unknown', unknown],
+    ] as const) {
+      expect({ path, last: statements.at(-1) }).toEqual({
+        path,
+        last: 'commit',
+      });
+      expect({
+        path,
+        rollbacks: statements.filter((s) => s === 'rollback'),
+      }).toEqual({ path, rollbacks: [] });
+      expect(statements.filter((s) => s === 'begin')).toHaveLength(1);
+      expect(statements.some((s) => s.startsWith('savepoint '))).toBe(true);
+    }
+    expect(unknown).toEqual(known);
   });
 
   it('keeps the durations of the two paths in one band', async () => {
