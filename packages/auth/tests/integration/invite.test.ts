@@ -640,6 +640,94 @@ describe('a second invite for a registered address (AUTH-02)', () => {
   });
 });
 
+/** An address as a bootstrap or a seed script might pass it. */
+const MIXED_CASE_ADDRESS = ' Ada@Example.TEST ';
+const STORED_ADDRESS = 'ada@example.test';
+
+/** Every user row whose address is `address` in any case or padding. */
+function usersWithAddressInAnyForm(address: string) {
+  return countOf(fixture().handle.sql<{ count: number }[]>`
+    SELECT count(*)::int AS count FROM "user"
+    WHERE lower(btrim(email)) = lower(btrim(${address}))
+  `);
+}
+
+/** The first SQLSTATE along an error's cause chain. */
+function sqlStateOf(error: unknown): unknown {
+  let current = error;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    const code: unknown = Reflect.get(current, 'code');
+    if (typeof code === 'string') {
+      return code;
+    }
+    current = current.cause;
+  }
+  return undefined;
+}
+
+function createDirectly(email: string, id: string = randomUUID()) {
+  return createUserWithRole(fixture().handle.db, {
+    id,
+    email,
+    name: 'Ada Lovelace',
+    roleKey: 'editor',
+  });
+}
+
+describe('users created without an invite (AUTH-02)', () => {
+  it('stores the address trimmed and lower-cased', async () => {
+    await seedInstallation();
+    const id = randomUUID();
+
+    await expect(createDirectly(MIXED_CASE_ADDRESS, id)).resolves.toEqual({
+      userId: id,
+      roleKey: 'editor',
+      wasFirstUser: false,
+    });
+
+    expect((await storedUser(STORED_ADDRESS)).id).toBe(id);
+    expect(await usersWithAddressInAnyForm(STORED_ADDRESS)).toBe(1);
+  });
+
+  it('never gets a second row for the same address in another case, created directly or invited', async () => {
+    const { superadmin } = await seedInstallation();
+    const id = randomUUID();
+    await createDirectly(MIXED_CASE_ADDRESS, id);
+
+    const duplicate = await caught(() => createDirectly('ADA@example.test'));
+    expect(sqlStateOf(duplicate)).toBe('23505');
+
+    await expect(invite(superadmin, 'ADA@example.test')).resolves.toEqual({
+      userId: id,
+      wasFirstUser: false,
+    });
+    expect(await usersWithAddressInAnyForm(STORED_ADDRESS)).toBe(1);
+    expect(fixture().mail.sent.map((message) => message.to)).toEqual([
+      STORED_ADDRESS,
+    ]);
+  });
+
+  it('is found by a link request for the original mixed-case address', async () => {
+    await seedInstallation();
+    const { handle, mail } = fixture();
+    const id = randomUUID();
+    await createDirectly(MIXED_CASE_ADDRESS, id);
+
+    await expect(
+      requestPasswordLink(
+        { db: handle.db, mail, baseURL: BASE_URL },
+        { email: MIXED_CASE_ADDRESS, purpose: 'set-password' },
+      ),
+    ).resolves.toEqual({ delivered: true });
+
+    expect(mail.sent.map((message) => message.to)).toEqual([STORED_ADDRESS]);
+    await expect(complete('set-password', lastToken())).resolves.toEqual({
+      userId: id,
+    });
+    expect(await signsIn(STORED_ADDRESS, PASSWORD)).toBe(id);
+  });
+});
+
 describe('audit coverage of invites and resends (USER-08)', () => {
   it('writes one allowed row per invite and resend, naming the acting superadmin and no address or token', async () => {
     const { superadmin } = await seedInstallation();
