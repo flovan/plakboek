@@ -8,7 +8,10 @@
  * number is exported once so tests, email copy and later modules read the
  * same value instead of restating it.
  */
-import type { DefinedRoles } from '@plakboek/permissions';
+import {
+  createPermissionResolver,
+  type DefinedRoles,
+} from '@plakboek/permissions';
 import {
   betterAuth,
   type Auth as BetterAuthInstance,
@@ -16,7 +19,7 @@ import {
   type BetterAuthPlugin,
 } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { APIError, createAuthMiddleware } from 'better-auth/api';
+import { APIError, createAuthMiddleware, isAPIError } from 'better-auth/api';
 import {
   admin,
   magicLink,
@@ -28,7 +31,12 @@ import { createAccessControl } from 'better-auth/plugins/access';
 import { defaultStatements } from 'better-auth/plugins/admin/access';
 import { eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import type { AuditFailureHook } from './audit.js';
+import {
+  AuditWriteError,
+  createAuditRecorder,
+  type AuditFailureHook,
+  type AuditRecorder,
+} from './audit.js';
 import { renderAuthEmail, type AuthEmailKind } from './email/render.js';
 import {
   MailSendError,
@@ -36,6 +44,7 @@ import {
   type MailSender,
 } from './email/types.js';
 import { SUPERADMIN_ROLE_KEY } from './first-user.js';
+import { auditActorFromSession } from './impersonation.js';
 import {
   PASSWORD_MIN_LENGTH,
   PasswordPolicyError,
@@ -326,6 +335,81 @@ const enforcePasswordPolicy = createAuthMiddleware(async (ctx) => {
   }
 });
 
+/** The audit action for each two-factor endpoint whose successful call is
+ * audited. Both stay open; they change how the user signs in, so D-06 holds
+ * them to an audit row even though no catalogue permission gates them. */
+const TWO_FACTOR_ENABLED_ACTION = 'two-factor.enabled';
+const TWO_FACTOR_AUDIT_ACTIONS: ReadonlyMap<string, string> = new Map([
+  ['/two-factor/enable', TWO_FACTOR_ENABLED_ACTION],
+  ['/two-factor/disable', 'two-factor.disabled'],
+]);
+
+/** The one field of a successful enable that reaches the audit row. The
+ * rest of that response is secret: the authenticator URI carries the TOTP
+ * secret, and the backup codes are credentials. */
+function enabledMethod(returned: unknown): { method: string } | undefined {
+  const method = readField(returned, 'method');
+  return method === 'totp' || method === 'otp' ? { method } : undefined;
+}
+
+/**
+ * Writes one self-service audit row after each successful two-factor enable
+ * or disable, naming the session's user as actor and entity, and the
+ * impersonating superadmin when there is one (D-11). A refused call returns
+ * an `APIError` and writes nothing.
+ *
+ * The plugin has already written the change, through its own adapter calls,
+ * when this runs, so a failed audit write cannot roll it back. The recorder
+ * reports that failure through `onAuditWriteFailed`, and the call answers
+ * `AUDIT_WRITE_FAILED` as an `APIError`, which keeps the replacement session
+ * cookie the plugin set: the plugin deleted the session the call arrived
+ * with.
+ */
+function auditTwoFactorChanges(recorder: AuditRecorder) {
+  return createAuthMiddleware(async (ctx) => {
+    const action = TWO_FACTOR_AUDIT_ACTIONS.get(ctx.path);
+    const returned: unknown = ctx.context.returned;
+    // Both endpoints require a session, so a successful call carries one.
+    const current = ctx.context.session;
+    if (action === undefined || isAPIError(returned) || current === null) {
+      return;
+    }
+    const roleKey: unknown = Reflect.get(current.user, 'role');
+    const impersonatedBy: unknown = Reflect.get(
+      current.session,
+      'impersonatedBy',
+    );
+    const actor = auditActorFromSession({
+      userId: current.user.id,
+      roleKey: typeof roleKey === 'string' ? roleKey : '',
+      ...(typeof impersonatedBy === 'string' && impersonatedBy !== ''
+        ? { impersonatedBy }
+        : {}),
+    });
+    const after =
+      action === TWO_FACTOR_ENABLED_ACTION
+        ? enabledMethod(returned)
+        : undefined;
+    try {
+      await recorder.recordSelfService(actor, {
+        action,
+        entityType: 'user',
+        entityId: current.user.id,
+        ...(after === undefined ? {} : { after }),
+      });
+    } catch (error) {
+      if (!(error instanceof AuditWriteError)) {
+        throw error;
+      }
+      throw APIError.from('INTERNAL_SERVER_ERROR', {
+        code: 'AUDIT_WRITE_FAILED',
+        message:
+          'The two-factor change was saved, but its audit entry could not be written',
+      });
+    }
+  });
+}
+
 type SessionHooks = NonNullable<
   NonNullable<BetterAuthOptions['databaseHooks']>['session']
 >;
@@ -493,6 +577,15 @@ export function createAuth(options: CreateAuthOptions): Auth {
   const renderEmail = options.renderEmail ?? renderAuthEmail;
   const onMailDeliveryError =
     options.onMailDeliveryError ?? defaultOnMailDeliveryError;
+  // Two-factor rows are self-service rows, so the resolver is never asked;
+  // it is the recorder's required dependency, built from the host's roles.
+  const recorder = createAuditRecorder({
+    db: options.db,
+    resolver: createPermissionResolver(options.roles),
+    ...(options.onAuditWriteFailed === undefined
+      ? {}
+      : { onAuditWriteFailed: options.onAuditWriteFailed }),
+  });
 
   /** A throwing hook must not escape: the send it reports on is already
    * detached from any request that could handle the error. */
@@ -603,6 +696,7 @@ export function createAuth(options: CreateAuthOptions): Auth {
     disabledPaths: [...DISABLED_AUTH_PATHS],
     hooks: {
       before: enforcePasswordPolicy,
+      after: auditTwoFactorChanges(recorder),
     },
     plugins,
   });

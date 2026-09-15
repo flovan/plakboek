@@ -16,6 +16,12 @@
  * `outcome` `'denied'`: a missing permission by `run` itself, and a refusal
  * the caller makes for its own reason through `recordDenied`.
  *
+ * A change a user makes to their own account that no catalogue permission
+ * gates, such as enabling two-factor authentication, is recorded through
+ * `recordSelfService`. Its row names the sentinel `'self'` in the
+ * `permission` column, which no catalogue permission can equal because
+ * every catalogue permission is `resource:action`.
+ *
  * `audit_log` is append-only. Nothing in this package updates its rows, and
  * the retention prune (`pruneAuditLog`, D-07) is the sole statement that
  * deletes from it.
@@ -49,6 +55,16 @@ export type AuditEntryInput = {
   readonly after?: unknown;
 };
 
+/** The `permission` column of a self-service row: a change a user made to
+ * their own account that no catalogue permission gates. */
+const SELF_SERVICE_PERMISSION = 'self';
+
+/** An entry as it is stored: a catalogue permission, or the self-service
+ * sentinel. */
+type RecordedEntry = Omit<AuditEntryInput, 'permission'> & {
+  readonly permission: Permission | typeof SELF_SERVICE_PERMISSION;
+};
+
 /** The transaction handle a mutation receives: every write it makes through
  * this handle commits or rolls back with the audit row. */
 export type AuditTransaction = Parameters<
@@ -64,9 +80,11 @@ export type AuditedMutation<T> = (
 ) => Promise<{ readonly result: T; readonly after?: unknown }>;
 
 /** Reported after an audit insert failed and its transaction rolled back.
- * Carries opaque identifiers only -- never the before/after payloads. */
+ * Carries opaque identifiers only -- never the before/after payloads.
+ * `permission` is `'self'` for a self-service row, whose change is not
+ * rolled back. */
 export type AuditWriteFailure = {
-  readonly permission: Permission;
+  readonly permission: Permission | 'self';
   readonly action: string;
   readonly entityType: string;
   readonly entityId?: string;
@@ -102,6 +120,19 @@ export type AuditRecorder = {
    * `AuditWriteError`.
    */
   recordDenied(actor: AuditActor, entry: AuditEntryInput): Promise<void>;
+  /**
+   * Records a change the actor made to their own account that no catalogue
+   * permission gates, after that change has been made. The row's
+   * `permission` is `'self'` and its `outcome` is `'allowed'`; no permission
+   * check runs and nothing is mutated. `entry.before` and `entry.after` are
+   * redacted like any other row. A failed insert reports through
+   * `onAuditWriteFailed` and throws `AuditWriteError`, but cannot undo the
+   * change it describes.
+   */
+  recordSelfService(
+    actor: AuditActor,
+    entry: Omit<AuditEntryInput, 'permission'>,
+  ): Promise<void>;
 };
 
 /** Thrown when the actor's role lacks the permission. Carries the
@@ -122,12 +153,22 @@ export class PermissionDeniedError extends Error {
   }
 }
 
+/** What became of the change an unwritten row describes: a gated mutation
+ * rolls back with its row, a self-service change was made before it. */
+function consequenceOf(permission: Permission | 'self'): string {
+  return permission === SELF_SERVICE_PERMISSION
+    ? 'the self-service change it describes was not undone'
+    : 'the mutation was rolled back';
+}
+
 /** Thrown when the audit row could not be written. The mutation it would
- * have described was rolled back with it. The original error is `cause`. */
+ * have described was rolled back with it, except for a self-service row
+ * (`permission` `'self'`), whose change was already made. The original error
+ * is `cause`. */
 export class AuditWriteError extends Error {
-  constructor(permission: Permission, action: string, cause: unknown) {
+  constructor(permission: Permission | 'self', action: string, cause: unknown) {
     super(
-      `@plakboek/auth: could not write the audit entry for "${action}" (${permission}); the mutation was rolled back`,
+      `@plakboek/auth: could not write the audit entry for "${action}" (${permission}); ${consequenceOf(permission)}`,
       { cause },
     );
     this.name = 'AuditWriteError';
@@ -156,7 +197,7 @@ function describeCause(cause: unknown): string {
 function defaultOnAuditWriteFailed(failure: AuditWriteFailure): void {
   // oxlint-disable-next-line no-console -- the documented default fallback hook; a host overrides `onAuditWriteFailed` to route elsewhere
   console.error(
-    `[@plakboek/auth] audit write failed for "${failure.action}" (${failure.permission}) on ${failure.entityType}; the mutation was rolled back (${describeCause(failure.error.cause)})`,
+    `[@plakboek/auth] audit write failed for "${failure.action}" (${failure.permission}) on ${failure.entityType}; ${consequenceOf(failure.permission)} (${describeCause(failure.error.cause)})`,
   );
 }
 
@@ -216,7 +257,7 @@ type AuditRowInput = {
  * here, so none can skip the redaction of `before` and `after`. */
 function auditRowValues(
   actor: AuditActor,
-  entry: AuditEntryInput,
+  entry: RecordedEntry,
   row: AuditRowInput,
 ) {
   return {
@@ -236,7 +277,7 @@ function auditRowValues(
 
 function auditWriteFailure(
   actor: AuditActor,
-  entry: AuditEntryInput,
+  entry: RecordedEntry,
   occurredAt: Date,
   error: AuditWriteError,
 ): AuditWriteFailure {
@@ -330,18 +371,20 @@ export async function runAuditedMutation<T>(
   return outcome.result;
 }
 
-/** `AuditRecorder.recordDenied`: one `denied` row for a refusal the caller
- * made itself. A single insert, so it needs no transaction of its own. */
-async function recordDeniedEntry(
+/** `AuditRecorder.recordDenied` and `recordSelfService`: one row that
+ * accompanies no mutation of its own. A single insert, so it needs no
+ * transaction. */
+async function recordStandaloneEntry(
   deps: AuditDeps,
   actor: AuditActor,
-  entry: AuditEntryInput,
+  entry: RecordedEntry,
+  outcome: 'allowed' | 'denied',
 ): Promise<void> {
   const now = deps.now ?? (() => new Date());
   try {
     await deps.db.insert(auditLog).values(
       auditRowValues(actor, entry, {
-        outcome: 'denied',
+        outcome,
         before: entry.before,
         after: entry.after,
         createdAt: now(),
@@ -376,7 +419,18 @@ export function createAuditRecorder(deps: AuditDeps): AuditRecorder {
       return runAuditedMutation(bound, actor, entry, mutation);
     },
     recordDenied(actor: AuditActor, entry: AuditEntryInput): Promise<void> {
-      return recordDeniedEntry(bound, actor, entry);
+      return recordStandaloneEntry(bound, actor, entry, 'denied');
+    },
+    recordSelfService(
+      actor: AuditActor,
+      entry: Omit<AuditEntryInput, 'permission'>,
+    ): Promise<void> {
+      return recordStandaloneEntry(
+        bound,
+        actor,
+        { ...entry, permission: SELF_SERVICE_PERMISSION },
+        'allowed',
+      );
     },
   };
 }

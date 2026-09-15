@@ -188,6 +188,11 @@ function fakeRecorder(
       events.push('denied');
       return Promise.resolve();
     },
+    recordSelfService() {
+      return Promise.reject(
+        new Error('invite flows never record a self-service row'),
+      );
+    },
   };
 }
 

@@ -34,21 +34,21 @@ audited paths described here.
 
 ### Configuration and policy
 
-| Export                              | Kind     | Purpose                                                                                                                                                     |
-| ----------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createAuth`                        | function | Builds the better-auth instance for one installation from injected options: sliding sessions, two-factor, magic links, closed routes and the password floor |
-| `AuthConfigError`                   | class    | Thrown by `createAuth` for an invalid option; names the option, never the value                                                                             |
-| `SESSION_EXPIRES_IN_SECONDS`        | constant | `2592000` (30 days): how long a session lives after its last refresh                                                                                        |
-| `SESSION_UPDATE_AGE_SECONDS`        | constant | `86400` (one day): how old a session must be before a request slides its expiry                                                                             |
-| `IMPERSONATION_SESSION_TTL_SECONDS` | constant | `28800` (8 hours): the fixed lifetime of an impersonation session, which never slides                                                                       |
-| `SET_PASSWORD_TOKEN_TTL_SECONDS`    | constant | `172800` (48 hours): lifetime of set-password and reset-password links                                                                                      |
-| `MAGIC_LINK_TTL_SECONDS`            | constant | `900` (15 minutes): lifetime of a magic link                                                                                                                |
-| `TWO_FACTOR_CODE_TTL_SECONDS`       | constant | `300` (5 minutes): lifetime of an emailed second-factor code                                                                                                |
-| `TWO_FACTOR_LOCKOUT`                | constant | Frozen `{ maxFailedAttempts: 5, durationSeconds: 900 }`, one counter shared by authenticator and emailed codes                                              |
-| `DISABLED_AUTH_PATHS`               | constant | Frozen list of better-auth HTTP routes that answer 404; the full list and the reason are under the security notes                                           |
-| `Auth`                              | type     | The better-auth instance `createAuth` returns                                                                                                               |
-| `CreateAuthOptions`                 | type     | `db`, `baseURL`, `secret`, `mail`, `roles`, and optionally `appName`, `minPasswordLength`, `renderEmail`, `onMailDeliveryError`                             |
-| `RenderAuthEmail`                   | type     | A template renderer a host can pass as `renderEmail` to theme the emails                                                                                    |
+| Export                              | Kind     | Purpose                                                                                                                                                             |
+| ----------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createAuth`                        | function | Builds the better-auth instance for one installation from injected options: sliding sessions, audited two-factor, magic links, closed routes and the password floor |
+| `AuthConfigError`                   | class    | Thrown by `createAuth` for an invalid option; names the option, never the value                                                                                     |
+| `SESSION_EXPIRES_IN_SECONDS`        | constant | `2592000` (30 days): how long a session lives after its last refresh                                                                                                |
+| `SESSION_UPDATE_AGE_SECONDS`        | constant | `86400` (one day): how old a session must be before a request slides its expiry                                                                                     |
+| `IMPERSONATION_SESSION_TTL_SECONDS` | constant | `28800` (8 hours): the fixed lifetime of an impersonation session, which never slides                                                                               |
+| `SET_PASSWORD_TOKEN_TTL_SECONDS`    | constant | `172800` (48 hours): lifetime of set-password and reset-password links                                                                                              |
+| `MAGIC_LINK_TTL_SECONDS`            | constant | `900` (15 minutes): lifetime of a magic link                                                                                                                        |
+| `TWO_FACTOR_CODE_TTL_SECONDS`       | constant | `300` (5 minutes): lifetime of an emailed second-factor code                                                                                                        |
+| `TWO_FACTOR_LOCKOUT`                | constant | Frozen `{ maxFailedAttempts: 5, durationSeconds: 900 }`, one counter shared by authenticator and emailed codes                                                      |
+| `DISABLED_AUTH_PATHS`               | constant | Frozen list of better-auth HTTP routes that answer 404; the full list and the reason are under the security notes                                                   |
+| `Auth`                              | type     | The better-auth instance `createAuth` returns                                                                                                                       |
+| `CreateAuthOptions`                 | type     | `db`, `baseURL`, `secret`, `mail`, `roles`, and optionally `appName`, `minPasswordLength`, `renderEmail`, `onMailDeliveryError`, `onAuditWriteFailed`               |
+| `RenderAuthEmail`                   | type     | A template renderer a host can pass as `renderEmail` to theme the emails                                                                                            |
 
 ### Passwords
 
@@ -71,21 +71,21 @@ audited paths described here.
 
 ### Audit log
 
-| Export                  | Kind     | Purpose                                                                                                                               |
-| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `createAuditRecorder`   | function | Binds database, permission resolver, failure hook and clock, and returns an `AuditRecorder`: the single call site for gated mutations |
-| `runAuditedMutation`    | function | The unbound form of `run`: permission check, mutation and audit row in one transaction                                                |
-| `PermissionDeniedError` | class    | Thrown once a refusal has been recorded; carries the permission and role key only                                                     |
-| `AuditWriteError`       | class    | The audit row could not be written, so the mutation was rolled back                                                                   |
-| `AuditActor`            | type     | The acting user's id and role key, and `impersonatedBy` while impersonating                                                           |
-| `AuditDatabase`         | type     | Any Drizzle Postgres handle that can open a transaction                                                                               |
-| `AuditDeps`             | type     | `db`, `resolver`, and optionally `onAuditWriteFailed` and `now`                                                                       |
-| `AuditEntryInput`       | type     | Permission, action, entity and the before and after states of one audit row                                                           |
-| `AuditFailureHook`      | type     | Called once per failed audit write, after the rollback                                                                                |
-| `AuditRecorder`         | type     | `run(actor, entry, mutation)` for gated mutations and `recordDenied(actor, entry)` for a refusal made for another reason              |
-| `AuditTransaction`      | type     | The transaction a mutation runs in                                                                                                    |
-| `AuditWriteFailure`     | type     | What the failure hook receives: identifiers and the error, never the payload                                                          |
-| `AuditedMutation`       | type     | A mutation that runs inside the audit transaction and returns `{ result, after }`                                                     |
+| Export                  | Kind     | Purpose                                                                                                                                                                                                                                  |
+| ----------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createAuditRecorder`   | function | Binds database, permission resolver, failure hook and clock, and returns an `AuditRecorder`: the single call site for gated mutations                                                                                                    |
+| `runAuditedMutation`    | function | The unbound form of `run`: permission check, mutation and audit row in one transaction                                                                                                                                                   |
+| `PermissionDeniedError` | class    | Thrown once a refusal has been recorded; carries the permission and role key only                                                                                                                                                        |
+| `AuditWriteError`       | class    | The audit row could not be written, so the mutation was rolled back; a self-service change was already made and is not undone                                                                                                            |
+| `AuditActor`            | type     | The acting user's id and role key, and `impersonatedBy` while impersonating                                                                                                                                                              |
+| `AuditDatabase`         | type     | Any Drizzle Postgres handle that can open a transaction                                                                                                                                                                                  |
+| `AuditDeps`             | type     | `db`, `resolver`, and optionally `onAuditWriteFailed` and `now`                                                                                                                                                                          |
+| `AuditEntryInput`       | type     | Permission, action, entity and the before and after states of one audit row                                                                                                                                                              |
+| `AuditFailureHook`      | type     | Called once per failed audit write, after the rollback                                                                                                                                                                                   |
+| `AuditRecorder`         | type     | `run(actor, entry, mutation)` for gated mutations, `recordDenied(actor, entry)` for a refusal made for another reason, and `recordSelfService(actor, entry)` for a user's change to their own account, stored with `permission` `'self'` |
+| `AuditTransaction`      | type     | The transaction a mutation runs in                                                                                                                                                                                                       |
+| `AuditWriteFailure`     | type     | What the failure hook receives: identifiers and the error, never the payload                                                                                                                                                             |
+| `AuditedMutation`       | type     | A mutation that runs inside the audit transaction and returns `{ result, after }`                                                                                                                                                        |
 
 ### Audit payload redaction
 
@@ -408,6 +408,12 @@ not affected.
 - **Report mail delivery failures.** Unauthenticated sends are
   fire-and-forget (see Mail delivery); pass `onMailDeliveryError` and
   `onDeliveryError` so failures reach monitoring.
+- **Report two-factor audit failures.** Enabling and disabling two-factor
+  stay open over HTTP. Each successful call writes a `two-factor.enabled`
+  or `two-factor.disabled` row with `permission` `'self'`, after the plugin
+  has saved the change. A failed row cannot undo that change: the call
+  answers `AUDIT_WRITE_FAILED` and `createAuth`'s `onAuditWriteFailed`
+  receives the failure, so pass it.
 - **Schedule the audit log prune.** The package never runs
   `pruneAuditLog` itself; see the next section.
 - **Rate-limit the unauthenticated endpoints** (sign-in, magic link,
@@ -556,6 +562,7 @@ root:
 | USER-08     | `tests/integration/impersonation.test.ts`                 | records an action taken while impersonating with both identities on one row                         | integration |
 | USER-08     | `tests/integration/invite.test.ts`                        | writes one allowed row per invite and resend, naming the acting superadmin and no address or token  | integration |
 | USER-08     | `tests/integration/set-password.test.ts`                  | writes one audit row naming the user whose credential changed                                       | integration |
+| USER-08     | `tests/integration/two-factor.test.ts`                    | writes one two-factor.enabled row when an authenticator is enabled, with no secret in it            | integration |
 
 The five Phase 2 success criteria map onto those rows: the first user holds
 every permission (AUTH-01); an invited user's link works once and stops
