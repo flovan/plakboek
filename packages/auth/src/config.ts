@@ -135,6 +135,11 @@ const DEFAULT_APP_NAME = 'Plakboek';
  * - `/request-password-reset`, `/reset-password`, `/reset-password/:token`:
  *   set and reset run only through the package's transactional
  *   single-use-token flow (D-09).
+ * - `/change-password`, `/update-user`, `/change-email`, `/delete-user`,
+ *   `/delete-user/callback`: a user changing their own password, name or
+ *   address, or deleting their own account, would write no audit row
+ *   (D-06), and a password changed there does not revoke the user's other
+ *   sessions. Audited self-service equivalents come later.
  *
  * A closed route answers 404 to any HTTP request, whatever its method,
  * trailing slashes or query string. Server-side `auth.api` calls are not
@@ -160,6 +165,11 @@ export const DISABLED_AUTH_PATHS: readonly string[] = Object.freeze([
   '/request-password-reset',
   '/reset-password',
   '/reset-password/:token',
+  '/change-password',
+  '/update-user',
+  '/change-email',
+  '/delete-user',
+  '/delete-user/callback',
 ]);
 
 /**

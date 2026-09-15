@@ -352,6 +352,11 @@ would let a caller reach an action around a guarantee this package builds:
 - `/request-password-reset`
 - `/reset-password`
 - `/reset-password/:token`
+- `/change-password`
+- `/update-user`
+- `/change-email`
+- `/delete-user`
+- `/delete-user/callback`
 
 Why they are closed:
 
@@ -366,6 +371,10 @@ Why they are closed:
   `stopImpersonation`, which call the plugin through `auth.api`.
 - **The built-in reset routes.** Set and reset run only through the
   transactional single-use-token flow above.
+- **Self-service account routes.** Changing your own password, name or
+  address, or deleting your own account, would write no audit row; self-service
+  account changes arrive audited in Phase 11. Do not call their `auth.api`
+  counterparts either.
 
 The `:token` segment is enforced by this package's own request guard, since
 better-auth's `disabledPaths` compares paths literally. A host that mounts
