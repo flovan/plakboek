@@ -39,7 +39,7 @@ import {
   type MailMessage,
   type MailSender,
 } from './email/types.js';
-import { createUserWithRole } from './first-user.js';
+import { createUserWithRole, storedEmailForm } from './first-user.js';
 import { account, user } from './schema.js';
 
 export type InviteDeps = {
@@ -212,11 +212,13 @@ function hasControlCharacter(value: string): boolean {
   return false;
 }
 
-/** The stored form of an invited address: trimmed and lower-cased, which is
- * the form `requestPasswordLink` looks addresses up in. The shape rule is
- * the sender's: exactly one `@`, with a non-blank part on either side. */
+/** The stored form of an invited address (`storedEmailForm`, the rule
+ * `createUserWithRole` stores with), checked against the sender's shape
+ * rule: exactly one `@`, with a non-blank part on either side. The lookup
+ * that decides whether the address already has a user runs before the
+ * creation, so it needs the stored form too. */
 function inviteAddress(email: unknown): string {
-  const address = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  const address = storedEmailForm(email);
   const parts = address.split('@');
   const [local = '', domain = ''] = parts;
   if (
@@ -235,12 +237,6 @@ function requiredText(value: unknown, field: InviteField): string {
     throw new InvalidInviteError(field);
   }
   return value;
-}
-
-/** The form an address is looked up in for a resend. A resend never throws
- * for a malformed address: it takes the unknown-address path instead. */
-function lookupForm(email: unknown): string {
-  return typeof email === 'string' ? email.trim().toLowerCase() : '';
 }
 
 /** The part after the last `@`, or `'unknown'`. */
@@ -559,7 +555,9 @@ export async function resendSetPasswordLink(
   input: ResendSetPasswordLinkInput,
 ): Promise<PasswordLinkRequestOutcome> {
   assertInviteDeps(deps);
-  const email = lookupForm(input.email);
+  // A resend never throws for a malformed address: it takes the
+  // unknown-address path instead.
+  const email = storedEmailForm(input.email);
 
   const resent = await deps.recorder.run(
     input.actor,

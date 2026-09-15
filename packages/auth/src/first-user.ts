@@ -4,6 +4,11 @@
  * `createUserWithRole`, and the very first user row an installation ever
  * gets holds `superadmin` no matter which role its caller asked for. There
  * is no separate "has this install been bootstrapped" flag to track.
+ *
+ * Because every path goes through it, `createUserWithRole` is also where an
+ * address gets its stored form: trimmed and lower-cased. Addresses are
+ * looked up in that form, so a user stored any other way could not be found
+ * and could be created a second time.
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
@@ -25,12 +30,22 @@ export const FIRST_USER_LOCK_KEY = '7305528140966231745';
 /** better-auth's provider id for email-and-password credentials. */
 const CREDENTIAL_PROVIDER_ID = 'credential';
 
+/**
+ * The form an address is stored and looked up in: trimmed and lower-cased.
+ * Anything that is not a string becomes the empty string, which no stored
+ * user has. Internal to the package; lookups elsewhere use the same rule.
+ */
+export function storedEmailForm(email: unknown): string {
+  return typeof email === 'string' ? email.trim().toLowerCase() : '';
+}
+
 /** Any Drizzle Postgres handle that can open a transaction: the database
  * itself, or an enclosing transaction (which nests as a savepoint). */
 export type UserCreationExecutor = PgDatabase<PgQueryResultHKT>;
 
 export type CreateUserInput = {
   readonly id: string;
+  /** Stored trimmed and lower-cased. Must not be empty once trimmed. */
   readonly email: string;
   readonly name: string;
   readonly roleKey: string;
@@ -59,12 +74,24 @@ export type CreateUserOptions = {
  * sees a row. Reading "zero users" in one statement and inserting in
  * another without that lock is exactly the race that would mint two
  * superadmins. The lock releases on COMMIT or ROLLBACK by itself.
+ *
+ * The address is stored trimmed and lower-cased, so `' Ada@Example.TEST '`
+ * becomes `ada@example.test`, and a later creation for that address in any
+ * case hits the unique constraint instead of adding a second row. An
+ * address that is empty once trimmed throws `TypeError` before any
+ * statement runs.
  */
 export async function createUserWithRole(
   db: UserCreationExecutor,
   input: CreateUserInput,
   options?: CreateUserOptions,
 ): Promise<CreateUserResult> {
+  const email = storedEmailForm(input.email);
+  if (email.length === 0) {
+    throw new TypeError(
+      '@plakboek/auth: a user needs an email address that is not blank',
+    );
+  }
   const now = options?.now ?? (() => new Date());
 
   return await db.transaction(async (tx) => {
@@ -81,7 +108,7 @@ export async function createUserWithRole(
 
     await tx.insert(user).values({
       id: input.id,
-      email: input.email,
+      email,
       name: input.name,
       role: roleKey,
       createdAt,
