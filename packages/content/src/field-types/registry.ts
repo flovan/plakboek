@@ -11,9 +11,15 @@
  * ever one of the type's own declared `widgets`.
  */
 import type { z } from 'zod';
+import { booleanFieldType } from './boolean.js';
+import { dateTimeFieldType } from './date-time.js';
+import { integerFieldType } from './integer.js';
 import { jsonFieldType } from './json.js';
 import { longTextFieldType } from './long-text.js';
+import { multiSelectFieldType } from './multi-select.js';
+import { numberFieldType } from './number.js';
 import { richTextFieldType } from './rich-text.js';
+import { selectFieldType } from './select.js';
 import { shortTextFieldType } from './short-text.js';
 import { slugFieldFieldType } from './slug-field.js';
 import { urlFieldType } from './url.js';
@@ -94,6 +100,12 @@ export function registerFieldType<O>(definition: FieldTypeDefinition<O>): void {
 registerFieldType(shortTextFieldType);
 registerFieldType(longTextFieldType);
 registerFieldType(richTextFieldType);
+registerFieldType(numberFieldType);
+registerFieldType(integerFieldType);
+registerFieldType(booleanFieldType);
+registerFieldType(dateTimeFieldType);
+registerFieldType(selectFieldType);
+registerFieldType(multiSelectFieldType);
 registerFieldType(slugFieldFieldType);
 registerFieldType(urlFieldType);
 registerFieldType(jsonFieldType);
