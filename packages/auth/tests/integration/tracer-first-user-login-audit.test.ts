@@ -160,7 +160,10 @@ describe('tracer: first user bootstraps, signs in, and performs one audited muta
       const firstRun = await runMigrations({
         connectionString: testDatabase.connectionString,
       });
-      expect(firstRun.applied).toEqual(['0001_auth_core']);
+      expect(firstRun.applied[0]).toBe('0001_auth_core');
+      expect(
+        firstRun.applied.filter((name) => name === '0001_auth_core'),
+      ).toHaveLength(1);
       const secondRun = await runMigrations({
         connectionString: testDatabase.connectionString,
       });
@@ -381,12 +384,18 @@ describe('tracer: first user bootstraps, signs in, and performs one audited muta
     const testDatabase: TestDatabase = await createTestDatabase();
     const handles: Db[] = [];
     try {
-      // Two overlapping migrators apply 0001_auth_core exactly once.
+      // Two overlapping migrators apply 0001_auth_core exactly once (and
+      // every other registered migration -- e.g. 0002_content_engine --
+      // exactly once each, with no duplicates across the two runs).
       const runs = await Promise.all([
         runMigrations({ connectionString: testDatabase.connectionString }),
         runMigrations({ connectionString: testDatabase.connectionString }),
       ]);
-      expect(runs.flatMap((run) => run.applied)).toEqual(['0001_auth_core']);
+      const flattenedApplied = runs.flatMap((run) => run.applied);
+      expect(
+        flattenedApplied.filter((name) => name === '0001_auth_core'),
+      ).toHaveLength(1);
+      expect(new Set(flattenedApplied).size).toBe(flattenedApplied.length);
 
       const handle = createDb({
         connectionString: testDatabase.connectionString,

@@ -69,9 +69,13 @@ gives up waiting for the lock before the first call finishes.
 
 `MIGRATIONS` starts with `0001_auth_core`, which creates the authentication
 tables (`"user"`, `session`, `account`, `verification`, `two_factor`) and
-the append-only `audit_log`. See [`MIGRATIONS.md`](./MIGRATIONS.md) for how
-later migrations are added, the transactional-vs-existence-guarded-statement
-decision, and what each thrown error class means.
+the append-only `audit_log`. `0002_content_engine` follows it, creating the
+content engine tables (`content_types`, `content_type_fields`,
+`content_entries`, `entry_revisions` and their history, seed, reference and
+settings tables) used by `@plakboek/content`. See
+[`MIGRATIONS.md`](./MIGRATIONS.md) for how later migrations are added, the
+transactional-vs-existence-guarded-statement decision, and what each thrown
+error class means.
 
 ## Errors
 
