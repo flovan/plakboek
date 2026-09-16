@@ -11,7 +11,12 @@
  * ever one of the type's own declared `widgets`.
  */
 import type { z } from 'zod';
+import { jsonFieldType } from './json.js';
+import { longTextFieldType } from './long-text.js';
+import { richTextFieldType } from './rich-text.js';
 import { shortTextFieldType } from './short-text.js';
+import { slugFieldFieldType } from './slug-field.js';
+import { urlFieldType } from './url.js';
 
 /** The 16 field types (FIELD-02), in the same order as
  * `content_type_fields_field_type_check` in `0002_content_engine`. */
@@ -78,13 +83,20 @@ export function registerFieldType<O>(definition: FieldTypeDefinition<O>): void {
   );
 }
 
-// short-text.ts exports a plain FieldTypeDefinition object and imports only
-// the *type* of FieldTypeDefinition back from this module (`import type`,
-// erased at compile time) -- never a value -- so registering it here, after
-// `registry` above, carries no circular-import/TDZ risk. Plan 03-03 adds the
-// remaining fifteen field types the same way: one import plus one
-// `registerFieldType` call, appended here.
+// Each field-type module exports a plain FieldTypeDefinition object and
+// imports only the *type* of FieldTypeDefinition back from this module
+// (`import type`, erased at compile time) -- never a value -- so
+// registering it here, after `registry` above, carries no
+// circular-import/TDZ risk. `repeater.ts` is the one exception: it needs
+// `getFieldTypeDefinition`/`isFieldType` as real values to resolve its
+// sub-fields, but only calls them from inside its own functions, never at
+// its own module top level -- see `repeater.ts`'s header comment.
 registerFieldType(shortTextFieldType);
+registerFieldType(longTextFieldType);
+registerFieldType(richTextFieldType);
+registerFieldType(slugFieldFieldType);
+registerFieldType(urlFieldType);
+registerFieldType(jsonFieldType);
 
 /** Thrown when a `field_type` string has no registered definition -- a
  * value the database CHECK constraint allows but this build's field-type

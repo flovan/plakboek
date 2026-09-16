@@ -1,6 +1,8 @@
 /**
  * The `short_text` field type: single-line text, no `\r`/`\n`, an optional
- * min/max length. Plan 03-03 adds the `pattern` option.
+ * min/max length and an optional whole-value `pattern` (T-03-12: guarded at
+ * define time by `isSafePattern`, never compiled per-request against an
+ * unvalidated expression).
  *
  * Exports a plain `FieldTypeDefinition` object; `registry.ts` is the one
  * place that calls `registerFieldType`, so this module only ever imports
@@ -8,6 +10,7 @@
  * compile time, never a runtime value) -- no circular import.
  */
 import { z } from 'zod';
+import { isSafePattern } from './pattern-safety.js';
 import type { FieldTypeDefinition } from './registry.js';
 
 export const SHORT_TEXT_MAX_LENGTH = 1000;
@@ -16,6 +19,7 @@ const shortTextOptionsSchema = z
   .strictObject({
     minLength: z.int().min(0).optional(),
     maxLength: z.int().min(1).max(SHORT_TEXT_MAX_LENGTH).optional(),
+    pattern: z.string().optional(),
   })
   .refine(
     (options) =>
@@ -23,6 +27,11 @@ const shortTextOptionsSchema = z
       options.maxLength === undefined ||
       options.minLength <= options.maxLength,
     { message: 'minLength must be less than or equal to maxLength' },
+  )
+  .refine(
+    (options) =>
+      options.pattern === undefined || isSafePattern(options.pattern),
+    { message: 'pattern is not a safe regular expression', path: ['pattern'] },
   );
 
 type ShortTextOptions = z.infer<typeof shortTextOptionsSchema>;
@@ -36,6 +45,16 @@ function buildShortTextValueSchema(options: ShortTextOptions): z.ZodType {
     .max(options.maxLength ?? SHORT_TEXT_MAX_LENGTH);
   if (options.minLength !== undefined) {
     schema = schema.min(options.minLength);
+  }
+  if (options.pattern !== undefined) {
+    // Compiled once per `buildValueSchema` call (per field, not per value):
+    // the pattern already passed `isSafePattern` when the field was
+    // defined, so this is a bounded-cost, whole-value match (`^(?:...)$`).
+    const wholeValuePattern = new RegExp(`^(?:${options.pattern})$`, 'u');
+    schema = schema.regex(
+      wholeValuePattern,
+      'does not match the configured pattern',
+    );
   }
   return schema;
 }
