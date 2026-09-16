@@ -13,11 +13,15 @@
 import type { z } from 'zod';
 import { booleanFieldType } from './boolean.js';
 import { dateTimeFieldType } from './date-time.js';
+import { fileFieldType } from './file.js';
+import { imageFieldType } from './image.js';
 import { integerFieldType } from './integer.js';
 import { jsonFieldType } from './json.js';
 import { longTextFieldType } from './long-text.js';
 import { multiSelectFieldType } from './multi-select.js';
 import { numberFieldType } from './number.js';
+import { referenceFieldType } from './reference.js';
+import { repeaterFieldType } from './repeater.js';
 import { richTextFieldType } from './rich-text.js';
 import { selectFieldType } from './select.js';
 import { shortTextFieldType } from './short-text.js';
@@ -106,9 +110,13 @@ registerFieldType(booleanFieldType);
 registerFieldType(dateTimeFieldType);
 registerFieldType(selectFieldType);
 registerFieldType(multiSelectFieldType);
+registerFieldType(imageFieldType);
+registerFieldType(fileFieldType);
+registerFieldType(referenceFieldType);
+registerFieldType(jsonFieldType);
 registerFieldType(slugFieldFieldType);
 registerFieldType(urlFieldType);
-registerFieldType(jsonFieldType);
+registerFieldType(repeaterFieldType);
 
 /** Thrown when a `field_type` string has no registered definition -- a
  * value the database CHECK constraint allows but this build's field-type
