@@ -149,6 +149,28 @@ Phase 2's boot-time scan of stored role keys and the Phase 10/11 admin
 banner both consume this exact hook rather than re-implementing orphaned
 role detection.
 
+## Permission supersets
+
+`permissionsIncludeAll` answers one question: does a resolved permission
+set contain every permission of another one (D-44)? "Higher" here means
+superset, not rank -- equal sets qualify. It underlies edit-lock takeover in
+`@plakboek/content` and Phase 11's "act only on users/roles whose
+permissions you already hold" rule, both resolving their two sides through
+`PermissionResolver.resolve` before comparing them:
+
+```ts
+import {
+  createPermissionResolver,
+  permissionsIncludeAll,
+} from '@plakboek/permissions';
+
+const resolver = createPermissionResolver(roles);
+const canTakeOver = permissionsIncludeAll(
+  resolver.resolve(actorRoleKey),
+  resolver.resolve(currentHolderRoleKey),
+);
+```
+
 ## Stability policy
 
 Permission strings are a published contract every host's role config
