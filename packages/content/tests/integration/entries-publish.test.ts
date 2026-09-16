@@ -18,7 +18,10 @@ import { defineContentConfig, type ContentDeps } from '../../src/config.js';
 import { createContentType, setTitleField } from '../../src/content-types.js';
 import { createEntry, getEntry } from '../../src/entries.js';
 import { addField, updateField } from '../../src/fields.js';
-import { UrlCollisionError, UrlPatternRequiredError } from '../../src/routing.js';
+import {
+  UrlCollisionError,
+  UrlPatternRequiredError,
+} from '../../src/routing.js';
 import {
   publishEntry,
   SlugRequiredError,
@@ -390,9 +393,12 @@ describe('Publishing an entry: slug rules, URL materialisation, URL history and 
     ]);
 
     const outcomes = [resultA, resultB];
-    const fulfilled = outcomes.filter((outcome) => outcome.status === 'fulfilled');
+    const fulfilled = outcomes.filter(
+      (outcome) => outcome.status === 'fulfilled',
+    );
     const rejected = outcomes.filter(
-      (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+      (outcome): outcome is PromiseRejectedResult =>
+        outcome.status === 'rejected',
     );
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
