@@ -28,10 +28,14 @@ import type {
 import { and, eq, sql } from 'drizzle-orm';
 import type { Permission } from '@plakboek/permissions';
 import type { ContentDeps } from './config.js';
-import { getEntry, loadEntryForUpdate, toEntryRecord } from './entries.js';
+import {
+  getEntry,
+  lockTranslationGroupForUpdate,
+  toEntryRecord,
+} from './entries.js';
 import { listFields } from './fields.js';
 import { assertRowsWritable } from './locks.js';
-import { EntryStateChangedError } from './publish.js';
+import { EntryStateChangedError, readWorkingCopy } from './publish.js';
 import { pruneSaveRevisions, recordRevision } from './revisions.js';
 import {
   assertPathAvailable,
@@ -49,8 +53,159 @@ import {
   SlugGenerationError,
 } from './slug.js';
 import { validateEntrySeo, type EntrySeo } from './seo.js';
-import type { EntryRecord } from './types.js';
+import type { EntryRecord, FieldDefinition } from './types.js';
 import { validateEntryData } from './validation.js';
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Structural equality over JSON-safe (jsonb-compatible) values: two
+ * `undefined`s are equal (both "no value"), any other mismatched pair
+ * involving `undefined` is not (D-19/D-23/D-26 treat a value going missing
+ * as a real change), and everything else compares by serialized shape so
+ * key order in an object never produces a false "changed". */
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+/** The subset of a content type row `applySyncedFieldChanges` needs -- a
+ * plain `string | null` for `revisionMode` (not the narrower `RevisionMode`
+ * union) since every caller already holds it as a raw column read and the
+ * function only ever compares it by string equality. */
+export type SyncableContentType = {
+  readonly drafts: boolean;
+  readonly revisions: boolean;
+  readonly revisionMode: string | null;
+};
+
+export type ApplySyncedFieldChangesInput = {
+  readonly row: EntryRecord;
+  readonly type: SyncableContentType;
+  readonly fields: readonly FieldDefinition[];
+  /** Key -> new value, for exactly the keys this row's own working copy
+   * should now hold; `applySyncedFieldChanges` reads the row's current
+   * working copy itself and merges `changes` on top of it. */
+  readonly changes: Readonly<Record<string, unknown>>;
+  readonly authorId: string | null;
+  readonly now: Date;
+};
+
+/**
+ * Applies `changes` onto one row's own working copy through the same
+ * draft-or-live branch an ordinary save uses (D-19, D-23, D-26): when the
+ * type has drafts on and the row is `published` or `scheduled`, the merged
+ * data is staged as a new pending `save` revision (the previous pending
+ * revision is deleted once nothing points to it, per D-13); otherwise the
+ * merged data is written live, recording a `publish` revision when the row
+ * is already published (a live write to published data is itself a publish
+ * event, matching a live save's own D-13 rule) or a `save` revision in
+ * `on_every_save` mode for a not-yet-published row. Bumps the row's
+ * `version` and `updated_at`; the caller prunes `save`-kind revisions
+ * afterward. Returns `false` (writing nothing) when every one of `changes`
+ * already matches the row's current working copy -- a no-op sync leaves the
+ * row's version untouched (D-23's "a group whose rows already agree is not
+ * rewritten"). Exported so `field-translatable.ts`'s translatable toggle
+ * applies its winner value to a differing row the same way
+ * `saveEntryInTransaction` syncs a shared field across a translation group.
+ */
+export async function applySyncedFieldChanges(
+  tx: AuditTransaction,
+  input: ApplySyncedFieldChangesInput,
+): Promise<boolean> {
+  const { row, type, fields, changes, authorId, now } = input;
+  const workingCopy = await readWorkingCopy(tx, row.id);
+  const workingData = isPlainObject(workingCopy.data) ? workingCopy.data : {};
+
+  const changedEntries = Object.entries(changes).filter(
+    ([key, value]) => !valuesEqual(value, workingData[key]),
+  );
+  if (changedEntries.length === 0) return false;
+
+  const mergedData: Record<string, unknown> = { ...workingData, ...changes };
+
+  const isPendingDraftBranch =
+    type.drafts && (row.status === 'published' || row.status === 'scheduled');
+
+  if (isPendingDraftBranch) {
+    const revisionId = await recordRevision(tx, {
+      entryId: row.id,
+      locale: row.locale,
+      kind: 'save',
+      data: mergedData,
+      seo: workingCopy.seo,
+      slug: workingCopy.slug,
+      fields,
+      authorId,
+      createdAt: now,
+    });
+    const previousPendingId = row.draftRevisionId;
+    await tx
+      .update(contentEntries)
+      .set({
+        draftRevisionId: revisionId,
+        version: sql`${contentEntries.version} + 1`,
+        updatedAt: now,
+        updatedBy: authorId,
+      })
+      .where(eq(contentEntries.id, row.id));
+
+    if (
+      previousPendingId !== null &&
+      (!type.revisions || type.revisionMode === 'on_publish')
+    ) {
+      await tx
+        .delete(entryRevisions)
+        .where(eq(entryRevisions.id, previousPendingId));
+    }
+    return true;
+  }
+
+  let liveRevisionId: string | null = null;
+  if (row.status === 'published' && type.revisions) {
+    liveRevisionId = await recordRevision(tx, {
+      entryId: row.id,
+      locale: row.locale,
+      kind: 'publish',
+      data: mergedData,
+      seo: workingCopy.seo,
+      slug: workingCopy.slug,
+      fields,
+      authorId,
+      createdAt: now,
+    });
+  } else if (type.revisions && type.revisionMode === 'on_every_save') {
+    await recordRevision(tx, {
+      entryId: row.id,
+      locale: row.locale,
+      kind: 'save',
+      data: mergedData,
+      seo: workingCopy.seo,
+      slug: workingCopy.slug,
+      fields,
+      authorId,
+      createdAt: now,
+    });
+  }
+
+  await tx
+    .update(contentEntries)
+    .set({
+      data: mergedData,
+      version: sql`${contentEntries.version} + 1`,
+      updatedAt: now,
+      updatedBy: authorId,
+      ...(liveRevisionId !== null ? { liveRevisionId } : {}),
+    })
+    .where(eq(contentEntries.id, row.id));
+  return true;
+}
 
 export type SaveEntryInput = {
   readonly entryId: string;
@@ -108,10 +263,10 @@ function asSlugSource(value: string | null): SlugSource {
  * Decides which permission gates this save, from an unlocked read (D-11):
  * `entries:publish` only when the type has drafts disabled and the row is
  * currently `published`, `entries:edit` otherwise. A missing entry defaults
- * to `entries:edit` -- the mutation's own `loadEntryForUpdate` throws
- * `EntryNotFoundError` for that case regardless of which permission was
- * checked. Exported so `revisions.ts`'s `restoreRevision` decides its own
- * permission the same way an ordinary save does.
+ * to `entries:edit` -- the mutation's own `lockTranslationGroupForUpdate`
+ * throws `EntryNotFoundError` for that case regardless of which permission
+ * was checked. Exported so `revisions.ts`'s `restoreRevision` decides its
+ * own permission the same way an ordinary save does.
  */
 export async function decideSavePermission(
   db: AuditDatabase,
@@ -264,11 +419,14 @@ export async function saveEntryInTransaction(
 ): Promise<SaveEntryTransactionResult> {
   const { permission, now } = context;
 
-  // loadEntryForUpdate both confirms the entry exists (EntryNotFoundError
-  // otherwise) and locks the row FOR UPDATE for the duration of this
-  // transaction, so the explicit version check below and the final
-  // UPDATE's WHERE clause can never disagree with each other.
-  const current = await loadEntryForUpdate(tx, input.entryId);
+  // lockTranslationGroupForUpdate both confirms the entry exists
+  // (EntryNotFoundError otherwise) and locks every row of its translation
+  // group, in locale order, for the duration of this transaction (plan
+  // 03-10) -- so the explicit version check below and the final UPDATE's
+  // WHERE clause can never disagree with each other, and a shared-field
+  // sync below never races a sibling's own concurrent save.
+  const { origin: current, rows: groupRows } =
+    await lockTranslationGroupForUpdate(tx, input.entryId);
 
   // Version check first (D-42, D-44): a base version that no longer
   // matches is a conflict regardless of locking. The row is already
@@ -323,6 +481,39 @@ export async function saveEntryInTransaction(
 
   const fields = await listFields(tx, current.contentTypeId);
   const validatedData = validateEntryData(fields, input.data);
+
+  // D-19/D-26: a non-translatable field's value is shared by every row of
+  // the translation group. Diff against the origin's own working copy (its
+  // pending draft when one is staged, its live data otherwise) -- not just
+  // its live `data` column -- so a value staged in a prior save is the
+  // baseline a new save is compared against. A value going missing counts
+  // as a change too (`valuesEqual` treats one side being `undefined` as
+  // unequal, unless both are).
+  const originWorkingCopy = await readWorkingCopy(tx, current.id);
+  const originWorkingData = isPlainObject(originWorkingCopy.data)
+    ? originWorkingCopy.data
+    : {};
+  const nonTranslatableKeys = fields
+    .filter((field) => !field.translatable)
+    .map((field) => field.key);
+  const changedSharedKeys = nonTranslatableKeys.filter(
+    (key) => !valuesEqual(validatedData[key], originWorkingData[key]),
+  );
+
+  // Rows whose locale was removed from ContentConfig are left untouched by
+  // shared-field sync (D-25) -- they are simply excluded from the sibling
+  // set below, never read or written by this save.
+  const siblings = groupRows.filter(
+    (row) => row.id !== current.id && deps.config.locales.includes(row.locale),
+  );
+
+  // D-45: refuses this save on the first sibling holding a live lock by
+  // someone else, before any row -- origin included -- is written, whenever
+  // a shared value is about to change. A save touching only translatable
+  // fields never reaches this check, so a locked sibling never blocks it.
+  if (changedSharedKeys.length > 0) {
+    assertRowsWritable(siblings, type, actor.userId, now());
+  }
 
   let validatedSeo: EntrySeo | undefined;
   if (input.seo !== undefined) {
@@ -525,18 +716,55 @@ export async function saveEntryInTransaction(
     }
   }
 
+  const revisionCap = await getRevisionCap(tx);
+
   // D-14/D-16: `save`-kind history is bounded to the project-wide cap after
   // every save, whichever branch ran above -- a no-op query when the cap is
   // 0 (uncapped) or this entry's type never writes `save`-kind rows.
   await pruneSaveRevisions(tx, {
-    cap: await getRevisionCap(tx),
+    cap: revisionCap,
     entryId: current.id,
   });
 
+  // D-19/D-26: propagate every changed shared value to every enabled
+  // sibling of the group, each through its own draft-or-live branch
+  // (`applySyncedFieldChanges`) -- a sibling whose working copy already
+  // holds the new value is left untouched (no version bump, no revision).
+  const syncedLocales: string[] = [];
+  if (changedSharedKeys.length > 0) {
+    const changes: Record<string, unknown> = {};
+    for (const key of changedSharedKeys) {
+      changes[key] = validatedData[key];
+    }
+    for (const sibling of siblings) {
+      const wrote = await applySyncedFieldChanges(tx, {
+        row: sibling,
+        type,
+        fields,
+        changes,
+        authorId: actor.userId,
+        now: updatedAt,
+      });
+      if (wrote) {
+        syncedLocales.push(sibling.locale);
+        await pruneSaveRevisions(tx, { cap: revisionCap, entryId: sibling.id });
+      }
+    }
+  }
+
   const record = toEntryRecord(row);
+  const after =
+    changedSharedKeys.length > 0
+      ? {
+          ...entrySnapshot(record),
+          originLocale: current.locale,
+          syncedLocales,
+        }
+      : entrySnapshot(record);
+
   return {
     result: record,
-    after: entrySnapshot(record),
+    after,
   };
 }
 

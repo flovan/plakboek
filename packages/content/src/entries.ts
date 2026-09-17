@@ -10,7 +10,7 @@ import type {
   AuditDatabase,
   AuditTransaction,
 } from '@plakboek/auth';
-import { eq, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import type { ContentDeps } from './config.js';
 import { listFields } from './fields.js';
 import { contentEntries, contentTypes } from './schema.js';
@@ -184,4 +184,38 @@ export async function loadEntryForUpdate(
     throw new EntryNotFoundError(entryId);
   }
   return toEntryRecord(row);
+}
+
+/**
+ * Locks every row of `entryId`'s translation group -- the group is found by
+ * a subquery on `entryId`'s own `translation_group`, and every row of it is
+ * locked `ORDER BY locale FOR UPDATE` (plan 03-10). Two saves from different
+ * locales of the same group therefore always request row locks in the same
+ * order, so they can never deadlock against each other. Throws
+ * `EntryNotFoundError` when `entryId` doesn't exist. Returns the row
+ * matching `entryId` as `origin` and every row of the group -- `origin`
+ * included -- as `rows`.
+ */
+export async function lockTranslationGroupForUpdate(
+  tx: AuditTransaction,
+  entryId: string,
+): Promise<{
+  readonly origin: EntryRecord;
+  readonly rows: readonly EntryRecord[];
+}> {
+  const groupRows = await tx
+    .select()
+    .from(contentEntries)
+    .where(
+      sql`${contentEntries.translationGroup} = (SELECT translation_group FROM content_entries WHERE id = ${entryId})`,
+    )
+    .orderBy(asc(contentEntries.locale))
+    .for('update');
+
+  const records = groupRows.map(toEntryRecord);
+  const origin = records.find((record) => record.id === entryId);
+  if (origin === undefined) {
+    throw new EntryNotFoundError(entryId);
+  }
+  return { origin, rows: records };
 }
