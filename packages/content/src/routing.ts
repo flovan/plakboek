@@ -12,10 +12,23 @@
  * `recordUrlHistory` only inserts (D-33 -- every change of a live path is
  * kept, so Phase 16 can redirect it).
  */
-import type { AuditTransaction } from '@plakboek/auth';
-import { and, eq, ne } from 'drizzle-orm';
-import { contentEntries, contentEntryUrlHistory } from './schema.js';
-import { resolveUrlPath, type UrlPathInput } from './url-pattern.js';
+import type {
+  AuditActor,
+  AuditDatabase,
+  AuditTransaction,
+} from '@plakboek/auth';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import type { ContentConfig, ContentDeps } from './config.js';
+import {
+  contentEntries,
+  contentEntryUrlHistory,
+  contentTypes,
+} from './schema.js';
+import {
+  parseUrlPattern,
+  resolveUrlPath,
+  type UrlPathInput,
+} from './url-pattern.js';
 
 /** Thrown by `computeEntryPath` when a routable content type has no URL
  * pattern configured yet (plan 03-08 owns setting it). */
@@ -187,4 +200,401 @@ export async function recordUrlHistory(
     reason: input.reason,
     changedAt: input.changedAt,
   });
+}
+
+/** Thrown when clearing a routable content type's URL pattern while any of
+ * its entries is still published (D-32's mirror for the "clear" case): those
+ * entries would lose their URLs with nothing left to resolve one. */
+export class UrlPatternInUseError extends Error {
+  readonly contentTypeId: string;
+  readonly publishedCount: number;
+
+  constructor(contentTypeId: string, publishedCount: number) {
+    super(
+      `@plakboek/content: content type "${contentTypeId}" cannot clear its URL pattern while ${publishedCount} entr${publishedCount === 1 ? 'y is' : 'ies are'} published`,
+    );
+    this.name = 'UrlPatternInUseError';
+    this.contentTypeId = contentTypeId;
+    this.publishedCount = publishedCount;
+  }
+}
+
+/** One `(locale, path)` pair a URL pattern change would give to more than
+ * one entry -- inside the type being changed, or against a published entry
+ * of another type entirely (D-32). */
+export type UrlPatternCollision = {
+  readonly locale: string;
+  readonly path: string;
+  readonly entryIds: readonly string[];
+};
+
+/** Thrown by `setUrlPattern` when the new pattern would give two published
+ * entries the same `(locale, path)` -- listing every colliding entry so the
+ * caller can show them. Nothing is changed when this is thrown. */
+export class UrlPatternCollisionError extends Error {
+  readonly collisions: readonly UrlPatternCollision[];
+
+  constructor(collisions: readonly UrlPatternCollision[]) {
+    super(
+      [
+        '@plakboek/content: URL pattern change would collide:',
+        ...collisions.map(
+          (collision) =>
+            `- "${collision.path}" (${collision.locale}): ${collision.entryIds.join(', ')}`,
+        ),
+      ].join('\n'),
+    );
+    this.name = 'UrlPatternCollisionError';
+    this.collisions = collisions;
+  }
+}
+
+export type ComputeUrlPatternChangeImpactInput = {
+  readonly contentTypeKey: string;
+  readonly urlPattern: string | null;
+};
+
+export type UrlPatternChangeImpact = {
+  readonly publishedEntries: number;
+  readonly changedPaths: number;
+  readonly collisions: readonly UrlPatternCollision[];
+};
+
+/** Builds a stable map key for a `(locale, path)` pair via
+ * `JSON.stringify` -- neither is validated against containing an
+ * arbitrary delimiter character, so a plain string join isn't safe. */
+function localePathKey(locale: string, path: string): string {
+  return JSON.stringify([locale, path]);
+}
+
+/** The inverse of `localePathKey`, without an unsafe type assertion on
+ * `JSON.parse`'s `any` result. */
+function parseLocalePathKey(key: string): {
+  readonly locale: string;
+  readonly path: string;
+} {
+  const parsed: unknown = JSON.parse(key);
+  if (
+    Array.isArray(parsed) &&
+    parsed.length === 2 &&
+    typeof parsed[0] === 'string' &&
+    typeof parsed[1] === 'string'
+  ) {
+    return { locale: parsed[0], path: parsed[1] };
+  }
+  throw new TypeError(`@plakboek/content: malformed locale/path key "${key}"`);
+}
+
+/**
+ * Reports what changing a routable content type's URL pattern to
+ * `input.urlPattern` would do to its currently published entries (D-32):
+ * how many entries are published, how many of their paths would actually
+ * change, and every collision the change would cause -- inside the type
+ * (two of its own entries landing on the same new path) and against another
+ * type (a new path already held by a published entry elsewhere). No
+ * uniqueness is enforced beyond this (D-31); this only reports what the
+ * *change* would move.
+ *
+ * Read-only and takes a plain `db`, so it runs standalone for a caller
+ * previewing a change, and again inside `setUrlPattern`'s own transaction
+ * (passing its `tx`) so the write can never drift from what was previewed.
+ */
+export async function computeUrlPatternChangeImpact(
+  db: AuditDatabase,
+  config: ContentConfig,
+  input: ComputeUrlPatternChangeImpactInput,
+): Promise<UrlPatternChangeImpact> {
+  const [type] = await db
+    .select({ id: contentTypes.id })
+    .from(contentTypes)
+    .where(eq(contentTypes.key, input.contentTypeKey))
+    .limit(1);
+  if (type === undefined) {
+    throw new Error(
+      `@plakboek/content: no content type registered for key "${input.contentTypeKey}"`,
+    );
+  }
+
+  const parsed =
+    input.urlPattern === null ? null : parseUrlPattern(input.urlPattern);
+
+  const publishedRows = await db
+    .select({
+      id: contentEntries.id,
+      locale: contentEntries.locale,
+      slug: contentEntries.slug,
+      publicId: contentEntries.publicId,
+      firstPublishedAt: contentEntries.firstPublishedAt,
+      resolvedPath: contentEntries.resolvedPath,
+    })
+    .from(contentEntries)
+    .where(
+      and(
+        eq(contentEntries.contentTypeId, type.id),
+        eq(contentEntries.status, 'published'),
+      ),
+    );
+
+  type NewPath = { readonly locale: string; readonly path: string | null };
+  const newPathsById = new Map<string, NewPath>();
+  let changedPaths = 0;
+  for (const row of publishedRows) {
+    const path =
+      parsed === null
+        ? null
+        : resolveUrlPath(
+            parsed,
+            {
+              slug: row.slug,
+              publicId: row.publicId,
+              firstPublishedAt: row.firstPublishedAt,
+            },
+            config.timezone,
+          );
+    newPathsById.set(row.id, { locale: row.locale, path });
+    if (path !== row.resolvedPath) changedPaths += 1;
+  }
+
+  // Collisions inside this type: two of its own entries landing on the same
+  // new (locale, path).
+  const groupedByLocalePath = new Map<string, string[]>();
+  for (const [entryId, { locale, path }] of newPathsById) {
+    if (path === null) continue;
+    const key = localePathKey(locale, path);
+    const existing = groupedByLocalePath.get(key);
+    if (existing === undefined) groupedByLocalePath.set(key, [entryId]);
+    else existing.push(entryId);
+  }
+
+  const collisionSets = new Map<string, Set<string>>();
+  for (const [key, entryIds] of groupedByLocalePath) {
+    if (entryIds.length > 1) {
+      collisionSets.set(key, new Set(entryIds));
+    }
+  }
+
+  // Collisions against another content type: a new path already held by a
+  // published entry that isn't part of this type.
+  for (const [entryId, { locale, path }] of newPathsById) {
+    if (path === null) continue;
+    const [conflict] = await db
+      .select({ id: contentEntries.id })
+      .from(contentEntries)
+      .where(
+        and(
+          eq(contentEntries.locale, locale),
+          eq(contentEntries.resolvedPath, path),
+          ne(contentEntries.contentTypeId, type.id),
+        ),
+      )
+      .limit(1);
+    if (conflict !== undefined) {
+      const key = localePathKey(locale, path);
+      const existing = collisionSets.get(key) ?? new Set<string>();
+      existing.add(entryId);
+      existing.add(conflict.id);
+      collisionSets.set(key, existing);
+    }
+  }
+
+  const collisions: UrlPatternCollision[] = [];
+  for (const [key, entryIds] of collisionSets) {
+    const { locale, path } = parseLocalePathKey(key);
+    collisions.push({ locale, path, entryIds: [...entryIds] });
+  }
+
+  return {
+    publishedEntries: publishedRows.length,
+    changedPaths,
+    collisions,
+  };
+}
+
+export type SetUrlPatternInput = {
+  readonly contentTypeKey: string;
+  readonly urlPattern: string | null;
+};
+
+export type SetUrlPatternResult = {
+  readonly contentTypeId: string;
+  readonly urlPattern: string | null;
+  readonly changedPaths: number;
+};
+
+/**
+ * Changes a routable content type's URL pattern (D-31, D-32, D-33), for a
+ * role holding `content-types:edit`. Locks the type row (`FOR UPDATE`) for
+ * the duration of the change. A non-routable type refuses with
+ * `UrlPatternRequiredError`; clearing the pattern (`null`) while any entry
+ * of the type is published refuses with `UrlPatternInUseError` instead --
+ * those entries would lose their URLs. Otherwise recomputes the change's
+ * impact inside this same transaction (`computeUrlPatternChangeImpact`, so
+ * nothing can drift between the check and the write) and refuses with
+ * `UrlPatternCollisionError` the moment it finds any collision, changing
+ * nothing.
+ *
+ * On success, every affected published entry's `resolved_path` is cleared
+ * in one statement first, then set to its new value in a second -- so two
+ * entries swapping paths under the new pattern never trip the unique index
+ * mid-update -- and each old path is recorded in URL history with reason
+ * `pattern_changed` before it's overwritten. Runs through
+ * `deps.recorder.run` (`content-types:edit` /
+ * `content-type.set-url-pattern`).
+ */
+export async function setUrlPattern(
+  deps: ContentDeps,
+  actor: AuditActor,
+  input: SetUrlPatternInput,
+): Promise<SetUrlPatternResult> {
+  const now = deps.now ?? (() => new Date());
+
+  return await deps.recorder.run(
+    actor,
+    {
+      permission: 'content-types:edit',
+      action: 'content-type.set-url-pattern',
+      entityType: 'content_type',
+    },
+    async (tx) => {
+      const [type] = await tx
+        .select({ id: contentTypes.id, routable: contentTypes.routable })
+        .from(contentTypes)
+        .where(eq(contentTypes.key, input.contentTypeKey))
+        .for('update');
+      if (type === undefined) {
+        throw new Error(
+          `@plakboek/content: no content type registered for key "${input.contentTypeKey}"`,
+        );
+      }
+      if (!type.routable) {
+        throw new UrlPatternRequiredError(type.id);
+      }
+
+      if (input.urlPattern === null) {
+        const [publishedCountRow] = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(contentEntries)
+          .where(
+            and(
+              eq(contentEntries.contentTypeId, type.id),
+              eq(contentEntries.status, 'published'),
+            ),
+          );
+        const publishedCount = publishedCountRow?.count ?? 0;
+        if (publishedCount > 0) {
+          throw new UrlPatternInUseError(type.id, publishedCount);
+        }
+      }
+
+      const impact = await computeUrlPatternChangeImpact(tx, deps.config, {
+        contentTypeKey: input.contentTypeKey,
+        urlPattern: input.urlPattern,
+      });
+      if (impact.collisions.length > 0) {
+        throw new UrlPatternCollisionError(impact.collisions);
+      }
+
+      const parsed =
+        input.urlPattern === null ? null : parseUrlPattern(input.urlPattern);
+
+      const publishedRows = await tx
+        .select({
+          id: contentEntries.id,
+          locale: contentEntries.locale,
+          translationGroup: contentEntries.translationGroup,
+          slug: contentEntries.slug,
+          publicId: contentEntries.publicId,
+          firstPublishedAt: contentEntries.firstPublishedAt,
+          resolvedPath: contentEntries.resolvedPath,
+        })
+        .from(contentEntries)
+        .where(
+          and(
+            eq(contentEntries.contentTypeId, type.id),
+            eq(contentEntries.status, 'published'),
+          ),
+        );
+
+      type ChangedPath = {
+        readonly id: string;
+        readonly locale: string;
+        readonly translationGroup: string;
+        readonly oldPath: string;
+        readonly newPath: string | null;
+      };
+      const changed: ChangedPath[] = [];
+      for (const row of publishedRows) {
+        if (row.resolvedPath === null) continue;
+        const newPath =
+          parsed === null
+            ? null
+            : resolveUrlPath(
+                parsed,
+                {
+                  slug: row.slug,
+                  publicId: row.publicId,
+                  firstPublishedAt: row.firstPublishedAt,
+                },
+                deps.config.timezone,
+              );
+        if (newPath !== row.resolvedPath) {
+          changed.push({
+            id: row.id,
+            locale: row.locale,
+            translationGroup: row.translationGroup,
+            oldPath: row.resolvedPath,
+            newPath,
+          });
+        }
+      }
+
+      const updatedAt = now();
+
+      if (changed.length > 0) {
+        // Two statements -- clear every changed row's path first, then set
+        // the new ones -- so two entries swapping paths under the new
+        // pattern never trip the unique index mid-update.
+        await tx
+          .update(contentEntries)
+          .set({ resolvedPath: null })
+          .where(
+            inArray(
+              contentEntries.id,
+              changed.map((row) => row.id),
+            ),
+          );
+
+        for (const row of changed) {
+          await tx
+            .update(contentEntries)
+            .set({ resolvedPath: row.newPath })
+            .where(eq(contentEntries.id, row.id));
+          await recordUrlHistory(tx, {
+            entryId: row.id,
+            contentTypeId: type.id,
+            translationGroup: row.translationGroup,
+            locale: row.locale,
+            oldPath: row.oldPath,
+            reason: 'pattern_changed',
+            changedAt: updatedAt,
+          });
+        }
+      }
+
+      await tx
+        .update(contentTypes)
+        .set({ urlPattern: input.urlPattern, updatedAt })
+        .where(eq(contentTypes.id, type.id));
+
+      const result: SetUrlPatternResult = {
+        contentTypeId: type.id,
+        urlPattern: input.urlPattern,
+        changedPaths: changed.length,
+      };
+      return {
+        result,
+        after: { urlPattern: input.urlPattern, changedPaths: changed.length },
+      };
+    },
+  );
 }
