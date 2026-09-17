@@ -32,6 +32,7 @@ import { getEntry, loadEntryForUpdate, toEntryRecord } from './entries.js';
 import { listFields } from './fields.js';
 import { assertRowsWritable } from './locks.js';
 import { EntryStateChangedError } from './publish.js';
+import { pruneSaveRevisions, recordRevision } from './revisions.js';
 import {
   assertPathAvailable,
   computeEntryPath,
@@ -39,6 +40,7 @@ import {
   urlCollisionFromUniqueViolation,
 } from './routing.js';
 import { contentEntries, contentTypes, entryRevisions } from './schema.js';
+import { getRevisionCap } from './settings.js';
 import {
   assertEntrySlugAvailable,
   generateUniqueEntrySlug,
@@ -83,7 +85,9 @@ export class StaleVersionError extends Error {
   }
 }
 
-function entrySnapshot(entry: EntryRecord) {
+/** Exported so `revisions.ts`'s `restoreRevision` can build the same
+ * `before`/`after` audit shape a normal save uses. */
+export function entrySnapshot(entry: EntryRecord) {
   return {
     version: entry.version,
     status: entry.status,
@@ -106,9 +110,10 @@ function asSlugSource(value: string | null): SlugSource {
  * currently `published`, `entries:edit` otherwise. A missing entry defaults
  * to `entries:edit` -- the mutation's own `loadEntryForUpdate` throws
  * `EntryNotFoundError` for that case regardless of which permission was
- * checked.
+ * checked. Exported so `revisions.ts`'s `restoreRevision` decides its own
+ * permission the same way an ordinary save does.
  */
-async function decideSavePermission(
+export async function decideSavePermission(
   db: AuditDatabase,
   entryId: string,
 ): Promise<Permission> {
@@ -200,11 +205,29 @@ async function resolveSlug(
   }
 }
 
+export type SaveEntryContext = {
+  /** The permission `saveEntry` decided from an unlocked read before its
+   * own transaction opened -- re-verified here against the freshly locked
+   * row (D-11). */
+  readonly permission: Permission;
+  readonly now: () => Date;
+};
+
+export type SaveEntryTransactionResult = {
+  readonly result: EntryRecord;
+  readonly after: unknown;
+};
+
 /**
- * Saves an entry (D-11, D-12, D-27, D-28, D-42, D-43, D-45, D-46, D-47).
- * Loads and locks its row (`FOR UPDATE`), checks its version against
+ * The transaction body every save runs (D-11, D-12, D-27, D-28, D-42, D-43,
+ * D-45, D-46, D-47, D-13). Exported so `revisions.ts`'s `restoreRevision`
+ * replays a mapped revision through the exact same rules an ordinary save
+ * follows -- drafts, locks, versions, slugs and validation all behave
+ * identically whether the caller is `saveEntry` or a restore.
+ *
+ * Loads and locks the row (`FOR UPDATE`), checks its version against
  * `input.baseVersion` (D-42), loads and locks the type row (`FOR SHARE`),
- * re-verifies the permission decided before this mutation opened
+ * re-verifies `context.permission` against the freshly locked row
  * (`EntryStateChangedError` on a mismatch -- e.g. the row was published in
  * the gap), checks the edit lock (`assertRowsWritable`), then validates
  * `data` (FIELD-06, D-12) and, when present, `seo` (D-46) against the
@@ -212,20 +235,317 @@ async function resolveSlug(
  * (`resolveSlug`), and writes:
  *
  * - **Pending draft** (drafts enabled, row `published` or `scheduled`,
- *   D-47): inserts a new `entry_revisions` row of kind `save` holding the
- *   validated data/SEO/slug, points `draft_revision_id` at it, bumps
- *   `version`. Live `data`, `seo`, `slug` and `resolved_path` are untouched.
- *   The previously pending row is deleted once nothing points to it, when
- *   the type has revisions disabled or is in `on_publish` mode (plan 03-09
- *   keeps it as history in `on_every_save` mode).
+ *   D-47): records a new `entry_revisions` row of kind `save`
+ *   (`recordRevision`) holding the validated data/SEO/slug, points
+ *   `draft_revision_id` at it, bumps `version`. Live `data`, `seo`, `slug`
+ *   and `resolved_path` are untouched. The previously pending row is
+ *   deleted once nothing points to it, when the type has revisions
+ *   disabled or is in `on_publish` mode (D-13 keeps it as history in
+ *   `on_every_save` mode).
  * - **Live** (never published, or drafts disabled): updates `data`, `slug`,
  *   `slugSource` directly, `seo` only when the input carried one. When the
  *   row is `published` and the resolved path changes, records URL history
  *   (D-33) and refuses a collision (`assertPathAvailable`, backstopped by
- *   the unique-violation mapping).
- *
- * Runs through `deps.recorder.run` (`entries:edit` or `entries:publish` /
- * `entry.save`).
+ *   the unique-violation mapping). A live save of an already-published
+ *   entry (only reachable on a drafts-off type, D-11) records a `publish`
+ *   revision and moves `live_revision_id` -- the data becoming live *is* a
+ *   publish event, regardless of the type's revision mode; an entry not yet
+ *   published records a `save` revision instead, but only in
+ *   `on_every_save` mode. After either branch, `save`-kind history is
+ *   pruned to the project-wide cap (D-14, D-16); `publish`-kind rows are
+ *   never touched by this.
+ */
+export async function saveEntryInTransaction(
+  tx: AuditTransaction,
+  deps: ContentDeps,
+  actor: AuditActor,
+  context: SaveEntryContext,
+  input: SaveEntryInput,
+): Promise<SaveEntryTransactionResult> {
+  const { permission, now } = context;
+
+  // loadEntryForUpdate both confirms the entry exists (EntryNotFoundError
+  // otherwise) and locks the row FOR UPDATE for the duration of this
+  // transaction, so the explicit version check below and the final
+  // UPDATE's WHERE clause can never disagree with each other.
+  const current = await loadEntryForUpdate(tx, input.entryId);
+
+  // Version check first (D-42, D-44): a base version that no longer
+  // matches is a conflict regardless of locking. The row is already
+  // locked FOR UPDATE, so nothing can change its version between this
+  // check and the final UPDATE below.
+  if (current.version !== input.baseVersion) {
+    throw new StaleVersionError(
+      input.entryId,
+      input.baseVersion,
+      current.version,
+    );
+  }
+
+  // Locks the type row for the duration of this save, so a concurrent
+  // field delete/rename can't remove a field this save is about to
+  // validate against mid-transaction; also carries every setting the
+  // rest of this mutation needs.
+  const [type] = await tx
+    .select({
+      id: contentTypes.id,
+      routable: contentTypes.routable,
+      urlPattern: contentTypes.urlPattern,
+      titleFieldKey: contentTypes.titleFieldKey,
+      seo: contentTypes.seo,
+      drafts: contentTypes.drafts,
+      revisions: contentTypes.revisions,
+      revisionMode: contentTypes.revisionMode,
+      editLocking: contentTypes.editLocking,
+    })
+    .from(contentTypes)
+    .where(eq(contentTypes.id, current.contentTypeId))
+    .for('share');
+  if (type === undefined) {
+    throw new Error(
+      `@plakboek/content: no content type found for entry "${input.entryId}"`,
+    );
+  }
+
+  // The permission decided before this mutation opened must still hold
+  // against the freshly locked row (D-11): a status/drafts change in
+  // the gap (e.g. someone else just published it) is a race, not a
+  // permission problem -- the caller retries.
+  const decidedPublishBranch = permission === 'entries:publish';
+  const actualPublishBranch = !type.drafts && current.status === 'published';
+  if (decidedPublishBranch !== actualPublishBranch) {
+    throw new EntryStateChangedError(input.entryId);
+  }
+
+  // Lock check second (D-43/D-45): refuses when another user holds a
+  // live lock on this row; a no-op when the type has no edit locking.
+  assertRowsWritable([current], type, actor.userId, now());
+
+  const fields = await listFields(tx, current.contentTypeId);
+  const validatedData = validateEntryData(fields, input.data);
+
+  let validatedSeo: EntrySeo | undefined;
+  if (input.seo !== undefined) {
+    validatedSeo = validateEntrySeo(input.seo, { seoEnabled: type.seo });
+  }
+
+  const [slugSourceRow] = await tx
+    .select({ slugSource: contentEntries.slugSource })
+    .from(contentEntries)
+    .where(eq(contentEntries.id, input.entryId))
+    .limit(1);
+
+  const { slug: resolvedSlug, slugSource: resolvedSlugSource } =
+    await resolveSlug(
+      tx,
+      type,
+      {
+        id: current.id,
+        contentTypeId: current.contentTypeId,
+        locale: current.locale,
+        slug: current.slug,
+        slugSource: asSlugSource(slugSourceRow?.slugSource ?? null),
+        firstPublishedAt: current.firstPublishedAt,
+      },
+      input.slug,
+      validatedData,
+    );
+
+  const updatedAt = now();
+  const isPendingDraftBranch =
+    type.drafts &&
+    (current.status === 'published' || current.status === 'scheduled');
+
+  let row: typeof contentEntries.$inferSelect | undefined;
+
+  if (isPendingDraftBranch) {
+    const stagedSeo = input.seo !== undefined ? validatedSeo : current.seo;
+
+    const revisionId = await recordRevision(tx, {
+      entryId: current.id,
+      locale: current.locale,
+      kind: 'save',
+      data: validatedData,
+      seo: stagedSeo,
+      slug: resolvedSlug,
+      fields,
+      authorId: actor.userId,
+      createdAt: updatedAt,
+    });
+
+    const previousPendingId = current.draftRevisionId;
+
+    [row] = await tx
+      .update(contentEntries)
+      .set({
+        draftRevisionId: revisionId,
+        version: sql`${contentEntries.version} + 1`,
+        updatedAt,
+        updatedBy: actor.userId,
+      })
+      .where(
+        and(
+          eq(contentEntries.id, input.entryId),
+          eq(contentEntries.version, input.baseVersion),
+        ),
+      )
+      .returning();
+    if (row === undefined) {
+      throw new StaleVersionError(
+        input.entryId,
+        input.baseVersion,
+        current.version,
+      );
+    }
+
+    // Replaces (never accumulates) the previous pending row once revisions
+    // are disabled, or in on_publish mode -- D-13 keeps it as history in
+    // on_every_save mode.
+    if (
+      previousPendingId !== null &&
+      (!type.revisions || type.revisionMode === 'on_publish')
+    ) {
+      await tx
+        .delete(entryRevisions)
+        .where(eq(entryRevisions.id, previousPendingId));
+    }
+  } else {
+    let path: string | null = current.resolvedPath;
+    if (current.status === 'published') {
+      path = computeEntryPath(
+        type,
+        {
+          slug: resolvedSlug,
+          publicId: current.publicId,
+          firstPublishedAt: current.firstPublishedAt,
+        },
+        deps.config.timezone,
+      );
+      if (path !== current.resolvedPath) {
+        if (current.resolvedPath !== null) {
+          await recordUrlHistory(tx, {
+            entryId: current.id,
+            contentTypeId: current.contentTypeId,
+            translationGroup: current.translationGroup,
+            locale: current.locale,
+            oldPath: current.resolvedPath,
+            reason: 'slug_changed',
+            changedAt: updatedAt,
+          });
+        }
+        if (path !== null) {
+          await assertPathAvailable(tx, {
+            path,
+            locale: current.locale,
+            entryId: current.id,
+          });
+        }
+      }
+    }
+
+    // A live write of already-published data (only reachable on a
+    // drafts-off type, D-11) is itself a publish event, regardless of the
+    // type's revision mode -- record a `publish` revision and move
+    // `live_revision_id`. Otherwise, an entry not yet published records a
+    // `save` revision, but only in `on_every_save` mode (D-13); on_publish
+    // mode writes nothing until the entry is actually published.
+    const effectiveSeo = input.seo !== undefined ? validatedSeo : current.seo;
+    let liveRevisionId: string | null = null;
+    if (current.status === 'published' && type.revisions) {
+      liveRevisionId = await recordRevision(tx, {
+        entryId: current.id,
+        locale: current.locale,
+        kind: 'publish',
+        data: validatedData,
+        seo: effectiveSeo,
+        slug: resolvedSlug,
+        fields,
+        authorId: actor.userId,
+        createdAt: updatedAt,
+      });
+    } else if (type.revisions && type.revisionMode === 'on_every_save') {
+      await recordRevision(tx, {
+        entryId: current.id,
+        locale: current.locale,
+        kind: 'save',
+        data: validatedData,
+        seo: effectiveSeo,
+        slug: resolvedSlug,
+        fields,
+        authorId: actor.userId,
+        createdAt: updatedAt,
+      });
+    }
+
+    try {
+      [row] = await tx
+        .update(contentEntries)
+        .set({
+          data: validatedData,
+          slug: resolvedSlug,
+          slugSource: resolvedSlugSource,
+          version: sql`${contentEntries.version} + 1`,
+          updatedAt,
+          updatedBy: actor.userId,
+          ...(input.seo !== undefined ? { seo: validatedSeo } : {}),
+          ...(current.status === 'published' ? { resolvedPath: path } : {}),
+          ...(liveRevisionId !== null ? { liveRevisionId } : {}),
+        })
+        .where(
+          and(
+            eq(contentEntries.id, input.entryId),
+            eq(contentEntries.version, input.baseVersion),
+          ),
+        )
+        .returning();
+    } catch (error) {
+      if (path !== null && current.status === 'published') {
+        const urlCollision = urlCollisionFromUniqueViolation(error, {
+          path,
+          locale: current.locale,
+        });
+        if (urlCollision !== undefined) throw urlCollision;
+      }
+      if (resolvedSlug !== null) {
+        const slugConflict = slugConflictFromUniqueViolation(error, {
+          slug: resolvedSlug,
+          locale: current.locale,
+          contentTypeId: current.contentTypeId,
+        });
+        if (slugConflict !== undefined) throw slugConflict;
+      }
+      throw error;
+    }
+    if (row === undefined) {
+      throw new StaleVersionError(
+        input.entryId,
+        input.baseVersion,
+        current.version,
+      );
+    }
+  }
+
+  // D-14/D-16: `save`-kind history is bounded to the project-wide cap after
+  // every save, whichever branch ran above -- a no-op query when the cap is
+  // 0 (uncapped) or this entry's type never writes `save`-kind rows.
+  await pruneSaveRevisions(tx, {
+    cap: await getRevisionCap(tx),
+    entryId: current.id,
+  });
+
+  const record = toEntryRecord(row);
+  return {
+    result: record,
+    after: entrySnapshot(record),
+  };
+}
+
+/**
+ * Saves an entry (D-11, D-12, D-27, D-28, D-42, D-43, D-45, D-46, D-47,
+ * D-13). Decides the permission from an unlocked read (D-11), then runs
+ * `saveEntryInTransaction` inside `deps.recorder.run` (`entries:edit` or
+ * `entries:publish` / `entry.save`). See `saveEntryInTransaction` for the
+ * full write contract.
  */
 export async function saveEntry(
   deps: ContentDeps,
@@ -245,253 +565,6 @@ export async function saveEntry(
       entityId: input.entryId,
       ...(before === null ? {} : { before: entrySnapshot(before) }),
     },
-    async (tx) => {
-      // loadEntryForUpdate both confirms the entry exists (EntryNotFoundError
-      // otherwise) and locks the row FOR UPDATE for the duration of this
-      // transaction, so the explicit version check below and the final
-      // UPDATE's WHERE clause can never disagree with each other.
-      const current = await loadEntryForUpdate(tx, input.entryId);
-
-      // Version check first (D-42, D-44): a base version that no longer
-      // matches is a conflict regardless of locking. The row is already
-      // locked FOR UPDATE, so nothing can change its version between this
-      // check and the final UPDATE below.
-      if (current.version !== input.baseVersion) {
-        throw new StaleVersionError(
-          input.entryId,
-          input.baseVersion,
-          current.version,
-        );
-      }
-
-      // Locks the type row for the duration of this save, so a concurrent
-      // field delete/rename can't remove a field this save is about to
-      // validate against mid-transaction; also carries every setting the
-      // rest of this mutation needs.
-      const [type] = await tx
-        .select({
-          id: contentTypes.id,
-          routable: contentTypes.routable,
-          urlPattern: contentTypes.urlPattern,
-          titleFieldKey: contentTypes.titleFieldKey,
-          seo: contentTypes.seo,
-          drafts: contentTypes.drafts,
-          revisions: contentTypes.revisions,
-          revisionMode: contentTypes.revisionMode,
-          editLocking: contentTypes.editLocking,
-        })
-        .from(contentTypes)
-        .where(eq(contentTypes.id, current.contentTypeId))
-        .for('share');
-      if (type === undefined) {
-        throw new Error(
-          `@plakboek/content: no content type found for entry "${input.entryId}"`,
-        );
-      }
-
-      // The permission decided before this mutation opened must still hold
-      // against the freshly locked row (D-11): a status/drafts change in
-      // the gap (e.g. someone else just published it) is a race, not a
-      // permission problem -- the caller retries.
-      const decidedPublishBranch = permission === 'entries:publish';
-      const actualPublishBranch =
-        !type.drafts && current.status === 'published';
-      if (decidedPublishBranch !== actualPublishBranch) {
-        throw new EntryStateChangedError(input.entryId);
-      }
-
-      // Lock check second (D-43/D-45): refuses when another user holds a
-      // live lock on this row; a no-op when the type has no edit locking.
-      assertRowsWritable([current], type, actor.userId, now());
-
-      const fields = await listFields(tx, current.contentTypeId);
-      const validatedData = validateEntryData(fields, input.data);
-
-      let validatedSeo: EntrySeo | undefined;
-      if (input.seo !== undefined) {
-        validatedSeo = validateEntrySeo(input.seo, { seoEnabled: type.seo });
-      }
-
-      const [slugSourceRow] = await tx
-        .select({ slugSource: contentEntries.slugSource })
-        .from(contentEntries)
-        .where(eq(contentEntries.id, input.entryId))
-        .limit(1);
-
-      const { slug: resolvedSlug, slugSource: resolvedSlugSource } =
-        await resolveSlug(
-          tx,
-          type,
-          {
-            id: current.id,
-            contentTypeId: current.contentTypeId,
-            locale: current.locale,
-            slug: current.slug,
-            slugSource: asSlugSource(slugSourceRow?.slugSource ?? null),
-            firstPublishedAt: current.firstPublishedAt,
-          },
-          input.slug,
-          validatedData,
-        );
-
-      const updatedAt = now();
-      const isPendingDraftBranch =
-        type.drafts &&
-        (current.status === 'published' || current.status === 'scheduled');
-
-      let row: typeof contentEntries.$inferSelect | undefined;
-
-      if (isPendingDraftBranch) {
-        const fieldIdsByKey: Record<string, string> = {};
-        for (const field of fields) {
-          if (Object.hasOwn(validatedData, field.key)) {
-            fieldIdsByKey[field.key] = field.id;
-          }
-        }
-        const stagedSeo = input.seo !== undefined ? validatedSeo : current.seo;
-
-        const [revisionRow] = await tx
-          .insert(entryRevisions)
-          .values({
-            entryId: current.id,
-            locale: current.locale,
-            kind: 'save',
-            data: validatedData,
-            fieldIds: fieldIdsByKey,
-            seo: stagedSeo,
-            slug: resolvedSlug,
-            authorId: actor.userId,
-            createdAt: updatedAt,
-          })
-          .returning({ id: entryRevisions.id });
-        if (revisionRow === undefined) {
-          throw new Error(
-            '@plakboek/content: entry revision insert returned no row',
-          );
-        }
-
-        const previousPendingId = current.draftRevisionId;
-
-        [row] = await tx
-          .update(contentEntries)
-          .set({
-            draftRevisionId: revisionRow.id,
-            version: sql`${contentEntries.version} + 1`,
-            updatedAt,
-            updatedBy: actor.userId,
-          })
-          .where(
-            and(
-              eq(contentEntries.id, input.entryId),
-              eq(contentEntries.version, input.baseVersion),
-            ),
-          )
-          .returning();
-        if (row === undefined) {
-          throw new StaleVersionError(
-            input.entryId,
-            input.baseVersion,
-            current.version,
-          );
-        }
-
-        // Replaces (never accumulates) the previous pending row once
-        // revisions are disabled, or in on_publish mode -- plan 03-09 keeps
-        // it as history in on_every_save mode.
-        if (
-          previousPendingId !== null &&
-          (!type.revisions || type.revisionMode === 'on_publish')
-        ) {
-          await tx
-            .delete(entryRevisions)
-            .where(eq(entryRevisions.id, previousPendingId));
-        }
-      } else {
-        let path: string | null = current.resolvedPath;
-        if (current.status === 'published') {
-          path = computeEntryPath(
-            type,
-            {
-              slug: resolvedSlug,
-              publicId: current.publicId,
-              firstPublishedAt: current.firstPublishedAt,
-            },
-            deps.config.timezone,
-          );
-          if (path !== current.resolvedPath) {
-            if (current.resolvedPath !== null) {
-              await recordUrlHistory(tx, {
-                entryId: current.id,
-                contentTypeId: current.contentTypeId,
-                translationGroup: current.translationGroup,
-                locale: current.locale,
-                oldPath: current.resolvedPath,
-                reason: 'slug_changed',
-                changedAt: updatedAt,
-              });
-            }
-            if (path !== null) {
-              await assertPathAvailable(tx, {
-                path,
-                locale: current.locale,
-                entryId: current.id,
-              });
-            }
-          }
-        }
-
-        try {
-          [row] = await tx
-            .update(contentEntries)
-            .set({
-              data: validatedData,
-              slug: resolvedSlug,
-              slugSource: resolvedSlugSource,
-              version: sql`${contentEntries.version} + 1`,
-              updatedAt,
-              updatedBy: actor.userId,
-              ...(input.seo !== undefined ? { seo: validatedSeo } : {}),
-              ...(current.status === 'published' ? { resolvedPath: path } : {}),
-            })
-            .where(
-              and(
-                eq(contentEntries.id, input.entryId),
-                eq(contentEntries.version, input.baseVersion),
-              ),
-            )
-            .returning();
-        } catch (error) {
-          if (path !== null && current.status === 'published') {
-            const urlCollision = urlCollisionFromUniqueViolation(error, {
-              path,
-              locale: current.locale,
-            });
-            if (urlCollision !== undefined) throw urlCollision;
-          }
-          if (resolvedSlug !== null) {
-            const slugConflict = slugConflictFromUniqueViolation(error, {
-              slug: resolvedSlug,
-              locale: current.locale,
-              contentTypeId: current.contentTypeId,
-            });
-            if (slugConflict !== undefined) throw slugConflict;
-          }
-          throw error;
-        }
-        if (row === undefined) {
-          throw new StaleVersionError(
-            input.entryId,
-            input.baseVersion,
-            current.version,
-          );
-        }
-      }
-
-      const record = toEntryRecord(row);
-      return {
-        result: record,
-        after: entrySnapshot(record),
-      };
-    },
+    (tx) => saveEntryInTransaction(tx, deps, actor, { permission, now }, input),
   );
 }

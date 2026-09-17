@@ -1,12 +1,13 @@
 /**
- * Publishing an entry (TYPE-04, TYPE-06, TYPE-07, TYPE-09, TYPE-10, D-27,
- * D-29, D-30, D-31, D-33, D-46, D-47): slug enforcement, first-publish
- * freezing, resolved-path materialisation with collision refusal, URL
- * history and pending-draft promotion, all inside one audited mutation.
- * Follows `save.ts`'s contract -- load, check version, lock the type row,
- * check the edit lock, validate, update -- with the working copy (live data,
- * or a pending draft revision when one is staged) taking the place of a
- * save's input data.
+ * Publishing an entry (TYPE-04, TYPE-06, TYPE-07, TYPE-08, TYPE-09, TYPE-10,
+ * D-13, D-15, D-27, D-29, D-30, D-31, D-33, D-46, D-47): slug enforcement,
+ * first-publish freezing, resolved-path materialisation with collision
+ * refusal, URL history, pending-draft promotion and -- on a
+ * revisions-enabled type -- one immutable `publish`-kind snapshot per
+ * publish, all inside one audited mutation. Follows `save.ts`'s contract --
+ * load, check version, lock the type row, check the edit lock, validate,
+ * update -- with the working copy (live data, or a pending draft revision
+ * when one is staged) taking the place of a save's input data.
  */
 import type { AuditActor, AuditDatabase } from '@plakboek/auth';
 import { and, eq, sql } from 'drizzle-orm';
@@ -15,6 +16,7 @@ import { getEntry, loadEntryForUpdate, toEntryRecord } from './entries.js';
 import { EntryNotFoundError } from './entries.js';
 import { listFields } from './fields.js';
 import { assertRowsWritable } from './locks.js';
+import { recordRevision } from './revisions.js';
 import {
   assertPathAvailable,
   computeEntryPath,
@@ -280,6 +282,25 @@ export async function publishEntry(
         });
       }
 
+      // TYPE-08, D-13, D-15: a revisions-enabled type gets one immutable
+      // `publish`-kind snapshot per publish, and `live_revision_id` points
+      // to it. Publish revisions are never pruned (`pruneSaveRevisions`
+      // only ever selects `kind = 'save'`).
+      let liveRevisionId: string | null = null;
+      if (type.revisions) {
+        liveRevisionId = await recordRevision(tx, {
+          entryId: current.id,
+          locale: current.locale,
+          kind: 'publish',
+          data: validatedData,
+          seo,
+          slug,
+          fields,
+          authorId: actor.userId,
+          createdAt: publishedAt,
+        });
+      }
+
       let row: typeof contentEntries.$inferSelect | undefined;
       try {
         [row] = await tx
@@ -294,6 +315,7 @@ export async function publishEntry(
             resolvedPath: path,
             scheduledAt: null,
             draftRevisionId: null,
+            ...(liveRevisionId !== null ? { liveRevisionId } : {}),
             version: sql`${contentEntries.version} + 1`,
             updatedAt: publishedAt,
             updatedBy: actor.userId,
