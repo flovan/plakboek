@@ -9,6 +9,7 @@
  * check.
  */
 import type { AuditActor } from '@plakboek/auth';
+import { eq } from 'drizzle-orm';
 import type { ContentDeps } from './config.js';
 import {
   LocaleNotEnabledError,
@@ -16,7 +17,8 @@ import {
   toEntryRecord,
 } from './entries.js';
 import { listFields } from './fields.js';
-import { contentEntries } from './schema.js';
+import { contentEntries, contentTypes } from './schema.js';
+import { SingletonEntryError } from './singletons.js';
 import type { EntryRecord } from './types.js';
 import { validateEntryData } from './validation.js';
 
@@ -103,6 +105,15 @@ export async function createTranslation(
         tx,
         input.sourceEntryId,
       );
+
+      const [typeRow] = await tx
+        .select({ key: contentTypes.key, singleton: contentTypes.singleton })
+        .from(contentTypes)
+        .where(eq(contentTypes.id, origin.contentTypeId))
+        .limit(1);
+      if (typeRow?.singleton === true) {
+        throw new SingletonEntryError(typeRow.key, 'singleton-type');
+      }
 
       const existing = rows.find((row) => row.locale === input.locale);
       if (existing !== undefined) {

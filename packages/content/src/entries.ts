@@ -14,6 +14,7 @@ import { asc, eq, sql } from 'drizzle-orm';
 import type { ContentDeps } from './config.js';
 import { listFields } from './fields.js';
 import { contentEntries, contentTypes } from './schema.js';
+import { SingletonEntryError } from './singletons.js';
 import { ENTRY_STATUSES, type EntryRecord, type EntryStatus } from './types.js';
 import { validateEntryData } from './validation.js';
 
@@ -115,7 +116,7 @@ export async function createEntry(
     },
     async (tx) => {
       const [typeRow] = await tx
-        .select({ id: contentTypes.id })
+        .select({ id: contentTypes.id, singleton: contentTypes.singleton })
         .from(contentTypes)
         .where(eq(contentTypes.key, input.contentTypeKey))
         .for('share');
@@ -123,6 +124,9 @@ export async function createEntry(
         throw new Error(
           `@plakboek/content: no content type registered for key "${input.contentTypeKey}"`,
         );
+      }
+      if (typeRow.singleton) {
+        throw new SingletonEntryError(input.contentTypeKey, 'singleton-type');
       }
 
       const fields = await listFields(tx, typeRow.id);
