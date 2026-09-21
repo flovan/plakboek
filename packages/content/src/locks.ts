@@ -232,7 +232,7 @@ export async function acquireEditLock(
   const now = deps.now ?? (() => new Date());
 
   return await deps.db.transaction(async (tx) => {
-    const row = await loadEntryForUpdate(tx, input.entryId);
+    const row = await loadEntryForUpdate(tx, deps.config, input.entryId);
     const editLocking = await loadEditLocking(tx, row.contentTypeId);
     if (!editLocking) {
       throw new EditLockingDisabledError(row.contentTypeId);
@@ -275,7 +275,7 @@ export async function renewEditLock(
   const now = deps.now ?? (() => new Date());
 
   return await deps.db.transaction(async (tx) => {
-    const row = await loadEntryForUpdate(tx, input.entryId);
+    const row = await loadEntryForUpdate(tx, deps.config, input.entryId);
     if (row.lockedBy === null) {
       return false;
     }
@@ -307,7 +307,7 @@ export async function releaseEditLock(
   input: ReleaseEditLockInput,
 ): Promise<boolean> {
   return await deps.db.transaction(async (tx) => {
-    const row = await loadEntryForUpdate(tx, input.entryId);
+    const row = await loadEntryForUpdate(tx, deps.config, input.entryId);
     if (row.lockedBy !== actor.userId) {
       return false;
     }
@@ -393,7 +393,7 @@ export async function takeOverEditLock(
       entityId: input.entryId,
     },
     async (tx) => {
-      const row = await loadEntryForUpdate(tx, input.entryId);
+      const row = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (row.lockedBy !== before.lockedBy) {
         throw new LockStateChangedError(input.entryId);
       }

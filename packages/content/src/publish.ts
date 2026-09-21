@@ -184,7 +184,7 @@ export async function publishEntry(
     async (tx) => {
       // loadEntryForUpdate both confirms the entry exists and locks the row
       // FOR UPDATE for the duration of this transaction (D-42/D-47).
-      const current = await loadEntryForUpdate(tx, input.entryId);
+      const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
 
       if (current.version !== input.baseVersion) {
         throw new StaleVersionError(

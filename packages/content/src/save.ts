@@ -426,7 +426,7 @@ export async function saveEntryInTransaction(
   // WHERE clause can never disagree with each other, and a shared-field
   // sync below never races a sibling's own concurrent save.
   const { origin: current, rows: groupRows } =
-    await lockTranslationGroupForUpdate(tx, input.entryId);
+    await lockTranslationGroupForUpdate(tx, deps.config, input.entryId);
 
   // Version check first (D-42, D-44): a base version that no longer
   // matches is a conflict regardless of locking. The row is already

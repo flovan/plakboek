@@ -297,6 +297,7 @@ export async function setFieldTranslatable(
 
           const { rows: lockedRows } = await lockTranslationGroupForUpdate(
             tx,
+            deps.config,
             plan.anyEntryId,
           );
 

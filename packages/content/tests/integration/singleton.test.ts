@@ -15,7 +15,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { defineContentConfig, type ContentDeps } from '../../src/config.js';
 import { createContentType } from '../../src/content-types.js';
-import { createEntry } from '../../src/entries.js';
+import { createEntry, listEntries } from '../../src/entries.js';
 import { addField } from '../../src/fields.js';
 import { saveEntry } from '../../src/save.js';
 import {
@@ -162,7 +162,7 @@ describe('Singletons: one record per enabled locale, no slug, no list (TYPE-11, 
     expect(nl.data.heading).toBe('Hallo');
   });
 
-  it('createEntry and createTranslation refuse a singleton type; listSingletonRecords orders by config locale order (TYPE-11 ordering)', async () => {
+  it('createEntry and createTranslation refuse a singleton type; listEntries refuses it too; listSingletonRecords orders by config locale order (TYPE-11 ordering)', async () => {
     const type = await createContentType(deps, superadmin, {
       key: 'siteSettingsOrdering',
       labelSingular: 'Site settings order',
@@ -199,6 +199,13 @@ describe('Singletons: one record per enabled locale, no slug, no list (TYPE-11, 
       { sourceEntryId: nl.id, locale: 'en' },
     ).catch((caught: unknown) => caught);
     expect(createTranslationError).toBeInstanceOf(SingletonEntryError);
+
+    const listEntriesError: unknown = await listEntries(
+      handle.db,
+      deps.config,
+      { contentTypeKey: type.key, locale: 'en' },
+    ).catch((caught: unknown) => caught);
+    expect(listEntriesError).toBeInstanceOf(SingletonEntryError);
 
     const records = await listSingletonRecords(handle.db, deps.config, {
       contentTypeKey: type.key,

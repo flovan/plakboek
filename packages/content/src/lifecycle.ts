@@ -127,7 +127,7 @@ export async function unpublishEntry(
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
     async (tx) => {
-      const current = await loadEntryForUpdate(tx, input.entryId);
+      const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (current.version !== input.baseVersion) {
         throw new StaleVersionError(
           input.entryId,
@@ -224,7 +224,7 @@ export async function scheduleEntry(
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
     async (tx) => {
-      const current = await loadEntryForUpdate(tx, input.entryId);
+      const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (current.version !== input.baseVersion) {
         throw new StaleVersionError(
           input.entryId,
@@ -311,7 +311,7 @@ export async function unscheduleEntry(
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
     async (tx) => {
-      const current = await loadEntryForUpdate(tx, input.entryId);
+      const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (current.version !== input.baseVersion) {
         throw new StaleVersionError(
           input.entryId,
@@ -398,7 +398,7 @@ export async function trashEntry(
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
     async (tx) => {
-      const current = await loadEntryForUpdate(tx, input.entryId);
+      const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (current.version !== input.baseVersion) {
         throw new StaleVersionError(
           input.entryId,
@@ -491,7 +491,7 @@ export async function restoreEntryFromTrash(
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
     async (tx) => {
-      const current = await loadEntryForUpdate(tx, input.entryId);
+      const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (current.version !== input.baseVersion) {
         throw new StaleVersionError(
           input.entryId,

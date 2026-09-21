@@ -103,6 +103,7 @@ export async function createTranslation(
     async (tx) => {
       const { origin, rows } = await lockTranslationGroupForUpdate(
         tx,
+        deps.config,
         input.sourceEntryId,
       );
 

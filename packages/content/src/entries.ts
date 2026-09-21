@@ -10,8 +10,8 @@ import type {
   AuditDatabase,
   AuditTransaction,
 } from '@plakboek/auth';
-import { asc, eq, sql } from 'drizzle-orm';
-import type { ContentDeps } from './config.js';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import type { ContentConfig, ContentDeps } from './config.js';
 import { listFields } from './fields.js';
 import { contentEntries, contentTypes } from './schema.js';
 import { SingletonEntryError } from './singletons.js';
@@ -174,9 +174,12 @@ export async function getEntry(
 
 /** Loads and locks one entry row (`SELECT ... FOR UPDATE`) inside an
  * audited mutation's transaction, for `saveEntry`'s version check. Throws
- * `EntryNotFoundError` when no row matches. */
+ * `EntryNotFoundError` when no row matches, and `LocaleNotEnabledError` when
+ * the row's own locale is no longer in `config.locales` -- a row of a
+ * removed locale is refused for every write (D-25, plan 03-11). */
 export async function loadEntryForUpdate(
   tx: AuditTransaction,
+  config: ContentConfig,
   entryId: string,
 ): Promise<EntryRecord> {
   const [row] = await tx
@@ -187,6 +190,9 @@ export async function loadEntryForUpdate(
   if (row === undefined) {
     throw new EntryNotFoundError(entryId);
   }
+  if (!config.locales.includes(row.locale)) {
+    throw new LocaleNotEnabledError(row.locale);
+  }
   return toEntryRecord(row);
 }
 
@@ -196,12 +202,17 @@ export async function loadEntryForUpdate(
  * locked `ORDER BY locale FOR UPDATE` (plan 03-10). Two saves from different
  * locales of the same group therefore always request row locks in the same
  * order, so they can never deadlock against each other. Throws
- * `EntryNotFoundError` when `entryId` doesn't exist. Returns the row
+ * `EntryNotFoundError` when `entryId` doesn't exist, and
+ * `LocaleNotEnabledError` when the origin row's own locale is no longer in
+ * `config.locales` -- a row of a removed locale is refused for every write
+ * (D-25, plan 03-11); a sibling of a removed locale is simply excluded by
+ * each caller's own sibling filtering (unaffected here). Returns the row
  * matching `entryId` as `origin` and every row of the group -- `origin`
  * included -- as `rows`.
  */
 export async function lockTranslationGroupForUpdate(
   tx: AuditTransaction,
+  config: ContentConfig,
   entryId: string,
 ): Promise<{
   readonly origin: EntryRecord;
@@ -221,5 +232,112 @@ export async function lockTranslationGroupForUpdate(
   if (origin === undefined) {
     throw new EntryNotFoundError(entryId);
   }
+  if (!config.locales.includes(origin.locale)) {
+    throw new LocaleNotEnabledError(origin.locale);
+  }
   return { origin, rows: records };
+}
+
+export type FindEntryInput = { readonly entryId: string };
+
+/** Reads one entry by id, excluding a row whose locale is no longer enabled
+ * in `config.locales` (D-25) -- returns `null` for that case, the same as a
+ * missing row. Not permission-gated: reads are internal API, gated by later
+ * phases' HTTP/admin layers. */
+export async function findEntry(
+  db: AuditDatabase,
+  config: ContentConfig,
+  input: FindEntryInput,
+): Promise<EntryRecord | null> {
+  const entry = await getEntry(db, input.entryId);
+  if (entry === null) return null;
+  if (!config.locales.includes(entry.locale)) return null;
+  return entry;
+}
+
+export type FindTranslationsInput = { readonly translationGroup: string };
+
+/** Reads every row of a translation group, excluding rows of a locale no
+ * longer enabled in `config.locales` (D-25), ordered by that locale's index
+ * in `config.locales`. Not permission-gated. */
+export async function findTranslations(
+  db: AuditDatabase,
+  config: ContentConfig,
+  input: FindTranslationsInput,
+): Promise<readonly EntryRecord[]> {
+  const rows = await db
+    .select()
+    .from(contentEntries)
+    .where(eq(contentEntries.translationGroup, input.translationGroup));
+
+  const records = rows
+    .map(toEntryRecord)
+    .filter((record) => config.locales.includes(record.locale));
+  return records
+    .slice()
+    .sort(
+      (a, b) =>
+        config.locales.indexOf(a.locale) - config.locales.indexOf(b.locale),
+    );
+}
+
+export type ListEntriesInput = {
+  readonly contentTypeKey: string;
+  readonly locale: string;
+  readonly statuses?: readonly EntryStatus[];
+  readonly includeTrashed?: boolean;
+};
+
+/**
+ * Lists a content type's entries in one locale (I18N-04, RESEARCH.md Pitfall
+ * 1: every list read takes a required locale, there is no "every locale"
+ * default). Throws `LocaleNotEnabledError` for a locale not in
+ * `config.locales`, and `SingletonEntryError` (`'singleton-type'`) for a
+ * singleton content type -- a singleton has no list read (TYPE-11).
+ * Excludes `trashed` entries unless `input.includeTrashed` is `true`; when
+ * `input.statuses` is given, only those statuses are returned (still subject
+ * to the trashed exclusion above). Ordered `created_at ASC, id ASC` (TYPE-10
+ * ordering), so entries sharing a timestamp come back in a stable order. Not
+ * permission-gated.
+ */
+export async function listEntries(
+  db: AuditDatabase,
+  config: ContentConfig,
+  input: ListEntriesInput,
+): Promise<readonly EntryRecord[]> {
+  if (!config.locales.includes(input.locale)) {
+    throw new LocaleNotEnabledError(input.locale);
+  }
+
+  const [typeRow] = await db
+    .select({ id: contentTypes.id, singleton: contentTypes.singleton })
+    .from(contentTypes)
+    .where(eq(contentTypes.key, input.contentTypeKey))
+    .limit(1);
+  if (typeRow === undefined) {
+    throw new Error(
+      `@plakboek/content: no content type registered for key "${input.contentTypeKey}"`,
+    );
+  }
+  if (typeRow.singleton) {
+    throw new SingletonEntryError(input.contentTypeKey, 'singleton-type');
+  }
+
+  const conditions = [
+    eq(contentEntries.contentTypeId, typeRow.id),
+    eq(contentEntries.locale, input.locale),
+  ];
+  if (input.includeTrashed !== true) {
+    conditions.push(sql`${contentEntries.status} <> 'trashed'`);
+  }
+  if (input.statuses !== undefined) {
+    conditions.push(inArray(contentEntries.status, input.statuses));
+  }
+
+  const rows = await db
+    .select()
+    .from(contentEntries)
+    .where(and(...conditions))
+    .orderBy(asc(contentEntries.createdAt), asc(contentEntries.id));
+  return rows.map(toEntryRecord);
 }
