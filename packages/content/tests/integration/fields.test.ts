@@ -30,9 +30,18 @@ import {
   updateField,
   type UpdateFieldInput,
 } from '../../src/fields.js';
+import { FieldDefinitionError } from '../../src/field-types/registry.js';
 import { saveEntry, StaleVersionError } from '../../src/save.js';
 import { FieldValidationError } from '../../src/validation.js';
 import { createTestDatabase, type TestDatabase } from './test-database.js';
+
+// A regressed guard would compile the catastrophic regular expression
+// against `'a'.repeat(30)` and hang the event loop for roughly five seconds
+// (doubling per added character past the guard's own measured ~150ms/28-char
+// baseline) rather than failing fast -- so the budget is generous while
+// still catching a real regression well before it could be mistaken for a
+// slow CI runner.
+const STORED_PATTERN_BUDGET_MS = 2000;
 
 const roles = defineRoles(defaultRoles);
 
@@ -488,5 +497,141 @@ describe('Field update, rename, duplicate, delete and required-field impact (FIE
     const data = await readEntryData(entry.id);
 
     expect(fieldStillExists || data.note === undefined).toBe(true);
+  });
+
+  it('addField refuses an unsafe pattern at define time, rolling back with no row written (FIELD-06 ReDoS mitigation)', async () => {
+    const type = await createContentType(deps, superadmin, {
+      key: 'redosGuardAdd',
+      labelSingular: 'ReDoS guard add',
+      labelPlural: 'ReDoS guard add',
+    });
+
+    const error: unknown = await addField(deps, superadmin, {
+      contentTypeKey: type.key,
+      label: 'Code',
+      fieldType: 'short_text',
+      options: { pattern: '(a|a)*' },
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FieldDefinitionError);
+
+    const fields = await listFields(handle.db, type.id);
+    expect(fields.some((field) => field.key === 'code')).toBe(false);
+  });
+
+  it('addField accepts a disjoint alternation pattern end to end: a matching value saves, a non-matching one is refused', async () => {
+    const type = await createContentType(deps, superadmin, {
+      key: 'redosGuardSafe',
+      labelSingular: 'ReDoS guard safe',
+      labelPlural: 'ReDoS guard safe',
+    });
+    await addField(deps, superadmin, {
+      contentTypeKey: type.key,
+      label: 'Code',
+      fieldType: 'short_text',
+      options: { pattern: '^(cat|dog)$' },
+    });
+    const entry = await createEntry(deps, superadmin, {
+      contentTypeKey: type.key,
+      locale: 'en',
+      data: { code: 'cat' },
+    });
+    expect((await readEntryData(entry.id)).code).toBe('cat');
+
+    const error: unknown = await saveEntry(deps, superadmin, {
+      entryId: entry.id,
+      baseVersion: entry.version,
+      data: { code: 'fox' },
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FieldValidationError);
+    expect(
+      (error as FieldValidationError).issues.some(
+        (issue) => issue.code === 'INVALID_VALUE' && issue.fieldKey === 'code',
+      ),
+    ).toBe(true);
+  });
+
+  it('computeFieldUpdateImpact refuses an unsafe pattern change, leaving the stored options unchanged', async () => {
+    const type = await createContentType(deps, superadmin, {
+      key: 'redosGuardUpdate',
+      labelSingular: 'ReDoS guard update',
+      labelPlural: 'ReDoS guard update',
+    });
+    await addField(deps, superadmin, {
+      contentTypeKey: type.key,
+      label: 'Code',
+      fieldType: 'short_text',
+      options: { pattern: '^(cat|dog)$' },
+    });
+
+    const error: unknown = await computeFieldUpdateImpact(handle.db, {
+      contentTypeKey: type.key,
+      fieldKey: 'code',
+      options: { pattern: '(a|aa)+' },
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FieldDefinitionError);
+
+    const fields = await listFields(handle.db, type.id);
+    expect(
+      fields.find((field) => field.key === 'code')?.options as {
+        pattern?: string;
+      },
+    ).toEqual({ pattern: '^(cat|dog)$' });
+  });
+
+  it('a pattern stored before the guard tightened fails the next save with FieldDefinitionError in bounded time, never hanging on a compiled catastrophic regex', async () => {
+    const type = await createContentType(deps, superadmin, {
+      key: 'redosGuardStored',
+      labelSingular: 'ReDoS guard stored',
+      labelPlural: 'ReDoS guard stored',
+    });
+    await addField(deps, superadmin, {
+      contentTypeKey: type.key,
+      label: 'Code',
+      fieldType: 'short_text',
+      options: { pattern: '^(cat|dog)$' },
+    });
+    const entry = await createEntry(deps, superadmin, {
+      contentTypeKey: type.key,
+      locale: 'en',
+      data: { code: 'cat' },
+    });
+    const fields = await listFields(handle.db, type.id);
+    const fieldId = fields.find((field) => field.key === 'code')?.id ?? '';
+
+    // Simulates a pattern stored while the guard was defective (03-VERIFICATION.md's
+    // gap): write it directly, bypassing addField/updateField entirely.
+    await handle.sql`UPDATE content_type_fields SET options = ${JSON.stringify({
+      pattern: '(a|a)*b',
+    })}::jsonb WHERE id = ${fieldId}`;
+
+    let caught: unknown;
+    const start = performance.now();
+    try {
+      await saveEntry(deps, superadmin, {
+        entryId: entry.id,
+        baseVersion: entry.version,
+        data: { code: 'a'.repeat(30) },
+      });
+    } catch (error: unknown) {
+      caught = error;
+    }
+    const elapsedMs = performance.now() - start;
+
+    expect(caught).toBeInstanceOf(FieldDefinitionError);
+    expect((caught as FieldDefinitionError).message).toContain('pattern');
+    expect(elapsedMs).toBeLessThan(STORED_PATTERN_BUDGET_MS);
+
+    // Restore the safe pattern so the fixture is left usable and the
+    // assertion above is about the pattern, not a permanently broken row.
+    await handle.sql`UPDATE content_type_fields SET options = ${JSON.stringify({
+      pattern: '^(cat|dog)$',
+    })}::jsonb WHERE id = ${fieldId}`;
+
+    const restored = await saveEntry(deps, superadmin, {
+      entryId: entry.id,
+      baseVersion: entry.version,
+      data: { code: 'dog' },
+    });
+    expect((await readEntryData(restored.id)).code).toBe('dog');
   });
 });
