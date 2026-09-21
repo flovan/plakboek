@@ -1146,7 +1146,13 @@ export async function deleteField(
       await tx
         .update(contentEntries)
         .set({
-          data: sql`${contentEntries.data} - ${current.key}`,
+          // The `::text` cast is explicit, not incidental (WR-02): `-` is
+          // ambiguous for an untyped parameter, this package also lists
+          // `pg` as a dependency and a future deployment on that driver
+          // would not get postgres-js's parameter framing, and the two
+          // sibling mutations in this file (renameField, duplicateField)
+          // already carry it.
+          data: sql`${contentEntries.data} - ${current.key}::text`,
           version: sql`${contentEntries.version} + 1`,
           updatedAt,
         })
