@@ -16,16 +16,45 @@
  * `scheduleEntry`/`unscheduleEntry` here only record or clear that intent.
  * The job that actually publishes an entry once `scheduled_at` arrives is
  * Phase 13's (PUB-04) -- nothing in this module publishes anything.
+ *
+ * D-40's two reference-aware operations also live here: `trashEntry` warns
+ * (via `after.referencedBy`) but always proceeds -- a trashed target is
+ * still a valid reference target (`references.ts`'s
+ * `assertReferencesResolvable`). `deleteEntryPermanently` is the one
+ * operation that actually removes a row, gated by the superadmin-only
+ * `entries:delete-permanent` permission; when the removed row was the last
+ * of its translation group, it strips that group's id from every reference
+ * holding it in the same transaction (T-03-62) -- the referencing entries
+ * are warned about beforehand (`computeEntryPermanentDeleteImpact`), never
+ * protected from the strip.
  */
-import type { AuditActor, AuditTransaction } from '@plakboek/auth';
+import type {
+  AuditActor,
+  AuditDatabase,
+  AuditTransaction,
+} from '@plakboek/auth';
 import { and, eq, sql } from 'drizzle-orm';
 import type { ContentDeps } from './config.js';
-import { getEntry, loadEntryForUpdate, toEntryRecord } from './entries.js';
+import {
+  EntryNotFoundError,
+  getEntry,
+  loadEntryForUpdate,
+  lockTranslationGroupForUpdate,
+  toEntryRecord,
+} from './entries.js';
+import { listFields } from './fields.js';
 import { assertRowsWritable, type LockableContentType } from './locks.js';
+import {
+  computeEntryReferenceUsage,
+  removeTranslationGroupFromEntryData,
+  stripTranslationGroupFromReferences,
+  type EntryReferenceUsageEntry,
+} from './references.js';
 import { recordUrlHistory } from './routing.js';
 import { StaleVersionError } from './save.js';
 import { contentEntries, contentTypes } from './schema.js';
 import type { EntryRecord, EntryStatus } from './types.js';
+import { FieldValidationError, validateEntryData } from './validation.js';
 
 /** Thrown when an entry's current status doesn't allow the requested
  * lifecycle operation. `operation` names the attempted transition:
@@ -455,10 +484,56 @@ export async function trashEntry(
           current.version,
         );
       }
+
+      // D-40: trashing always proceeds -- the reference usage count rides
+      // in this audit row's `after` payload as a warning, never a block.
+      // Recomputed inside this same transaction (not a pre-mutation read),
+      // so it reflects what actually got trashed.
+      const usage = await computeEntryReferenceUsage(tx, {
+        translationGroup: current.translationGroup,
+      });
+
       const record = toEntryRecord(row);
-      return { result: record, after: lifecycleSnapshot(record) };
+      return {
+        result: record,
+        after: {
+          ...lifecycleSnapshot(record),
+          referencedBy: usage.referencedBy,
+        },
+      };
     },
   );
+}
+
+export type EntryTrashImpact = {
+  readonly status: EntryStatus;
+  readonly referencedBy: number;
+  readonly referencingEntries: readonly EntryReferenceUsageEntry[];
+};
+
+export type ComputeEntryTrashImpactInput = { readonly entryId: string };
+
+/** Reports what trashing `input.entryId` would touch (D-40): its current
+ * status, plus `computeEntryReferenceUsage` for its translation group --
+ * "referenced by N entries" is a warning shown before trashing, never a
+ * refusal. `trashEntry` recomputes this same usage inside its own
+ * transaction rather than trusting this standalone read. */
+export async function computeEntryTrashImpact(
+  db: AuditDatabase,
+  input: ComputeEntryTrashImpactInput,
+): Promise<EntryTrashImpact> {
+  const entry = await getEntry(db, input.entryId);
+  if (entry === null) {
+    throw new EntryNotFoundError(input.entryId);
+  }
+  const usage = await computeEntryReferenceUsage(db, {
+    translationGroup: entry.translationGroup,
+  });
+  return {
+    status: entry.status,
+    referencedBy: usage.referencedBy,
+    referencingEntries: usage.referencingEntries,
+  };
 }
 
 export type RestoreEntryFromTrashInput = {
@@ -540,6 +615,202 @@ export async function restoreEntryFromTrash(
       }
       const record = toEntryRecord(row);
       return { result: record, after: lifecycleSnapshot(record) };
+    },
+  );
+}
+
+export type EntryPermanentDeleteImpact = {
+  readonly isLastRowOfGroup: boolean;
+  readonly referencedBy: number;
+  readonly referencingEntries: readonly EntryReferenceUsageEntry[];
+  readonly entriesBlockedUntilRefilled: readonly string[];
+};
+
+export type ComputeEntryPermanentDeleteImpactInput = {
+  readonly entryId: string;
+};
+
+/**
+ * Reports what permanently deleting `input.entryId` would touch (D-40,
+ * D-18). `isLastRowOfGroup` is `true` only when this locale row is the only
+ * one left in its translation group -- `stripTranslationGroupFromReferences`
+ * only ever runs then, since a surviving sibling row means the group (and
+ * every reference to it) still exists. When it is, every referencing entry
+ * `computeEntryReferenceUsage` finds is checked by actually simulating the
+ * strip (`removeTranslationGroupFromEntryData`) against its current fields
+ * and data, then re-running `validateEntryData`: an entry that would fail
+ * with a `REQUIRED` issue is listed in `entriesBlockedUntilRefilled` --
+ * D-18's existing "required field, no value" rule, applied to a reference
+ * losing its target rather than a new rule of its own. Read-only, and typed
+ * to accept a transaction handle too, so `deleteEntryPermanently` recomputes
+ * this same impact inside its own transaction rather than trusting a stale
+ * preview.
+ */
+export async function computeEntryPermanentDeleteImpact(
+  db: AuditDatabase,
+  input: ComputeEntryPermanentDeleteImpactInput,
+): Promise<EntryPermanentDeleteImpact> {
+  const entry = await getEntry(db, input.entryId);
+  if (entry === null) {
+    throw new EntryNotFoundError(input.entryId);
+  }
+
+  const [groupCountRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(contentEntries)
+    .where(eq(contentEntries.translationGroup, entry.translationGroup));
+  const isLastRowOfGroup = (groupCountRow?.count ?? 1) <= 1;
+
+  const usage = await computeEntryReferenceUsage(db, {
+    translationGroup: entry.translationGroup,
+  });
+
+  const entriesBlockedUntilRefilled: string[] = [];
+  if (isLastRowOfGroup) {
+    const checkedEntryIds = new Set<string>();
+    for (const referencing of usage.referencingEntries) {
+      if (checkedEntryIds.has(referencing.entryId)) continue;
+      checkedEntryIds.add(referencing.entryId);
+
+      const referencingEntry = await getEntry(db, referencing.entryId);
+      if (referencingEntry === null) continue;
+
+      const referencingFields = await listFields(
+        db,
+        referencingEntry.contentTypeId,
+      );
+      const { data: strippedData } = removeTranslationGroupFromEntryData(
+        referencingFields,
+        referencingEntry.data,
+        entry.translationGroup,
+      );
+      try {
+        validateEntryData(referencingFields, strippedData);
+      } catch (error) {
+        if (!(error instanceof FieldValidationError)) throw error;
+        if (error.issues.some((issue) => issue.code === 'REQUIRED')) {
+          entriesBlockedUntilRefilled.push(referencing.entryId);
+        }
+      }
+    }
+  }
+
+  return {
+    isLastRowOfGroup,
+    referencedBy: usage.referencedBy,
+    referencingEntries: usage.referencingEntries,
+    entriesBlockedUntilRefilled,
+  };
+}
+
+/** The `before` shape `deleteEntryPermanently` audits: identifying columns
+ * only, never `data` -- the row is about to be gone, so there is no `after`
+ * row to compare it against either way. */
+function permanentDeleteBeforeSnapshot(entry: EntryRecord) {
+  return {
+    id: entry.id,
+    contentTypeId: entry.contentTypeId,
+    translationGroup: entry.translationGroup,
+    locale: entry.locale,
+    version: entry.version,
+  };
+}
+
+export type DeleteEntryPermanentlyInput = {
+  readonly entryId: string;
+  readonly baseVersion: number;
+};
+
+/**
+ * Permanently deletes one locale row (D-40), for a role holding the
+ * superadmin-only `entries:delete-permanent` permission -- distinct from
+ * `entries:delete`'s trash/restore, matching `pages:delete-permanent`'s own
+ * split in the permissions catalogue. Locks the row's whole translation
+ * group (`lockTranslationGroupForUpdate`, so a concurrent delete of a
+ * sibling locale row -- or a concurrent save adding a fresh reference to
+ * this very group -- serializes against this one), checks its version
+ * (D-42) and edit lock (D-43/D-45) exactly like every other operation in
+ * this module, then recomputes `computeEntryPermanentDeleteImpact` inside
+ * this same transaction before deleting the row.
+ *
+ * Only when the deleted row was the last of its group does this call
+ * `stripTranslationGroupFromReferences` -- a surviving sibling locale row
+ * means the group, and every reference to it, still exists. `before`
+ * carries the entry's identifying columns; `after` carries `{
+ * strippedFrom, referencedBy, entriesBlockedUntilRefilled }` -- the
+ * entries the strip actually changed, how many entries referenced this
+ * group, and which of them are now blocked from saving until the
+ * reference is refilled (D-18's rule, warned about, never protected
+ * against). Revision rows cascade-delete with the entry (`entry_revisions`'
+ * own FK); URL history rows keep their own `SET NULL` FK behaviour. Runs
+ * through `deps.recorder.run` (`entries:delete-permanent` /
+ * `entry.delete-permanent`).
+ */
+export async function deleteEntryPermanently(
+  deps: ContentDeps,
+  actor: AuditActor,
+  input: DeleteEntryPermanentlyInput,
+): Promise<void> {
+  const now = deps.now ?? (() => new Date());
+  const before = await getEntry(deps.db, input.entryId);
+
+  await deps.recorder.run(
+    actor,
+    {
+      permission: 'entries:delete-permanent',
+      action: 'entry.delete-permanent',
+      entityType: 'content_entry',
+      entityId: input.entryId,
+      ...(before === null
+        ? {}
+        : { before: permanentDeleteBeforeSnapshot(before) }),
+    },
+    async (tx) => {
+      const { origin: current } = await lockTranslationGroupForUpdate(
+        tx,
+        deps.config,
+        input.entryId,
+      );
+      if (current.version !== input.baseVersion) {
+        throw new StaleVersionError(
+          input.entryId,
+          input.baseVersion,
+          current.version,
+        );
+      }
+
+      const type = await loadLifecycleType(
+        tx,
+        input.entryId,
+        current.contentTypeId,
+      );
+      assertRowsWritable([current], type, actor.userId, now());
+
+      const impact = await computeEntryPermanentDeleteImpact(tx, {
+        entryId: input.entryId,
+      });
+
+      await tx
+        .delete(contentEntries)
+        .where(eq(contentEntries.id, input.entryId));
+
+      let strippedFrom: readonly string[] = [];
+      if (impact.isLastRowOfGroup) {
+        strippedFrom = await stripTranslationGroupFromReferences(tx, {
+          translationGroup: current.translationGroup,
+          changedAt: now(),
+          changedBy: actor.userId,
+        });
+      }
+
+      return {
+        result: undefined,
+        after: {
+          strippedFrom,
+          referencedBy: impact.referencedBy,
+          entriesBlockedUntilRefilled: impact.entriesBlockedUntilRefilled,
+        },
+      };
     },
   );
 }
