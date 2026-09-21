@@ -35,6 +35,40 @@ function buildValueSchema(fieldType: FieldType, options: unknown) {
   return definition.buildValueSchema(parsedOptions);
 }
 
+/** Ambiguous alternation under a repeat, plus the flag-propagation variants
+ * (`((a+))*b`, `((a|a)x)*b`, `((a|a))*b`) that reach the same catastrophic
+ * class one level deeper than the group the quantifier directly follows. */
+const REDOS_CORPUS = [
+  '(a|a)*',
+  '(a|aa)+',
+  '(a|a)*b',
+  '(a|aa)+b',
+  '(?:a|a)*b',
+  '(a|b|ab)*c',
+  '(a|a){30}b',
+  '(a|a){2,}b',
+  '((a|a)x)*b',
+  '((a|a))*b',
+  '((a+))*b',
+] as const;
+
+/** Alternation shapes a customer would plausibly author in a `short_text`
+ * validation pattern: none of them repeats the alternating group. */
+const SAFE_PATTERN_CORPUS = [
+  '^[A-Z]{2}-\\d{4}$',
+  '^(cat|dog|bird)$',
+  '^(Mr|Ms|Mx)?\\s?[A-Za-z ]+$',
+  '^https?://[a-z0-9.-]+$',
+  '^(\\+32|0)\\d{8,9}$',
+  '^(19|20)\\d{2}-\\d{2}-\\d{2}$',
+  '^(EUR|USD|GBP) \\d+([.,]\\d{2})?$',
+  '^#[0-9a-fA-F]{6}$',
+  '^\\d{4} ?[A-Z]{2}$',
+] as const;
+
+const REDOS_PROBE_LENGTH = 28;
+const REDOS_TIME_BUDGET_MS = 150;
+
 describe('isSafePattern', () => {
   it('accepts a bounded pattern', () => {
     expect(isSafePattern('^[A-Z]{2}-\\d{4}$')).toBe(true);
@@ -56,6 +90,55 @@ describe('isSafePattern', () => {
   it('rejects a pattern longer than 200 characters', () => {
     expect(isSafePattern('a'.repeat(201))).toBe(false);
   });
+
+  it('rejects every shape in the ambiguous-alternation rejection corpus, including the flag-propagation variants', () => {
+    const accepted = REDOS_CORPUS.filter((pattern) => isSafePattern(pattern));
+    expect(accepted).toEqual([]);
+  });
+
+  it('accepts every plausible customer pattern in the safe-pattern corpus', () => {
+    const rejected = SAFE_PATTERN_CORPUS.filter(
+      (pattern) => !isSafePattern(pattern),
+    );
+    expect(rejected).toEqual([]);
+  });
+
+  it('keeps a literal bar accepted: inside a character class, escaped, and top-level outside every group', () => {
+    expect(isSafePattern('[a|b]+')).toBe(true);
+    expect(isSafePattern('\\|+')).toBe(true);
+    expect(isSafePattern('a|a')).toBe(true);
+  });
+
+  it('keeps a repeat that cannot repeat the group more than once accepted', () => {
+    expect(isSafePattern('(a|a)?b')).toBe(true);
+    expect(isSafePattern('(a|a){0,1}b')).toBe(true);
+    expect(isSafePattern('(a|a){1}b')).toBe(true);
+  });
+
+  it('every pattern the guard accepts matches an adversarial input in bounded time', () => {
+    const candidates = [
+      ...REDOS_CORPUS,
+      ...SAFE_PATTERN_CORPUS,
+      '[a|b]+',
+      '\\|+',
+      'a|a',
+      '(a|a)?b',
+      '(a|a){0,1}b',
+      '(a|a){1}b',
+    ];
+    const probe = 'a'.repeat(REDOS_PROBE_LENGTH);
+    const offenders = candidates
+      .filter((pattern) => isSafePattern(pattern))
+      .map((pattern) => {
+        const wholeValuePattern = new RegExp(`^(?:${pattern})$`, 'u');
+        const start = performance.now();
+        wholeValuePattern.test(probe);
+        return { pattern, elapsedMs: performance.now() - start };
+      })
+      .filter((result) => result.elapsedMs > REDOS_TIME_BUDGET_MS);
+
+    expect(offenders).toEqual([]);
+  });
 });
 
 describe('short_text', () => {
@@ -71,6 +154,21 @@ describe('short_text', () => {
     expect(() => parseFieldOptions('short_text', { pattern: '(a+)+' })).toThrow(
       FieldDefinitionError,
     );
+  });
+
+  it('throws FieldDefinitionError for ambiguous alternation under a repeat, including through flag propagation', () => {
+    expect(() =>
+      parseFieldOptions('short_text', { pattern: '(a|a)*' }),
+    ).toThrow(FieldDefinitionError);
+    expect(() =>
+      parseFieldOptions('short_text', { pattern: '((a+))*b' }),
+    ).toThrow(FieldDefinitionError);
+  });
+
+  it('still accepts a disjoint alternation pattern end to end', () => {
+    const schema = buildValueSchema('short_text', { pattern: '^(cat|dog)$' });
+    expect(schema.safeParse('cat').success).toBe(true);
+    expect(schema.safeParse('fox').success).toBe(false);
   });
 
   it('counts maxLength/minLength in Unicode code points', () => {
