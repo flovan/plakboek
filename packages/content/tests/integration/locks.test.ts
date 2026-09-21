@@ -22,6 +22,7 @@ import {
   EDIT_LOCK_TTL_SECONDS,
   EditLockingDisabledError,
   EntryLockedError,
+  LockStateChangedError,
   LockTakeoverForbiddenError,
   releaseEditLock,
   renewEditLock,
@@ -385,5 +386,102 @@ describe('Edit locking, heartbeat lapse, takeover and the save-time refusal (TYP
       { lockedBy: string | null }[]
     >`SELECT locked_by AS "lockedBy" FROM content_entries WHERE id = ${entry.id}`;
     expect(lockRow?.lockedBy).toBe(editorA.userId);
+  });
+
+  it('takeover refuses with LockStateChangedError when a holder that looked lapsed at pre-check time is live again by the time the takeover transaction reloads the row (WR-01)', async () => {
+    const entry = await createEntry(deps, superadmin, {
+      contentTypeKey: typeLockingKey,
+      locale: 'en',
+    });
+    await acquireEditLock(deps, editorA, { entryId: entry.id });
+    clock.advance(EDIT_LOCK_TTL_SECONDS + 1); // lapsed from the pre-check's point of view
+
+    const blocking = createDb({
+      connectionString: testDatabase.connectionString,
+      maxConnections: 1,
+    });
+
+    let resolveRenewSignal: () => void = () => {
+      throw new Error('resolveRenewSignal called before it was assigned');
+    };
+    const renewSignal = new Promise<void>((resolve) => {
+      resolveRenewSignal = resolve;
+    });
+
+    try {
+      const blockingTxPromise = blocking.sql.begin(async (sql) => {
+        await sql`SELECT id FROM content_entries WHERE id = ${entry.id} FOR UPDATE`;
+        await renewSignal;
+        await sql`
+          UPDATE content_entries
+          SET locked_at = ${clock.now().toISOString()}
+          WHERE id = ${entry.id}
+        `;
+      });
+
+      const takeoverPromise = takeOverEditLock(deps, author, {
+        entryId: entry.id,
+      }).catch((caught: unknown) => caught);
+
+      const MAX_POLL_ATTEMPTS = 50;
+      const POLL_INTERVAL_MS = 20;
+      let waitingCount = 0;
+      for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+        const [row] = await handle.sql<{ count: string }[]>`
+          SELECT count(*) AS count
+          FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'
+        `;
+        waitingCount = Number(row?.count ?? '0');
+        if (waitingCount >= 1) break;
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      }
+      if (waitingCount < 1) {
+        throw new Error(
+          'timed out waiting for the takeover to block on its FOR UPDATE reload',
+        );
+      }
+
+      resolveRenewSignal();
+      await blockingTxPromise;
+
+      const takeoverResult: unknown = await takeoverPromise;
+      expect(takeoverResult).toBeInstanceOf(LockStateChangedError);
+
+      const [row] = await handle.sql<
+        { lockedBy: string | null; version: number }[]
+      >`SELECT locked_by AS "lockedBy", version FROM content_entries WHERE id = ${entry.id}`;
+      expect(row?.lockedBy).toBe(editorA.userId);
+      expect(row?.version).toBe(entry.version);
+
+      const retryError: unknown = await takeOverEditLock(deps, author, {
+        entryId: entry.id,
+      }).catch((caught: unknown) => caught);
+      expect(retryError).toBeInstanceOf(LockTakeoverForbiddenError);
+
+      const denied = (await auditRowsFor('entry.lock-takeover')).filter(
+        (auditRow) => auditRow.outcome === 'denied',
+      );
+      const lastDenied = denied.at(-1);
+      expect(lastDenied?.after).toMatchObject({
+        reason: 'not-permission-superset',
+      });
+    } finally {
+      await blocking.close();
+    }
+  });
+
+  it('a lapsed lock that nobody renews is still taken over by a non-superset actor (unchanged path)', async () => {
+    const entry = await createEntry(deps, superadmin, {
+      contentTypeKey: typeLockingKey,
+      locale: 'en',
+    });
+    await acquireEditLock(deps, editorA, { entryId: entry.id });
+    clock.advance(EDIT_LOCK_TTL_SECONDS + 1);
+
+    const takenOver = await takeOverEditLock(deps, author, {
+      entryId: entry.id,
+    });
+    expect(takenOver.lockedBy).toBe(author.userId);
   });
 });
