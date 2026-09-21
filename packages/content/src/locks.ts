@@ -340,9 +340,16 @@ const TAKEOVER_ACTION = 'entry.lock-takeover';
  * transaction that would just roll back. Otherwise the takeover runs
  * through `deps.recorder.run`, whose mutation re-reads the row `FOR UPDATE`
  * and throws `LockStateChangedError` if the holder changed since the
- * pre-check (a race, not a permission problem -- the caller retries), then
- * sets the lock to the actor and bumps `version`, so the previous holder's
- * next save from its old base version hits `StaleVersionError` (D-42).
+ * pre-check (a race, not a permission problem -- the caller retries). The
+ * mutation also re-derives liveness against the reloaded row and its own
+ * clock read, and refuses the same way (`LockStateChangedError`) when a
+ * holder that looked lapsed at pre-check time -- and so was never compared
+ * against the D-44 superset rule -- is live again by the time the row is
+ * locked: the pre-check's decision to skip that comparison has gone stale,
+ * and a retry re-runs it against the now-live holder. Otherwise the
+ * mutation sets the lock to the actor and bumps `version`, so the previous
+ * holder's next save from its old base version hits `StaleVersionError`
+ * (D-42).
  *
  * When nobody holds a live lock, the permission pre-check is skipped (there
  * is nobody to compare against) and the takeover proceeds like a fresh
@@ -395,6 +402,20 @@ export async function takeOverEditLock(
     async (tx) => {
       const row = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (row.lockedBy !== before.lockedBy) {
+        throw new LockStateChangedError(input.entryId);
+      }
+      const transactionTime = now();
+      const holderStillLive = isLockLive(
+        row.lockedBy,
+        row.lockedAt,
+        transactionTime,
+      );
+      if (holderStillLive && !holderIsLive && row.lockedBy !== actor.userId) {
+        // The pre-check saw a lapsed lock and skipped the D-44 superset
+        // comparison, but the holder renewed before this reload -- the
+        // skip decision has gone stale. Refuse rather than displace a live
+        // holder whose permissions were never compared; the caller retries
+        // and the pre-check re-runs the comparison against the live holder.
         throw new LockStateChangedError(input.entryId);
       }
       const previousHolderUserId = row.lockedBy;
