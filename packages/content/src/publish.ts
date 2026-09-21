@@ -16,6 +16,10 @@ import { getEntry, loadEntryForUpdate, toEntryRecord } from './entries.js';
 import { EntryNotFoundError } from './entries.js';
 import { listFields } from './fields.js';
 import { assertRowsWritable } from './locks.js';
+import {
+  assertReferencesResolvable,
+  syncEntryReferenceIndex,
+} from './references.js';
 import { recordRevision } from './revisions.js';
 import {
   assertPathAvailable,
@@ -223,6 +227,13 @@ export async function publishEntry(
 
       const validatedData = validateEntryData(fields, workingCopy.data);
 
+      // T-03-61/T-03-62/D-40: re-check that every reference in the
+      // promoted data still resolves. A pending draft was checked when it
+      // was saved, but its target could have been permanently deleted in
+      // the meantime -- without this, promoting it would write a dangling
+      // reference straight into the live data and the reverse index.
+      await assertReferencesResolvable(tx, fields, validatedData);
+
       let seo: EntrySeo | null = null;
       if (workingCopy.seo !== null && workingCopy.seo !== undefined) {
         seo = validateEntrySeo(workingCopy.seo, { seoEnabled: type.seo });
@@ -352,6 +363,15 @@ export async function publishEntry(
           current.version,
         );
       }
+
+      // D-40: the promoted data just became this entry's live side, so its
+      // reference index must mirror it now -- exactly when a pending
+      // draft's references first enter the index.
+      await syncEntryReferenceIndex(tx, {
+        entryId: current.id,
+        fields,
+        data: validatedData,
+      });
 
       // The previously pending revision is only ever deleted here when the
       // type has revisions disabled -- with revisions on, plan 03-09 keeps

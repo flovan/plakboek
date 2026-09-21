@@ -36,6 +36,10 @@ import {
 import { listFields } from './fields.js';
 import { assertRowsWritable } from './locks.js';
 import { EntryStateChangedError, readWorkingCopy } from './publish.js';
+import {
+  assertReferencesResolvable,
+  syncEntryReferenceIndex,
+} from './references.js';
 import { pruneSaveRevisions, recordRevision } from './revisions.js';
 import {
   assertPathAvailable,
@@ -204,6 +208,16 @@ export async function applySyncedFieldChanges(
       ...(liveRevisionId !== null ? { liveRevisionId } : {}),
     })
     .where(eq(contentEntries.id, row.id));
+
+  // D-40: this row's data just changed live, so its reference index must
+  // be rebuilt too -- a shared reference field synced to a sibling (or a
+  // translatable toggle's winner value, field-translatable.ts's own caller
+  // of this function) is exactly as live-writing as an origin's own save.
+  await syncEntryReferenceIndex(tx, {
+    entryId: row.id,
+    fields,
+    data: mergedData,
+  });
   return true;
 }
 
@@ -482,6 +496,12 @@ export async function saveEntryInTransaction(
   const fields = await listFields(tx, current.contentTypeId);
   const validatedData = validateEntryData(fields, input.data);
 
+  // T-03-61/FIELD-06/D-12: a reference value must name a real target of an
+  // allowed type before anything is written -- runs for both the
+  // pending-draft and live branches below, so an unresolvable reference
+  // can never even be staged.
+  await assertReferencesResolvable(tx, fields, validatedData);
+
   // D-19/D-26: a non-translatable field's value is shared by every row of
   // the translation group. Diff against the origin's own working copy (its
   // pending draft when one is staged, its live data otherwise) -- not just
@@ -714,6 +734,15 @@ export async function saveEntryInTransaction(
         current.version,
       );
     }
+
+    // D-40: this is the live branch -- the entry's data just went live, so
+    // its reference index must mirror it now. The pending-draft branch
+    // above never reaches here: the index tracks the live side only.
+    await syncEntryReferenceIndex(tx, {
+      entryId: current.id,
+      fields,
+      data: validatedData,
+    });
   }
 
   const revisionCap = await getRevisionCap(tx);
