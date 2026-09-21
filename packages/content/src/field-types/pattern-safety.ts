@@ -3,12 +3,33 @@
  * surface in this phase: `short_text`'s optional `pattern` option (T-03-12).
  * A pattern is accepted only if it is at most `PATTERN_MAX_LENGTH`
  * characters, contains no backreference, never nests an unbounded
- * quantifier inside a quantified group, and compiles with the `u` flag.
+ * quantifier inside a quantified group, never contains a top-level
+ * alternation inside a group that a following quantifier can repeat more
+ * than once, and compiles with the `u` flag.
  *
- * `isSafePattern` runs once, when a field is defined (`short-text.ts`'s
- * options refinement) -- never per-request against submitted values, so an
- * expensive or malicious pattern is refused before it can ever be compiled
+ * Group flags (`hasUnboundedQuantifier`, `hasAlternation`) propagate outward
+ * into the enclosing group the moment a group closes, so either dangerous
+ * shape buried one level deeper than the group a quantifier directly
+ * follows still reaches the rule that rejects it (for example
+ * `((a+))*b` or `((a|a)x)*b`).
+ *
+ * `isSafePattern` is a definition-time gate, reached from `addField`,
+ * `updateField` and the seed applier via `short-text.ts`'s options
+ * refinement -- never compiled per-request against a submitted value.
+ * `validateEntryData` additionally re-parses a field's *stored* options
+ * through this same path on every save, so a pattern that was accepted
+ * before a rule tightened is refused on the next save rather than compiled
  * against untrusted input.
+ *
+ * The alternation rule is deliberately conservative: it does not attempt to
+ * prove the alternatives disjoint, only that a group containing any
+ * top-level `|` is followed by a quantifier that can repeat that group more
+ * than once. This rejects a small number of provably-safe shapes no
+ * plausible `short_text` validation pattern needs, for example `(cat|dog){2}`
+ * (an exact bounded repeat of a disjoint alternation) and `((cat|dog)-)+` (a
+ * disjoint alternation reached through propagation). That tradeoff is
+ * accepted: a regex-analysis dependency capable of proving disjointness is
+ * not warranted for a single-line text pattern surface.
  */
 
 export const PATTERN_MAX_LENGTH = 200;
@@ -18,6 +39,7 @@ const BACKREFERENCE_PATTERN = /\\(?:[1-9]|k<)/;
 type Quantifier = {
   readonly length: number;
   readonly unbounded: boolean;
+  readonly repeatsMoreThanOnce: boolean;
 };
 
 /** Matches a quantifier (`*`, `+`, `?`, `{n}`, `{n,}`, `{n,m}`, each
@@ -28,11 +50,19 @@ function matchQuantifierAt(pattern: string, index: number): Quantifier | null {
   const char = pattern[index];
   if (char === '*' || char === '+') {
     const lazy = pattern[index + 1] === '?';
-    return { length: lazy ? 2 : 1, unbounded: true };
+    return {
+      length: lazy ? 2 : 1,
+      unbounded: true,
+      repeatsMoreThanOnce: true,
+    };
   }
   if (char === '?') {
     const lazy = pattern[index + 1] === '?';
-    return { length: lazy ? 2 : 1, unbounded: false };
+    return {
+      length: lazy ? 2 : 1,
+      unbounded: false,
+      repeatsMoreThanOnce: false,
+    };
   }
   if (char === '{') {
     const match = /^\{(\d+)(,(\d*))?\}/.exec(pattern.slice(index));
@@ -43,21 +73,34 @@ function matchQuantifierAt(pattern: string, index: number): Quantifier | null {
       hasComma && (upperBound === undefined || upperBound === '');
     const baseLength = match[0].length;
     const lazy = pattern[index + baseLength] === '?';
-    return { length: lazy ? baseLength + 1 : baseLength, unbounded };
+    const repeatsMoreThanOnce = unbounded
+      ? true
+      : hasComma
+        ? Number(upperBound) >= 2
+        : Number(match[1]) >= 2;
+    return {
+      length: lazy ? baseLength + 1 : baseLength,
+      unbounded,
+      repeatsMoreThanOnce,
+    };
   }
   return null;
 }
 
 type GroupFrame = {
   hasUnboundedQuantifier: boolean;
+  hasAlternation: boolean;
 };
 
 /**
  * A single left-to-right scan that skips escaped characters and character
  * classes, keeps a stack of open groups each recording whether it contains
- * an unbounded quantifier, and flags a pattern the moment a group closes and
- * is immediately followed by any quantifier while it contains an unbounded
- * one -- the catastrophic-backtracking shape (`(a+)+`, `(\w*)*x`).
+ * an unbounded quantifier or a top-level alternation, propagates both flags
+ * into the enclosing group when a group closes, and flags a pattern the
+ * moment a group closes and is immediately followed by a quantifier that
+ * either (a) can repeat the group while it holds an unbounded quantifier
+ * (`(a+)+`, `(\w*)*x`) or (b) can repeat the group more than once while it
+ * holds a top-level alternation (`(a|a)*b`, `(a|a){2,}b`).
  */
 export function isSafePattern(pattern: string): boolean {
   if (pattern.length > PATTERN_MAX_LENGTH) return false;
@@ -65,6 +108,7 @@ export function isSafePattern(pattern: string): boolean {
 
   const stack: GroupFrame[] = [];
   let nestedUnbounded = false;
+  let ambiguousAlternation = false;
   let index = 0;
 
   while (index < pattern.length) {
@@ -80,12 +124,29 @@ export function isSafePattern(pattern: string): boolean {
       }
       index += 1;
     } else if (char === '(') {
-      stack.push({ hasUnboundedQuantifier: false });
+      stack.push({ hasUnboundedQuantifier: false, hasAlternation: false });
+      index += 1;
+      continue;
+    } else if (char === '|') {
+      // A top-level bar with no open group (`a|a`) has nothing to flag --
+      // `short-text.ts` wraps the whole pattern in a group it never
+      // quantifies, so a bare top-level alternation is left alone.
+      const innermost = stack[stack.length - 1];
+      if (innermost !== undefined) innermost.hasAlternation = true;
       index += 1;
       continue;
     } else if (char === ')') {
       closedFrame = stack.pop();
       index += 1;
+      if (closedFrame !== undefined) {
+        const parent = stack[stack.length - 1];
+        if (parent !== undefined) {
+          if (closedFrame.hasUnboundedQuantifier) {
+            parent.hasUnboundedQuantifier = true;
+          }
+          if (closedFrame.hasAlternation) parent.hasAlternation = true;
+        }
+      }
     } else {
       index += 1;
     }
@@ -95,6 +156,13 @@ export function isSafePattern(pattern: string): boolean {
       if (closedFrame !== undefined && closedFrame.hasUnboundedQuantifier) {
         nestedUnbounded = true;
       }
+      if (
+        closedFrame !== undefined &&
+        closedFrame.hasAlternation &&
+        quantifier.repeatsMoreThanOnce
+      ) {
+        ambiguousAlternation = true;
+      }
       if (quantifier.unbounded) {
         const parent = stack[stack.length - 1];
         if (parent !== undefined) parent.hasUnboundedQuantifier = true;
@@ -103,7 +171,7 @@ export function isSafePattern(pattern: string): boolean {
     }
   }
 
-  if (nestedUnbounded) return false;
+  if (nestedUnbounded || ambiguousAlternation) return false;
 
   try {
     // The pattern is dynamic by design (a host-configured field option) --
