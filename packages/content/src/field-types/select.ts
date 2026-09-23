@@ -45,12 +45,12 @@ function isEmptySelectValue(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
-export const selectFieldType: FieldTypeDefinition<SelectOptions> = {
+export const selectFieldType = {
   fieldType: 'select',
   optionsSchema: selectOptionsSchema,
   buildValueSchema: buildSelectValueSchema,
   isEmptyValue: isEmptySelectValue,
-  widgets: ['dropdown', 'radio'],
+  widgets: ['dropdown', 'radio'] as const,
   defaultWidget: 'dropdown',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<SelectOptions>;

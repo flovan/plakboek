@@ -221,12 +221,12 @@ function isEmptyRepeaterValue(value: unknown): boolean {
   );
 }
 
-export const repeaterFieldType: FieldTypeDefinition<RepeaterOptions> = {
+export const repeaterFieldType = {
   fieldType: 'repeater',
   optionsSchema: repeaterOptionsSchema,
   buildValueSchema: buildRepeaterValueSchema,
   isEmptyValue: isEmptyRepeaterValue,
-  widgets: ['repeater-list'],
+  widgets: ['repeater-list'] as const,
   defaultWidget: 'repeater-list',
   allowedInRepeater: false,
-};
+} satisfies FieldTypeDefinition<RepeaterOptions>;

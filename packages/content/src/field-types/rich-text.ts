@@ -91,12 +91,12 @@ function isEmptyRichTextValue(value: unknown): boolean {
   );
 }
 
-export const richTextFieldType: FieldTypeDefinition<RichTextOptions> = {
+export const richTextFieldType = {
   fieldType: 'rich_text',
   optionsSchema: richTextOptionsSchema,
   buildValueSchema: buildRichTextValueSchema,
   isEmptyValue: isEmptyRichTextValue,
-  widgets: ['rich-text-editor'],
+  widgets: ['rich-text-editor'] as const,
   defaultWidget: 'rich-text-editor',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<RichTextOptions>;

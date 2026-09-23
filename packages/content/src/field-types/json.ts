@@ -32,12 +32,12 @@ function isEmptyJsonFieldValue(value: unknown): boolean {
   return value === undefined;
 }
 
-export const jsonFieldType: FieldTypeDefinition<JsonFieldOptions> = {
+export const jsonFieldType = {
   fieldType: 'json',
   optionsSchema: jsonFieldOptionsSchema,
   buildValueSchema: buildJsonFieldValueSchema,
   isEmptyValue: isEmptyJsonFieldValue,
-  widgets: ['json-editor'],
+  widgets: ['json-editor'] as const,
   defaultWidget: 'json-editor',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<JsonFieldOptions>;

@@ -24,12 +24,12 @@ function isEmptyFileValue(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
-export const fileFieldType: FieldTypeDefinition<FileOptions> = {
+export const fileFieldType = {
   fieldType: 'file',
   optionsSchema: fileOptionsSchema,
   buildValueSchema: buildFileValueSchema,
   isEmptyValue: isEmptyFileValue,
-  widgets: ['file-picker'],
+  widgets: ['file-picker'] as const,
   defaultWidget: 'file-picker',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<FileOptions>;

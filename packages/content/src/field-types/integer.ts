@@ -40,12 +40,12 @@ function isEmptyIntegerValue(value: unknown): boolean {
   return value === undefined || value === null;
 }
 
-export const integerFieldType: FieldTypeDefinition<IntegerOptions> = {
+export const integerFieldType = {
   fieldType: 'integer',
   optionsSchema: integerOptionsSchema,
   buildValueSchema: buildIntegerValueSchema,
   isEmptyValue: isEmptyIntegerValue,
-  widgets: ['number-input', 'slider'],
+  widgets: ['number-input', 'slider'] as const,
   defaultWidget: 'number-input',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<IntegerOptions>;

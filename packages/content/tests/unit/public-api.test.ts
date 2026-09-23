@@ -341,6 +341,7 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
 const INTERNAL_NAMES: readonly string[] = Object.freeze([
   // field-types/registry.ts
   'registerFieldType',
+  'FIELD_TYPE_DEFINITIONS',
   // save.ts
   'saveEntryInTransaction',
   'decideSavePermission',

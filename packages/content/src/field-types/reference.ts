@@ -74,12 +74,12 @@ function isEmptyReferenceValue(value: unknown): boolean {
   );
 }
 
-export const referenceFieldType: FieldTypeDefinition<ReferenceOptions> = {
+export const referenceFieldType = {
   fieldType: 'reference',
   optionsSchema: referenceOptionsSchema,
   buildValueSchema: buildReferenceValueSchema,
   isEmptyValue: isEmptyReferenceValue,
-  widgets: ['entry-picker'],
+  widgets: ['entry-picker'] as const,
   defaultWidget: 'entry-picker',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<ReferenceOptions>;

@@ -36,8 +36,19 @@ import {
   uuid,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
+import { FIELD_TYPES } from './field-types/field-type-ids.js';
 
 const timestamptz = (name: string) => timestamp(name, { withTimezone: true });
+
+/** The CHECK constraint's `IN (...)` list, rendered from `FIELD_TYPES`.
+ * Every value comes from this package's own frozen tuple, never from a
+ * caller, so `sql.raw` below carries no injection surface. A plain
+ * interpolation of a JS array through drizzle's `sql` template renders
+ * bound parameters, which is wrong for a constraint definition, so the
+ * list is built as a literal string instead. */
+const FIELD_TYPE_SQL_LIST = FIELD_TYPES.map(
+  (fieldType) => `'${fieldType}'`,
+).join(', ');
 
 export const contentTypes = pgTable(
   'content_types',
@@ -105,7 +116,7 @@ export const contentTypeFields = pgTable(
     ),
     check(
       'content_type_fields_field_type_check',
-      sql`${table.fieldType} IN ('short_text', 'long_text', 'rich_text', 'number', 'integer', 'boolean', 'date_time', 'select', 'multi_select', 'image', 'file', 'reference', 'json', 'slug', 'url', 'repeater')`,
+      sql`${table.fieldType} IN (${sql.raw(FIELD_TYPE_SQL_LIST)})`,
     ),
     check(
       'content_type_fields_key_check',

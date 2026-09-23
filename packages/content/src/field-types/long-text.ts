@@ -38,12 +38,12 @@ function isEmptyLongTextValue(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
-export const longTextFieldType: FieldTypeDefinition<LongTextOptions> = {
+export const longTextFieldType = {
   fieldType: 'long_text',
   optionsSchema: longTextOptionsSchema,
   buildValueSchema: buildLongTextValueSchema,
   isEmptyValue: isEmptyLongTextValue,
-  widgets: ['textarea'],
+  widgets: ['textarea'] as const,
   defaultWidget: 'textarea',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<LongTextOptions>;

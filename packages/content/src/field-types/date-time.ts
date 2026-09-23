@@ -99,12 +99,12 @@ function isEmptyDateTimeValue(value: unknown): boolean {
   return value === undefined || value === null;
 }
 
-export const dateTimeFieldType: FieldTypeDefinition<DateTimeOptions> = {
+export const dateTimeFieldType = {
   fieldType: 'date_time',
   optionsSchema: dateTimeOptionsSchema,
   buildValueSchema: buildDateTimeValueSchema,
   isEmptyValue: isEmptyDateTimeValue,
-  widgets: ['datetime-picker', 'date-picker'],
+  widgets: ['datetime-picker', 'date-picker'] as const,
   defaultWidget: 'datetime-picker',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<DateTimeOptions>;

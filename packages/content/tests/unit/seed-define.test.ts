@@ -277,7 +277,7 @@ describe('defineContentTypes (D-02): runtime option validation matches the types
     ).toBe(true);
   });
 
-  it("rejects a widget outside its field type's widget list", () => {
+  it("compiles with @ts-expect-error and still throws at runtime for a widget outside its field type's widget list", () => {
     const issues = issuesOf(() =>
       defineContentTypes([
         baseType({
@@ -286,6 +286,7 @@ describe('defineContentTypes (D-02): runtime option validation matches the types
               seedId: 'post.title',
               label: 'Title',
               fieldType: 'short_text',
+              // @ts-expect-error -- "color-swatch" is not one of short_text's widgets
               widget: 'color-swatch',
             },
           ],

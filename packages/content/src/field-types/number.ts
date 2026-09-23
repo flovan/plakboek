@@ -41,12 +41,12 @@ function isEmptyNumberValue(value: unknown): boolean {
   return value === undefined || value === null;
 }
 
-export const numberFieldType: FieldTypeDefinition<NumberOptions> = {
+export const numberFieldType = {
   fieldType: 'number',
   optionsSchema: numberOptionsSchema,
   buildValueSchema: buildNumberValueSchema,
   isEmptyValue: isEmptyNumberValue,
-  widgets: ['number-input', 'slider'],
+  widgets: ['number-input', 'slider'] as const,
   defaultWidget: 'number-input',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<NumberOptions>;

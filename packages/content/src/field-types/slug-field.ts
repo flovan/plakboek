@@ -31,12 +31,12 @@ function isEmptySlugFieldValue(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
-export const slugFieldFieldType: FieldTypeDefinition<SlugFieldOptions> = {
+export const slugFieldFieldType = {
   fieldType: 'slug',
   optionsSchema: slugFieldOptionsSchema,
   buildValueSchema: buildSlugFieldValueSchema,
   isEmptyValue: isEmptySlugFieldValue,
-  widgets: ['slug-input'],
+  widgets: ['slug-input'] as const,
   defaultWidget: 'slug-input',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<SlugFieldOptions>;

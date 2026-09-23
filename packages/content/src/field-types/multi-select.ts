@@ -59,12 +59,12 @@ function isEmptyMultiSelectValue(value: unknown): boolean {
   );
 }
 
-export const multiSelectFieldType: FieldTypeDefinition<MultiSelectOptions> = {
+export const multiSelectFieldType = {
   fieldType: 'multi_select',
   optionsSchema: multiSelectOptionsSchema,
   buildValueSchema: buildMultiSelectValueSchema,
   isEmptyValue: isEmptyMultiSelectValue,
-  widgets: ['checkbox-group', 'multi-dropdown'],
+  widgets: ['checkbox-group', 'multi-dropdown'] as const,
   defaultWidget: 'checkbox-group',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<MultiSelectOptions>;

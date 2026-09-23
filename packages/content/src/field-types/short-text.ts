@@ -63,12 +63,12 @@ function isEmptyShortTextValue(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
-export const shortTextFieldType: FieldTypeDefinition<ShortTextOptions> = {
+export const shortTextFieldType = {
   fieldType: 'short_text',
   optionsSchema: shortTextOptionsSchema,
   buildValueSchema: buildShortTextValueSchema,
   isEmptyValue: isEmptyShortTextValue,
-  widgets: ['text-input'],
+  widgets: ['text-input'] as const,
   defaultWidget: 'text-input',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<ShortTextOptions>;

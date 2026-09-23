@@ -24,12 +24,12 @@ function isEmptyImageValue(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
-export const imageFieldType: FieldTypeDefinition<ImageOptions> = {
+export const imageFieldType = {
   fieldType: 'image',
   optionsSchema: imageOptionsSchema,
   buildValueSchema: buildImageValueSchema,
   isEmptyValue: isEmptyImageValue,
-  widgets: ['image-picker'],
+  widgets: ['image-picker'] as const,
   defaultWidget: 'image-picker',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<ImageOptions>;

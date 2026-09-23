@@ -5,95 +5,49 @@
  * with `options: { maxLength: 5 }` -- `short_text`'s option, not
  * `number`'s -- is a compile error, not a runtime-only check.
  *
- * Each entry is derived from its own field-type module's exported
- * `FieldTypeDefinition<O>` constant (never restated by hand): `OptionsOf<D>`
- * extracts the definition's own `O` via the same `infer` trick a discriminated
- * generic type normally uses, so a change to a field type's options shape
- * (e.g. `short-text.ts`'s `ShortTextOptions`) is picked up here automatically,
- * with no matching edit required in this file.
+ * Both maps derive from `registry.ts`'s single `FIELD_TYPE_DEFINITIONS`
+ * record, with zero field-type keys restated in this file: `OptionsOf<D>`
+ * and `WidgetOf<D>` extract each definition's own types through `infer`, so
+ * a change to a field type's options shape (e.g. `short-text.ts`'s
+ * `ShortTextOptions`) is picked up here automatically, with no matching
+ * edit required in this file.
  *
- * `widgets` is declared as a fixed, non-generic
- * `readonly [string, ...string[]]` on `FieldTypeDefinition<O>` itself (see
- * `registry.ts`) -- it does not vary with `O`. Because every field-type
- * module gives its exported constant an explicit `FieldTypeDefinition<...>`
- * type annotation (never lets it infer), TypeScript uses that annotation as
- * the constant's declared type and discards the object literal's more
- * specific tuple-of-string-literals type in the process -- this is
- * unconditional, ordinary "explicit annotation wins" behaviour, confirmed
- * live against this package's own field-type modules (see 03-13-SUMMARY.md).
- * `FieldTypeWidgetMap` is still built the same mechanical, per-definition
- * way as `FieldTypeOptionsMap` (so it stays automatically in sync with the
- * registry), but every entry resolves to plain `string` rather than a
- * literal widget union -- `defineContentTypes`'s widget check is therefore
- * enforced at runtime (`seed.ts`'s `INVALID_WIDGET` issue), the same way
- * `addField`/`updateField` already enforce it, not at compile time.
+ * `FieldTypeWidgetMap[K]` now resolves to the literal widget union field
+ * type `K` declares, not plain `string`: `registry.ts`'s definitions are
+ * checked with `satisfies`, which keeps each definition's own literal
+ * `widgets` tuple instead of widening it to `FieldTypeDefinition`'s
+ * declared `readonly [string, ...string[]]`. The widget check
+ * `defineContentTypes` used to only perform at runtime therefore moved to
+ * compile time. `addField` and `updateField` still check widgets at
+ * runtime, because their own input types keep `widget` as a plain string.
  */
-import { booleanFieldType } from './boolean.js';
-import { dateTimeFieldType } from './date-time.js';
-import { fileFieldType } from './file.js';
-import { imageFieldType } from './image.js';
-import { integerFieldType } from './integer.js';
-import { jsonFieldType } from './json.js';
-import { longTextFieldType } from './long-text.js';
-import { multiSelectFieldType } from './multi-select.js';
-import { numberFieldType } from './number.js';
-import { referenceFieldType } from './reference.js';
-import { repeaterFieldType } from './repeater.js';
-import type { FieldTypeDefinition } from './registry.js';
-import { richTextFieldType } from './rich-text.js';
-import { selectFieldType } from './select.js';
-import { shortTextFieldType } from './short-text.js';
-import { slugFieldFieldType } from './slug-field.js';
-import { urlFieldType } from './url.js';
+import type {
+  FIELD_TYPE_DEFINITIONS,
+  FieldType,
+  FieldTypeDefinition,
+} from './registry.js';
+
+type Defs = typeof FIELD_TYPE_DEFINITIONS;
 
 /** Extracts a `FieldTypeDefinition<O>`'s own `O` from the definition's
  * declared type. */
 type OptionsOf<D> = D extends FieldTypeDefinition<infer O> ? O : never;
 
-/** Extracts a `FieldTypeDefinition`'s `widgets` element type. See this
- * module's header comment for why this resolves to plain `string` today. */
+/** Extracts a `FieldTypeDefinition`'s `widgets` element type. Resolves to
+ * the literal widget union `D` itself declares. See this module's header
+ * comment. */
 type WidgetOf<D> =
   D extends FieldTypeDefinition<unknown> ? D['widgets'][number] : never;
 
-/** One entry per field type (FIELD-02), each projected from that type's own
- * exported `FieldTypeDefinition` constant -- never restated by hand. */
+/** One entry per field type (FIELD-02), each projected from
+ * `FIELD_TYPE_DEFINITIONS` -- never restated by hand. */
 export type FieldTypeOptionsMap = {
-  short_text: OptionsOf<typeof shortTextFieldType>;
-  long_text: OptionsOf<typeof longTextFieldType>;
-  rich_text: OptionsOf<typeof richTextFieldType>;
-  number: OptionsOf<typeof numberFieldType>;
-  integer: OptionsOf<typeof integerFieldType>;
-  boolean: OptionsOf<typeof booleanFieldType>;
-  date_time: OptionsOf<typeof dateTimeFieldType>;
-  select: OptionsOf<typeof selectFieldType>;
-  multi_select: OptionsOf<typeof multiSelectFieldType>;
-  image: OptionsOf<typeof imageFieldType>;
-  file: OptionsOf<typeof fileFieldType>;
-  reference: OptionsOf<typeof referenceFieldType>;
-  json: OptionsOf<typeof jsonFieldType>;
-  slug: OptionsOf<typeof slugFieldFieldType>;
-  url: OptionsOf<typeof urlFieldType>;
-  repeater: OptionsOf<typeof repeaterFieldType>;
+  [K in FieldType]: OptionsOf<Defs[K]>;
 };
 
 /** One entry per field type, projected the same mechanical way as
  * `FieldTypeOptionsMap`. See this module's header comment for why every
- * entry is `string` rather than a literal widget union. */
+ * entry is now a literal widget union rather than plain `string`. */
 export type FieldTypeWidgetMap = {
-  short_text: WidgetOf<typeof shortTextFieldType>;
-  long_text: WidgetOf<typeof longTextFieldType>;
-  rich_text: WidgetOf<typeof richTextFieldType>;
-  number: WidgetOf<typeof numberFieldType>;
-  integer: WidgetOf<typeof integerFieldType>;
-  boolean: WidgetOf<typeof booleanFieldType>;
-  date_time: WidgetOf<typeof dateTimeFieldType>;
-  select: WidgetOf<typeof selectFieldType>;
-  multi_select: WidgetOf<typeof multiSelectFieldType>;
-  image: WidgetOf<typeof imageFieldType>;
-  file: WidgetOf<typeof fileFieldType>;
-  reference: WidgetOf<typeof referenceFieldType>;
-  json: WidgetOf<typeof jsonFieldType>;
-  slug: WidgetOf<typeof slugFieldFieldType>;
-  url: WidgetOf<typeof urlFieldType>;
-  repeater: WidgetOf<typeof repeaterFieldType>;
+  [K in FieldType]: WidgetOf<Defs[K]>;
 };

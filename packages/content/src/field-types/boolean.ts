@@ -22,12 +22,12 @@ function isEmptyBooleanValue(value: unknown): boolean {
   return value === undefined || value === null;
 }
 
-export const booleanFieldType: FieldTypeDefinition<BooleanOptions> = {
+export const booleanFieldType = {
   fieldType: 'boolean',
   optionsSchema: booleanOptionsSchema,
   buildValueSchema: buildBooleanValueSchema,
   isEmptyValue: isEmptyBooleanValue,
-  widgets: ['checkbox', 'switch'],
+  widgets: ['checkbox', 'switch'] as const,
   defaultWidget: 'checkbox',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<BooleanOptions>;

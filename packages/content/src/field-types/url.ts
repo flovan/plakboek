@@ -46,12 +46,12 @@ function isEmptyUrlValue(value: unknown): boolean {
   return value === undefined || value === null || value === '';
 }
 
-export const urlFieldType: FieldTypeDefinition<UrlOptions> = {
+export const urlFieldType = {
   fieldType: 'url',
   optionsSchema: urlOptionsSchema,
   buildValueSchema: buildUrlValueSchema,
   isEmptyValue: isEmptyUrlValue,
-  widgets: ['url-input'],
+  widgets: ['url-input'] as const,
   defaultWidget: 'url-input',
   allowedInRepeater: true,
-};
+} satisfies FieldTypeDefinition<UrlOptions>;
