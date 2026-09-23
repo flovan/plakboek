@@ -424,7 +424,7 @@ export async function takeOverEditLock(
         .update(contentEntries)
         .set({
           lockedBy: actor.userId,
-          lockedAt: preCheckTime,
+          lockedAt: transactionTime,
           version: sql`${contentEntries.version} + 1`,
         })
         .where(eq(contentEntries.id, input.entryId))

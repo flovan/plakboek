@@ -471,6 +471,40 @@ describe('Edit locking, heartbeat lapse, takeover and the save-time refusal (TYP
     }
   });
 
+  it('takeover stamps lockedAt with the transaction-time clock read, not the pre-check time, so a lock cannot be born already lapsed (C-CR-01)', async () => {
+    const entry = await createEntry(deps, superadmin, {
+      contentTypeKey: typeLockingKey,
+      locale: 'en',
+    });
+    await acquireEditLock(deps, editorA, { entryId: entry.id });
+    clock.advance(EDIT_LOCK_TTL_SECONDS + 1); // holder lapsed, so the pre-check skips the D-44 comparison
+
+    const preCheckTime = clock.now();
+    const transactionTime = new Date(preCheckTime.getTime() + 5000);
+    let calls = 0;
+    const raceDeps: ContentDeps = {
+      ...deps,
+      now: (): Date => {
+        calls += 1;
+        return calls === 1 ? preCheckTime : transactionTime;
+      },
+    };
+
+    const takenOver = await takeOverEditLock(raceDeps, author, {
+      entryId: entry.id,
+    });
+
+    expect(takenOver.lockedAt?.getTime()).toBe(transactionTime.getTime());
+    expect(takenOver.lockedAt?.getTime()).not.toBe(preCheckTime.getTime());
+
+    const [row] = await handle.sql<{ lockedAt: Date }[]>`
+      SELECT locked_at AS "lockedAt" FROM content_entries WHERE id = ${entry.id}
+    `;
+    expect(new Date(row?.lockedAt ?? 0).getTime()).toBe(
+      transactionTime.getTime(),
+    );
+  });
+
   it('a lapsed lock that nobody renews is still taken over by a non-superset actor (unchanged path)', async () => {
     const entry = await createEntry(deps, superadmin, {
       contentTypeKey: typeLockingKey,
