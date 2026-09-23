@@ -21,7 +21,14 @@ const urlOptionsSchema = z.strictObject({
 type UrlOptions = z.infer<typeof urlOptionsSchema>;
 
 const HTTPS_PROTOCOL_PATTERN = /^https?$/;
-const SINGLE_SLASH_RELATIVE_PATTERN = /^\/(?!\/)/;
+// A relative value must start with exactly one "/" and hold no backslash
+// anywhere. The WHATWG URL parser (implemented identically by every major
+// browser and by Node's own URL) normalises a backslash to a forward slash
+// inside a special-scheme URL, so "/\evil.com" resolves against a new host
+// exactly like "//evil.com" does, even though it does not start with two
+// slashes. Rejecting any backslash, not only one in the second position,
+// is defense in depth. A path has no legitimate use for one.
+const SINGLE_SLASH_RELATIVE_PATTERN = /^\/(?![/\\])[^\\]*$/;
 
 function buildUrlValueSchema(options: UrlOptions): z.ZodType {
   const absolute = z.url({ protocol: HTTPS_PROTOCOL_PATTERN });

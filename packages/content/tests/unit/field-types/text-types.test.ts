@@ -259,6 +259,20 @@ describe('url', () => {
     expect(schema.safeParse('/about').success).toBe(true);
     expect(schema.safeParse('//evil.example').success).toBe(false);
   });
+
+  it('with allowRelative rejects a leading-backslash value the WHATWG URL parser would resolve as protocol-relative (D-CR-04)', () => {
+    const schema = buildValueSchema('url', { allowRelative: true });
+    // The WHATWG URL parser normalises a backslash to a forward slash in a
+    // special-scheme URL, so `/\evil.com` resolves to `https://evil.com/`
+    // against any base origin. Confirm the resolution this guard exists to
+    // prevent, then confirm the guard actually rejects the value.
+    expect(new URL('/\\evil.com', 'https://mysite.example/page').host).toBe(
+      'evil.com',
+    );
+    expect(schema.safeParse('/\\evil.com').success).toBe(false);
+    expect(schema.safeParse('//evil.example').success).toBe(false);
+    expect(schema.safeParse('/safe/path').success).toBe(true);
+  });
 });
 
 describe('json (field type)', () => {
