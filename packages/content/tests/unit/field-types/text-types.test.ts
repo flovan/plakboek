@@ -50,6 +50,12 @@ const REDOS_CORPUS = [
   '((a|a)x)*b',
   '((a|a))*b',
   '((a+))*b',
+  // D-CR-01: a bounded-but-variable-width inner quantifier (min !== max)
+  // repeated by an outer quantifier that can apply more than once is the
+  // same catastrophic shape as `(a+)+`, even though no inner quantifier is
+  // literally unbounded.
+  '(a{1,2})+',
+  '(a{2,5})*',
 ] as const;
 
 /** Alternation shapes a customer would plausibly author in a `short_text`
@@ -64,6 +70,11 @@ const SAFE_PATTERN_CORPUS = [
   '^(EUR|USD|GBP) \\d+([.,]\\d{2})?$',
   '^#[0-9a-fA-F]{6}$',
   '^\\d{4} ?[A-Z]{2}$',
+  // D-WR-01: an optional group can apply at most once, so a `+`/`*` inside
+  // it creates no ambiguity across repeats of the outer group -- the outer
+  // `?` is the same "cannot repeat more than once" shape the alternation
+  // rule already exempts.
+  '(v\\d+\\.)?\\d+\\.\\d+',
 ] as const;
 
 const REDOS_PROBE_LENGTH = 28;

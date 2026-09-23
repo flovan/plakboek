@@ -2,15 +2,18 @@
  * Define-time ReDoS guard for the one user-supplied regular expression
  * surface in this phase: `short_text`'s optional `pattern` option (T-03-12).
  * A pattern is accepted only if it is at most `PATTERN_MAX_LENGTH`
- * characters, contains no backreference, never nests an unbounded
- * quantifier inside a quantified group, never contains a top-level
- * alternation inside a group that a following quantifier can repeat more
- * than once, and compiles with the `u` flag.
+ * characters, contains no backreference, never nests a variable-width
+ * quantifier (one whose minimum and maximum repeat counts differ, such as
+ * `*`, `+`, `?`, `{n,}` or `{n,m}` with `m > n`, but not a fixed-width
+ * `{n}`/`{n,n}`) inside a group that a following quantifier can itself
+ * repeat more than once, never contains a top-level alternation inside a
+ * group that a following quantifier can repeat more than once, and
+ * compiles with the `u` flag.
  *
- * Group flags (`hasUnboundedQuantifier`, `hasAlternation`) propagate outward
- * into the enclosing group the moment a group closes, so either dangerous
- * shape buried one level deeper than the group a quantifier directly
- * follows still reaches the rule that rejects it (for example
+ * Group flags (`hasVariableWidthQuantifier`, `hasAlternation`) propagate
+ * outward into the enclosing group the moment a group closes, so either
+ * dangerous shape buried one level deeper than the group a quantifier
+ * directly follows still reaches the rule that rejects it (for example
  * `((a+))*b` or `((a|a)x)*b`).
  *
  * `isSafePattern` is a definition-time gate, reached from `addField`,
@@ -38,7 +41,14 @@ const BACKREFERENCE_PATTERN = /\\(?:[1-9]|k<)/;
 
 type Quantifier = {
   readonly length: number;
-  readonly unbounded: boolean;
+  /** True when one application of this quantifier can consume a different
+   * number of atoms than another application can, i.e. its minimum and
+   * maximum repeat counts differ (`*`, `+`, `?`, `{n,}`, `{n,m}` with
+   * `m > n`). False for a fixed-width repeat (`{n}`, `{n,n}`), which
+   * cannot itself create the "split a run of matches across a
+   * combinatorial number of iterations" ambiguity nested-quantifier
+   * catastrophic backtracking depends on, regardless of how large `n` is. */
+  readonly variableWidth: boolean;
   readonly repeatsMoreThanOnce: boolean;
 };
 
@@ -52,7 +62,7 @@ function matchQuantifierAt(pattern: string, index: number): Quantifier | null {
     const lazy = pattern[index + 1] === '?';
     return {
       length: lazy ? 2 : 1,
-      unbounded: true,
+      variableWidth: true,
       repeatsMoreThanOnce: true,
     };
   }
@@ -60,7 +70,7 @@ function matchQuantifierAt(pattern: string, index: number): Quantifier | null {
     const lazy = pattern[index + 1] === '?';
     return {
       length: lazy ? 2 : 1,
-      unbounded: false,
+      variableWidth: true,
       repeatsMoreThanOnce: false,
     };
   }
@@ -71,6 +81,12 @@ function matchQuantifierAt(pattern: string, index: number): Quantifier | null {
     const upperBound = match[3];
     const unbounded =
       hasComma && (upperBound === undefined || upperBound === '');
+    // `{n,m}` is variable width when its bounds differ, exactly like `?`
+    // (`{0,1}`) is. `{n}` and `{n,n}` are fixed width: every application
+    // consumes exactly `n` atoms, so they cannot themselves be the source
+    // of a variable-width nested repeat, no matter how large `n` is.
+    const variableWidth =
+      unbounded || (hasComma && Number(upperBound) !== Number(match[1]));
     const baseLength = match[0].length;
     const lazy = pattern[index + baseLength] === '?';
     const repeatsMoreThanOnce = unbounded
@@ -80,7 +96,7 @@ function matchQuantifierAt(pattern: string, index: number): Quantifier | null {
         : Number(match[1]) >= 2;
     return {
       length: lazy ? baseLength + 1 : baseLength,
-      unbounded,
+      variableWidth,
       repeatsMoreThanOnce,
     };
   }
@@ -88,19 +104,24 @@ function matchQuantifierAt(pattern: string, index: number): Quantifier | null {
 }
 
 type GroupFrame = {
-  hasUnboundedQuantifier: boolean;
+  hasVariableWidthQuantifier: boolean;
   hasAlternation: boolean;
 };
 
 /**
  * A single left-to-right scan that skips escaped characters and character
  * classes, keeps a stack of open groups each recording whether it contains
- * an unbounded quantifier or a top-level alternation, propagates both flags
- * into the enclosing group when a group closes, and flags a pattern the
- * moment a group closes and is immediately followed by a quantifier that
- * either (a) can repeat the group while it holds an unbounded quantifier
- * (`(a+)+`, `(\w*)*x`) or (b) can repeat the group more than once while it
- * holds a top-level alternation (`(a|a)*b`, `(a|a){2,}b`).
+ * a variable-width quantifier or a top-level alternation, propagates both
+ * flags into the enclosing group when a group closes, and flags a pattern
+ * the moment a group closes and is immediately followed by a quantifier
+ * that can itself repeat the group more than once while (a) the group
+ * holds a variable-width quantifier (`(a+)+`, `(\w*)*x`, `(a{1,2})+`,
+ * `(a{2,5})*`) or (b) the group holds a top-level alternation
+ * (`(a|a)*b`, `(a|a){2,}b`). Gating both rules on the outer quantifier's
+ * own `repeatsMoreThanOnce` keeps an optional group safe regardless of
+ * what it contains (`(a+)?`, `(v\d+\.)?\d+\.\d+`): applied at most once,
+ * it cannot itself create the "multiple repeats of a repeat" ambiguity
+ * either rule exists to catch.
  */
 export function isSafePattern(pattern: string): boolean {
   if (pattern.length > PATTERN_MAX_LENGTH) return false;
@@ -124,7 +145,7 @@ export function isSafePattern(pattern: string): boolean {
       }
       index += 1;
     } else if (char === '(') {
-      stack.push({ hasUnboundedQuantifier: false, hasAlternation: false });
+      stack.push({ hasVariableWidthQuantifier: false, hasAlternation: false });
       index += 1;
       continue;
     } else if (char === '|') {
@@ -141,8 +162,8 @@ export function isSafePattern(pattern: string): boolean {
       if (closedFrame !== undefined) {
         const parent = stack[stack.length - 1];
         if (parent !== undefined) {
-          if (closedFrame.hasUnboundedQuantifier) {
-            parent.hasUnboundedQuantifier = true;
+          if (closedFrame.hasVariableWidthQuantifier) {
+            parent.hasVariableWidthQuantifier = true;
           }
           if (closedFrame.hasAlternation) parent.hasAlternation = true;
         }
@@ -153,7 +174,11 @@ export function isSafePattern(pattern: string): boolean {
 
     const quantifier = matchQuantifierAt(pattern, index);
     if (quantifier !== null) {
-      if (closedFrame !== undefined && closedFrame.hasUnboundedQuantifier) {
+      if (
+        closedFrame !== undefined &&
+        closedFrame.hasVariableWidthQuantifier &&
+        quantifier.repeatsMoreThanOnce
+      ) {
         nestedUnbounded = true;
       }
       if (
@@ -163,9 +188,9 @@ export function isSafePattern(pattern: string): boolean {
       ) {
         ambiguousAlternation = true;
       }
-      if (quantifier.unbounded) {
+      if (quantifier.variableWidth) {
         const parent = stack[stack.length - 1];
-        if (parent !== undefined) parent.hasUnboundedQuantifier = true;
+        if (parent !== undefined) parent.hasVariableWidthQuantifier = true;
       }
       index += quantifier.length;
     }
