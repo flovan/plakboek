@@ -3,6 +3,7 @@ import { createDb, runMigrations, type Db } from '@plakboek/db';
 import { is } from 'drizzle-orm';
 import { getTableConfig, PgTable } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { FIELD_TYPES } from '../../src/field-types/registry.js';
 import * as schema from '../../src/schema.js';
 import { createTestDatabase, type TestDatabase } from './test-database.js';
 
@@ -324,6 +325,30 @@ describe('schema parity: 0002_content_engine vs @plakboek/content schema.ts', ()
           `,
         ),
       ).toBe('23514');
+    });
+
+    // Reads content_type_fields_field_type_check's allowed value set directly
+    // out of live Postgres and compares it to FIELD_TYPES. This is the
+    // assertion that catches a field type shipping without a matching
+    // migration update.
+    it('keeps content_type_fields_field_type_check in sync with FIELD_TYPES', async () => {
+      const [constraint] = await handle.sql<{ constraintdef: string }[]>`
+        SELECT pg_get_constraintdef(con.oid) AS "constraintdef"
+        FROM pg_constraint con
+        JOIN pg_class c ON c.oid = con.conrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND con.conname = 'content_type_fields_field_type_check'
+      `;
+      expect(constraint).toBeDefined();
+
+      const constraintDef = constraint?.constraintdef ?? '';
+      const allowedValues = new Set(
+        [...constraintDef.matchAll(/'([^']*)'::text/g)].map(
+          (match) => match[1] ?? '',
+        ),
+      );
+      expect(allowedValues).toEqual(new Set(FIELD_TYPES));
     });
 
     it('rejects revisions = true with a null revision_mode', async () => {
