@@ -215,6 +215,46 @@ describe('Field update, rename, duplicate, delete and required-field impact (FIE
     expect(await readEntryVersion(entry.id)).toBe(entry.version + 1);
   });
 
+  it('updateField backfills an explicit null default the same way computeFieldUpdateImpact previews it (B-CR-02)', async () => {
+    // `json`'s own `isEmptyValue` treats `null` as a real, non-empty value
+    // (only `undefined` counts as empty), so a `null` default is a
+    // meaningful backfill value for this field type, not a no-op.
+    const type = await createContentType(deps, superadmin, {
+      key: 'fieldsNullDefault',
+      labelSingular: 'Fields null default',
+      labelPlural: 'Fields null default',
+    });
+    await addField(deps, superadmin, {
+      contentTypeKey: type.key,
+      label: 'Payload',
+      fieldType: 'json',
+    });
+    const entry = await createEntry(deps, superadmin, {
+      contentTypeKey: type.key,
+      locale: 'en',
+    });
+
+    const impact = await computeFieldUpdateImpact(handle.db, {
+      contentTypeKey: type.key,
+      fieldKey: 'payload',
+      required: true,
+      defaultValue: null,
+    });
+    expect(impact.entriesToBackfill).toBe(1);
+
+    await updateField(deps, superadmin, {
+      contentTypeKey: type.key,
+      fieldKey: 'payload',
+      required: true,
+      defaultValue: null,
+    });
+
+    const data = await readEntryData(entry.id);
+    expect(Object.hasOwn(data, 'payload')).toBe(true);
+    expect(data.payload).toBeNull();
+    expect(await readEntryVersion(entry.id)).toBe(entry.version + 1);
+  });
+
   it('updateField rejects any input carrying a fieldType property with FieldTypeImmutableError', async () => {
     const type = await createContentType(deps, superadmin, {
       key: 'fieldsImmutable',

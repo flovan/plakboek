@@ -693,12 +693,16 @@ export async function updateField(
       const becomingRequired = input.required === true && !current.required;
       const updatedAt = now();
 
+      // The backfill gate below intentionally reads `input.defaultValue`,
+      // not `validatedDefault`. A field with no default ever set stores
+      // `null` in the same column an explicit `defaultValue: null` would
+      // (addField's own insert coalesces `undefined` to `null`), so
+      // `current.defaultValue` cannot tell "explicitly defaulted to null"
+      // apart from "never defaulted". Only this call's own input can, and
+      // computeFieldUpdateImpact's preview reads the same signal (D-18,
+      // B-CR-02: the preview and the applied backfill count must agree).
       let entriesToBackfill = 0;
-      if (
-        becomingRequired &&
-        validatedDefault !== undefined &&
-        validatedDefault !== null
-      ) {
+      if (becomingRequired && input.defaultValue !== undefined) {
         entriesToBackfill = await backfillDefaultValue(
           tx,
           typeRow.id,
