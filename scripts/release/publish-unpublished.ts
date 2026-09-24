@@ -20,6 +20,7 @@ type DependencyMap = Record<string, string>;
 type PackageManifest = {
   name: string;
   version: string;
+  private?: boolean;
   repository?: { url?: string };
   dependencies?: DependencyMap;
   devDependencies?: DependencyMap;
@@ -50,6 +51,32 @@ function findPackageDirectories(): Map<string, string> {
     directories.set(manifest.name, dir);
   }
   return directories;
+}
+
+/**
+ * Every package this repository intends to publish: all of them under
+ * `packages/` that are not marked private.
+ *
+ * This is deliberately NOT the Changesets `fixed` group. That group means
+ * "these packages share a version number", not "these packages get
+ * published", and reading it as the publish list silently dropped every
+ * package outside it. `@plakboek/auth` was versioned to 0.2.0 and never
+ * reached npm for nine days because of exactly that, and the summary line
+ * did not even list it as skipped, because it was never a candidate.
+ *
+ * Deriving the list from the workspace makes that omission unrepresentable:
+ * a new package is publishable the moment it exists and is not private.
+ */
+function findPublishablePackages(
+  directories: ReadonlyMap<string, string>,
+): string[] {
+  const names: string[] = [];
+  for (const [name, dir] of directories) {
+    const manifest = readJson<PackageManifest>(join(dir, 'package.json'));
+    if (manifest.private === true) continue;
+    names.push(name);
+  }
+  return names.sort();
 }
 
 function tryRun(command: string, args: readonly string[]): string | null {
@@ -161,34 +188,50 @@ function main(): void {
   }
 
   const directories = findPackageDirectories();
-  const manifestsByName = new Map<string, PackageManifest>();
-  const versions = new Set<string>();
-
-  for (const name of group) {
-    const dir = directories.get(name);
-    if (!dir) {
-      console.error(
-        `release: fixed-group package '${name}' has no directory under packages/`,
-      );
-      process.exit(1);
-    }
-    const manifest = readJson<PackageManifest>(join(dir, 'package.json'));
-    manifestsByName.set(name, manifest);
-    versions.add(manifest.version);
+  const candidates = findPublishablePackages(directories);
+  if (candidates.length === 0) {
+    console.error('release: no publishable package found under packages/');
+    process.exit(1);
   }
 
-  if (versions.size > 1) {
+  // The fixed group is still checked, but only for what it actually means:
+  // its members must exist and must agree on a version. It no longer decides
+  // WHICH packages are published.
+  const missingFromWorkspace = group.filter((name) => !directories.has(name));
+  if (missingFromWorkspace.length > 0) {
     console.error(
-      `release: fixed group versions differ: ${[...versions].join(', ')}`,
+      `release: fixed-group package(s) with no directory under packages/: ${missingFromWorkspace.join(', ')}`,
     );
     process.exit(1);
   }
+
+  const manifestsByName = new Map<string, PackageManifest>();
+  for (const name of candidates) {
+    const dir = directories.get(name);
+    if (!dir) continue;
+    manifestsByName.set(
+      name,
+      readJson<PackageManifest>(join(dir, 'package.json')),
+    );
+  }
+
+  const groupVersions = new Set(
+    group.map((name) => manifestsByName.get(name)?.version).filter(Boolean),
+  );
+  if (groupVersions.size > 1) {
+    console.error(
+      `release: fixed group versions differ: ${[...groupVersions].join(', ')}`,
+    );
+    process.exit(1);
+  }
+
+  console.log(`release: publish candidates=${candidates.join(',')}`);
 
   const published: string[] = [];
   const skipped: string[] = [];
   const bootstrapRequired: string[] = [];
 
-  for (const name of group) {
+  for (const name of candidates) {
     const dir = directories.get(name);
     const manifest = manifestsByName.get(name);
     if (!dir || !manifest) continue;
