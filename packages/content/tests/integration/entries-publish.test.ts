@@ -608,9 +608,7 @@ describe('Publishing an entry: slug rules, URL materialisation, URL history and 
 
     const denied = await handle.sql<{ outcome: string }[]>`
       SELECT outcome FROM audit_log
-      WHERE action = 'entry.publish' AND outcome = 'denied'
-      ORDER BY id DESC
-      LIMIT 1
+      WHERE action = 'entry.publish' AND outcome = 'denied' AND entity_id = ${entry.id}
     `;
     expect(denied).toHaveLength(1);
   });

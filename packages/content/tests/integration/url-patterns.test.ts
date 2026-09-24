@@ -140,6 +140,14 @@ describe('URL pattern changes: collision refusal and history (D-31, D-32, D-33)'
     return row?.url_pattern ?? null;
   }
 
+  async function deniedUrlPatternRowCount(): Promise<number> {
+    const [row] = await handle.sql<{ count: number }[]>`
+      SELECT count(*)::int AS count FROM audit_log
+      WHERE action = 'content-type.set-url-pattern' AND outcome = 'denied'
+    `;
+    return row?.count ?? 0;
+  }
+
   it('changing the pattern updates both published paths and writes two pattern_changed history rows; computeUrlPatternChangeImpact beforehand reports changedPaths: 2 and no collisions', async () => {
     const type = await createRoutableType('newsType', '/news/{slug}');
     const first = await createAndPublishEntry(type.key, 'en', 'first-story');
@@ -344,18 +352,19 @@ describe('URL pattern changes: collision refusal and history (D-31, D-32, D-33)'
       '/permission/{slug}',
     );
 
+    // setUrlPattern records no entity_id on a denial, because the refusal
+    // happens before the transaction resolves the content type. So count the
+    // delta around the call rather than filtering by entity: asserting a
+    // count of exactly one written row still catches a duplicate write.
+    const deniedBefore = await deniedUrlPatternRowCount();
+
     const error: unknown = await setUrlPattern(deps, editor, {
       contentTypeKey: type.key,
       urlPattern: '/permission-2/{slug}',
     }).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(PermissionDeniedError);
 
-    const denied = await handle.sql<{ outcome: string }[]>`
-      SELECT outcome FROM audit_log
-      WHERE action = 'content-type.set-url-pattern' AND outcome = 'denied'
-      ORDER BY id DESC
-      LIMIT 1
-    `;
-    expect(denied).toHaveLength(1);
+    const deniedAfter = await deniedUrlPatternRowCount();
+    expect(deniedAfter - deniedBefore).toBe(1);
   });
 });

@@ -92,6 +92,14 @@ describe('Revision snapshots per mode, the project cap and pruning (TYPE-08, D-1
     return row?.count ?? 0;
   }
 
+  async function revisionCapAuditCount(outcome: string): Promise<number> {
+    const [row] = await handle.sql<{ count: number }[]>`
+      SELECT count(*)::int AS count FROM audit_log
+      WHERE action = 'settings.revision-cap' AND outcome = ${outcome}
+    `;
+    return row?.count ?? 0;
+  }
+
   it('revisions off: publish writes no publish row and liveRevisionId stays null', async () => {
     const type = await createContentType(deps, superadmin, {
       key: 'noRevisionsType',
@@ -327,16 +335,14 @@ describe('Revision snapshots per mode, the project cap and pruning (TYPE-08, D-1
     expect(impact.entriesAffected).toBeGreaterThanOrEqual(1);
     expect(impact.revisionsToPrune).toBeGreaterThanOrEqual(2);
 
+    // settings.revision-cap is project-wide and records no entity_id, and
+    // sibling tests in this file set the cap too, so count the delta around
+    // this call. An exact delta of one still catches a duplicate write, which
+    // an `ORDER BY id DESC LIMIT 1` could not.
+    const allowedBefore = await revisionCapAuditCount('allowed');
     await setRevisionCap(deps, superadmin, { cap: 1 });
     expect(await revisionCount(entry.id, 'save')).toBe(1);
-
-    const auditRows = await handle.sql<{ outcome: string }[]>`
-      SELECT outcome FROM audit_log
-      WHERE action = 'settings.revision-cap' AND outcome = 'allowed'
-      ORDER BY id DESC
-      LIMIT 1
-    `;
-    expect(auditRows).toHaveLength(1);
+    expect((await revisionCapAuditCount('allowed')) - allowedBefore).toBe(1);
 
     // Reset for subsequent tests, which assume an uncapped project.
     await setRevisionCap(deps, superadmin, { cap: 0 });
@@ -429,17 +435,13 @@ describe('Revision snapshots per mode, the project cap and pruning (TYPE-08, D-1
   });
 
   it('a user without settings:manage gets PermissionDeniedError and a denied row', async () => {
+    const deniedBefore = await revisionCapAuditCount('denied');
+
     const error: unknown = await setRevisionCap(deps, editor, {
       cap: 1,
     }).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(PermissionDeniedError);
 
-    const denied = await handle.sql<{ outcome: string }[]>`
-      SELECT outcome FROM audit_log
-      WHERE action = 'settings.revision-cap' AND outcome = 'denied'
-      ORDER BY id DESC
-      LIMIT 1
-    `;
-    expect(denied).toHaveLength(1);
+    expect((await revisionCapAuditCount('denied')) - deniedBefore).toBe(1);
   });
 });

@@ -286,9 +286,7 @@ describe('Entry lifecycle: unpublish, schedule, unschedule, trash and restore-fr
 
     const denied = await handle.sql<{ outcome: string }[]>`
       SELECT outcome FROM audit_log
-      WHERE action = 'entry.unpublish' AND outcome = 'denied'
-      ORDER BY id DESC
-      LIMIT 1
+      WHERE action = 'entry.unpublish' AND outcome = 'denied' AND entity_id = ${published.id}
     `;
     expect(denied).toHaveLength(1);
   });
@@ -449,9 +447,7 @@ describe('Entry lifecycle: unpublish, schedule, unschedule, trash and restore-fr
     expect(deniedError).toBeInstanceOf(PermissionDeniedError);
     const denied = await handle.sql<{ outcome: string }[]>`
       SELECT outcome FROM audit_log
-      WHERE action = 'entry.trash' AND outcome = 'denied'
-      ORDER BY id DESC
-      LIMIT 1
+      WHERE action = 'entry.trash' AND outcome = 'denied' AND entity_id = ${published.id}
     `;
     expect(denied).toHaveLength(1);
 

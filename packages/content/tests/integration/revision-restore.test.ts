@@ -170,9 +170,7 @@ describe('Restore preview and restore (D-17, T-03-41)', () => {
 
     const auditRows = await handle.sql<{ outcome: string }[]>`
       SELECT outcome FROM audit_log
-      WHERE action = 'entry.restore-revision' AND outcome = 'allowed'
-      ORDER BY id DESC
-      LIMIT 1
+      WHERE action = 'entry.restore-revision' AND outcome = 'allowed' AND entity_id = ${entry.id}
     `;
     expect(auditRows).toHaveLength(1);
 
