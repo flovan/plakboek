@@ -554,7 +554,10 @@ export async function saveEntryInTransaction(
         id: current.id,
         contentTypeId: current.contentTypeId,
         locale: current.locale,
-        slug: current.slug,
+        // Same rule as `stagedSeo` below. A slug staged on a pending draft
+        // is the baseline an omitted `slug` falls back to, not the live
+        // row's. Identical to `current.slug` when no draft is pending.
+        slug: originWorkingCopy.slug,
         slugSource: asSlugSource(slugSourceRow?.slugSource ?? null),
         firstPublishedAt: current.firstPublishedAt,
       },
@@ -570,7 +573,14 @@ export async function saveEntryInTransaction(
   let row: typeof contentEntries.$inferSelect | undefined;
 
   if (isPendingDraftBranch) {
-    const stagedSeo = input.seo !== undefined ? validatedSeo : current.seo;
+    // An omitted `seo` keeps the working copy's own staged value, not the
+    // live row's. Autosave sends only what changed, so a save that omits
+    // `seo` must not revert an SEO edit staged by an earlier save.
+    // `originWorkingCopy` is the pending draft when one is staged and the
+    // live row otherwise, so this is identical to `current.seo` whenever no
+    // draft is pending.
+    const stagedSeo =
+      input.seo !== undefined ? validatedSeo : originWorkingCopy.seo;
 
     const revisionId = await recordRevision(tx, {
       entryId: current.id,

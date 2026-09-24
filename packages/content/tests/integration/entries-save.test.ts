@@ -228,6 +228,55 @@ describe('Draft-versus-live saves and title-driven slugs (TYPE-05, TYPE-07, TYPE
     expect(workingCopy.data).toEqual({ note: 'pending-2' });
   });
 
+  it('drafts on, published: a later save omitting seo keeps the staged seo', async () => {
+    const type = await createContentType(deps, superadmin, {
+      key: 'stagedSeoType',
+      labelSingular: 'Staged seo type',
+      labelPlural: 'Staged seo types',
+      drafts: true,
+      seo: true,
+    });
+    await addField(deps, superadmin, {
+      contentTypeKey: type.key,
+      key: 'note',
+      label: 'Note',
+      fieldType: 'short_text',
+    });
+
+    const entry = await createEntry(deps, editor, {
+      contentTypeKey: type.key,
+      locale: 'en',
+      data: { note: 'live' },
+    });
+    const published = await publishEntry(deps, editor, {
+      entryId: entry.id,
+      baseVersion: entry.version,
+    });
+
+    // Stage an SEO edit onto the pending draft.
+    const staged = await save({
+      entryId: entry.id,
+      baseVersion: published.version,
+      data: { note: 'live' },
+      seo: { title: 'Staged SEO' },
+    });
+    const afterStaging = await readWorkingCopy(deps.db, entry.id);
+    expect(afterStaging.seo).toMatchObject({ title: 'Staged SEO' });
+
+    // Autosave sends only what changed, so a save omitting `seo` is the
+    // normal case. The staged SEO belongs to the working copy and must
+    // survive, not revert to the live row's value.
+    await save({
+      entryId: entry.id,
+      baseVersion: staged.version,
+      data: { note: 'edited' },
+    });
+
+    const workingCopy = await readWorkingCopy(deps.db, entry.id);
+    expect(workingCopy.data).toEqual({ note: 'edited' });
+    expect(workingCopy.seo).toMatchObject({ title: 'Staged SEO' });
+  });
+
   it('drafts off, published: an actor without entries:publish is denied; one with it updates live data and creates no revision row', async () => {
     const type = await createContentType(deps, superadmin, {
       key: 'liveOffType',
