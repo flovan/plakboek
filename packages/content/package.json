@@ -1,6 +1,6 @@
 {
   "name": "@plakboek/content",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Headless content types, fields, entries and revisions for Plakboek CMS installations",
   "homepage": "https://github.com/flovan/plakboek/tree/main/packages/content#readme",
   "bugs": {

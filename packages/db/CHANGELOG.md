@@ -1,5 +1,11 @@
 # @plakboek/db
 
+## 0.3.0
+
+### Minor Changes
+
+- [#7](https://github.com/flovan/plakboek/pull/7) [`6005d92`](https://github.com/flovan/plakboek/commit/6005d92dc7be5a9aa5a62da81201a31fe18a82ff) Thanks [@flovan](https://github.com/flovan)! - Add the 0002_content_engine migration, creating the content type, field, entry and revision tables used by @plakboek/content.
+
 ## 0.2.0
 
 ### Minor Changes
