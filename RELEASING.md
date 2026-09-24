@@ -1,9 +1,13 @@
 # Releasing `@plakboek/*`
 
-This document describes how `@plakboek/permissions` and `@plakboek/db`
-reach the public npm registry. Both packages are versioned together as one
-Changesets `fixed` group (`.changeset/config.json`) -- they always ship at
-the same version.
+This document describes how the `@plakboek/*` packages reach the public
+npm registry. The publish list is every non-private package under
+`packages/`, derived from the workspace by
+`scripts/release/publish-unpublished.ts` -- currently `auth`, `content`,
+`db`, and `permissions`. `@plakboek/permissions` and `@plakboek/db` are
+additionally versioned together as one Changesets `fixed` group
+(`.changeset/config.json`), so those two always ship at the same version
+while the others version independently.
 
 ## Steady state
 
@@ -120,9 +124,9 @@ relationship from the npm website instead: open the package on npmjs.com,
 - **Workflow filename:** `release.yml`
 - **Environment:** (leave empty)
 
-Once every package in the fixed group has been bootstrapped and trusted,
-remove the `.release-bootstrap/` directory -- it is a scratch location, not
-a committed artifact.
+Once every publishable package has been bootstrapped and trusted, remove
+the `.release-bootstrap/` directory -- it is a scratch location, not a
+committed artifact.
 
 ## Required repository setting
 
