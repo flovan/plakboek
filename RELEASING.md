@@ -53,22 +53,41 @@ annotation pointing back at this document and reports the package as
 that package itself.
 
 To bootstrap a package (maintainer only, requires account-level 2FA on the
-npm account -- classic auth, not a token):
+npm account -- classic auth, not a token), run these commands from the
+repo root:
 
 ```sh
 pnpm run build
-pnpm --dir packages/<name> pack --pack-destination .release-bootstrap
-npm publish .release-bootstrap/plakboek-<name>-<version>.tgz --access public
+pnpm --dir packages/<name> pack --pack-destination "$PWD/.release-bootstrap"
+npm publish .release-bootstrap/plakboek-<name>-<version>.tgz \
+  --access public --provenance=false
 ```
 
-Run this from an interactive terminal so npm's web-based 2FA flow can open
-a browser tab for you to approve. In a non-interactive shell (CI runner,
-piped command, etc.) the web flow cannot complete and `npm publish` fails
-with `EOTP`; pass a current TOTP code directly instead:
-`npm publish <tarball> --access public --otp=<code>`. If you use the
-npmjs.com website fallback below, its publish-permission dialog must have
-**"npm publish"** checked as an allowed action for the trusted publisher to
-actually be able to publish later.
+The `pack` destination above is an absolute path. `pnpm pack
+--pack-destination` resolves a relative value against the packed package's
+own directory, not the repo root -- a relative `.release-bootstrap` lands
+the tarball in `packages/<name>/.release-bootstrap/`, while the `npm
+publish` line above resolves paths from the repo root and fails with a
+`tarball data for file:... seems to be corrupted` error.
+
+`--provenance=false` overrides `publishConfig.provenance: true`, which
+every published manifest sets and which is correct for the automated
+`release.yml` publish -- that one runs under GitHub Actions OIDC trusted
+publishing and needs the attestation it produces. A bootstrap publish is
+human-run locally with no OIDC provider, so without the override npm
+aborts with `EUSAGE` / `Automatic provenance generation not supported for
+provider: null`. The accepted consequence: the bootstrap tarball ships
+with no provenance attestation, while every subsequent release of that
+package, published by `release.yml`, has one.
+
+Run the publish from an interactive terminal so npm's web-based 2FA flow
+can open a browser tab for you to approve. In a non-interactive shell (CI
+runner, piped command, etc.) the web flow cannot complete and `npm publish`
+fails with `EOTP`; pass a current TOTP code directly instead:
+`npm publish <tarball> --access public --provenance=false --otp=<code>`.
+If you use the npmjs.com website fallback below, its publish-permission
+dialog must have **"npm publish"** checked as an allowed action for the
+trusted publisher to actually be able to publish later.
 
 Then bind the newly published package to this repository's release
 workflow as a trusted publisher. `npm trust` requires npm `>=11.15.0` and,
