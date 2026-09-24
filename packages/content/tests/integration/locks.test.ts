@@ -388,6 +388,77 @@ describe('Edit locking, heartbeat lapse, takeover and the save-time refusal (TYP
     expect(lockRow?.lockedBy).toBe(editorA.userId);
   });
 
+  it("takeover refuses with LockStateChangedError when the holder's role changes between the pre-check and the takeover transaction (C-WR-03)", async () => {
+    const entry = await createEntry(deps, superadmin, {
+      contentTypeKey: typeLockingKey,
+      locale: 'en',
+    });
+    // editorA holds a live lock, so the pre-check runs the D-44 superset
+    // comparison against editorA's role at that moment.
+    await acquireEditLock(deps, editorA, { entryId: entry.id });
+
+    const blocking = createDb({
+      connectionString: testDatabase.connectionString,
+      maxConnections: 1,
+    });
+    let releaseBlocker: () => void = () => {
+      throw new Error('releaseBlocker called before it was assigned');
+    };
+    const blockerSignal = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    let signalHeld: (xid: string) => void = () => {
+      throw new Error('signalHeld called before it was assigned');
+    };
+    const held = new Promise<string>((resolve) => {
+      signalHeld = resolve;
+    });
+
+    try {
+      const blockingTx = blocking.sql.begin(async (sql) => {
+        const [row] = await sql`
+          SELECT pg_current_xact_id()::xid::text AS xid
+          FROM content_entries WHERE id = ${entry.id} FOR UPDATE
+        `;
+        signalHeld(row?.xid ?? '');
+        await blockerSignal;
+        // Promote the holder while the takeover is parked on the row lock.
+        await sql`
+          UPDATE "user" SET role_key = 'superadmin' WHERE id = ${editorA.userId}
+        `;
+      });
+
+      const holderXid = await held;
+
+      const takeoverPromise = takeOverEditLock(deps, superadmin, {
+        entryId: entry.id,
+      }).catch((caught: unknown) => caught);
+
+      const deadline = Date.now() + 5000;
+      let waiting = 0;
+      while (waiting < 1 && Date.now() < deadline) {
+        const [row] = await handle.sql<{ count: number }[]>`
+          SELECT count(*)::int AS count FROM pg_locks
+          WHERE NOT granted AND locktype = 'transactionid'
+            AND transactionid = ${holderXid}::xid
+        `;
+        waiting = row?.count ?? 0;
+      }
+      expect(waiting).toBeGreaterThanOrEqual(1);
+
+      releaseBlocker();
+      await blockingTx;
+
+      const result: unknown = await takeoverPromise;
+      expect(result).toBeInstanceOf(LockStateChangedError);
+    } finally {
+      await blocking.sql.end({ timeout: 5 });
+      await handle.sql`
+        UPDATE "user" SET role_key = 'editor' WHERE id = ${editorA.userId}
+      `;
+    }
+  });
+
   it('takeover refuses with LockStateChangedError when a holder that looked lapsed at pre-check time is live again by the time the takeover transaction reloads the row (WR-01)', async () => {
     const entry = await createEntry(deps, superadmin, {
       contentTypeKey: typeLockingKey,

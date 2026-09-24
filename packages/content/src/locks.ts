@@ -22,7 +22,11 @@
  * hits `StaleVersionError` (D-42) instead of silently overwriting the new
  * holder's work.
  */
-import { PermissionDeniedError, type AuditActor } from '@plakboek/auth';
+import {
+  PermissionDeniedError,
+  type AuditActor,
+  type AuditTransaction,
+} from '@plakboek/auth';
 import { permissionsIncludeAll } from '@plakboek/permissions';
 import { eq, sql } from 'drizzle-orm';
 import type { ContentDeps } from './config.js';
@@ -166,7 +170,7 @@ export function assertRowsWritable(
  * same pattern `@plakboek/auth`'s own `createUserWithRole` uses to read an
  * `EXISTS (...)` against `"user"` without importing its table. */
 async function readUserRoleKey(
-  db: ContentDeps['db'],
+  db: ContentDeps['db'] | AuditTransaction,
   userId: string,
 ): Promise<string | null> {
   const [row] = await db
@@ -372,9 +376,11 @@ export async function takeOverEditLock(
     before.lockedAt,
     preCheckTime,
   );
+  let preCheckHolderRoleKey: string | null = null;
   if (holderIsLive && before.lockedBy !== actor.userId) {
     const holderUserId = before.lockedBy as string;
     const holderRoleKey = await readUserRoleKey(deps.db, holderUserId);
+    preCheckHolderRoleKey = holderRoleKey;
     const allowed = permissionsIncludeAll(
       deps.resolver.resolve(actor.roleKey, { userId: actor.userId }),
       deps.resolver.resolve(holderRoleKey ?? ''),
@@ -410,6 +416,24 @@ export async function takeOverEditLock(
         row.lockedAt,
         transactionTime,
       );
+      // D-44 (C-WR-03): the holder's identity is re-checked above, but the
+      // superset comparison ran before this transaction against the holder's
+      // role at that moment. A role change since then makes that decision
+      // stale, so refuse and let the caller retry, which re-runs the
+      // comparison against the current role. Same shape as the liveness
+      // re-check below, and it keeps recordDenied on its single write path.
+      if (
+        holderIsLive &&
+        holderStillLive &&
+        row.lockedBy !== null &&
+        row.lockedBy !== actor.userId
+      ) {
+        const currentHolderRoleKey = await readUserRoleKey(tx, row.lockedBy);
+        if (currentHolderRoleKey !== preCheckHolderRoleKey) {
+          throw new LockStateChangedError(input.entryId);
+        }
+      }
+
       if (holderStillLive && !holderIsLive && row.lockedBy !== actor.userId) {
         // The pre-check saw a lapsed lock and skipped the D-44 superset
         // comparison, but the holder renewed before this reload -- the

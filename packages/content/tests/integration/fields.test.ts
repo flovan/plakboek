@@ -501,6 +501,59 @@ describe('Field update, rename, duplicate, delete and required-field impact (FIE
     expect(team[1]?.name).toBe('B');
   });
 
+  it('updateField strips repeater sub-field keys without aborting on an entry whose repeater value is JSON null (B-WR-01)', async () => {
+    const type = await createContentType(deps, superadmin, {
+      key: 'nullRepeaterType',
+      labelSingular: 'Null repeater type',
+      labelPlural: 'Null repeater types',
+    });
+    await addField(deps, superadmin, {
+      contentTypeKey: type.key,
+      key: 'team',
+      label: 'Team',
+      fieldType: 'repeater',
+      options: {
+        fields: [
+          { key: 'name', label: 'Name', fieldType: 'short_text' },
+          { key: 'bio', label: 'Bio', fieldType: 'short_text' },
+        ],
+      },
+    });
+
+    const populated = await createEntry(deps, superadmin, {
+      contentTypeKey: type.key,
+      locale: 'en',
+      data: { team: [{ name: 'A', bio: 'bio-a' }] },
+    });
+    const nulled = await createEntry(deps, superadmin, {
+      contentTypeKey: type.key,
+      locale: 'en',
+      data: {},
+    });
+    // An explicit JSON null is a legitimate empty repeater value, and
+    // jsonb_exists reports the key as present, so the strip UPDATE used to
+    // reach jsonb_array_elements with a scalar and abort the transaction.
+    await handle.sql`
+      UPDATE content_entries SET data = jsonb_set(data, ARRAY['team'], 'null'::jsonb)
+      WHERE id = ${nulled.id}
+    `;
+
+    await updateField(deps, superadmin, {
+      contentTypeKey: type.key,
+      fieldKey: 'team',
+      options: {
+        fields: [{ key: 'name', label: 'Name', fieldType: 'short_text' }],
+      },
+    });
+
+    const populatedData = await readEntryData(populated.id);
+    const team = populatedData.team as { name: string; bio?: string }[];
+    expect(team.every((item) => !Object.hasOwn(item, 'bio'))).toBe(true);
+
+    const nulledData = await readEntryData(nulled.id);
+    expect(nulledData.team).toBeNull();
+  });
+
   it('a deleteField and a saveEntry on the same type started concurrently never leave a row holding the deleted key', async () => {
     const type = await createContentType(deps, superadmin, {
       key: 'fieldsConcurrency',

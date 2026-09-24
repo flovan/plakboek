@@ -509,7 +509,12 @@ async function stripRemovedRepeaterSubFieldKeys(
     .where(
       and(
         eq(contentEntries.contentTypeId, contentTypeId),
-        sql`jsonb_exists(${contentEntries.data}, ${fieldKey})`,
+        // jsonb_exists is true for an explicit JSON null too, and
+        // jsonb_array_elements aborts the whole transaction on a scalar. An
+        // empty repeater stored as null is legitimate, so match on the value
+        // actually being an array, the same way countRepeaterItemsLosingValues
+        // skips a non-array value.
+        sql`jsonb_typeof(${contentEntries.data} -> ${fieldKey}) = 'array'`,
       ),
     );
 }
