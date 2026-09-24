@@ -129,6 +129,7 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   computeUrlPatternChangeImpact: 'function',
   setUrlPattern: 'function',
   UrlPatternRequiredError: 'class',
+  UrlTokenValueError: 'class',
   UrlCollisionError: 'class',
   UrlPatternInUseError: 'class',
   UrlPatternCollisionError: 'class',
@@ -468,6 +469,8 @@ const ERROR_FACTORIES: Readonly<
     new (K as new (id: string) => unknown)('entry-id'),
   UrlPatternRequiredError: (K) =>
     new (K as new (id: string) => unknown)('content-type-id'),
+  UrlTokenValueError: (K) =>
+    new (K as new (t: string, v: string) => unknown)('slug', 'bad'),
   UrlCollisionError: (K) =>
     new (K as new (p: string, l: string, c: string | null) => unknown)(
       '/a',

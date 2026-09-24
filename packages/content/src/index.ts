@@ -134,6 +134,7 @@ export {
   URL_PATTERN_TOKENS,
   URL_PATTERN_MAX_LENGTH,
   UrlPatternError,
+  UrlTokenValueError,
   parseUrlPattern,
   resolveUrlPath,
   usesSlugToken,

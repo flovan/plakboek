@@ -124,6 +124,7 @@ locale-filtered paths this package guarantees.
 | `URL_PATTERN_TOKENS`     | constant | `{slug}`, `{id}` and the six date tokens a URL pattern may use      |
 | `URL_PATTERN_MAX_LENGTH` | constant | `500`: maximum length of a URL pattern string                       |
 | `UrlPatternError`        | class    | Thrown by `parseUrlPattern` with every malformation found           |
+| `UrlTokenValueError`     | class    | Thrown when a token value cannot be placed in a path unescaped      |
 | `parseUrlPattern`        | function | Parses a URL pattern string, collecting every issue                 |
 | `resolveUrlPath`         | function | Resolves a parsed pattern against one entry's tokens, in a timezone |
 | `usesSlugToken`          | function | Whether a parsed pattern uses `{slug}`                              |
