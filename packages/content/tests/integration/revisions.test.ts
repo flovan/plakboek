@@ -321,6 +321,13 @@ describe('Revision snapshots per mode, the project cap and pruning (TYPE-08, D-1
       locale: 'en',
       data: {},
     });
+    // computeRevisionCapImpact is project-wide, so revisions left by earlier
+    // tests in this file already clear any absolute threshold. Measure this
+    // entry's own contribution as a delta instead, which is exact and cannot
+    // be satisfied by unrelated debris. The entry holds no revisions yet, so
+    // it contributes nothing to the baseline.
+    const baseline = await computeRevisionCapImpact(deps.db, 1);
+
     let current = entry;
     for (const value of ['a', 'b', 'c']) {
       current = await saveEntry(deps, editor, {
@@ -332,8 +339,8 @@ describe('Revision snapshots per mode, the project cap and pruning (TYPE-08, D-1
     expect(await revisionCount(entry.id, 'save')).toBe(3);
 
     const impact = await computeRevisionCapImpact(deps.db, 1);
-    expect(impact.entriesAffected).toBeGreaterThanOrEqual(1);
-    expect(impact.revisionsToPrune).toBeGreaterThanOrEqual(2);
+    expect(impact.entriesAffected - baseline.entriesAffected).toBe(1);
+    expect(impact.revisionsToPrune - baseline.revisionsToPrune).toBe(2);
 
     // settings.revision-cap is project-wide and records no entity_id, and
     // sibling tests in this file set the cap too, so count the delta around

@@ -270,9 +270,19 @@ describe('validation on save: all sixteen field types attach, store and reject o
       }).catch((caught: unknown) => caught);
       expect(invalidError).toBeInstanceOf(FieldValidationError);
       const invalidIssues = (invalidError as FieldValidationError).issues;
-      const invalidKeys = new Set(invalidIssues.map((issue) => issue.fieldKey));
+      // Every value above breaks its own field type's rules, so each key must
+      // be reported, and reported for the right reason. Asserting only that
+      // the key appears cannot tell a real validation failure apart from the
+      // field being rejected as unknown or missing, which is what a typo in
+      // this fixture would produce.
       for (const key of Object.keys(validData)) {
-        expect(invalidKeys.has(key)).toBe(true);
+        const issue = invalidIssues.find(
+          (candidate) => candidate.fieldKey === key,
+        );
+        expect(issue, `expected a validation issue for "${key}"`).toBeDefined();
+        expect(issue?.code, `wrong issue code for "${key}"`).toBe(
+          'INVALID_VALUE',
+        );
       }
 
       const afterInvalidSave = await getEntry(deps.db, entry.id);

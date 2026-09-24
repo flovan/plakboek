@@ -131,6 +131,23 @@ describe('Reference resolution on save and the reverse index (D-38, D-39, D-40, 
     return type;
   }
 
+  async function waitForGroupWaiters(xid: string, atLeast: number) {
+    const deadline = Date.now() + 5000;
+    let waiting = 0;
+    while (waiting < atLeast && Date.now() < deadline) {
+      const [row] = await handle.sql<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM pg_locks
+        WHERE NOT granted
+          AND (
+            (locktype = 'transactionid' AND transactionid = ${xid}::xid)
+            OR (locktype = 'tuple' AND relation = 'content_entries'::regclass)
+          )
+      `;
+      waiting = row?.count ?? 0;
+    }
+    expect(waiting).toBeGreaterThanOrEqual(atLeast);
+  }
+
   it('saving a single reference naming an existing entrys translation group succeeds and writes exactly one row', async () => {
     const targetType = await makeTargetType('refTargetSingle');
     const target = await createEntry(deps, editor, {
@@ -533,30 +550,67 @@ describe('Reference resolution on save and the reverse index (D-38, D-39, D-40, 
       data: {},
     });
 
-    const [saveOutcome, deleteOutcome] = await Promise.allSettled([
-      saveEntry(deps, editor, {
+    // Force the interleaving rather than hoping for it. Both operations take
+    // the target's translation group, the delete FOR UPDATE and the save FOR
+    // SHARE, so holding that group queues them and makes the order
+    // deterministic. Queue the delete first, so it wins.
+    const blocking = createDb({
+      connectionString: testDatabase.connectionString,
+      maxConnections: 1,
+    });
+    let releaseBlocker: () => void = () => {
+      throw new Error('releaseBlocker called before it was assigned');
+    };
+    const blockerSignal = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    let signalHeld: (xid: string) => void = () => {
+      throw new Error('signalHeld called before it was assigned');
+    };
+    const held = new Promise<string>((resolve) => {
+      signalHeld = resolve;
+    });
+
+    let deleteResult: unknown;
+    let saveResult: unknown;
+    try {
+      const blockingTx = blocking.sql.begin(async (sql) => {
+        const [row] = await sql`
+          SELECT pg_current_xact_id()::xid::text AS xid
+          FROM content_entries
+          WHERE translation_group = ${target.translationGroup} FOR UPDATE
+        `;
+        signalHeld(row?.xid ?? '');
+        await blockerSignal;
+      });
+      const holderXid = await held;
+
+      const deletePromise = deleteEntryPermanently(deps, superadmin, {
+        entryId: target.id,
+        baseVersion: target.version,
+      }).catch((caught: unknown) => caught);
+      await waitForGroupWaiters(holderXid, 1);
+
+      const savePromise = saveEntry(deps, editor, {
         entryId: source.id,
         baseVersion: source.version,
         data: { related: target.translationGroup },
-      }),
-      deleteEntryPermanently(deps, superadmin, {
-        entryId: target.id,
-        baseVersion: target.version,
-      }),
-    ]);
+      }).catch((caught: unknown) => caught);
+      await waitForGroupWaiters(holderXid, 2);
 
-    expect(deleteOutcome.status).toBe('fulfilled');
+      releaseBlocker();
+      await blockingTx;
+      deleteResult = await deletePromise;
+      saveResult = await savePromise;
+    } finally {
+      await blocking.sql.end({ timeout: 5 });
+    }
 
-    // Either the save failed the existence check, or it succeeded because
-    // it read the target before the delete committed -- both are
-    // acceptable outcomes of this race (D-40); asserted as one boolean so
-    // `expect` is never called conditionally.
-    const saveOutcomeAcceptable =
-      (saveOutcome.status === 'rejected' &&
-        saveOutcome.reason instanceof ReferenceTargetMissingError) ||
-      (saveOutcome.status === 'fulfilled' &&
-        saveOutcome.value.data.related === target.translationGroup);
-    expect(saveOutcomeAcceptable).toBe(true);
+    // The delete wins the group, so the save's existence check must see the
+    // target gone. The old assertion allowed either outcome, which meant it
+    // could not tell a working existence check from a missing one.
+    expect(deleteResult).not.toBeInstanceOf(Error);
+    expect(saveResult).toBeInstanceOf(ReferenceTargetMissingError);
 
     // Whichever way the save settled, the two never interleave into a
     // dangling reference: once both are done, no row names the deleted

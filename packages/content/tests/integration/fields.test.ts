@@ -571,26 +571,98 @@ describe('Field update, rename, duplicate, delete and required-field impact (FIE
       data: { note: 'x' },
     });
 
-    const results = await Promise.allSettled([
-      deleteField(deps, superadmin, {
+    // Force the interleaving rather than hoping for it. Both operations take
+    // the content type row first, so holding that row queues them both, and
+    // releasing it makes the order deterministic instead of a coin flip.
+    const blocking = createDb({
+      connectionString: testDatabase.connectionString,
+      maxConnections: 1,
+    });
+    let releaseBlocker: () => void = () => {
+      throw new Error('releaseBlocker called before it was assigned');
+    };
+    const blockerSignal = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    let signalHeld: (xid: string) => void = () => {
+      throw new Error('signalHeld called before it was assigned');
+    };
+    const held = new Promise<string>((resolve) => {
+      signalHeld = resolve;
+    });
+
+    let deleteResult: unknown;
+    let saveResult: unknown;
+    try {
+      const blockingTx = blocking.sql.begin(async (sql) => {
+        const [row] = await sql`
+          SELECT pg_current_xact_id()::xid::text AS xid
+          FROM content_types WHERE id = ${type.id} FOR UPDATE
+        `;
+        signalHeld(row?.xid ?? '');
+        await blockerSignal;
+      });
+      const holderXid = await held;
+
+      const deletePromise = deleteField(deps, superadmin, {
         contentTypeKey: type.key,
         fieldKey: 'note',
-      }),
-      saveEntry(deps, superadmin, {
+      }).catch((caught: unknown) => caught);
+      await waitForTypeWaiters(holderXid, 1);
+
+      const savePromise = saveEntry(deps, superadmin, {
         entryId: entry.id,
         baseVersion: entry.version,
         data: { note: 'y' },
-      }),
-    ]);
+      }).catch((caught: unknown) => caught);
+      await waitForTypeWaiters(holderXid, 2);
 
-    expect(results.some((result) => result.status === 'fulfilled')).toBe(true);
+      releaseBlocker();
+      await blockingTx;
+      deleteResult = await deletePromise;
+      saveResult = await savePromise;
+    } finally {
+      await blocking.sql.end({ timeout: 5 });
+    }
 
+    // Neither may fail on a deadlock.
+    for (const result of [deleteResult, saveResult]) {
+      const code =
+        result instanceof Error
+          ? (result as { cause?: { code?: string } }).cause?.code
+          : undefined;
+      expect(code).not.toBe('40P01');
+    }
+
+    // The delete wins the type row, so it completes. The save then finds its
+    // base version superseded, because deleting a field rewrites every entry.
+    expect(deleteResult).not.toBeInstanceOf(Error);
+    expect(saveResult).toBeInstanceOf(StaleVersionError);
+
+    // The real invariant: the field is gone and no row still holds its key.
+    // The old assertion was satisfied by the field merely still existing.
     const fields = await listFields(handle.db, type.id);
-    const fieldStillExists = fields.some((field) => field.key === 'note');
+    expect(fields.some((field) => field.key === 'note')).toBe(false);
     const data = await readEntryData(entry.id);
-
-    expect(fieldStillExists || data.note === undefined).toBe(true);
+    expect(data.note).toBeUndefined();
   });
+
+  async function waitForTypeWaiters(xid: string, atLeast: number) {
+    const deadline = Date.now() + 5000;
+    let waiting = 0;
+    while (waiting < atLeast && Date.now() < deadline) {
+      const [row] = await handle.sql<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM pg_locks
+        WHERE NOT granted
+          AND (
+            (locktype = 'transactionid' AND transactionid = ${xid}::xid)
+            OR (locktype = 'tuple' AND relation = 'content_types'::regclass)
+          )
+      `;
+      waiting = row?.count ?? 0;
+    }
+    expect(waiting).toBeGreaterThanOrEqual(atLeast);
+  }
 
   it('addField refuses an unsafe pattern at define time, rolling back with no row written (FIELD-06 ReDoS mitigation)', async () => {
     const type = await createContentType(deps, superadmin, {

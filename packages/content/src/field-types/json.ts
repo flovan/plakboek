@@ -8,6 +8,7 @@
  */
 import { z } from 'zod';
 import type { FieldTypeDefinition } from './registry.js';
+import { exceedsNestingDepth, MAX_VALUE_NESTING_DEPTH } from './value-depth.js';
 
 export const JSON_FIELD_MAX_BYTES = 65536;
 
@@ -20,12 +21,24 @@ function utf8ByteLength(value: string): number {
 }
 
 function buildJsonFieldValueSchema(_options: JsonFieldOptions): z.ZodType {
+  // z.json() is recursive and has no depth cap of its own, so a deeply nested
+  // value escaped safeParse as an uncaught RangeError. The guard runs first
+  // and short-circuits.
   return z
-    .json()
+    .unknown()
+    .superRefine((value, ctx) => {
+      if (exceedsNestingDepth(value)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `must not nest deeper than ${MAX_VALUE_NESTING_DEPTH} levels`,
+        });
+      }
+    })
+    .pipe(z.json())
     .refine(
       (value) => utf8ByteLength(JSON.stringify(value)) <= JSON_FIELD_MAX_BYTES,
       { message: `must be at most ${JSON_FIELD_MAX_BYTES} UTF-8 bytes` },
-    );
+    ) as unknown as z.ZodType;
 }
 
 function isEmptyJsonFieldValue(value: unknown): boolean {

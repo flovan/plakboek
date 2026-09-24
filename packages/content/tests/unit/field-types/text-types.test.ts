@@ -77,8 +77,19 @@ const SAFE_PATTERN_CORPUS = [
   '(v\\d+\\.)?\\d+\\.\\d+',
 ] as const;
 
-const REDOS_PROBE_LENGTH = 28;
+// The probe must NOT match, or the engine succeeds on the first path and
+// never backtracks, which is what made the old all-`a` probe unable to
+// detect a catastrophic pattern at any length.
+const REDOS_PROBE_LENGTH = 36;
 const REDOS_TIME_BUDGET_MS = 150;
+const redosProbe = (length: number) => `${'a'.repeat(length)}!`;
+
+/** A pattern the guard rejects, kept here to prove the probe and the budget
+ * can actually detect catastrophic backtracking. Without this control the
+ * timing assertion below is vacuous: it only ever runs patterns the guard
+ * already accepts, so it would pass even if the probe could never blow the
+ * budget. */
+const KNOWN_CATASTROPHIC_PATTERN = '(a{1,2})+';
 
 describe('isSafePattern', () => {
   it('accepts a bounded pattern', () => {
@@ -126,6 +137,9 @@ describe('isSafePattern', () => {
     expect(isSafePattern('(a|a){1}b')).toBe(true);
   });
 
+  // The control below deliberately runs a catastrophic pattern to completion,
+  // so this one test is allowed to take seconds where the rest take
+  // milliseconds.
   it('every pattern the guard accepts matches an adversarial input in bounded time', () => {
     const candidates = [
       ...REDOS_CORPUS,
@@ -137,7 +151,7 @@ describe('isSafePattern', () => {
       '(a|a){0,1}b',
       '(a|a){1}b',
     ];
-    const probe = 'a'.repeat(REDOS_PROBE_LENGTH);
+    const probe = redosProbe(REDOS_PROBE_LENGTH);
     const offenders = candidates
       .filter((pattern) => isSafePattern(pattern))
       .map((pattern) => {
@@ -148,8 +162,21 @@ describe('isSafePattern', () => {
       })
       .filter((result) => result.elapsedMs > REDOS_TIME_BUDGET_MS);
 
+    // Control: the guard rejects this one, and at the same probe length it
+    // blows the budget by orders of magnitude. That is what makes the
+    // assertion below meaningful rather than trivially true.
+    expect(isSafePattern(KNOWN_CATASTROPHIC_PATTERN)).toBe(false);
+    const controlPattern = new RegExp(
+      `^(?:${KNOWN_CATASTROPHIC_PATTERN})$`,
+      'u',
+    );
+    const controlStart = performance.now();
+    controlPattern.test(probe);
+    const controlElapsedMs = performance.now() - controlStart;
+    expect(controlElapsedMs).toBeGreaterThan(REDOS_TIME_BUDGET_MS);
+
     expect(offenders).toEqual([]);
-  });
+  }, 30000);
 });
 
 describe('short_text', () => {
