@@ -4,6 +4,7 @@ import {
   UrlPatternError,
   parseUrlPattern,
   resolveUrlPath,
+  UrlTokenValueError,
 } from '../../src/url-pattern.js';
 
 describe('parseUrlPattern (TYPE-06, D-31)', () => {
@@ -146,5 +147,48 @@ describe('resolveUrlPath (D-30)', () => {
         'UTC',
       ),
     ).toBeNull();
+  });
+});
+
+describe('token substitution is validated, not just the pattern literals (D-WR-02)', () => {
+  it('refuses a slug that would escape the path', () => {
+    expect(() =>
+      resolveUrlPath(
+        '/blog/{slug}',
+        {
+          slug: '../../admin/secret',
+          publicId: 1,
+          firstPublishedAt: null,
+        },
+        'UTC',
+      ),
+    ).toThrow(UrlTokenValueError);
+  });
+
+  it('refuses a non-numeric id', () => {
+    expect(() =>
+      resolveUrlPath(
+        '/items/{id}',
+        { slug: null, publicId: '1/../../admin', firstPublishedAt: null },
+        'UTC',
+      ),
+    ).toThrow(UrlTokenValueError);
+  });
+
+  it('still resolves a normalised slug and a numeric id', () => {
+    expect(
+      resolveUrlPath(
+        '/blog/{slug}',
+        { slug: 'hello-world', publicId: 42, firstPublishedAt: null },
+        'UTC',
+      ),
+    ).toBe('/blog/hello-world');
+    expect(
+      resolveUrlPath(
+        '/items/{id}',
+        { slug: null, publicId: 42, firstPublishedAt: null },
+        'UTC',
+      ),
+    ).toBe('/items/42');
   });
 });

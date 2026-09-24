@@ -29,6 +29,18 @@ const multiSelectOptionsSchema = z
       options.maxItems === undefined ||
       options.minItems <= options.maxItems,
     { message: 'minItems must be less than or equal to maxItems' },
+  )
+  .refine(
+    // A minItems above the number of choices can never be satisfied, because
+    // values must be distinct and drawn from the choices, so the field would
+    // reject every possible input (D-WR-03).
+    (options) =>
+      options.minItems === undefined ||
+      options.minItems <= options.choices.length,
+    {
+      message: 'minItems must not exceed the number of choices',
+      path: ['minItems'],
+    },
   );
 
 type MultiSelectOptions = z.infer<typeof multiSelectOptionsSchema>;

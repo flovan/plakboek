@@ -329,16 +329,53 @@ export type UrlPathInput = {
   readonly firstPublishedAt: Date | null;
 };
 
+/** Thrown when a token's substituted value is not something this module can
+ * place in a path unescaped. The module's contract is that a resolved path
+ * never needs escaping, and that only holds if the substituted values are
+ * checked, not just the pattern's literal parts (D-WR-02). */
+export class UrlTokenValueError extends Error {
+  readonly token: string;
+  readonly value: string;
+
+  constructor(token: string, value: string) {
+    super(
+      `@plakboek/content: url token "${token}" resolved to a value that cannot be placed in a path unescaped`,
+    );
+    this.name = 'UrlTokenValueError';
+    this.token = token;
+    this.value = value;
+  }
+}
+
+/** A normalised slug, as `slug.ts` produces. */
+const SLUG_TOKEN_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/** `public_id` is a bigint column, so only digits can be legitimate. */
+const ID_TOKEN_PATTERN = /^[0-9]+$/;
+
 function resolveTokenValue(
   token: UrlPatternToken,
   input: UrlPathInput,
   dateParts: Record<DateToken, string> | undefined,
 ): string {
   if (token === 'slug') {
-    return requireDefined(input.slug, 'slug token resolved without a slug');
+    const slug = requireDefined(
+      input.slug,
+      'slug token resolved without a slug',
+    );
+    // resolveUrlPath and computeEntryPath are both exported, so a host can
+    // reach them with values that never passed through slug.ts. An unchecked
+    // value here is a path traversal: '../../admin' substitutes verbatim.
+    if (!SLUG_TOKEN_PATTERN.test(slug)) {
+      throw new UrlTokenValueError('slug', slug);
+    }
+    return slug;
   }
   if (token === 'id') {
-    return String(input.publicId);
+    const id = String(input.publicId);
+    if (!ID_TOKEN_PATTERN.test(id)) {
+      throw new UrlTokenValueError('id', id);
+    }
+    return id;
   }
   const parts = requireDefined(
     dateParts,

@@ -144,3 +144,31 @@ describe('repeater', () => {
     ).toThrow(FieldDefinitionError);
   });
 });
+
+describe('multi_select unsatisfiable minItems (D-WR-03)', () => {
+  it('refuses a minItems above the number of choices', () => {
+    // Values must be distinct and drawn from the choices, so this field
+    // would reject every possible input.
+    expect(() =>
+      parseFieldOptions('multi_select', {
+        choices: [
+          { value: 'a', labels: { en: 'A' } },
+          { value: 'b', labels: { en: 'B' } },
+        ],
+        minItems: 3,
+      }),
+    ).toThrow(FieldDefinitionError);
+  });
+
+  it('accepts a minItems equal to the number of choices', () => {
+    expect(() =>
+      parseFieldOptions('multi_select', {
+        choices: [
+          { value: 'a', labels: { en: 'A' } },
+          { value: 'b', labels: { en: 'B' } },
+        ],
+        minItems: 2,
+      }),
+    ).not.toThrow();
+  });
+});

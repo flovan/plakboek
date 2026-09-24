@@ -102,7 +102,14 @@ export async function recordRevision(
 
 /** Reads an affected-row count from a raw `execute()` result across
  * drivers: postgres-js reports `count`, node-postgres reports `rowCount`.
- * Mirrors `@plakboek/auth`'s `pruneAuditLog` helper of the same shape. */
+ * Mirrors `@plakboek/auth`'s `pruneAuditLog` helper of the same shape.
+ *
+ * Throwing rather than defaulting to `0` is deliberate (A-WR-01). Both
+ * supported drivers always report one of the two, including for a zero-row
+ * DELETE, so this branch is unreachable on a supported driver and only fires
+ * on one this package has never been tested against. Defaulting to `0` there
+ * would silently under-report how much was pruned, which is worse than a
+ * loud failure, because the count is what the caller is told was removed. */
 function affectedRowCount(result: unknown): number {
   if (typeof result === 'object' && result !== null) {
     for (const property of ['count', 'rowCount']) {

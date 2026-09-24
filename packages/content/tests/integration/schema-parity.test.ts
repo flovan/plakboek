@@ -92,12 +92,28 @@ const EXPECTED_CONSTRAINT_NAMES = [
   'content_entry_references_source_entry_id_fk',
   'content_engine_settings_id_check',
   'content_engine_settings_revision_cap_check',
+  // The primary keys were omitted while the comparison pre-filtered on this
+  // very list, so nothing could notice (E1b-WR-03). Now that the query lists
+  // everything on these tables, they belong here, and a dropped primary key
+  // becomes detectable.
+  'content_types_pkey',
+  'content_type_fields_pkey',
+  'content_entries_pkey',
+  'entry_revisions_pkey',
+  'content_type_key_history_pkey',
+  'content_field_key_history_pkey',
+  'content_entry_url_history_pkey',
+  'content_type_seed_applications_pkey',
+  'content_entry_references_pkey',
+  'content_engine_settings_pkey',
 ] as const;
 
-/** Every named index `0002_content_engine.ts` creates directly (unique
- * constraints and PKs create their own backing index but are asserted via
- * `EXPECTED_CONSTRAINT_NAMES` instead -- this list is the `CREATE [UNIQUE]
- * INDEX` statements). */
+/** Every named index `0002_content_engine.ts` creates directly. Unique
+ * constraints and primary keys create their own backing index but are
+ * asserted via `EXPECTED_CONSTRAINT_NAMES` instead, so this list is the
+ * `CREATE [UNIQUE] INDEX` statements. The query below lists every index on
+ * these tables, so a backing index appears here only if Postgres names it
+ * differently from its constraint. */
 const EXPECTED_INDEX_NAMES = [
   'content_entries_type_locale_status_idx',
   'content_entries_translation_group_idx',
@@ -136,22 +152,38 @@ async function expectSchemaMatchesMigration(db: Db): Promise<void> {
   `;
   expect(sortColumnShapes([...actualColumns])).toEqual(expectedColumns);
 
+  // Scope by TABLE, never by the expected list itself (E1b-WR-03). Filtering
+  // on `conname = ANY(expected)` before comparing made this one-directional:
+  // it caught a constraint missing from the database, but a constraint the
+  // migration adds and this list forgets could never appear in the result, so
+  // it could never be detected. Listing everything on the tables under test
+  // makes the comparison exhaustive in both directions, the way the
+  // column-shape check above already is.
   const actualConstraints = await db.sql<{ name: string }[]>`
     SELECT con.conname AS "name"
     FROM pg_constraint con
     JOIN pg_class c ON c.oid = con.conrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public'
-      AND con.conname = ANY(${[...EXPECTED_CONSTRAINT_NAMES]})
+    WHERE n.nspname = 'public' AND c.relname = ANY(${tableNames})
   `;
   expect(new Set(actualConstraints.map((row) => row.name))).toEqual(
     new Set(EXPECTED_CONSTRAINT_NAMES),
   );
 
+  // Exhaustive over these tables, minus the indexes Postgres creates to back
+  // a constraint. Those share their constraint's name and are already
+  // asserted above, so including them would just duplicate that list here.
   const actualIndexes = await db.sql<{ name: string }[]>`
-    SELECT indexname AS "name" FROM pg_indexes
-    WHERE schemaname = 'public'
-      AND indexname = ANY(${[...EXPECTED_INDEX_NAMES]})
+    SELECT i.indexname AS "name"
+    FROM pg_indexes i
+    WHERE i.schemaname = 'public' AND i.tablename = ANY(${tableNames})
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint con
+        JOIN pg_class ic ON ic.oid = con.conindid
+        JOIN pg_namespace ns ON ns.oid = ic.relnamespace
+        WHERE ns.nspname = 'public' AND ic.relname = i.indexname
+      )
   `;
   expect(new Set(actualIndexes.map((row) => row.name))).toEqual(
     new Set(EXPECTED_INDEX_NAMES),
