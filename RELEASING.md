@@ -75,10 +75,11 @@ every published manifest sets and which is correct for the automated
 `release.yml` publish -- that one runs under GitHub Actions OIDC trusted
 publishing and needs the attestation it produces. A bootstrap publish is
 human-run locally with no OIDC provider, so without the override npm
-aborts with `EUSAGE` / `Automatic provenance generation not supported for
-provider: null`. The accepted consequence: the bootstrap tarball ships
-with no provenance attestation, while every subsequent release of that
-package, published by `release.yml`, has one.
+aborts with `EUSAGE`:
+`Automatic provenance generation not supported for provider: null`.
+The accepted consequence: the bootstrap tarball ships with no provenance
+attestation, while every subsequent release of that package, published by
+`release.yml`, has one.
 
 Run the publish from an interactive terminal so npm's web-based 2FA flow
 can open a browser tab for you to approve. In a non-interactive shell (CI
