@@ -52,9 +52,83 @@ import {
 } from './references.js';
 import { recordUrlHistory } from './routing.js';
 import { StaleVersionError } from './save.js';
-import { contentEntries, contentTypes } from './schema.js';
+import { contentEntries, contentTypes, entryRevisions } from './schema.js';
 import type { EntryRecord, EntryStatus } from './types.js';
 import { FieldValidationError, validateEntryData } from './validation.js';
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** What collapsing a pending draft contributes to the status transition's
+ * own `UPDATE`, plus the revision row that becomes obsolete by it. */
+type PendingDraftCollapse = {
+  readonly promote: Partial<typeof contentEntries.$inferInsert>;
+  readonly obsoleteRevisionId: string | null;
+};
+
+const NO_PENDING_DRAFT: PendingDraftCollapse = {
+  promote: {},
+  obsoleteRevisionId: null,
+};
+
+/**
+ * Reads a pending draft so the caller can collapse it onto the row (D-47).
+ *
+ * A pending draft is content staged on top of live content, so it only has
+ * meaning while the entry is published or scheduled. Every transition out
+ * of those statuses promotes the staged `data`, `seo` and `slug` onto the
+ * row and clears `draft_revision_id`. Promoting rather than discarding
+ * keeps the newest thing the editor wrote, and it leaves the row and its
+ * working copy in agreement, so a later publish can never resurrect a stale
+ * pending revision over a newer live edit.
+ *
+ * The caller must apply `promote` in its own `UPDATE` and only then delete
+ * `obsoleteRevisionId`. `content_entries.draft_revision_id` references the
+ * revision row, so the pointer has to move first. This is the ordering
+ * `save.ts` already uses when it replaces a pending revision.
+ *
+ * Whether the superseded row survives follows `save.ts`'s own rule. In
+ * `on_every_save` mode it is history (D-13) and is kept. Otherwise it is
+ * ephemeral and is removed.
+ */
+async function readPendingDraftCollapse(
+  tx: AuditTransaction,
+  current: { readonly id: string; readonly draftRevisionId: string | null },
+  type: LifecycleContentType,
+): Promise<PendingDraftCollapse> {
+  if (current.draftRevisionId === null) return NO_PENDING_DRAFT;
+
+  const [revision] = await tx
+    .select({
+      data: entryRevisions.data,
+      seo: entryRevisions.seo,
+      slug: entryRevisions.slug,
+    })
+    .from(entryRevisions)
+    .where(eq(entryRevisions.id, current.draftRevisionId))
+    .limit(1);
+
+  if (revision === undefined) {
+    // A set pointer with no row behind it is never expected. Clear it
+    // rather than carry a dangling pointer through the transition.
+    return { promote: { draftRevisionId: null }, obsoleteRevisionId: null };
+  }
+
+  const keepAsHistory = type.revisions && type.revisionMode === 'on_every_save';
+  return {
+    promote: {
+      // A revision whose `data` is not a plain object is a corrupt row. Leave
+      // the entry's own `data` alone in that case rather than overwrite it
+      // with a fallback, and still clear the pointer.
+      ...(isPlainObject(revision.data) ? { data: revision.data } : {}),
+      seo: revision.seo,
+      slug: revision.slug,
+      draftRevisionId: null,
+    },
+    obsoleteRevisionId: keepAsHistory ? null : current.draftRevisionId,
+  };
+}
 
 /** Thrown when an entry's current status doesn't allow the requested
  * lifecycle operation. `operation` names the attempted transition:
@@ -105,13 +179,24 @@ function lifecycleSnapshot(entry: EntryRecord) {
 
 /** Loads and locks (`FOR SHARE`) the content type row a lifecycle mutation
  * needs to check its edit lock against. */
+type LifecycleContentType = LockableContentType & {
+  readonly revisions: boolean;
+  /** Compared only against `'on_every_save'` here, so the stored column type
+   * is enough. `content-types.ts` owns narrowing it to `RevisionMode`. */
+  readonly revisionMode: string | null;
+};
+
 async function loadLifecycleType(
   tx: AuditTransaction,
   entryId: string,
   contentTypeId: string,
-): Promise<LockableContentType> {
+): Promise<LifecycleContentType> {
   const [type] = await tx
-    .select({ editLocking: contentTypes.editLocking })
+    .select({
+      editLocking: contentTypes.editLocking,
+      revisions: contentTypes.revisions,
+      revisionMode: contentTypes.revisionMode,
+    })
     .from(contentTypes)
     .where(eq(contentTypes.id, contentTypeId))
     .for('share');
@@ -188,9 +273,12 @@ export async function unpublishEntry(
         });
       }
 
+      const collapse = await readPendingDraftCollapse(tx, current, type);
+
       const [row] = await tx
         .update(contentEntries)
         .set({
+          ...collapse.promote,
           status: 'draft',
           resolvedPath: null,
           scheduledAt: null,
@@ -211,6 +299,13 @@ export async function unpublishEntry(
           input.baseVersion,
           current.version,
         );
+      }
+
+      // The pointer has moved, so the superseded pending revision can go.
+      if (collapse.obsoleteRevisionId !== null) {
+        await tx
+          .delete(entryRevisions)
+          .where(eq(entryRevisions.id, collapse.obsoleteRevisionId));
       }
       const record = toEntryRecord(row);
       return { result: record, after: lifecycleSnapshot(record) };
@@ -366,9 +461,18 @@ export async function unscheduleEntry(
       const nextStatus: EntryStatus =
         current.status === 'scheduled' ? 'draft' : current.status;
 
+      // Only a transition that actually lands on `draft` leaves the
+      // published/scheduled pair, so only that one collapses the pending
+      // draft. Unscheduling an already-published entry stays published.
+      const collapse =
+        nextStatus === 'draft'
+          ? await readPendingDraftCollapse(tx, current, type)
+          : NO_PENDING_DRAFT;
+
       const [row] = await tx
         .update(contentEntries)
         .set({
+          ...collapse.promote,
           status: nextStatus,
           scheduledAt: null,
           version: sql`${contentEntries.version} + 1`,
@@ -388,6 +492,13 @@ export async function unscheduleEntry(
           input.baseVersion,
           current.version,
         );
+      }
+
+      // The pointer has moved, so the superseded pending revision can go.
+      if (collapse.obsoleteRevisionId !== null) {
+        await tx
+          .delete(entryRevisions)
+          .where(eq(entryRevisions.id, collapse.obsoleteRevisionId));
       }
       const record = toEntryRecord(row);
       return { result: record, after: lifecycleSnapshot(record) };
@@ -459,9 +570,12 @@ export async function trashEntry(
         });
       }
 
+      const collapse = await readPendingDraftCollapse(tx, current, type);
+
       const [row] = await tx
         .update(contentEntries)
         .set({
+          ...collapse.promote,
           status: 'trashed',
           trashedAt: updatedAt,
           resolvedPath: null,
@@ -483,6 +597,13 @@ export async function trashEntry(
           input.baseVersion,
           current.version,
         );
+      }
+
+      // The pointer has moved, so the superseded pending revision can go.
+      if (collapse.obsoleteRevisionId !== null) {
+        await tx
+          .delete(entryRevisions)
+          .where(eq(entryRevisions.id, collapse.obsoleteRevisionId));
       }
 
       // D-40: trashing always proceeds -- the reference usage count rides

@@ -28,8 +28,8 @@ import {
   unpublishEntry,
   unscheduleEntry,
 } from '../../src/lifecycle.js';
-import { publishEntry } from '../../src/publish.js';
-import { StaleVersionError } from '../../src/save.js';
+import { publishEntry, readWorkingCopy } from '../../src/publish.js';
+import { saveEntry, StaleVersionError } from '../../src/save.js';
 import { createTestDatabase, type TestDatabase } from './test-database.js';
 
 const roles = defineRoles({
@@ -142,6 +142,74 @@ describe('Entry lifecycle: unpublish, schedule, unschedule, trash and restore-fr
     });
     return { type, published };
   }
+
+  it('unpublishing collapses a pending draft onto the row and clears draftRevisionId', async () => {
+    const type = await createContentType(deps, superadmin, {
+      key: 'collapsePendingType',
+      labelSingular: 'Collapse pending type',
+      labelPlural: 'Collapse pending types',
+      drafts: true,
+    });
+    await addField(deps, superadmin, {
+      contentTypeKey: type.key,
+      key: 'note',
+      label: 'Note',
+      fieldType: 'short_text',
+    });
+
+    const entry = await createEntry(deps, editor, {
+      contentTypeKey: type.key,
+      locale: 'en',
+      data: { note: 'published text' },
+    });
+    const published = await publishEntry(deps, editor, {
+      entryId: entry.id,
+      baseVersion: entry.version,
+    });
+
+    // Stage a pending draft on top of the published row.
+    const staged = await saveEntry(deps, editor, {
+      entryId: entry.id,
+      baseVersion: published.version,
+      data: { note: 'staged text' },
+    });
+    expect(staged.draftRevisionId).not.toBeNull();
+    expect(staged.data).toEqual({ note: 'published text' });
+
+    const unpublished = await unpublishEntry(deps, editor, {
+      entryId: entry.id,
+      baseVersion: staged.version,
+    });
+
+    // The staged content is the newest the editor wrote, so unpublishing
+    // promotes it onto the row rather than stranding or discarding it.
+    expect(unpublished.status).toBe('draft');
+    expect(unpublished.draftRevisionId).toBeNull();
+    expect(unpublished.data).toEqual({ note: 'staged text' });
+
+    // The working copy and the row now agree, so a later publish cannot
+    // resurrect a stale pending revision over a newer live edit.
+    const workingCopy = await readWorkingCopy(deps.db, entry.id);
+    expect(workingCopy.data).toEqual({ note: 'staged text' });
+    expect(workingCopy.pendingRevisionId).toBeNull();
+
+    // A-CR-01 end to end: edit live while unpublished, then republish. The
+    // newest edit must win. Before the collapse, the republish read the
+    // stranded pending revision and silently discarded this edit.
+    const liveEdit = await saveEntry(deps, editor, {
+      entryId: entry.id,
+      baseVersion: unpublished.version,
+      data: { note: 'edited while unpublished' },
+    });
+    expect(liveEdit.data).toEqual({ note: 'edited while unpublished' });
+
+    const republished = await publishEntry(deps, editor, {
+      entryId: entry.id,
+      baseVersion: liveEdit.version,
+    });
+    expect(republished.status).toBe('published');
+    expect(republished.data).toEqual({ note: 'edited while unpublished' });
+  });
 
   it('unpublishing a published routable entry sets draft, clears resolvedPath, keeps slug/dates/revisions, and writes one URL history row reason unpublished with the old path', async () => {
     const { published } = await createAndPublishRoutableEntry({
