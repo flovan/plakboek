@@ -239,6 +239,7 @@ import {
   type UrlPatternIssueCode,
   UrlPatternRequiredError,
   type UrlPatternToken,
+  UrlTokenValueError,
   usesDateTokens,
   usesSlugToken,
   validateEntryData,
@@ -366,6 +367,7 @@ const errorClasses: Record<string, unknown> = {
   UrlPatternError,
   UrlPatternInUseError,
   UrlPatternRequiredError,
+  UrlTokenValueError,
 };
 
 const numbers: Record<string, unknown> = {
