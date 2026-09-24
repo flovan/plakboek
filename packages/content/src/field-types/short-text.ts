@@ -48,13 +48,26 @@ function buildShortTextValueSchema(options: ShortTextOptions): z.ZodType {
   }
   if (options.pattern !== undefined) {
     // Compiled once per `buildValueSchema` call (per field, not per value):
-    // the pattern already passed `isSafePattern` when the field was
-    // defined, so this is a bounded-cost, whole-value match (`^(?:...)$`).
+    // the pattern already passed `isSafePattern` when the field was defined.
     const wholeValuePattern = new RegExp(`^(?:${options.pattern})$`, 'u');
-    schema = schema.regex(
-      wholeValuePattern,
-      'does not match the configured pattern',
-    );
+    const maxLength = options.maxLength ?? SHORT_TEXT_MAX_LENGTH;
+    // The length cap is re-checked HERE rather than relied on from the
+    // `.max()` above, because zod does not stop at the first failing check:
+    // an over-long value still reached this regex, so the cap bounded the
+    // stored value but never bounded the match. Running a user-authored
+    // pattern over unbounded input is the expensive half of the ReDoS
+    // surface, so the match is skipped outright once the value is already
+    // too long. Such a value is rejected by `.max()` regardless, so nothing
+    // that would otherwise pass is turned away here.
+    schema = schema.superRefine((value, ctx) => {
+      if (value.length > maxLength) return;
+      if (!wholeValuePattern.test(value)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'does not match the configured pattern',
+        });
+      }
+    });
   }
   return schema;
 }

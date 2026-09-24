@@ -30,6 +30,36 @@ const HTTPS_PROTOCOL_PATTERN = /^https?$/;
 // is defense in depth. A path has no legitimate use for one.
 const SINGLE_SLASH_RELATIVE_PATTERN = /^\/(?![/\\])[^\\]*$/;
 
+/**
+ * An origin no real site can hold, used only to resolve a candidate relative
+ * value and see where it actually lands.
+ */
+const RELATIVE_PROBE_ORIGIN = 'https://relative.invalid';
+
+/**
+ * Whether `value` is genuinely site-relative, decided by resolving it the way
+ * a browser will rather than by pattern alone.
+ *
+ * The pattern above is a cheap pre-filter, and on its own it is not enough.
+ * The WHATWG URL parser strips ASCII TAB, LF and CR from its input BEFORE
+ * parsing, so "/\t/evil.com" survives any character rule that inspects the
+ * string as written and then reconstitutes itself as "//evil.com", landing on
+ * a different origin. Backslash normalisation was the same class of bypass.
+ *
+ * Asking the parser where the value lands closes the whole class at once,
+ * including whatever normalisation a future parser adds, because the question
+ * is no longer "does this look relative" but "does this stay on our origin".
+ */
+function staysOnOrigin(value: string): boolean {
+  let resolved: URL;
+  try {
+    resolved = new URL(value, RELATIVE_PROBE_ORIGIN);
+  } catch {
+    return false;
+  }
+  return resolved.origin === RELATIVE_PROBE_ORIGIN;
+}
+
 function buildUrlValueSchema(options: UrlOptions): z.ZodType {
   const absolute = z.url({ protocol: HTTPS_PROTOCOL_PATTERN });
   const base =
@@ -41,7 +71,10 @@ function buildUrlValueSchema(options: UrlOptions): z.ZodType {
             .regex(
               SINGLE_SLASH_RELATIVE_PATTERN,
               'must start with a single "/"',
-            ),
+            )
+            .refine(staysOnOrigin, {
+              message: 'must resolve within the same origin',
+            }),
         ])
       : absolute;
   return base.refine((value) => value.length <= URL_MAX_LENGTH, {
