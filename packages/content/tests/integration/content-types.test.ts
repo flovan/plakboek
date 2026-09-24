@@ -248,6 +248,112 @@ describe('Content type settings, slug, key rename, title field and delete (TYPE-
     expect((error as ContentTypeHasEntriesError).count).toBe(1);
   });
 
+  it('renameContentTypeKey does not clobber a concurrent options change on a referencing field it does not own (B-CR-01)', async () => {
+    const targetType = await createContentType(deps, superadmin, {
+      key: 'clobberTarget',
+      labelSingular: 'Clobber target',
+      labelPlural: 'Clobber targets',
+    });
+    const holderType = await createContentType(deps, superadmin, {
+      key: 'clobberHolder',
+      labelSingular: 'Clobber holder',
+      labelPlural: 'Clobber holders',
+    });
+    await addField(deps, superadmin, {
+      contentTypeKey: holderType.key,
+      key: 'author',
+      label: 'Author',
+      fieldType: 'reference',
+      options: { allowedTypeKeys: [targetType.key], cardinality: 'single' },
+    });
+    const [fieldRow] = await handle.sql<{ id: string }[]>`
+      SELECT id FROM content_type_fields
+      WHERE content_type_id = ${holderType.id} AND key = 'author'
+    `;
+    const fieldId = fieldRow?.id;
+    if (fieldId === undefined) {
+      throw new Error('expected the reference field row to exist');
+    }
+
+    // A second connection holds the referencing field row and only then
+    // writes its own options change. The rename owns neither this field nor
+    // its content type, so nothing it locks protects this row.
+    const blocking = createDb({
+      connectionString: testDatabase.connectionString,
+      maxConnections: 1,
+    });
+
+    let releaseBlocker: () => void = () => {
+      throw new Error('releaseBlocker called before it was assigned');
+    };
+    const blockerSignal = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    let signalLockHeld: () => void = () => {
+      throw new Error('signalLockHeld called before it was assigned');
+    };
+    const lockHeld = new Promise<void>((resolve) => {
+      signalLockHeld = resolve;
+    });
+
+    try {
+      const blockingTxPromise = blocking.sql.begin(async (sql) => {
+        await sql`SELECT id FROM content_type_fields WHERE id = ${fieldId} FOR UPDATE`;
+        signalLockHeld();
+        await blockerSignal;
+        await sql`
+          UPDATE content_type_fields
+          SET options = options || '{"probeMarker": true}'::jsonb
+          WHERE id = ${fieldId}
+        `;
+      });
+
+      // Only start the rename once the blocker demonstrably holds the row,
+      // otherwise the rename can finish first and the race never happens.
+      await lockHeld;
+
+      const renamePromise = renameContentTypeKey(deps, superadmin, {
+        key: targetType.key,
+        newKey: 'clobberRenamed',
+      }).catch((caught: unknown) => caught);
+
+      // Wait for the rename to block on the field row it must lock. Scoped
+      // to a transactionid wait so a sibling suite's lock cannot satisfy it.
+      const MAX_POLL_ATTEMPTS = 250;
+      const POLL_INTERVAL_MS = 20;
+      let waiting = 0;
+      for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+        const [row] = await handle.sql<{ count: string }[]>`
+          SELECT count(*) AS count
+          FROM pg_locks
+          WHERE NOT granted AND locktype = 'transactionid'
+        `;
+        waiting = Number(row?.count ?? '0');
+        if (waiting >= 1) break;
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      }
+
+      expect(waiting).toBeGreaterThanOrEqual(1);
+
+      releaseBlocker();
+      await blockingTxPromise;
+      const renameResult: unknown = await renamePromise;
+      expect(renameResult).not.toBeInstanceOf(Error);
+
+      // Both writes must survive. The rename rewrites allowedTypeKeys, the
+      // concurrent update added probeMarker, and neither may erase the other.
+      const [after] = await handle.sql<{ options: Record<string, unknown> }[]>`
+        SELECT options FROM content_type_fields WHERE id = ${fieldId}
+      `;
+      expect(after?.options).toMatchObject({
+        allowedTypeKeys: ['clobberRenamed'],
+        probeMarker: true,
+      });
+    } finally {
+      await blocking.sql.end({ timeout: 5 });
+    }
+  });
+
   it('setContentTypeSlug leaves key unchanged; renameContentTypeKey leaves slug unchanged and writes one history row', async () => {
     const type = await createContentType(deps, superadmin, {
       key: 'slugKeyArticle',

@@ -495,8 +495,9 @@ function toReferencingFieldReport(row: ReferencingFieldRow): ReferencingField {
 async function findReferencingFields(
   db: AuditDatabase,
   typeKey: string,
+  options: { readonly forUpdate?: boolean } = {},
 ): Promise<readonly ReferencingFieldRow[]> {
-  const rows = await db
+  const query = db
     .select({
       fieldId: contentTypeFields.id,
       fieldKey: contentTypeFields.key,
@@ -510,6 +511,22 @@ async function findReferencingFields(
       eq(contentTypeFields.contentTypeId, contentTypes.id),
     )
     .where(sql`${contentTypeFields.fieldType} IN ('reference', 'repeater')`);
+
+  // A caller that is about to rewrite these rows must lock them. They belong
+  // to other content types, so locking this rename's own type row protects
+  // nothing here, and the transactions run at READ COMMITTED. Without the
+  // lock a concurrent updateField can commit between this read and the
+  // rewrite, and the rewrite then writes a whole `options` object built from
+  // the stale snapshot, silently discarding that change.
+  //
+  // `of` keeps the lock off the joined content_types rows, and the id order
+  // makes two concurrent rewrites take the same rows in the same order.
+  // Read-only callers (the impact reports) pass nothing and take no locks.
+  const rows = options.forUpdate
+    ? await query
+        .orderBy(contentTypeFields.id)
+        .for('update', { of: contentTypeFields })
+    : await query;
 
   const referencing: ReferencingFieldRow[] = [];
   for (const row of rows) {
@@ -970,7 +987,9 @@ export async function renameContentTypeKey(
           );
         }
 
-        const referencingRows = await findReferencingFields(tx, input.key);
+        const referencingRows = await findReferencingFields(tx, input.key, {
+          forUpdate: true,
+        });
         await rewriteReferencingFields(
           tx,
           referencingRows,
@@ -1165,7 +1184,9 @@ export async function deleteContentType(
         throw new ContentTypeHasEntriesError(input.key, entryCount);
       }
 
-      const referencingRows = await findReferencingFields(tx, input.key);
+      const referencingRows = await findReferencingFields(tx, input.key, {
+        forUpdate: true,
+      });
       const emptying = referencingRows.filter(
         (row) => row.allowedTypeKeys.length === 1,
       );
