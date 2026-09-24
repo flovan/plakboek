@@ -104,6 +104,14 @@ function matchQuantifierAt(pattern: string, index: number): Quantifier | null {
 }
 
 type GroupFrame = {
+  /** Whether the atom immediately before this position, at THIS nesting
+   * level, carried a quantifier that can repeat more than once. Two such
+   * atoms side by side with nothing mandatory between them is the
+   * sequential catastrophic shape (`.*.*`, `a*a*`), which is distinct from
+   * the nested one (`(a+)+`) and was not modelled before. A mandatory atom
+   * in between (`\d+\.\d+`) resets it, because the engine cannot then
+   * redistribute a run of characters between the two. */
+  previousAtomRepeatable: boolean;
   hasVariableWidthQuantifier: boolean;
   hasAlternation: boolean;
 };
@@ -127,9 +135,18 @@ export function isSafePattern(pattern: string): boolean {
   if (pattern.length > PATTERN_MAX_LENGTH) return false;
   if (BACKREFERENCE_PATTERN.test(pattern)) return false;
 
-  const stack: GroupFrame[] = [];
+  // A root frame so the top level tracks adjacency the same way a group
+  // does. It is never closed, so its own flags are never read.
+  const stack: GroupFrame[] = [
+    {
+      hasVariableWidthQuantifier: false,
+      hasAlternation: false,
+      previousAtomRepeatable: false,
+    },
+  ];
   let nestedUnbounded = false;
   let ambiguousAlternation = false;
+  let adjacentRepeatable = false;
   let index = 0;
 
   while (index < pattern.length) {
@@ -145,7 +162,11 @@ export function isSafePattern(pattern: string): boolean {
       }
       index += 1;
     } else if (char === '(') {
-      stack.push({ hasVariableWidthQuantifier: false, hasAlternation: false });
+      stack.push({
+        hasVariableWidthQuantifier: false,
+        hasAlternation: false,
+        previousAtomRepeatable: false,
+      });
       index += 1;
       continue;
     } else if (char === '|') {
@@ -153,7 +174,11 @@ export function isSafePattern(pattern: string): boolean {
       // `short-text.ts` wraps the whole pattern in a group it never
       // quantifies, so a bare top-level alternation is left alone.
       const innermost = stack[stack.length - 1];
-      if (innermost !== undefined) innermost.hasAlternation = true;
+      if (innermost !== undefined) {
+        innermost.hasAlternation = true;
+        // A branch boundary: the next atom follows nothing.
+        innermost.previousAtomRepeatable = false;
+      }
       index += 1;
       continue;
     } else if (char === ')') {
@@ -194,9 +219,32 @@ export function isSafePattern(pattern: string): boolean {
       }
       index += quantifier.length;
     }
+
+    // Adjacency, evaluated once per atom at the level the atom sits on.
+    const level = stack[stack.length - 1];
+    if (level !== undefined) {
+      // Restricted to non-group atoms on purpose. A quantified GROUP very
+      // often opens with a mandatory separator its neighbour cannot match
+      // (`[a-z0-9]+(?:-[a-z0-9]+)*`, this project's own slug pattern), which
+      // leaves nothing to redistribute and is therefore safe. Deciding that
+      // in general needs character-set analysis this scanner does not do, so
+      // the rule stays where it is exact. See the header note on the
+      // residual `(a)*(a)*` shape.
+      const repeatable =
+        closedFrame === undefined &&
+        quantifier !== null &&
+        quantifier.variableWidth &&
+        quantifier.repeatsMoreThanOnce;
+      if (repeatable && level.previousAtomRepeatable) {
+        adjacentRepeatable = true;
+      }
+      level.previousAtomRepeatable = repeatable;
+    }
   }
 
-  if (nestedUnbounded || ambiguousAlternation) return false;
+  if (nestedUnbounded || ambiguousAlternation || adjacentRepeatable) {
+    return false;
+  }
 
   try {
     // The pattern is dynamic by design (a host-configured field option) --

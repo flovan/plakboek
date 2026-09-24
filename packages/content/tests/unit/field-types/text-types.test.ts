@@ -56,6 +56,15 @@ const REDOS_CORPUS = [
   // literally unbounded.
   '(a{1,2})+',
   '(a{2,5})*',
+  // T-03-12 re-opened by the 2026-09-24 security audit: two adjacent atoms
+  // that can each repeat more than once let the engine redistribute a run of
+  // characters between them. Distinct from the nested and alternation
+  // shapes above, and not modelled before. Measured 25.9s on 60 characters.
+  '.*.*.*.*!',
+  '.*.*.*.*.*.*.*.*!',
+  'a*a*a*a*a*a*a*a*b',
+  '.*.*',
+  '\\w*\\w*!',
 ] as const;
 
 /** Alternation shapes a customer would plausibly author in a `short_text`
@@ -323,5 +332,69 @@ describe('json (field type)', () => {
     const result = schema.safeParse(oversized) as ParseOutcome;
     expect(result.success).toBe(false);
     expect(failureIssues(result).length).toBeGreaterThan(0);
+  });
+});
+
+describe('short_text pattern matching is bounded by the length cap (T-03-12)', () => {
+  it('does not run the configured pattern over a value already past the cap', () => {
+    // zod does not stop at the first failing check, so an over-long value
+    // used to reach the user-authored pattern anyway. The value is rejected
+    // either way; what matters is that the match is not attempted.
+    const schema = buildValueSchema('short_text', {
+      pattern: '[a-z]+',
+      maxLength: 50,
+    });
+    const overLong = 'a'.repeat(5000);
+    const started = performance.now();
+    const result = schema.safeParse(overLong);
+    const elapsedMs = performance.now() - started;
+    expect(result.success).toBe(false);
+    expect(elapsedMs).toBeLessThan(100);
+  });
+
+  it('still enforces the pattern for a value within the cap', () => {
+    const schema = buildValueSchema('short_text', {
+      pattern: '[a-z]+',
+      maxLength: 50,
+    });
+    expect(schema.safeParse('abc').success).toBe(true);
+    expect(schema.safeParse('ABC').success).toBe(false);
+  });
+});
+
+describe('url field: a relative value must stay on the same origin (T-03-14)', () => {
+  // The WHATWG URL parser strips ASCII TAB, LF and CR before parsing, so a
+  // character rule that inspects the string as written can be defeated by
+  // putting one of them between the slashes. Resolving the value and
+  // checking where it lands closes the whole class, including backslash.
+  const bypasses = [
+    '/\t/evil.com',
+    '/\n/evil.com',
+    '/\r/evil.com',
+    '//evil.com',
+    '/\\evil.com',
+  ];
+
+  it('rejects every value that resolves to another origin', () => {
+    const schema = buildValueSchema('url', { allowRelative: true });
+    for (const value of bypasses) {
+      expect(
+        schema.safeParse(value).success,
+        `expected ${JSON.stringify(value)} to be rejected`,
+      ).toBe(false);
+      // Prove the value really is dangerous, so this corpus cannot rot into
+      // a list of harmless strings.
+      expect(new URL(value, 'https://mysite.example/page').origin).not.toBe(
+        'https://mysite.example',
+      );
+    }
+  });
+
+  it('still accepts ordinary site-relative values', () => {
+    const schema = buildValueSchema('url', { allowRelative: true });
+    for (const value of ['/safe/path', '/a/b?x=1#y', '/']) {
+      expect(schema.safeParse(value).success).toBe(true);
+    }
+    expect(schema.safeParse('https://ok.example').success).toBe(true);
   });
 });
