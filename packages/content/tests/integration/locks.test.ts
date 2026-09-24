@@ -408,9 +408,21 @@ describe('Edit locking, heartbeat lapse, takeover and the save-time refusal (TYP
       resolveRenewSignal = resolve;
     });
 
+    let signalHolderXid: (xid: string) => void = () => {
+      throw new Error('signalHolderXid called before it was assigned');
+    };
+    const holderXidReady = new Promise<string>((resolve) => {
+      signalHolderXid = resolve;
+    });
+
     try {
       const blockingTxPromise = blocking.sql.begin(async (sql) => {
-        await sql`SELECT id FROM content_entries WHERE id = ${entry.id} FOR UPDATE`;
+        // Capture the holder's own xid so the wait below can be scoped to it.
+        const [row] = await sql`
+          SELECT pg_current_xact_id()::xid::text AS xid
+          FROM content_entries WHERE id = ${entry.id} FOR UPDATE
+        `;
+        signalHolderXid(row?.xid ?? '');
         await renewSignal;
         await sql`
           UPDATE content_entries
@@ -419,22 +431,32 @@ describe('Edit locking, heartbeat lapse, takeover and the save-time refusal (TYP
         `;
       });
 
+      // Wait until the blocker provably holds the row. Starting the takeover
+      // first made this a genuine race for the same row lock, which is why
+      // the takeover sometimes won and nothing ever blocked.
+      const holderXid = await holderXidReady;
+
       const takeoverPromise = takeOverEditLock(deps, author, {
         entryId: entry.id,
       }).catch((caught: unknown) => caught);
 
-      const MAX_POLL_ATTEMPTS = 50;
-      const POLL_INTERVAL_MS = 20;
+      // A blocked FOR UPDATE reload waits on the holder's own xid, so scope
+      // the wait to that exact xid. pg_locks and pg_stat_activity are both
+      // server-wide, and this suite's other integration files run against the
+      // same Postgres server concurrently, so an unscoped check can be
+      // satisfied by a sibling file's race and release this one early. The
+      // budget is a deadline rather than a fixed attempt count, because the
+      // previous 50 x 20ms cap left no margin on a cold CI runner and failed
+      // there while passing locally.
+      const deadline = Date.now() + 5000;
       let waitingCount = 0;
-      for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
-        const [row] = await handle.sql<{ count: string }[]>`
-          SELECT count(*) AS count
-          FROM pg_stat_activity
-          WHERE datname = current_database() AND wait_event_type = 'Lock'
+      while (waitingCount < 1 && Date.now() < deadline) {
+        const [row] = await handle.sql<{ count: number }[]>`
+          SELECT count(*)::int AS count FROM pg_locks
+          WHERE NOT granted AND locktype = 'transactionid'
+            AND transactionid = ${holderXid}::xid
         `;
-        waitingCount = Number(row?.count ?? '0');
-        if (waitingCount >= 1) break;
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        waitingCount = row?.count ?? 0;
       }
       if (waitingCount < 1) {
         throw new Error(

@@ -289,17 +289,21 @@ describe('Content type settings, slug, key rename, title field and delete (TYPE-
     const blockerSignal = new Promise<void>((resolve) => {
       releaseBlocker = resolve;
     });
-    let signalLockHeld: () => void = () => {
+    let signalLockHeld: (xid: string) => void = () => {
       throw new Error('signalLockHeld called before it was assigned');
     };
-    const lockHeld = new Promise<void>((resolve) => {
+    const lockHeld = new Promise<string>((resolve) => {
       signalLockHeld = resolve;
     });
 
     try {
       const blockingTxPromise = blocking.sql.begin(async (sql) => {
-        await sql`SELECT id FROM content_type_fields WHERE id = ${fieldId} FOR UPDATE`;
-        signalLockHeld();
+        // Capture the holder's own xid so the wait below can be scoped to it.
+        const [held] = await sql`
+          SELECT pg_current_xact_id()::xid::text AS xid
+          FROM content_type_fields WHERE id = ${fieldId} FOR UPDATE
+        `;
+        signalLockHeld(held?.xid ?? '');
         await blockerSignal;
         await sql`
           UPDATE content_type_fields
@@ -310,27 +314,26 @@ describe('Content type settings, slug, key rename, title field and delete (TYPE-
 
       // Only start the rename once the blocker demonstrably holds the row,
       // otherwise the rename can finish first and the race never happens.
-      await lockHeld;
+      const holderXid = await lockHeld;
 
       const renamePromise = renameContentTypeKey(deps, superadmin, {
         key: targetType.key,
         newKey: 'clobberRenamed',
       }).catch((caught: unknown) => caught);
 
-      // Wait for the rename to block on the field row it must lock. Scoped
-      // to a transactionid wait so a sibling suite's lock cannot satisfy it.
-      const MAX_POLL_ATTEMPTS = 250;
-      const POLL_INTERVAL_MS = 20;
+      // Wait for the rename to block on the field row it must lock, scoped to
+      // the holder's own xid. pg_locks is server-wide and this suite's other
+      // integration files share the server, so an unscoped check can be
+      // satisfied by a sibling file's race.
+      const deadline = Date.now() + 5000;
       let waiting = 0;
-      for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
-        const [row] = await handle.sql<{ count: string }[]>`
-          SELECT count(*) AS count
-          FROM pg_locks
+      while (waiting < 1 && Date.now() < deadline) {
+        const [row] = await handle.sql<{ count: number }[]>`
+          SELECT count(*)::int AS count FROM pg_locks
           WHERE NOT granted AND locktype = 'transactionid'
+            AND transactionid = ${holderXid}::xid
         `;
-        waiting = Number(row?.count ?? '0');
-        if (waiting >= 1) break;
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        waiting = row?.count ?? 0;
       }
 
       expect(waiting).toBeGreaterThanOrEqual(1);
