@@ -1,6 +1,6 @@
 {
   "name": "@plakboek/auth",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "better-auth wiring, invite, audit and impersonation primitives for Plakboek CMS installations",
   "homepage": "https://github.com/flovan/plakboek/tree/main/packages/auth#readme",
   "bugs": {

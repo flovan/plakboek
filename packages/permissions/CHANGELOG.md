@@ -1,5 +1,11 @@
 # @plakboek/permissions
 
+## 0.3.0
+
+### Minor Changes
+
+- [#7](https://github.com/flovan/plakboek/pull/7) [`113c783`](https://github.com/flovan/plakboek/commit/113c7839871e9e84d681ea2211dcd2f793f336c2) Thanks [@flovan](https://github.com/flovan)! - Add `permissionsIncludeAll`, a pure permission-superset check for edit-lock takeover and role-management rules.
+
 ## 0.2.0
 
 ## 0.1.2
