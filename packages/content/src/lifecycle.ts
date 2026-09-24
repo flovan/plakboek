@@ -38,6 +38,7 @@ import type { ContentDeps } from './config.js';
 import {
   EntryNotFoundError,
   getEntry,
+  readEntryContentTypeId,
   loadEntryForUpdate,
   lockTranslationGroupForUpdate,
   toEntryRecord,
@@ -241,6 +242,12 @@ export async function unpublishEntry(
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
     async (tx) => {
+      // Lock order (C-WR-01): the content type row is taken BEFORE the entry
+      // row, matching every schema operation. See entries.ts's
+      // readEntryContentTypeId for why the unlocked read is safe.
+      const typeId = await readEntryContentTypeId(tx, input.entryId);
+      const type = await loadLifecycleType(tx, input.entryId, typeId);
+
       const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (current.version !== input.baseVersion) {
         throw new StaleVersionError(
@@ -253,11 +260,6 @@ export async function unpublishEntry(
         throw new EntryStatusError(input.entryId, current.status, 'unpublish');
       }
 
-      const type = await loadLifecycleType(
-        tx,
-        input.entryId,
-        current.contentTypeId,
-      );
       assertRowsWritable([current], type, actor.userId, now());
 
       const updatedAt = now();
@@ -348,6 +350,12 @@ export async function scheduleEntry(
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
     async (tx) => {
+      // Lock order (C-WR-01): the content type row is taken BEFORE the entry
+      // row, matching every schema operation. See entries.ts's
+      // readEntryContentTypeId for why the unlocked read is safe.
+      const typeId = await readEntryContentTypeId(tx, input.entryId);
+      const type = await loadLifecycleType(tx, input.entryId, typeId);
+
       const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (current.version !== input.baseVersion) {
         throw new StaleVersionError(
@@ -360,11 +368,6 @@ export async function scheduleEntry(
         throw new EntryStatusError(input.entryId, current.status, 'schedule');
       }
 
-      const type = await loadLifecycleType(
-        tx,
-        input.entryId,
-        current.contentTypeId,
-      );
       assertRowsWritable([current], type, actor.userId, now());
 
       const updatedAt = now();
@@ -435,6 +438,12 @@ export async function unscheduleEntry(
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
     async (tx) => {
+      // Lock order (C-WR-01): the content type row is taken BEFORE the entry
+      // row, matching every schema operation. See entries.ts's
+      // readEntryContentTypeId for why the unlocked read is safe.
+      const typeId = await readEntryContentTypeId(tx, input.entryId);
+      const type = await loadLifecycleType(tx, input.entryId, typeId);
+
       const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (current.version !== input.baseVersion) {
         throw new StaleVersionError(
@@ -450,11 +459,6 @@ export async function unscheduleEntry(
         throw new EntryStatusError(input.entryId, current.status, 'unschedule');
       }
 
-      const type = await loadLifecycleType(
-        tx,
-        input.entryId,
-        current.contentTypeId,
-      );
       assertRowsWritable([current], type, actor.userId, now());
 
       const updatedAt = now();
@@ -538,6 +542,12 @@ export async function trashEntry(
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
     async (tx) => {
+      // Lock order (C-WR-01): the content type row is taken BEFORE the entry
+      // row, matching every schema operation. See entries.ts's
+      // readEntryContentTypeId for why the unlocked read is safe.
+      const typeId = await readEntryContentTypeId(tx, input.entryId);
+      const type = await loadLifecycleType(tx, input.entryId, typeId);
+
       const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (current.version !== input.baseVersion) {
         throw new StaleVersionError(
@@ -550,11 +560,6 @@ export async function trashEntry(
         throw new EntryStatusError(input.entryId, current.status, 'trash');
       }
 
-      const type = await loadLifecycleType(
-        tx,
-        input.entryId,
-        current.contentTypeId,
-      );
       assertRowsWritable([current], type, actor.userId, now());
 
       const updatedAt = now();
@@ -687,6 +692,12 @@ export async function restoreEntryFromTrash(
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
     async (tx) => {
+      // Lock order (C-WR-01): the content type row is taken BEFORE the entry
+      // row, matching every schema operation. See entries.ts's
+      // readEntryContentTypeId for why the unlocked read is safe.
+      const typeId = await readEntryContentTypeId(tx, input.entryId);
+      const type = await loadLifecycleType(tx, input.entryId, typeId);
+
       const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
       if (current.version !== input.baseVersion) {
         throw new StaleVersionError(
@@ -703,11 +714,6 @@ export async function restoreEntryFromTrash(
         );
       }
 
-      const type = await loadLifecycleType(
-        tx,
-        input.entryId,
-        current.contentTypeId,
-      );
       assertRowsWritable([current], type, actor.userId, now());
 
       const updatedAt = now();
@@ -887,6 +893,11 @@ export async function deleteEntryPermanently(
         : { before: permanentDeleteBeforeSnapshot(before) }),
     },
     async (tx) => {
+      // Lock order (C-WR-01): the content type row is taken BEFORE any entry
+      // row, matching every schema operation.
+      const typeId = await readEntryContentTypeId(tx, input.entryId);
+      const type = await loadLifecycleType(tx, input.entryId, typeId);
+
       const { origin: current } = await lockTranslationGroupForUpdate(
         tx,
         deps.config,
@@ -899,12 +910,6 @@ export async function deleteEntryPermanently(
           current.version,
         );
       }
-
-      const type = await loadLifecycleType(
-        tx,
-        input.entryId,
-        current.contentTypeId,
-      );
       assertRowsWritable([current], type, actor.userId, now());
 
       const impact = await computeEntryPermanentDeleteImpact(tx, {

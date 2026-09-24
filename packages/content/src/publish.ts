@@ -12,7 +12,13 @@
 import type { AuditActor, AuditDatabase } from '@plakboek/auth';
 import { and, eq, sql } from 'drizzle-orm';
 import type { ContentDeps } from './config.js';
-import { getEntry, loadEntryForUpdate, toEntryRecord } from './entries.js';
+import {
+  getEntry,
+  loadEntryForUpdate,
+  lockContentTypeForShare,
+  readEntryContentTypeId,
+  toEntryRecord,
+} from './entries.js';
 import { EntryNotFoundError } from './entries.js';
 import { listFields } from './fields.js';
 import { assertRowsWritable } from './locks.js';
@@ -28,7 +34,7 @@ import {
   urlCollisionFromUniqueViolation,
 } from './routing.js';
 import { StaleVersionError } from './save.js';
-import { contentEntries, contentTypes, entryRevisions } from './schema.js';
+import { contentEntries, entryRevisions } from './schema.js';
 import {
   generateUniqueEntrySlug,
   slugConflictFromUniqueViolation,
@@ -186,6 +192,12 @@ export async function publishEntry(
       ...(before === null ? {} : { before: beforeSnapshot(before) }),
     },
     async (tx) => {
+      // Lock order (C-WR-01): the content type row is taken BEFORE the entry
+      // row, matching every schema operation. See entries.ts's
+      // readEntryContentTypeId for why the unlocked read is safe.
+      const typeId = await readEntryContentTypeId(tx, input.entryId);
+      const type = await lockContentTypeForShare(tx, typeId, input.entryId);
+
       // loadEntryForUpdate both confirms the entry exists and locks the row
       // FOR UPDATE for the duration of this transaction (D-42/D-47).
       const current = await loadEntryForUpdate(tx, deps.config, input.entryId);
@@ -195,28 +207,6 @@ export async function publishEntry(
           input.entryId,
           input.baseVersion,
           current.version,
-        );
-      }
-
-      // Locks the type row for the duration of the publish, so a concurrent
-      // field delete/rename can't remove a field this publish is about to
-      // validate against mid-transaction.
-      const [type] = await tx
-        .select({
-          id: contentTypes.id,
-          routable: contentTypes.routable,
-          urlPattern: contentTypes.urlPattern,
-          titleFieldKey: contentTypes.titleFieldKey,
-          seo: contentTypes.seo,
-          revisions: contentTypes.revisions,
-          editLocking: contentTypes.editLocking,
-        })
-        .from(contentTypes)
-        .where(eq(contentTypes.id, current.contentTypeId))
-        .for('share');
-      if (type === undefined) {
-        throw new Error(
-          `@plakboek/content: no content type found for entry "${input.entryId}"`,
         );
       }
 

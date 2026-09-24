@@ -30,7 +30,9 @@ import type { Permission } from '@plakboek/permissions';
 import type { ContentDeps } from './config.js';
 import {
   getEntry,
+  lockContentTypeForShare,
   lockTranslationGroupForUpdate,
+  readEntryContentTypeId,
   toEntryRecord,
 } from './entries.js';
 import { listFields } from './fields.js';
@@ -433,6 +435,16 @@ export async function saveEntryInTransaction(
 ): Promise<SaveEntryTransactionResult> {
   const { permission, now } = context;
 
+  // Lock order (C-WR-01): the content type row is taken BEFORE any entry
+  // row. Every schema operation (fields.ts, content-types.ts,
+  // field-translatable.ts) locks the type first and then writes entries, so
+  // an entry write that took entry rows first and then waited for the type
+  // closed an ABBA cycle, and Postgres aborted one side with a deadlock.
+  // Reading the entry's content_type_id unlocked first is safe because an
+  // entry never changes content type.
+  const typeId = await readEntryContentTypeId(tx, input.entryId);
+  const type = await lockContentTypeForShare(tx, typeId, input.entryId);
+
   // lockTranslationGroupForUpdate both confirms the entry exists
   // (EntryNotFoundError otherwise) and locks every row of its translation
   // group, in locale order, for the duration of this transaction (plan
@@ -451,31 +463,6 @@ export async function saveEntryInTransaction(
       input.entryId,
       input.baseVersion,
       current.version,
-    );
-  }
-
-  // Locks the type row for the duration of this save, so a concurrent
-  // field delete/rename can't remove a field this save is about to
-  // validate against mid-transaction; also carries every setting the
-  // rest of this mutation needs.
-  const [type] = await tx
-    .select({
-      id: contentTypes.id,
-      routable: contentTypes.routable,
-      urlPattern: contentTypes.urlPattern,
-      titleFieldKey: contentTypes.titleFieldKey,
-      seo: contentTypes.seo,
-      drafts: contentTypes.drafts,
-      revisions: contentTypes.revisions,
-      revisionMode: contentTypes.revisionMode,
-      editLocking: contentTypes.editLocking,
-    })
-    .from(contentTypes)
-    .where(eq(contentTypes.id, current.contentTypeId))
-    .for('share');
-  if (type === undefined) {
-    throw new Error(
-      `@plakboek/content: no content type found for entry "${input.entryId}"`,
     );
   }
 

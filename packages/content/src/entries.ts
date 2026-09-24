@@ -177,6 +177,79 @@ export async function getEntry(
  * `EntryNotFoundError` when no row matches, and `LocaleNotEnabledError` when
  * the row's own locale is no longer in `config.locales` -- a row of a
  * removed locale is refused for every write (D-25, plan 03-11). */
+/**
+ * The content type columns every entry-write path needs, read under a
+ * `FOR SHARE` lock on the type row.
+ */
+export type LockedContentType = {
+  readonly id: string;
+  readonly routable: boolean;
+  readonly urlPattern: string | null;
+  readonly titleFieldKey: string | null;
+  readonly seo: boolean;
+  readonly drafts: boolean;
+  readonly revisions: boolean;
+  readonly revisionMode: string | null;
+  readonly editLocking: boolean;
+};
+
+/**
+ * Reads one entry's `content_type_id` without taking a lock (C-WR-01).
+ *
+ * This exists so an entry write can lock the CONTENT TYPE row before any
+ * entry row. Every schema operation locks the type first and then writes
+ * entries, so an entry write doing the reverse closes an ABBA cycle and
+ * Postgres aborts one side with a deadlock. Reading this one column
+ * unlocked is safe because an entry never changes content type.
+ */
+export async function readEntryContentTypeId(
+  tx: AuditTransaction,
+  entryId: string,
+): Promise<string> {
+  const [row] = await tx
+    .select({ contentTypeId: contentEntries.contentTypeId })
+    .from(contentEntries)
+    .where(eq(contentEntries.id, entryId))
+    .limit(1);
+  if (row === undefined) {
+    throw new EntryNotFoundError(entryId);
+  }
+  return row.contentTypeId;
+}
+
+/**
+ * Locks a content type row `FOR SHARE` for the rest of the transaction, so
+ * a concurrent field delete or rename cannot change the type's fields
+ * mid-write. Always called before any entry row is locked (C-WR-01).
+ */
+export async function lockContentTypeForShare(
+  tx: AuditTransaction,
+  contentTypeId: string,
+  entryId: string,
+): Promise<LockedContentType> {
+  const [type] = await tx
+    .select({
+      id: contentTypes.id,
+      routable: contentTypes.routable,
+      urlPattern: contentTypes.urlPattern,
+      titleFieldKey: contentTypes.titleFieldKey,
+      seo: contentTypes.seo,
+      drafts: contentTypes.drafts,
+      revisions: contentTypes.revisions,
+      revisionMode: contentTypes.revisionMode,
+      editLocking: contentTypes.editLocking,
+    })
+    .from(contentTypes)
+    .where(eq(contentTypes.id, contentTypeId))
+    .for('share');
+  if (type === undefined) {
+    throw new Error(
+      `@plakboek/content: no content type found for entry "${entryId}"`,
+    );
+  }
+  return type;
+}
+
 export async function loadEntryForUpdate(
   tx: AuditTransaction,
   config: ContentConfig,
