@@ -233,6 +233,9 @@ catalogs:
     vitest:
       specifier: ^5.0.0
       version: 5.0.0
+    zod:
+      specifier: ^4.6.5
+      version: 4.6.5
 
 importers:
 
@@ -323,6 +326,49 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.3.0(react@19.3.0)
+      tsdown:
+        specifier: 'catalog:'
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(typescript@7.0.2)
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.0(@types/node@22.20.2)(vite@8.3.0(@types/node@22.20.2))
+
+  packages/content:
+    dependencies:
+      '@plakboek/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@plakboek/db':
+        specifier: workspace:*
+        version: link:../db
+      '@plakboek/permissions':
+        specifier: workspace:*
+        version: link:../permissions
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.5
+    devDependencies:
+      '@arethetypeswrong/cli':
+        specifier: 'catalog:'
+        version: 0.18.5
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.2
+      '@types/pg':
+        specifier: 'catalog:'
+        version: 8.23.1
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
+      pg:
+        specifier: 'catalog:'
+        version: 8.23.0
+      publint:
+        specifier: 'catalog:'
+        version: 0.3.24
       tsdown:
         specifier: 'catalog:'
         version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(typescript@7.0.2)
@@ -2508,6 +2554,9 @@ packages:
   zod@4.6.4:
     resolution: {integrity: sha512-AXSD6hvGdvRjajG/l1cC+d6IrhH+sjmPKtYeQdJIK8MFJl3LyClzS+o/YsVC+zQZPupAaeH5skwwm8YqYH7BqA==}
 
+  zod@4.6.5:
+    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
+
 snapshots:
 
   '@andrewbranch/untar.js@1.0.4': {}
@@ -4140,3 +4189,5 @@ snapshots:
       '@yuku-parser/binding-win32-x64': 0.9.5
 
   zod@4.6.4: {}
+
+  zod@4.6.5: {}

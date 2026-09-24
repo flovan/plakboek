@@ -4,6 +4,7 @@ import {
   defaultRoles,
   defineRoles,
   isPermission,
+  permissionsIncludeAll,
   PERMISSIONS,
   type DefinedRoles,
   type OrphanedRoleEvent,
@@ -63,4 +64,15 @@ if (resolver.resolve('ghost').size !== 0) {
 
 console.log(
   'permissions.ts: defineRoles(defaultRoles) succeeds and an orphaned role key resolves to an empty set',
+);
+
+if (
+  typeof permissionsIncludeAll !== 'function' ||
+  !permissionsIncludeAll(clientPermissions, clientPermissions)
+) {
+  process.exit(1);
+}
+
+console.log(
+  'permissions.ts: permissionsIncludeAll is a function and a resolved set includes itself',
 );

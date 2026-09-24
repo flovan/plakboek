@@ -32,6 +32,10 @@ describe('shipped MIGRATIONS registry', () => {
     expect(MIGRATIONS[0]?.name).toBe('0001_auth_core');
   });
 
+  it('ships 0002_content_engine as its second entry', () => {
+    expect(MIGRATIONS[1]?.name).toBe('0002_content_engine');
+  });
+
   it("gives every entry the name of the file it is imported from, in the array's order", () => {
     const indexSource = readFileSync(INDEX_PATH, 'utf8');
     const fileByBinding = new Map(

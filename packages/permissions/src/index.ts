@@ -35,3 +35,4 @@ export type {
   PermissionResolverOptions,
 } from './resolve.js';
 export { createPermissionResolver } from './resolve.js';
+export { permissionsIncludeAll } from './superset.js';

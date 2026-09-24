@@ -1,5 +1,6 @@
 import type { Migration } from '../migrate.js';
 import { migration as m0001 } from './0001_auth_core.js';
+import { migration as m0002 } from './0002_content_engine.js';
 
 /**
  * The static migration registry for @plakboek/db (D-03).
@@ -16,8 +17,10 @@ import { migration as m0001 } from './0001_auth_core.js';
  * ../../MIGRATIONS.md for the full authoring convention.
  *
  * `0001_auth_core` is the first shipped entry: the better-auth core tables
- * and the audit log. The runner's failure modes (ordering, checksums,
- * partial application, locking) are exercised through fixture registries in
- * this package's own tests (tests/fixtures/migrations.ts).
+ * and the audit log. `0002_content_engine` is the second: the content-type,
+ * field and entry tables `@plakboek/content` builds on. The runner's
+ * failure modes (ordering, checksums, partial application, locking) are
+ * exercised through fixture registries in this package's own tests
+ * (tests/fixtures/migrations.ts).
  */
-export const MIGRATIONS: readonly Migration[] = Object.freeze([m0001]);
+export const MIGRATIONS: readonly Migration[] = Object.freeze([m0001, m0002]);
