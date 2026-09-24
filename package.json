@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r run build",
-    "test": "pnpm -r run test",
+    "test": "pnpm -r run test && pnpm run test:scripts",
+    "test:scripts": "vitest run",
     "test:integration": "pnpm -r --if-present run test:integration",
     "typecheck": "pnpm -r run typecheck",
     "check": "pnpm -r run check",
