@@ -40,6 +40,7 @@ import { assertRowsWritable } from './locks.js';
 import { EntryStateChangedError, readWorkingCopy } from './publish.js';
 import {
   assertReferencesResolvable,
+  lockReferencedGroupsInOrder,
   syncEntryReferenceIndex,
 } from './references.js';
 import { pruneSaveRevisions, recordRevision } from './revisions.js';
@@ -444,6 +445,18 @@ export async function saveEntryInTransaction(
   // entry never changes content type.
   const typeId = await readEntryContentTypeId(tx, input.entryId);
   const type = await lockContentTypeForShare(tx, typeId, input.entryId);
+
+  // C-WR-02: take every translation group this save touches in one sorted
+  // order, before the group lock below, so two entries referencing each
+  // other cannot acquire their groups in opposite orders. The calls below
+  // re-request rows this already holds, which is a no-op.
+  const orderingFields = await listFields(tx, type.id);
+  await lockReferencedGroupsInOrder(
+    tx,
+    input.entryId,
+    orderingFields,
+    isPlainObject(input.data) ? input.data : {},
+  );
 
   // lockTranslationGroupForUpdate both confirms the entry exists
   // (EntryNotFoundError otherwise) and locks every row of its translation

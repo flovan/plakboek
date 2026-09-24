@@ -183,6 +183,117 @@ describe('Lock ordering between entry writes and schema operations (C-WR-01)', (
     }
   });
 
+  it('two entries referencing each other do not deadlock on their translation groups (C-WR-02)', async () => {
+    const type = await createContentType(deps, superadmin, {
+      key: 'mutualRefType',
+      labelSingular: 'Mutual ref type',
+      labelPlural: 'Mutual ref types',
+    });
+    await addField(deps, superadmin, {
+      contentTypeKey: type.key,
+      key: 'peer',
+      label: 'Peer',
+      fieldType: 'reference',
+      options: { allowedTypeKeys: [type.key], cardinality: 'single' },
+    });
+
+    const entryA = await createEntry(deps, editor, {
+      contentTypeKey: type.key,
+      locale: 'en',
+      data: {},
+    });
+    const entryB = await createEntry(deps, editor, {
+      contentTypeKey: type.key,
+      locale: 'en',
+      data: {},
+    });
+    // Pick roles by sort order, because that is what the fix keys on. The
+    // saved entry is the one whose group sorts HIGHER, and the stand-in
+    // concurrent peer holds the LOWER group and then reaches for the higher,
+    // which is the order a correct peer takes. Under the old code the save
+    // grabbed its own (higher) group first and closed the cycle.
+    const rawA = await translationGroupOf(entryA.id);
+    const rawB = await translationGroupOf(entryB.id);
+    const lowerGroup = rawA < rawB ? rawA : rawB;
+    const higherGroup = rawA < rawB ? rawB : rawA;
+    const savedEntry = rawA < rawB ? entryB : entryA;
+
+    // A second connection stands in for a concurrent save of B: it takes B's
+    // own translation group FOR UPDATE, then reaches for A's group FOR SHARE
+    // the way assertReferencesResolvable does. Saving A does the mirror
+    // image, so under the old order the two close a cycle.
+    const blocking = createDb({
+      connectionString: testDatabase.connectionString,
+      maxConnections: 1,
+    });
+    let releaseBlocker: () => void = () => {
+      throw new Error('releaseBlocker called before it was assigned');
+    };
+    const blockerSignal = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    let signalHeld: (xid: string) => void = () => {
+      throw new Error('signalHeld called before it was assigned');
+    };
+    const held = new Promise<string>((resolve) => {
+      signalHeld = resolve;
+    });
+
+    try {
+      const blockingTx = blocking.sql
+        .begin(async (sql) => {
+          const [row] = await sql`
+            SELECT pg_current_xact_id()::xid::text AS xid
+            FROM content_entries WHERE translation_group = ${lowerGroup} FOR UPDATE
+          `;
+          signalHeld(row?.xid ?? '');
+          await blockerSignal;
+          await sql`
+            SELECT id FROM content_entries
+            WHERE translation_group = ${higherGroup} FOR SHARE
+          `;
+        })
+        .catch((caught: unknown) => caught);
+
+      const holderXid = await held;
+
+      // Saving A locks A's group, then needs B's group to resolve the
+      // reference it is storing.
+      const savePromise = saveEntry(deps, editor, {
+        entryId: savedEntry.id,
+        baseVersion: savedEntry.version,
+        data: { peer: lowerGroup },
+      }).catch((caught: unknown) => caught);
+
+      await waitForWaiters(holderXid, 1);
+
+      releaseBlocker();
+      const blockerResult: unknown = await blockingTx;
+      const saveResult: unknown = await savePromise;
+
+      const sqlStates = [saveResult, blockerResult].map((result) =>
+        result instanceof Error
+          ? ((result as { cause?: { code?: string } }).cause?.code ??
+            (result as { code?: string }).code ??
+            null)
+          : null,
+      );
+      expect(sqlStates).toEqual([null, null]);
+      expect(saveResult).not.toBeInstanceOf(Error);
+    } finally {
+      await blocking.sql.end({ timeout: 5 });
+    }
+  });
+
+  async function translationGroupOf(entryId: string): Promise<string> {
+    const [row] = await handle.sql<{ translationGroup: string }[]>`
+      SELECT translation_group AS "translationGroup"
+      FROM content_entries WHERE id = ${entryId}
+    `;
+    if (row === undefined) throw new Error('entry not found');
+    return row.translationGroup;
+  }
+
   /**
    * Counts callers queued behind the held content type row. Postgres shows
    * the first waiter as a `transactionid` wait on the holder's own xid, and

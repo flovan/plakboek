@@ -196,6 +196,62 @@ export class ReferenceTypeNotAllowedError extends Error {
  * own (field-sort-order) iteration order, so the error is deterministic.
  * A no-op when `data` holds no reference values at all.
  */
+/**
+ * Acquires every translation group this write will touch, in one
+ * deterministic order (C-WR-02).
+ *
+ * A save locks its own group `FOR UPDATE` and then locks each referenced
+ * target group `FOR SHARE` via `assertReferencesResolvable`. Two entries
+ * that reference each other therefore took their two groups in opposite
+ * orders and deadlocked. Sorting the whole set and taking it in that order
+ * makes both sides agree, so one simply waits for the other.
+ *
+ * This is additive. The later `lockTranslationGroupForUpdate` and
+ * `assertReferencesResolvable` calls re-request rows this already holds,
+ * which is a no-op, so no existing behaviour changes.
+ *
+ * The unlocked read of the origin's own translation group is safe because an
+ * entry never moves between groups.
+ */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function lockReferencedGroupsInOrder(
+  tx: AuditTransaction,
+  entryId: string,
+  fields: readonly FieldDefinition[],
+  data: Readonly<Record<string, unknown>>,
+): Promise<void> {
+  const [originRow] = await tx
+    .select({ translationGroup: contentEntries.translationGroup })
+    .from(contentEntries)
+    .where(eq(contentEntries.id, entryId))
+    .limit(1);
+  if (originRow === undefined) return;
+  const originGroup = originRow.translationGroup;
+
+  // `data` has not been validated yet, so a reference value may be any shape
+  // the caller sent. Only well-formed uuids can name a translation group, and
+  // anything else is rejected by validation moments later, so skip it here
+  // rather than let it reach Postgres as a malformed uuid.
+  const targets = new Set(
+    collectReferenceValues(fields, data)
+      .map((ref) => ref.targetTranslationGroup)
+      .filter((group) => UUID_PATTERN.test(group)),
+  );
+  targets.delete(originGroup);
+  if (targets.size === 0) return;
+
+  const ordered = [originGroup, ...targets].sort();
+  for (const group of ordered) {
+    await tx
+      .select({ id: contentEntries.id })
+      .from(contentEntries)
+      .where(eq(contentEntries.translationGroup, group))
+      .for(group === originGroup ? 'update' : 'share');
+  }
+}
+
 export async function assertReferencesResolvable(
   tx: AuditTransaction,
   fields: readonly FieldDefinition[],

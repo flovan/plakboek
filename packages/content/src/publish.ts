@@ -24,6 +24,7 @@ import { listFields } from './fields.js';
 import { assertRowsWritable } from './locks.js';
 import {
   assertReferencesResolvable,
+  lockReferencedGroupsInOrder,
   syncEntryReferenceIndex,
 } from './references.js';
 import { recordRevision } from './revisions.js';
@@ -132,6 +133,10 @@ export async function readWorkingCopy(
   };
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function isBlankSlug(slug: string | null): boolean {
   return slug === null || slug.trim().length === 0;
 }
@@ -197,6 +202,19 @@ export async function publishEntry(
       // readEntryContentTypeId for why the unlocked read is safe.
       const typeId = await readEntryContentTypeId(tx, input.entryId);
       const type = await lockContentTypeForShare(tx, typeId, input.entryId);
+
+      // C-WR-02: take every translation group this publish touches in one
+      // sorted order, before the entry lock below. The publish validates the
+      // working copy's own data, so that is what decides the targets. The
+      // later calls re-request rows this already holds, which is a no-op.
+      const orderingFields = await listFields(tx, typeId);
+      const orderingCopy = await readWorkingCopy(tx, input.entryId);
+      await lockReferencedGroupsInOrder(
+        tx,
+        input.entryId,
+        orderingFields,
+        isPlainObject(orderingCopy.data) ? orderingCopy.data : {},
+      );
 
       // loadEntryForUpdate both confirms the entry exists and locks the row
       // FOR UPDATE for the duration of this transaction (D-42/D-47).
