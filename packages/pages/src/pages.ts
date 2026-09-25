@@ -45,7 +45,10 @@ function asSlugSource(value: string): 'generated' | 'manual' {
   );
 }
 
-function toPageRecord(row: typeof pages.$inferSelect): PageRecord {
+/** Maps a raw `pages` row to the camelCase `PageRecord` shape. Exported
+ * (not part of the barrel) so `translations.ts` and `locale.ts` can reuse
+ * the same mapping instead of duplicating it. */
+export function toPageRecord(row: typeof pages.$inferSelect): PageRecord {
   return {
     id: row.id,
     translationGroup: row.translationGroup,
