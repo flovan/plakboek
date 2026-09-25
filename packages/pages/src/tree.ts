@@ -18,7 +18,7 @@
  */
 import type { AuditActor, AuditDatabase } from '@plakboek/auth';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import type { PagesDeps } from './config.js';
+import type { PagesDeps, PagesHooks } from './config.js';
 import { loadPageForUpdate, StalePageVersionError } from './pages.js';
 import { assertPlacementAllowed, countAncestorSections } from './placement.js';
 import {
@@ -35,7 +35,11 @@ import {
   type OwnerRef,
   type OwnerType,
 } from './types.js';
-import { upcastOnRead } from './versioning.js';
+import {
+  createUpcastSession,
+  reportDegradedBlock,
+  type UpcastSession,
+} from './versioning.js';
 
 // `StalePageVersionError` is now defined in `pages.ts` (D-38: `movePage`,
 // `renamePage` and `createPage`'s parent-load path all need it too, and
@@ -217,7 +221,11 @@ function buildRawTree(rows: readonly TreeRow[]): RawNode[] {
   return childrenByParent.get(null) ?? [];
 }
 
-function toBlockNode(raw: RawNode): BlockNode {
+function toBlockNode(
+  raw: RawNode,
+  session: UpcastSession,
+  hooks: PagesHooks | undefined,
+): BlockNode {
   const record: BlockRecord = {
     id: raw.row.id,
     ownerType: asOwnerType(raw.row.ownerType),
@@ -234,32 +242,48 @@ function toBlockNode(raw: RawNode): BlockNode {
     updatedAt: raw.row.updatedAt,
   };
 
-  let definition;
+  // Read separately from `session.upcast` below purely to report the
+  // registry's current `schemaVersion` on a degraded event -- an
+  // unregistered block type (caught inside `session.upcast` itself) leaves
+  // this `null`, matching `DegradedBlockEvent.currentVersion`.
+  let currentVersion: number | null;
   try {
-    definition = getBlockDefinition(raw.row.blockType);
+    currentVersion = getBlockDefinition(raw.row.blockType).schemaVersion;
   } catch {
-    definition = undefined;
+    currentVersion = null;
   }
-  const upcast =
-    definition === undefined
-      ? ({
-          props: raw.row.props,
-          degraded: true,
-          reason: 'unknown-block-type',
-        } as const)
-      : upcastOnRead(definition, raw.row.schemaVersion, raw.row.props);
 
-  const children = Object.freeze(raw.children.map(toBlockNode));
+  const outcome = session.upcast(
+    raw.row.blockType,
+    raw.row.schemaVersion,
+    raw.row.props,
+  );
 
-  return upcast.degraded
+  if (outcome.degraded) {
+    reportDegradedBlock(hooks, {
+      blockId: raw.row.id,
+      blockType: raw.row.blockType,
+      storedVersion: raw.row.schemaVersion,
+      currentVersion,
+      reason: outcome.reason,
+      ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
+      occurredAt: new Date(),
+    });
+  }
+
+  const children = Object.freeze(
+    raw.children.map((child) => toBlockNode(child, session, hooks)),
+  );
+
+  return outcome.degraded
     ? {
         ...record,
-        props: upcast.props,
+        props: outcome.props,
         degraded: true,
-        degradedReason: upcast.reason,
+        degradedReason: outcome.reason,
         children,
       }
-    : { ...record, props: upcast.props, degraded: false, children };
+    : { ...record, props: outcome.props, degraded: false, children };
 }
 
 /**
@@ -267,17 +291,21 @@ function toBlockNode(raw: RawNode): BlockNode {
  * (04-RESEARCH.md Pattern 2), ordered depth-first by `sort_path`. Every
  * dynamic value (`owner.ownerType`, `owner.ownerId`, `owner.locale`) is
  * interpolated through Drizzle's tagged `sql` template -- no string
- * concatenation anywhere. Each row's `props` is run through `upcastOnRead`,
- * resolving the block's registry entry by `block_type`; an unregistered
- * type yields a degraded node (`unknown-block-type`) rather than throwing.
- * Never writes: the stored `props` bytes are untouched by a read (BLOCK-12,
- * D-11). Accepts a plain database handle or an open transaction (both
- * expose the same `execute` surface), so `publishPage` can read the same
- * tree it is about to snapshot from inside its own transaction.
+ * concatenation anywhere. One `createUpcastSession` is built for this
+ * whole read and applied per row, resolving the block's registry entry by
+ * `block_type`; an unregistered type yields a degraded node
+ * (`unknown-block-type`) rather than throwing. Every degraded row is
+ * reported once through `reportDegradedBlock` (`hooks?.onDegradedBlock`,
+ * or the console-warning default when `hooks` is omitted). Never writes:
+ * the stored `props` bytes are untouched by a read (BLOCK-12, D-11).
+ * Accepts a plain database handle or an open transaction (both expose the
+ * same `execute` surface), so `publishPage` can read the same tree it is
+ * about to snapshot from inside its own transaction.
  */
 export async function readBlockTree(
   db: AuditDatabase,
   owner: OwnerRef,
+  hooks?: PagesHooks,
 ): Promise<readonly BlockNode[]> {
   const result = await db.execute(sql`
     WITH RECURSIVE tree AS (
@@ -311,7 +339,8 @@ export async function readBlockTree(
   `);
   const rows = resultRows(result).map(toTreeRow);
   const rawRoots = buildRawTree(rows);
-  return Object.freeze(rawRoots.map(toBlockNode));
+  const session = createUpcastSession();
+  return Object.freeze(rawRoots.map((raw) => toBlockNode(raw, session, hooks)));
 }
 
 export type InsertBlockInput = {

@@ -29,7 +29,6 @@ export {
   reportPagesWarning,
 } from './config.js';
 export type {
-  BlockDegradedEvent,
   LocaleRemovedEvent,
   PagesConfig,
   PagesConfigInput,
@@ -112,8 +111,20 @@ export type {
 } from './compatibility.js';
 
 // versioning.ts
-export { upcastOnRead } from './versioning.js';
-export type { UpcastResult } from './versioning.js';
+export {
+  createUpcastSession,
+  DEGRADED_REASONS,
+  reportDegradedBlock,
+  resolveUpcasterChain,
+  upcastOnRead,
+} from './versioning.js';
+export type {
+  DegradedBlockEvent,
+  DegradedReason,
+  UpcasterChainResolution,
+  UpcastOutcome,
+  UpcastSession,
+} from './versioning.js';
 
 // pages.ts
 export {

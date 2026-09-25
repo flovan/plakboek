@@ -36,6 +36,7 @@ import {
   reportSectionLint,
   type SectionLintEvent,
 } from './section-lint.js';
+import type { DegradedBlockEvent } from './versioning.js';
 
 // `reportPagesWarning` is defined in `warnings.ts`, a dependency-free leaf
 // module, and re-exported here unchanged so every existing
@@ -186,20 +187,6 @@ export function definePagesConfig(input: PagesConfigInput): PagesConfig {
   });
 }
 
-/** Emitted when `readBlockTree`/`upcastOnRead` cannot bring a stored
- * block's props to its registry's current shape (D-12, D-15). The row is
- * never rewritten or dropped because of it; plan 04-07 wires this hook into
- * `readBlockTree`. */
-export type BlockDegradedEvent = {
-  readonly ownerType: string;
-  readonly ownerId: string;
-  readonly locale: string;
-  readonly blockId: string;
-  readonly blockType: string;
-  readonly reason: string;
-  readonly occurredAt: Date;
-};
-
 /** Emitted at boot when a locale present in stored pages/blocks is no
  * longer in `ContentConfig.locales` (D-37, plan 04-11 or later). */
 export type LocaleRemovedEvent = {
@@ -209,7 +196,7 @@ export type LocaleRemovedEvent = {
 };
 
 export type PagesHooks = {
-  readonly onDegradedBlock?: (event: BlockDegradedEvent) => void;
+  readonly onDegradedBlock?: (event: DegradedBlockEvent) => void;
   readonly onSectionLint?: (event: SectionLintEvent) => void;
   readonly onBelowFloor?: (event: BelowFloorEvent) => void;
   readonly onLocaleRemoved?: (event: LocaleRemovedEvent) => void;

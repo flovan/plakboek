@@ -99,11 +99,15 @@ export async function publishPage(
         );
       }
 
-      const tree = await readBlockTree(tx, {
-        ownerType: 'page',
-        ownerId: page.id,
-        locale: page.locale,
-      });
+      const tree = await readBlockTree(
+        tx,
+        {
+          ownerType: 'page',
+          ownerId: page.id,
+          locale: page.locale,
+        },
+        deps.hooks,
+      );
 
       const batchId = newRevisionBatchId();
       const publishedAt = now();
