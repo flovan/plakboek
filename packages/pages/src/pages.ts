@@ -243,11 +243,13 @@ export type RecordPageUrlHistoryInput = {
  * `@plakboek/content`'s `recordUrlHistory`): inserts one append-only
  * `page_url_history` row naming the path it moved away from. This module
  * defines no update or delete for that table -- URL history is append-only,
- * kept for Phase 16's redirects. Package-internal (not part of the
- * barrel): called only from this package's own move/rename paths inside an
- * already-open audited transaction.
+ * kept for Phase 16's redirects. Exported for `page-routing.ts`'s
+ * `setPageUrlPattern` (04-11) to call from its own already-open audited
+ * transaction, but deliberately absent from the package barrel
+ * (`index.ts`): a caller reaching it directly could write history outside
+ * any audited mutation.
  */
-async function recordPageUrlHistory(
+export async function recordPageUrlHistory(
   tx: AuditTransaction,
   input: RecordPageUrlHistoryInput,
 ): Promise<void> {
