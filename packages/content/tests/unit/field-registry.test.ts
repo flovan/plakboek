@@ -1,11 +1,43 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import {
   FIELD_TYPE_DEFINITIONS,
   FIELD_TYPES,
   getFieldTypeDefinition,
+  getFieldTypeWidgets,
+  isFieldType,
+  registerHostFieldType,
   type FieldTypeDefinition,
   type FieldTypeDefinitions,
 } from '../../src/field-types/registry.js';
+
+describe('registerHostFieldType widens lookup without widening FIELD_TYPES (EXT-02, D-07)', () => {
+  it('resolves a host field type by getFieldTypeDefinition without counting it in isFieldType', () => {
+    registerHostFieldType([
+      {
+        fieldType: 'color',
+        optionsSchema: z.strictObject({}),
+        buildValueSchema: () => z.string(),
+        isEmptyValue: (value) => value === undefined || value === null,
+        widgets: ['color-picker'],
+        defaultWidget: 'color-picker',
+        allowedInRepeater: true,
+      },
+    ]);
+    expect(isFieldType('color')).toBe(false);
+    expect(getFieldTypeDefinition('color').fieldType).toBe('color');
+  });
+});
+
+describe('getFieldTypeWidgets (EXT-02, D-07)', () => {
+  it("returns each built-in field type's own widget tuple unchanged when no host widget is registered", () => {
+    for (const fieldType of FIELD_TYPES) {
+      expect(getFieldTypeWidgets(fieldType)).toEqual(
+        getFieldTypeDefinition(fieldType).widgets,
+      );
+    }
+  });
+});
 
 describe('field type registry completeness (FIELD-02, FIELD-04)', () => {
   it('every registered field type has a defaultWidget among its own widgets', () => {

@@ -33,6 +33,7 @@ import type {
 import {
   FieldDefinitionError,
   getFieldTypeDefinition,
+  getFieldTypeWidgets,
   isFieldType,
   parseFieldOptions,
   type FieldType,
@@ -427,15 +428,16 @@ export function defineContentTypes<
         }
       }
 
+      const widgets = getFieldTypeWidgets(fieldInput.fieldType);
       if (
         fieldInput.widget !== undefined &&
-        !definition.widgets.includes(fieldInput.widget)
+        !widgets.includes(fieldInput.widget)
       ) {
         issues.push({
           code: 'INVALID_WIDGET',
           seedId: fieldInput.seedId,
           property: 'widget',
-          message: `widget "${fieldInput.widget}" is not one of "${fieldInput.fieldType}"'s widgets (${definition.widgets.join(', ')})`,
+          message: `widget "${fieldInput.widget}" is not one of "${fieldInput.fieldType}"'s widgets (${widgets.join(', ')})`,
         });
       }
 
