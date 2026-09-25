@@ -1,20 +1,26 @@
 /**
- * Snapshot builder, degraded-block refusal and audited publish (D-30,
- * D-31, D-33). `buildSnapshotTree` materialises the nested shape the
- * renderer consumes, built in memory in one pass (04-RESEARCH.md Open
- * Question 2), emitting each block's `props` keys in its current
+ * Snapshot builder, degraded-block refusal, publish and draft snapshot
+ * (D-30, D-31, D-32, D-33). `buildSnapshotTree` materialises the nested
+ * shape the renderer consumes, built in memory in one pass (04-RESEARCH.md
+ * Open Question 2), emitting each block's `props` keys in its current
  * declaration order so two builds of the same tree serialise
  * byte-identically. `buildPageSnapshot` validates every node and refuses
  * with `DegradedBlockPublishError`, naming every offending block, before
  * anything is written: a knowingly broken snapshot is never stored, and a
- * refused publish leaves the previously published snapshot serving. Draft
- * snapshots (D-32) are plan 04-09's Task 2.
+ * refused publish (or draft) leaves the previously published snapshot
+ * serving. `publishPage` and `createDraftSnapshot` both funnel through the
+ * private `materialisePublication` helper, so a draft provably cannot
+ * differ from what publishing the same tree would produce (D-32).
  */
 import { createHash } from 'node:crypto';
-import type { AuditActor, AuditDatabase } from '@plakboek/auth';
-import { eq, sql } from 'drizzle-orm';
-import type { PagesDeps } from './config.js';
-import { loadPageForUpdate } from './pages.js';
+import type {
+  AuditActor,
+  AuditDatabase,
+  AuditTransaction,
+} from '@plakboek/auth';
+import { and, desc, eq, sql } from 'drizzle-orm';
+import type { PagesDeps, PagesHooks } from './config.js';
+import { getPage, loadPageForUpdate, PageNotFoundError } from './pages.js';
 import {
   BlockPropsValidationError,
   getBlockDefinition,
@@ -24,7 +30,7 @@ import {
 import { newRevisionBatchId, recordBlockRevision } from './revisions.js';
 import { pagePublications, pages } from './schema.js';
 import { StalePageVersionError, readBlockTree } from './tree.js';
-import type { BlockNode } from './types.js';
+import type { BlockNode, PageRecord } from './types.js';
 import type { DegradedReason } from './versioning.js';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -80,12 +86,12 @@ export function buildSnapshotTree(nodes: readonly BlockNode[]): PageSnapshot {
   return { blocks: Object.freeze(nodes.map(toSnapshotBlock)) };
 }
 
-/** One block that stopped a publish (or, from 04-09's Task 2, a draft
- * snapshot) from being built -- either already flagged `degraded` on read
- * (`versioning.ts`'s `DegradedReason`), or one whose upcast props failed
- * `validateBlockProps` against the current declaration
- * (`'invalid-props'`): a block that upcasts but does not validate is as
- * unpublishable as one that does not upcast at all. */
+/** One block that stopped a publish or a draft snapshot from being built --
+ * either already flagged `degraded` on read (`versioning.ts`'s
+ * `DegradedReason`), or one whose upcast props failed `validateBlockProps`
+ * against the current declaration (`'invalid-props'`): a block that
+ * upcasts but does not validate is as unpublishable as one that does not
+ * upcast at all. */
 export type DegradedSnapshotBlock = {
   readonly blockId: string;
   readonly blockType: string;
@@ -100,20 +106,20 @@ export type SnapshotBuildResult = {
 };
 
 /**
- * `buildPageSnapshot` is the single builder `publishPage` calls to turn a
- * tree into a snapshot, validating every node against its current
- * declaration first. Performs no I/O -- the whole tree materialises in
- * memory. Walks every node regardless of an earlier failure, so
- * `degraded` names EVERY offending block in one pass rather than stopping
- * at the first: a node already flagged `degraded` (by `readBlockTree`'s
- * upcast-on-read) is collected with its reason and contributes nothing
- * further; otherwise its `props` go through `validateBlockProps` -- a
- * `BlockPropsValidationError` collects the node with reason
- * `'invalid-props'` and the issue codes as `detail`. `snapshot` is only
- * ever built from the fully validated tree (via `buildSnapshotTree`) when
- * `degraded` is empty; when it is not, the caller (`publishPage`) throws
- * `DegradedBlockPublishError` before the (unusable) `snapshot` value is
- * ever read or written anywhere.
+ * `buildPageSnapshot` is the single builder both `publishPage` and
+ * `createDraftSnapshot` call (via `materialisePublication`) to turn a tree
+ * into a snapshot, validating every node against its current declaration
+ * first. Performs no I/O -- the whole tree materialises in memory. Walks
+ * every node regardless of an earlier failure, so `degraded` names EVERY
+ * offending block in one pass rather than stopping at the first: a node
+ * already flagged `degraded` (by `readBlockTree`'s upcast-on-read) is
+ * collected with its reason and contributes nothing further; otherwise its
+ * `props` go through `validateBlockProps` -- a `BlockPropsValidationError`
+ * collects the node with reason `'invalid-props'` and the issue codes as
+ * `detail`. `snapshot` is only ever built from the fully validated tree
+ * (via `buildSnapshotTree`) when `degraded` is empty; when it is not, the
+ * caller (`materialisePublication`) throws `DegradedBlockPublishError`
+ * before the (unusable) `snapshot` value is ever read or written anywhere.
  */
 export function buildPageSnapshot(
   nodes: readonly BlockNode[],
@@ -179,11 +185,11 @@ export function computeManifestHash(
   return createHash('sha256').update(serialized).digest('hex');
 }
 
-/** Thrown by `publishPage` when `buildPageSnapshot` reports one or more
- * degraded blocks -- thrown BEFORE any write, so a refused publish leaves
- * the previously published snapshot serving (D-31, T-04-38). A true
- * integrity break: this is one of the few places this engine refuses
- * rather than reporting and continuing. */
+/** Thrown by `publishPage`/`createDraftSnapshot` when `buildPageSnapshot`
+ * reports one or more degraded blocks -- thrown BEFORE any write, so a
+ * refused publish or draft leaves the previously published snapshot
+ * serving (D-31, T-04-38). A true integrity break: this is one of the few
+ * places this engine refuses rather than reporting and continuing. */
 export class DegradedBlockPublishError extends Error {
   readonly blocks: readonly DegradedSnapshotBlock[];
 
@@ -229,6 +235,10 @@ export type PublishPageInput = {
   readonly baseVersion: number;
 };
 
+export type CreateDraftSnapshotInput = {
+  readonly pageId: string;
+};
+
 export type PagePublicationRecord = {
   readonly id: string;
   readonly pageId: string;
@@ -241,21 +251,131 @@ export type PagePublicationRecord = {
   readonly publishedAt: Date;
 };
 
+type MaterialisePublicationResult = {
+  readonly record: PagePublicationRecord;
+  readonly blockCount: number;
+};
+
+/**
+ * Turns one owner's live tree into a stored `page_publications` row -- the
+ * ONE code path `publishPage` and `createDraftSnapshot` both call, so
+ * D-32's guarantee (a preview provably cannot differ from what publishing
+ * will produce) is structural rather than aspirational. Reads the tree
+ * (`readBlockTree`, forwarding `hooks` so a degraded block still reports
+ * through the normal read-time hook too) and runs it through
+ * `buildPageSnapshot`; a non-empty `degraded` list throws
+ * `DegradedBlockPublishError` before any write. Records one `'publish'`-
+ * kind `recordBlockRevision` per block, all sharing one
+ * `newRevisionBatchId()`, building the `revisionManifest` as `{ [blockId]:
+ * revisionId }` from those exact ids -- so a publish's and a draft's
+ * manifest-referenced revisions are both `'publish'`-kind and therefore
+ * never pruned (D-28). Inserts the `page_publications` row with
+ * `is_draft` set from `options.isDraft`. Only a non-draft additionally
+ * moves the owning page's `live_publication_id`, `status` to
+ * `'published'`, `published_at` and (only the first time) `
+ * first_published_at`, and bumps `pages.version` -- a draft touches none
+ * of those: taking a preview is not an edit.
+ */
+async function materialisePublication(
+  tx: AuditTransaction,
+  page: PageRecord,
+  actor: AuditActor,
+  now: () => Date,
+  hooks: PagesHooks | undefined,
+  options: { readonly isDraft: boolean },
+): Promise<MaterialisePublicationResult> {
+  const tree = await readBlockTree(
+    tx,
+    { ownerType: 'page', ownerId: page.id, locale: page.locale },
+    hooks,
+  );
+
+  const buildResult = buildPageSnapshot(tree);
+  if (buildResult.degraded.length > 0) {
+    throw new DegradedBlockPublishError(buildResult.degraded);
+  }
+
+  const batchId = newRevisionBatchId();
+  const publishedAt = now();
+  const manifest: Record<string, string> = {};
+
+  async function recordPublishRevisions(
+    nodes: readonly BlockNode[],
+  ): Promise<void> {
+    for (const node of nodes) {
+      const revisionId = await recordBlockRevision(tx, {
+        blockId: node.id,
+        owner: {
+          ownerType: node.ownerType,
+          ownerId: node.ownerId,
+          locale: node.locale,
+        },
+        revisionBatchId: batchId,
+        changeType: 'update',
+        kind: 'publish',
+        blockType: node.blockType,
+        parentBlockId: node.parentBlockId,
+        sortOrder: node.sortOrder,
+        depth: node.depth,
+        props: node.props,
+        schemaVersion: node.schemaVersion,
+        authorId: actor.userId,
+        createdAt: publishedAt,
+      });
+      manifest[node.id] = revisionId;
+      await recordPublishRevisions(node.children);
+    }
+  }
+  await recordPublishRevisions(tree);
+
+  const manifestHash = computeManifestHash(manifest);
+
+  const [publication] = await tx
+    .insert(pagePublications)
+    .values({
+      pageId: page.id,
+      locale: page.locale,
+      isDraft: options.isDraft,
+      snapshot: buildResult.snapshot,
+      revisionManifest: manifest,
+      manifestHash,
+      publishedBy: actor.userId,
+      publishedAt,
+    })
+    .returning();
+  if (publication === undefined) {
+    throw new Error('@plakboek/pages: page publication insert returned no row');
+  }
+
+  if (!options.isDraft) {
+    await tx
+      .update(pages)
+      .set({
+        livePublicationId: publication.id,
+        status: 'published',
+        publishedAt,
+        ...(page.firstPublishedAt === null
+          ? { firstPublishedAt: publishedAt }
+          : {}),
+        version: sql`${pages.version} + 1`,
+      })
+      .where(eq(pages.id, page.id));
+  }
+
+  const record = toPagePublicationRecord(publication);
+  return { record, blockCount: Object.keys(manifest).length };
+}
+
 /**
  * Publishes a page (D-30, D-31, D-33). Through `deps.recorder.run`
  * (`pages:publish` / `page.publish`): loads and locks the page `FOR
- * UPDATE`, throwing `StalePageVersionError` on a version mismatch --
- * before any of the below runs, so a stale publish writes nothing; reads
- * the tree for `{ ownerType: 'page', ownerId: page.id, locale: page.locale
- * }`; runs it through `buildPageSnapshot`, throwing
- * `DegradedBlockPublishError` when `degraded` is non-empty -- BEFORE any
- * write, so a refused publish leaves the previous publication serving;
- * records one `'publish'`-kind revision per block, all sharing one batch
- * id, building `revisionManifest` as `{ [blockId]: revisionId }` as it
- * goes; computes `manifestHash`; inserts a `page_publications` row with
- * `is_draft: false`; and moves the page's `live_publication_id`, `status`
- * to `'published'`, `published_at` and (only the first time) `
- * first_published_at`.
+ * UPDATE`, throwing `StalePageVersionError` on a base-version mismatch --
+ * BEFORE `materialisePublication` ever runs, so a stale publish writes
+ * nothing. `materialisePublication` does the rest: reads the tree, refuses
+ * `DegradedBlockPublishError` on any degraded or invalid block (leaving
+ * the previously published snapshot serving), records one `'publish'`-
+ * kind revision per block, inserts the publication row, and moves the
+ * page's live publication pointer.
  */
 export async function publishPage(
   deps: PagesDeps,
@@ -282,92 +402,75 @@ export async function publishPage(
         );
       }
 
-      const tree = await readBlockTree(
+      const { record, blockCount } = await materialisePublication(
         tx,
-        { ownerType: 'page', ownerId: page.id, locale: page.locale },
+        page,
+        actor,
+        now,
         deps.hooks,
+        { isDraft: false },
       );
-
-      const buildResult = buildPageSnapshot(tree);
-      if (buildResult.degraded.length > 0) {
-        throw new DegradedBlockPublishError(buildResult.degraded);
-      }
-
-      const batchId = newRevisionBatchId();
-      const publishedAt = now();
-      const manifest: Record<string, string> = {};
-
-      async function recordPublishRevisions(
-        nodes: readonly BlockNode[],
-      ): Promise<void> {
-        for (const node of nodes) {
-          const revisionId = await recordBlockRevision(tx, {
-            blockId: node.id,
-            owner: {
-              ownerType: node.ownerType,
-              ownerId: node.ownerId,
-              locale: node.locale,
-            },
-            revisionBatchId: batchId,
-            changeType: 'update',
-            kind: 'publish',
-            blockType: node.blockType,
-            parentBlockId: node.parentBlockId,
-            sortOrder: node.sortOrder,
-            depth: node.depth,
-            props: node.props,
-            schemaVersion: node.schemaVersion,
-            authorId: actor.userId,
-            createdAt: publishedAt,
-          });
-          manifest[node.id] = revisionId;
-          await recordPublishRevisions(node.children);
-        }
-      }
-      await recordPublishRevisions(tree);
-
-      const manifestHash = computeManifestHash(manifest);
-
-      const [publication] = await tx
-        .insert(pagePublications)
-        .values({
-          pageId: page.id,
-          locale: page.locale,
-          isDraft: false,
-          snapshot: buildResult.snapshot,
-          revisionManifest: manifest,
-          manifestHash,
-          publishedBy: actor.userId,
-          publishedAt,
-        })
-        .returning();
-      if (publication === undefined) {
-        throw new Error(
-          '@plakboek/pages: page publication insert returned no row',
-        );
-      }
-
-      await tx
-        .update(pages)
-        .set({
-          livePublicationId: publication.id,
-          status: 'published',
-          publishedAt,
-          ...(page.firstPublishedAt === null
-            ? { firstPublishedAt: publishedAt }
-            : {}),
-          version: sql`${pages.version} + 1`,
-        })
-        .where(eq(pages.id, page.id));
-
-      const record = toPagePublicationRecord(publication);
 
       return {
         result: record,
         after: {
           publicationId: record.id,
-          manifestHash,
-          blockCount: Object.keys(manifest).length,
+          manifestHash: record.manifestHash,
+          blockCount,
+        },
+      };
+    },
+  );
+}
+
+/**
+ * Builds a draft snapshot from a page's CURRENT tree (D-32) -- the
+ * identical `materialisePublication` helper `publishPage` calls, so a
+ * preview provably cannot differ from what publishing the same tree would
+ * produce. Through `deps.recorder.run` (`pages:read-drafts` /
+ * `page.draft-snapshot`). Takes no `baseVersion`: a preview reads whatever
+ * the tree currently is, and there is no lost-update risk because it
+ * writes nothing to `pages` or `page_blocks` -- only a new
+ * `page_publications` row with `is_draft` true. Refuses
+ * `DegradedBlockPublishError` on the same terms a publish would: a preview
+ * that silently omitted a broken block would be a preview that lies.
+ */
+export async function createDraftSnapshot(
+  deps: PagesDeps,
+  actor: AuditActor,
+  input: CreateDraftSnapshotInput,
+): Promise<PagePublicationRecord> {
+  const now = deps.now ?? (() => new Date());
+
+  return await deps.recorder.run(
+    actor,
+    {
+      permission: 'pages:read-drafts',
+      action: 'page.draft-snapshot',
+      entityType: 'page',
+      entityId: input.pageId,
+    },
+    async (tx) => {
+      const page = await getPage(tx, input.pageId);
+      if (page === null) {
+        throw new PageNotFoundError(input.pageId);
+      }
+
+      const { record, blockCount } = await materialisePublication(
+        tx,
+        page,
+        actor,
+        now,
+        deps.hooks,
+        { isDraft: true },
+      );
+
+      return {
+        result: record,
+        after: {
+          publicationId: record.id,
+          manifestHash: record.manifestHash,
+          blockCount,
         },
       };
     },
@@ -400,4 +503,29 @@ export async function readPublishedSnapshot(
   return publicationRow === undefined
     ? null
     : toPagePublicationRecord(publicationRow);
+}
+
+/**
+ * Reads the newest `is_draft` row for a page, ordered `published_at DESC,
+ * id DESC` via `page_publications_page_draft_published_idx`, or `null`
+ * when none exists. Two successive draft snapshots leave two rows; this
+ * never deletes either. Phase 13 attaches its temporary preview URLs to
+ * the row this returns rather than inventing a parallel mechanism.
+ */
+export async function readLatestDraftSnapshot(
+  db: AuditDatabase,
+  input: { readonly pageId: string },
+): Promise<PagePublicationRecord | null> {
+  const [row] = await db
+    .select()
+    .from(pagePublications)
+    .where(
+      and(
+        eq(pagePublications.pageId, input.pageId),
+        eq(pagePublications.isDraft, true),
+      ),
+    )
+    .orderBy(desc(pagePublications.publishedAt), desc(pagePublications.id))
+    .limit(1);
+  return row === undefined ? null : toPagePublicationRecord(row);
 }
