@@ -36,6 +36,12 @@ describe('shipped MIGRATIONS registry', () => {
     expect(MIGRATIONS[1]?.name).toBe('0002_content_engine');
   });
 
+  it('ships 0003_page_block_engine as its third entry, with no duplicate names', () => {
+    expect(MIGRATIONS[2]?.name).toBe('0003_page_block_engine');
+    const names = MIGRATIONS.map((migration) => migration.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
   it("gives every entry the name of the file it is imported from, in the array's order", () => {
     const indexSource = readFileSync(INDEX_PATH, 'utf8');
     const fileByBinding = new Map(

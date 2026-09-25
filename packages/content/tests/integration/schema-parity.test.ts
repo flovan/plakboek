@@ -282,6 +282,7 @@ describe('schema parity: 0002_content_engine vs @plakboek/content schema.ts', ()
         expect(firstRun.applied).toEqual([
           '0001_auth_core',
           '0002_content_engine',
+          '0003_page_block_engine',
         ]);
 
         const secondRun = await runMigrations({
@@ -291,6 +292,7 @@ describe('schema parity: 0002_content_engine vs @plakboek/content schema.ts', ()
         expect(secondRun.alreadyApplied).toEqual([
           '0001_auth_core',
           '0002_content_engine',
+          '0003_page_block_engine',
         ]);
 
         handle = createDb({ connectionString: testDatabase.connectionString });
