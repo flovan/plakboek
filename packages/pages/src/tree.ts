@@ -19,7 +19,7 @@
 import type { AuditActor, AuditDatabase } from '@plakboek/auth';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { PagesDeps } from './config.js';
-import { loadPageForUpdate } from './pages.js';
+import { loadPageForUpdate, StalePageVersionError } from './pages.js';
 import { getBlockDefinition, validateBlockProps } from './registry.js';
 import { newRevisionBatchId, recordBlockRevision } from './revisions.js';
 import { pageBlocks, pages } from './schema.js';
@@ -31,6 +31,15 @@ import {
   type OwnerType,
 } from './types.js';
 import { upcastOnRead } from './versioning.js';
+
+// `StalePageVersionError` is now defined in `pages.ts` (D-38: `movePage`,
+// `renamePage` and `createPage`'s parent-load path all need it too, and
+// `pages.ts` cannot import it back from here without a circular
+// pages.ts <-> tree.ts dependency -- STATE.md's Phase 4 quick-task already
+// hit and fixed one such cycle in this package). Re-exported here so
+// `publish.ts`'s and `index.ts`'s existing `from './tree.js'` imports keep
+// resolving unchanged.
+export { StalePageVersionError } from './pages.js';
 
 /** Thrown when a block write's `baseVersion` no longer matches the row's
  * current `version` -- a property edit names only the touched block's own
@@ -46,25 +55,6 @@ export class StaleBlockVersionError extends Error {
     );
     this.name = 'StaleBlockVersionError';
     this.blockId = blockId;
-    this.expectedVersion = expectedVersion;
-    this.actualVersion = actualVersion;
-  }
-}
-
-/** Thrown when a structural write's `basePageVersion` no longer matches
- * the owning page's current `version` (D-38: insert, move and delete
- * additionally take the page version, because those genuinely conflict). */
-export class StalePageVersionError extends Error {
-  readonly pageId: string;
-  readonly expectedVersion: number;
-  readonly actualVersion: number;
-
-  constructor(pageId: string, expectedVersion: number, actualVersion: number) {
-    super(
-      `@plakboek/pages: page "${pageId}" was modified by someone else since it was loaded (expected version ${expectedVersion}, now ${actualVersion})`,
-    );
-    this.name = 'StalePageVersionError';
-    this.pageId = pageId;
     this.expectedVersion = expectedVersion;
     this.actualVersion = actualVersion;
   }

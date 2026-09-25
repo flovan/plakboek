@@ -1,6 +1,9 @@
 /**
- * Page creation and the row-loading primitives `tree.ts`/`publish.ts` build
- * on (D-20, D-21, D-23). Mirrors `@plakboek/content`'s `entries.ts` shape.
+ * Page creation, rename and the row-loading primitives `tree.ts`/`publish.ts`
+ * build on (D-20, D-21, D-23). Mirrors `@plakboek/content`'s `entries.ts`
+ * shape. Slug derivation, availability and generation live in
+ * `page-slug.ts` -- this module composes them with the recorder's
+ * transaction, load-and-lock reads, and the insert/update itself.
  */
 import { randomUUID } from 'node:crypto';
 import type {
@@ -8,11 +11,21 @@ import type {
   AuditDatabase,
   AuditTransaction,
 } from '@plakboek/auth';
-import { normalizeSlug } from '@plakboek/content';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { PagesDeps } from './config.js';
+import {
+  assertPageSlugAvailable,
+  composePagePath,
+  generateUniquePageSlug,
+} from './page-slug.js';
 import { pages } from './schema.js';
 import { PAGE_STATUSES, type PageRecord, type PageStatus } from './types.js';
+
+// All slug errors -- including the format/availability/generation checks
+// `createPage` and `renamePage` rely on -- are defined in `page-slug.ts`
+// (D-23). Re-exported here so index.ts's existing `from './pages.js'`
+// import keeps resolving unchanged.
+export { InvalidPageSlugError } from './page-slug.js';
 
 function isPageStatus(value: string): value is PageStatus {
   return PAGE_STATUSES.some((status) => status === value);
@@ -73,20 +86,10 @@ export class LocaleNotEnabledError extends Error {
   }
 }
 
-/** Thrown by `createPage` when `input.slug ?? input.title` normalises to
- * an empty string -- there is nothing to derive a slug from. */
-export class InvalidPageSlugError extends Error {
-  readonly input: string;
-
-  constructor(input: string) {
-    super(`@plakboek/pages: "${input}" normalises to an empty slug`);
-    this.name = 'InvalidPageSlugError';
-    this.input = input;
-  }
-}
-
 /** Thrown when the computed `path` is already used by another page in the
- * same locale (`pages_locale_path_unique`). */
+ * same locale (`pages_locale_path_unique`) -- the race backstop behind
+ * `createPage`'s slug resolution, and the whole-subtree collision refusal
+ * `movePage`/`renamePage` run before writing anything. */
 export class PagePathConflictError extends Error {
   readonly path: string;
   readonly locale: string;
@@ -109,6 +112,30 @@ export class PageNotFoundError extends Error {
     super(`@plakboek/pages: no page found for id "${pageId}"`);
     this.name = 'PageNotFoundError';
     this.pageId = pageId;
+  }
+}
+
+/** Thrown when a structural write's `basePageVersion` no longer matches
+ * the owning page's current `version` (D-38: insert, move, rename and
+ * delete all take the page version, because those genuinely conflict).
+ * Defined here (not `tree.ts`, which used to own it) so `pages.ts` itself
+ * -- `movePage`, `renamePage` -- can throw it without importing back from
+ * `tree.ts`, which already imports `loadPageForUpdate` from here; `tree.ts`
+ * re-exports it unchanged so nothing downstream (`publish.ts`, the package
+ * barrel) needed to move. */
+export class StalePageVersionError extends Error {
+  readonly pageId: string;
+  readonly expectedVersion: number;
+  readonly actualVersion: number;
+
+  constructor(pageId: string, expectedVersion: number, actualVersion: number) {
+    super(
+      `@plakboek/pages: page "${pageId}" was modified by someone else since it was loaded (expected version ${expectedVersion}, now ${actualVersion})`,
+    );
+    this.name = 'StalePageVersionError';
+    this.pageId = pageId;
+    this.expectedVersion = expectedVersion;
+    this.actualVersion = actualVersion;
   }
 }
 
@@ -142,14 +169,17 @@ export type CreatePageInput = {
 /**
  * Creates a draft page (D-20, D-21, D-23). Rejects a locale not enabled in
  * `deps.config.content.locales` with `LocaleNotEnabledError` before the
- * recorder opens; derives the slug as `normalizeSlug(input.slug ??
- * input.title)`, throwing `InvalidPageSlugError` when the result is empty.
- * Through `deps.recorder.run` (`pages:create` / `page.create`): computes
- * `path` as the parent's `path + '/' + slug` (parent loaded `FOR SHARE`) or
- * `slug` at the root, inserts with a fresh `translation_group`, `status
+ * recorder opens. Through `deps.recorder.run` (`pages:create` /
+ * `page.create`): loads the parent's `path` (`FOR SHARE`) when given; a
+ * manual `input.slug` goes through `assertPageSlugAvailable`
+ * (`slugSource: 'manual'`, refuses on a clash), an omitted one through
+ * `generateUniquePageSlug` from `input.title` (`slugSource: 'generated'`,
+ * resolves a clash with `-2`, `-3`, ...); composes `path` via
+ * `composePagePath`; inserts with a fresh `translation_group`, `status
  * 'draft'`, `version 1`, `created_by`/`updated_by` the actor and both
  * timestamps from `deps.now`. A unique violation on
- * `pages_locale_path_unique` becomes `PagePathConflictError`.
+ * `pages_locale_path_unique` becomes `PagePathConflictError` -- the race
+ * backstop behind the advisory-lock-serialised slug resolution above.
  */
 export async function createPage(
   deps: PagesDeps,
@@ -159,30 +189,47 @@ export async function createPage(
   if (!deps.config.content.locales.includes(input.locale)) {
     throw new LocaleNotEnabledError(input.locale);
   }
-  const slugSource = input.slug ?? input.title;
-  const slug = normalizeSlug(slugSource);
-  if (slug.length === 0) {
-    throw new InvalidPageSlugError(slugSource);
-  }
   const now = deps.now ?? (() => new Date());
+  const parentPageId = input.parentPageId ?? null;
 
   return await deps.recorder.run(
     actor,
     { permission: 'pages:create', action: 'page.create', entityType: 'page' },
     async (tx) => {
       let parentPath: string | null = null;
-      if (input.parentPageId !== null && input.parentPageId !== undefined) {
+      if (parentPageId !== null) {
         const [parent] = await tx
           .select({ path: pages.path })
           .from(pages)
-          .where(eq(pages.id, input.parentPageId))
+          .where(eq(pages.id, parentPageId))
           .for('share');
         if (parent === undefined) {
-          throw new PageNotFoundError(input.parentPageId);
+          throw new PageNotFoundError(parentPageId);
         }
         parentPath = parent.path;
       }
-      const path = parentPath === null ? slug : `${parentPath}/${slug}`;
+
+      let slug: string;
+      let slugSource: 'generated' | 'manual';
+      if (input.slug !== undefined) {
+        slugSource = 'manual';
+        await assertPageSlugAvailable(tx, {
+          locale: input.locale,
+          slug: input.slug,
+          parentPath,
+          parentPageId,
+        });
+        slug = input.slug;
+      } else {
+        slugSource = 'generated';
+        slug = await generateUniquePageSlug(tx, {
+          locale: input.locale,
+          parentPath,
+          parentPageId,
+          base: input.title,
+        });
+      }
+      const path = composePagePath(parentPath, slug);
       const createdAt = now();
 
       try {
@@ -191,9 +238,9 @@ export async function createPage(
           .values({
             translationGroup: randomUUID(),
             locale: input.locale,
-            parentPageId: input.parentPageId ?? null,
+            parentPageId,
             slug,
-            slugSource: 'generated',
+            slugSource,
             path,
             title: input.title,
             status: 'draft',
@@ -215,6 +262,97 @@ export async function createPage(
         }
         throw error;
       }
+    },
+  );
+}
+
+export type RenamePageInput = {
+  readonly pageId: string;
+  readonly baseVersion: number;
+  readonly title?: string;
+  readonly slug?: string;
+};
+
+/**
+ * Renames a page's title and/or slug (D-21, D-23). Through
+ * `deps.recorder.run` (`pages:edit` / `page.rename`): loads and locks the
+ * page `FOR UPDATE`, throwing `StalePageVersionError` on a version
+ * mismatch. A supplied `slug` different from the current one goes through
+ * the same manual-refuses split `createPage` uses
+ * (`assertPageSlugAvailable`, excluding the page's own id); an omitted or
+ * unchanged `slug` leaves `slugSource` untouched. Establishes the slug
+ * split this plan's Task 2 completes with descendant path propagation and
+ * URL history.
+ */
+export async function renamePage(
+  deps: PagesDeps,
+  actor: AuditActor,
+  input: RenamePageInput,
+): Promise<PageRecord> {
+  const now = deps.now ?? (() => new Date());
+
+  return await deps.recorder.run(
+    actor,
+    {
+      permission: 'pages:edit',
+      action: 'page.rename',
+      entityType: 'page',
+      entityId: input.pageId,
+    },
+    async (tx) => {
+      const page = await loadPageForUpdate(tx, input.pageId);
+      if (page.version !== input.baseVersion) {
+        throw new StalePageVersionError(
+          page.id,
+          input.baseVersion,
+          page.version,
+        );
+      }
+
+      let parentPath: string | null = null;
+      if (page.parentPageId !== null) {
+        const [parent] = await tx
+          .select({ path: pages.path })
+          .from(pages)
+          .where(eq(pages.id, page.parentPageId))
+          .for('share');
+        parentPath = parent?.path ?? null;
+      }
+
+      let newSlug = page.slug;
+      let slugSource = page.slugSource;
+      if (input.slug !== undefined && input.slug !== page.slug) {
+        slugSource = 'manual';
+        await assertPageSlugAvailable(tx, {
+          locale: page.locale,
+          slug: input.slug,
+          parentPath,
+          parentPageId: page.parentPageId,
+          excludePageId: page.id,
+        });
+        newSlug = input.slug;
+      }
+      const path = composePagePath(parentPath, newSlug);
+
+      const updatedAt = now();
+      const [row] = await tx
+        .update(pages)
+        .set({
+          slug: newSlug,
+          slugSource,
+          path,
+          title: input.title ?? page.title,
+          version: sql`${pages.version} + 1`,
+          updatedAt,
+          updatedBy: actor.userId,
+        })
+        .where(eq(pages.id, page.id))
+        .returning();
+      if (row === undefined) {
+        throw new Error('@plakboek/pages: page rename update returned no row');
+      }
+      const record = toPageRecord(row);
+      return { result: record, after: record };
     },
   );
 }
