@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import {
   createAuditRecorder,
   createUserWithRole,
+  PermissionDeniedError,
   SUPERADMIN_ROLE_KEY,
   type AuditActor,
   type AuditDatabase,
@@ -19,6 +20,7 @@ import { createDb, runMigrations, type Db } from '@plakboek/db';
 import {
   createPermissionResolver,
   defaultRoles,
+  defineRoles,
   type PermissionResolver,
 } from '@plakboek/permissions';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -41,7 +43,7 @@ import {
 } from '../../src/tree.js';
 import { createTestDatabase } from './test-database.js';
 
-const roles = defaultRoles;
+const roles = defineRoles({ ...defaultRoles, viewer: ['pages:read'] });
 
 describe('moveBlock/deleteBlock/computeBlockDeleteImpact (D-08, D-18, D-27, D-38)', () => {
   let testDatabase: Awaited<ReturnType<typeof createTestDatabase>>;
@@ -49,6 +51,7 @@ describe('moveBlock/deleteBlock/computeBlockDeleteImpact (D-08, D-18, D-27, D-38
   let db: AuditDatabase;
   let deps: PagesDeps;
   let actor: AuditActor;
+  let viewer: AuditActor;
   const clock = (): Date => new Date('2026-09-25T12:00:00.000Z');
 
   beforeAll(async () => {
@@ -102,6 +105,13 @@ describe('moveBlock/deleteBlock/computeBlockDeleteImpact (D-08, D-18, D-27, D-38
       roleKey: SUPERADMIN_ROLE_KEY,
     });
     actor = { userId: superadminUser.userId, roleKey: superadminUser.roleKey };
+    const viewerUser = await createUserWithRole(db, {
+      id: randomUUID(),
+      email: 'viewer@example.com',
+      name: 'Viewer',
+      roleKey: 'viewer',
+    });
+    viewer = { userId: viewerUser.userId, roleKey: viewerUser.roleKey };
     deps = { db, recorder, resolver, config, now: clock };
   });
 
@@ -649,5 +659,43 @@ describe('moveBlock/deleteBlock/computeBlockDeleteImpact (D-08, D-18, D-27, D-38
       basePageVersion: (await currentPage(page.id)).version,
     }).catch((caught: unknown) => caught);
     expect((staleDeleteError as Error).name).toBe('StaleBlockVersionError');
+  });
+
+  it('move and delete run through deps.recorder.run gated on pages:edit/pages:delete: a refused call writes a denied audit row and no data', async () => {
+    const page = await freshPage('Move/delete permission gating');
+    const owner = ownerOf(page);
+    const section = await insert(page, owner, 'section', null);
+    const heading = await insert(page, owner, 'heading', section.id);
+    const beforeMove = await blockRow(heading.id);
+
+    const moveDenied: unknown = await moveBlock(deps, viewer, {
+      blockId: heading.id,
+      baseVersion: heading.version,
+      pageId: page.id,
+      basePageVersion: (await currentPage(page.id)).version,
+      newParentBlockId: null,
+    }).catch((caught: unknown) => caught);
+    expect(moveDenied).toBeInstanceOf(PermissionDeniedError);
+    expect(await blockRow(heading.id)).toEqual(beforeMove);
+
+    const deleteDenied: unknown = await deleteBlock(deps, viewer, {
+      blockId: heading.id,
+      baseVersion: heading.version,
+      pageId: page.id,
+      basePageVersion: (await currentPage(page.id)).version,
+    }).catch((caught: unknown) => caught);
+    expect(deleteDenied).toBeInstanceOf(PermissionDeniedError);
+    expect(await blockExists(heading.id)).toBe(true);
+    expect(await blockRow(heading.id)).toEqual(beforeMove);
+
+    const deniedRows = await handle.sql<{ action: string }[]>`
+      SELECT action FROM audit_log
+      WHERE outcome = 'denied' AND actor_user_id = ${viewer.userId}
+      ORDER BY id
+    `;
+    expect(deniedRows.map((row) => row.action)).toEqual([
+      'block.move',
+      'block.delete',
+    ]);
   });
 });
