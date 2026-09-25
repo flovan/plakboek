@@ -31,6 +31,21 @@ import {
   type BlockConstraintSet,
 } from './constraints.js';
 import type { BlockDefinition } from './registry.js';
+import {
+  lintSectionProperties,
+  reportSectionLint,
+  type SectionLintEvent,
+} from './section-lint.js';
+
+// `reportPagesWarning` is defined in `warnings.ts`, a dependency-free leaf
+// module, and re-exported here unchanged so every existing
+// `from './config.js'` import (compatibility.ts, this package's barrel)
+// keeps resolving -- `definePagesConfig` itself calls into `section-lint.ts`
+// below, and `section-lint.ts` needs `reportPagesWarning` too, so defining
+// it in `config.ts` directly would create a `config.ts <-> section-lint.ts`
+// circular value import (the same class of cycle `field-type-ids.ts`'s
+// extraction avoided for `registry.ts`, STATE.md's Phase 4 quick task).
+export { reportPagesWarning } from './warnings.js';
 
 export const DEFAULT_SECTION_NESTING_DEPTH = 2;
 export const DEFAULT_BLOCK_DEPTH_CEILING = 12;
@@ -152,6 +167,17 @@ export function definePagesConfig(input: PagesConfigInput): PagesConfig {
   // `BlockConfigError`/`HostRegistrationError` above never is.
   const blocks = applyBlockConstraints(input.blocks, input.constraints ?? []);
 
+  // The D-17 boot-time section lint (section-lint.ts) runs last, only after
+  // registration and every collect-then-throw validation above has already
+  // succeeded -- a config that throws for a real reason never also emits
+  // lint noise. This never throws itself: a flagged section property is
+  // reported, not refused (D-17, 01 D-15).
+  reportSectionLint(
+    input.hooks,
+    lintSectionProperties(blocks),
+    () => new Date(),
+  );
+
   return Object.freeze({
     content: input.content,
     blocks,
@@ -171,14 +197,6 @@ export type BlockDegradedEvent = {
   readonly blockId: string;
   readonly blockType: string;
   readonly reason: string;
-  readonly occurredAt: Date;
-};
-
-/** Emitted by the D-17 boot-time section lint (plan 04-05); never thrown. */
-export type SectionLintEvent = {
-  readonly blockType: string;
-  readonly propertyKey: string;
-  readonly fieldType: string;
   readonly occurredAt: Date;
 };
 
@@ -213,40 +231,3 @@ export type PagesDeps = {
   readonly hooks?: PagesHooks;
   readonly now?: () => Date;
 };
-
-/**
- * Invokes a warning hook (or its fallback) inside a try/catch, handling a
- * hook that returns a rejected promise the same way
- * `@plakboek/content`'s `reportContentWarning` does -- a broken or slow
- * host-supplied hook can never crash the operation it is reporting on.
- */
-export function reportPagesWarning<E>(
-  hook: ((event: E) => void) | undefined,
-  fallback: (event: E) => void,
-  event: E,
-): void {
-  const invoke = hook ?? fallback;
-  try {
-    const returned: unknown = invoke(event);
-    if (
-      typeof returned === 'object' &&
-      returned !== null &&
-      typeof Reflect.get(returned, 'then') === 'function'
-    ) {
-      void Promise.resolve(returned).catch((hookError: unknown) => {
-        logHookFailure(hookError);
-      });
-    }
-  } catch (hookError) {
-    logHookFailure(hookError);
-  }
-}
-
-function logHookFailure(hookError: unknown): void {
-  try {
-    // oxlint-disable-next-line no-console -- last-resort fallback when a host-supplied pages warning hook itself throws or rejects
-    console.error('[@plakboek/pages] a warning hook threw', hookError);
-  } catch {
-    // Never let a broken console/logger escape either.
-  }
-}

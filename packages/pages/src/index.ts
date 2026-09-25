@@ -37,7 +37,6 @@ export type {
   PagesConfigIssueCode,
   PagesDeps,
   PagesHooks,
-  SectionLintEvent,
 } from './config.js';
 
 // types.ts
@@ -144,3 +143,28 @@ export { newRevisionBatchId } from './revisions.js';
 // publish.ts
 export { buildSnapshotTree, publishPage } from './publish.js';
 export type { PagePublicationRecord, PublishPageInput } from './publish.js';
+
+// placement.ts
+export {
+  assertPlacementAllowed,
+  BlockDepthExceededError,
+  BlockPlacementError,
+  countAncestorSections,
+  ROOT_PARENT_SENTINEL,
+  SectionNestingDepthExceededError,
+  SectionRequiredError,
+} from './placement.js';
+export type { BlockPlacementReason, PlacementContext } from './placement.js';
+
+// section-lint.ts
+export {
+  lintSectionProperties,
+  reportSectionLint,
+  SECTION_LINT_FIELD_TYPES,
+  SECTION_LINT_PROPERTY_SUBSTRINGS,
+} from './section-lint.js';
+export type {
+  SectionLintEvent,
+  SectionLintFinding,
+  SectionLintReason,
+} from './section-lint.js';
