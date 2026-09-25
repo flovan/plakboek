@@ -102,13 +102,29 @@ export {
   assertBlockCompatibility,
   BlockCompatibilityError,
   checkBlockCompatibility,
+  queryStoredVersionCounts,
 } from './compatibility.js';
 export type {
   BelowFloorBlockEntry,
   BelowFloorEvent,
   BlockCompatibilityReport,
   IncompatibleBlockEntry,
+  StoredVersionCount,
 } from './compatibility.js';
+
+// compaction.ts
+export {
+  compactBlockType,
+  computeCompactionImpact,
+  reportBelowFloorBlocks,
+} from './compaction.js';
+export type {
+  CompactBlockTypeInput,
+  CompactionImpact,
+  CompactionImpactEntry,
+  CompactionResult,
+  CompactionSkippedEntry,
+} from './compaction.js';
 
 // versioning.ts
 export {

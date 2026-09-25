@@ -106,23 +106,20 @@ function asNumber(value: unknown, field: string): number {
   return value;
 }
 
-type StoredVersionCount = {
+export type StoredVersionCount = {
   readonly schemaVersion: number;
   readonly count: number;
 };
 
 /**
- * Classifies every stored `(block_type, schema_version)` pair against each
- * registered definition's version lineage, in one grouped read over
- * `page_blocks`. Never executes a host `upcasters` function -- only checks
- * which steps exist. A `block_type` present in the database but absent from
- * `definitions` is not this function's concern -- `readBlockTree`'s
- * `unknown-block-type` degraded reason covers it at read time.
+ * The one grouped `block_type`/`schema_version` read this package performs
+ * over `page_blocks` -- `checkBlockCompatibility` below and
+ * `compaction.ts`'s `computeCompactionImpact` both call this instead of
+ * each issuing their own aggregate query.
  */
-export async function checkBlockCompatibility(
+export async function queryStoredVersionCounts(
   db: AuditDatabase,
-  definitions: readonly BlockDefinition[],
-): Promise<BlockCompatibilityReport> {
+): Promise<ReadonlyMap<string, readonly StoredVersionCount[]>> {
   const result: unknown = await db.execute(sql`
     SELECT block_type, schema_version, count(*)::int AS count
     FROM page_blocks
@@ -138,6 +135,23 @@ export async function checkBlockCompatibility(
     forType.push({ schemaVersion, count });
     byBlockType.set(blockType, forType);
   }
+  return byBlockType;
+}
+
+/**
+ * Classifies every stored `(block_type, schema_version)` pair against each
+ * registered definition's version lineage, in one grouped read over
+ * `page_blocks` (`queryStoredVersionCounts`). Never executes a host
+ * `upcasters` function -- only checks which steps exist. A `block_type`
+ * present in the database but absent from `definitions` is not this
+ * function's concern -- `readBlockTree`'s `unknown-block-type` degraded
+ * reason covers it at read time.
+ */
+export async function checkBlockCompatibility(
+  db: AuditDatabase,
+  definitions: readonly BlockDefinition[],
+): Promise<BlockCompatibilityReport> {
+  const byBlockType = await queryStoredVersionCounts(db);
 
   const incompatible: IncompatibleBlockEntry[] = [];
   const belowFloor: BelowFloorBlockEntry[] = [];
