@@ -38,7 +38,11 @@ below), every field type's own definition constant, the transaction-scoped
 writers (revisions, URL history, key history, the reference index, slug
 generation), and every Drizzle schema table stay internal: with them a
 consumer could write or read content around the audited, version-checked,
-locale-filtered paths this package guarantees.
+locale-filtered paths this package guarantees. One deliberate exception:
+`purgeLocaleEntriesInTransaction` takes a transaction handle too, but is
+exported anyway so `@plakboek/pages`'s cross-package `purgeLocale` can run it
+inside its own transaction (D-37) -- a caller using it owns the audit record
+for the whole operation it's part of.
 
 ### Host config
 
@@ -461,3 +465,20 @@ CHECK constraint.
 | `EntryReferenceUsageEntry`        | type     | One entry in `computeEntryReferenceUsage`'s result                               |
 | `EntryReferenceUsage`             | type     | The result of `computeEntryReferenceUsage`                                       |
 | `ComputeEntryReferenceUsageInput` | type     | Input to `computeEntryReferenceUsage`                                            |
+
+### Locale purge
+
+| Export                            | Kind     | Purpose                                                                                              |
+| --------------------------------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `computeLocalePurgeEntriesImpact` | function | Previews what purging a locale's entries would delete; writes nothing                                |
+| `purgeLocaleEntries`              | function | Deletes every entry, revision, URL-history and reference row in a locale, audited                    |
+| `purgeLocaleEntriesInTransaction` | function | The same purge with no `recorder.run` of its own, for a caller running it inside its own transaction |
+| `LocalePurgeEntriesImpact`        | type     | The result of `computeLocalePurgeEntriesImpact`/`purgeLocaleEntries`                                 |
+| `LocalePurgeEntriesInput`         | type     | Input to all three: `{ locale }`                                                                     |
+
+Nothing in this package purges a locale implicitly (D-37): `checkContentLocales`
+only ever reports a removed locale's rows. `purgeLocaleEntries` is the one
+audited, permission-gated door for actually deleting them, requiring
+`entries:delete-permanent`. `@plakboek/pages`'s cross-package `purgeLocale`
+calls `purgeLocaleEntriesInTransaction` directly, inside its own transaction,
+so a page-engine purge and this entry purge commit or roll back together.

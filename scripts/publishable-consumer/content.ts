@@ -135,7 +135,10 @@ import {
   listSingletonRecords,
   type ListSingletonRecordsInput,
   type LocaleCheckReport,
+  computeLocalePurgeEntriesImpact,
   LocaleNotEnabledError,
+  type LocalePurgeEntriesImpact,
+  type LocalePurgeEntriesInput,
   type LocaleRemovedEvent,
   LockStateChangedError,
   LockTakeoverForbiddenError,
@@ -149,6 +152,8 @@ import {
   PendingDraftsError,
   publishEntry,
   type PublishEntryInput,
+  purgeLocaleEntries,
+  purgeLocaleEntriesInTransaction,
   ReferenceTargetMissingError,
   ReferenceTypeNotAllowedError,
   type ReferencingField,
@@ -274,6 +279,7 @@ const functions: Record<string, unknown> = {
   computeFieldDeleteImpact,
   computeFieldKeyUsage,
   computeFieldUpdateImpact,
+  computeLocalePurgeEntriesImpact,
   computeRestorePreview,
   computeRevisionCapImpact,
   computeTranslatableChangeImpact,
@@ -310,6 +316,8 @@ const functions: Record<string, unknown> = {
   parseFieldOptions,
   parseUrlPattern,
   publishEntry,
+  purgeLocaleEntries,
+  purgeLocaleEntriesInTransaction,
   registerHostFieldType,
   registerHostWidget,
   releaseEditLock,
@@ -965,6 +973,15 @@ const listSingletonRecordsInput: ListSingletonRecordsInput = {
   contentTypeKey: 'site-settings',
 };
 const localeCheckReport: LocaleCheckReport = { removedLocales: [] };
+const localePurgeEntriesInput: LocalePurgeEntriesInput = { locale: 'nl' };
+const localePurgeEntriesImpact: LocalePurgeEntriesImpact = {
+  locale: 'nl',
+  entryCount: 0,
+  revisionCount: 0,
+  urlHistoryCount: 0,
+  referenceCount: 0,
+  translationGroupsAffected: 0,
+};
 const entrySeoProperty: EntrySeoProperty = 'title';
 const entrySeoIssueCode: EntrySeoIssueCode = 'SEO_NOT_ENABLED';
 const entrySeoIssue: EntrySeoIssue = {
@@ -1100,6 +1117,8 @@ const typeProofs: unknown[] = [
   findSingletonInput,
   listSingletonRecordsInput,
   localeCheckReport,
+  localePurgeEntriesInput,
+  localePurgeEntriesImpact,
   entrySeoProperty,
   entrySeoIssueCode,
   entrySeoIssue,

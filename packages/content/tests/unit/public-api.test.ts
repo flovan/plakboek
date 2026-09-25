@@ -202,6 +202,10 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   computeEntryReferenceUsage: 'function',
   ReferenceTargetMissingError: 'class',
   ReferenceTypeNotAllowedError: 'class',
+  // locale-purge
+  computeLocalePurgeEntriesImpact: 'function',
+  purgeLocaleEntries: 'function',
+  purgeLocaleEntriesInTransaction: 'function',
 });
 
 /** Every type the entry point exports. Types leave no runtime trace, so this
@@ -341,6 +345,9 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'EntryReferenceUsageEntry',
   'EntryReferenceUsage',
   'ComputeEntryReferenceUsageInput',
+  // locale-purge
+  'LocalePurgeEntriesImpact',
+  'LocalePurgeEntriesInput',
 ]);
 
 /**

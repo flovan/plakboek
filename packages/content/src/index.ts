@@ -36,6 +36,14 @@
  *   the field-registry read functions above, never by its own name.
  * - Every Drizzle schema table -- a consumer able to read or write these
  *   directly could bypass every guarantee above.
+ *
+ * One deliberate exception to "transaction-scoped writers stay internal":
+ * `purgeLocaleEntriesInTransaction` (locale-purge.ts) takes a transaction
+ * handle as its first parameter, like the writers above, but is exported
+ * anyway because `@plakboek/pages`'s cross-package `purgeLocale` needs to run
+ * it inside its own transaction (D-37). A caller using it owns the audit
+ * record for the whole operation it's part of; `purgeLocaleEntries` is the
+ * audited door for calling it on its own.
  */
 
 // config.ts
@@ -439,3 +447,14 @@ export type {
   EntryReferenceUsage,
   ComputeEntryReferenceUsageInput,
 } from './references.js';
+
+// locale-purge.ts
+export {
+  computeLocalePurgeEntriesImpact,
+  purgeLocaleEntries,
+  purgeLocaleEntriesInTransaction,
+} from './locale-purge.js';
+export type {
+  LocalePurgeEntriesImpact,
+  LocalePurgeEntriesInput,
+} from './locale-purge.js';
