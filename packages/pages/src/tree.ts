@@ -21,6 +21,7 @@ import type {
   AuditDatabase,
   AuditTransaction,
 } from '@plakboek/auth';
+import { getRevisionCap } from '@plakboek/content';
 import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { PagesDeps, PagesHooks } from './config.js';
 import {
@@ -41,7 +42,11 @@ import {
   validateBlockProps,
   type BlockDefinition,
 } from './registry.js';
-import { newRevisionBatchId, recordBlockRevision } from './revisions.js';
+import {
+  newRevisionBatchId,
+  pruneBlockRevisions,
+  recordBlockRevision,
+} from './revisions.js';
 import { blockRevisions, pageBlocks, pages } from './schema.js';
 import {
   OWNER_TYPES,
@@ -390,6 +395,9 @@ export async function insertBlock(
   input: InsertBlockInput,
 ): Promise<BlockRecord> {
   const now = deps.now ?? (() => new Date());
+  // Read once, before the transaction opens, so the prune call below runs
+  // with a value the transaction itself did not have to fetch (04-08).
+  const revisionCap = await getRevisionCap(deps.db);
 
   return await deps.recorder.run(
     actor,
@@ -507,6 +515,12 @@ export async function insertBlock(
         .set({ version: sql`${pages.version} + 1` })
         .where(eq(pages.id, page.id));
 
+      await pruneBlockRevisions(tx, {
+        pageId: page.id,
+        locale: input.owner.locale,
+        cap: revisionCap,
+      });
+
       return { result: record, after: record };
     },
   );
@@ -535,6 +549,7 @@ export async function updateBlockProps(
   input: UpdateBlockPropsInput,
 ): Promise<BlockRecord> {
   const now = deps.now ?? (() => new Date());
+  const revisionCap = await getRevisionCap(deps.db);
 
   return await deps.recorder.run(
     actor,
@@ -607,6 +622,12 @@ export async function updateBlockProps(
         schemaVersion: record.schemaVersion,
         authorId: actor.userId,
         createdAt: updatedAt,
+      });
+
+      await pruneBlockRevisions(tx, {
+        pageId: record.ownerId,
+        locale: record.locale,
+        cap: revisionCap,
       });
 
       return { result: record, after: record };
@@ -765,6 +786,7 @@ export async function moveBlock(
   input: MoveBlockInput,
 ): Promise<BlockRecord> {
   const now = deps.now ?? (() => new Date());
+  const revisionCap = await getRevisionCap(deps.db);
   const before = await loadBlockSnapshot(deps.db, input.blockId);
 
   return await deps.recorder.run(
@@ -1016,6 +1038,12 @@ export async function moveBlock(
         .set({ version: sql`${pages.version} + 1` })
         .where(eq(pages.id, page.id));
 
+      await pruneBlockRevisions(tx, {
+        pageId: page.id,
+        locale: ownerRef.locale,
+        cap: revisionCap,
+      });
+
       const record = toBlockRecordFromRow(movedRow);
       return { result: record, after: record };
     },
@@ -1163,6 +1191,7 @@ export async function deleteBlock(
   input: DeleteBlockInput,
 ): Promise<BlockDeleteImpact> {
   const now = deps.now ?? (() => new Date());
+  const revisionCap = await getRevisionCap(deps.db);
 
   return await deps.recorder.run(
     actor,
@@ -1238,6 +1267,12 @@ export async function deleteBlock(
         .update(pages)
         .set({ version: sql`${pages.version} + 1` })
         .where(eq(pages.id, page.id));
+
+      await pruneBlockRevisions(tx, {
+        pageId: page.id,
+        locale: ownerRef.locale,
+        cap: revisionCap,
+      });
 
       const impact: BlockDeleteImpact = {
         blockId: input.blockId,
