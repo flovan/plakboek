@@ -25,6 +25,10 @@ import {
   type ShadowedFieldTypeEvent,
 } from '@plakboek/content';
 import type { PermissionResolver } from '@plakboek/permissions';
+import {
+  applyBlockConstraints,
+  type BlockConstraintSet,
+} from './constraints.js';
 import type { BlockDefinition } from './registry.js';
 
 export const DEFAULT_SECTION_NESTING_DEPTH = 2;
@@ -42,6 +46,7 @@ export type PagesConfigInput = {
   readonly blocks: readonly BlockDefinition[];
   readonly fieldTypes?: readonly HostFieldTypeDefinition[];
   readonly widgets?: readonly HostWidgetDefinition[];
+  readonly constraints?: readonly BlockConstraintSet[];
   readonly sectionNestingDepth?: number;
   readonly blockDepthCeiling?: number;
   readonly hooks?: PagesHooks;
@@ -89,13 +94,17 @@ function isPositiveInteger(value: unknown): value is number {
  */
 export function definePagesConfig(input: PagesConfigInput): PagesConfig {
   // The single registration door (EXT-02, D-07): field types, then widgets,
-  // then blocks (Task 2 wires the block/constraint half), each walking its
-  // own array in order under the identical last-wins-by-array-position
-  // rule. A `HostRegistrationError` from either forwarded call propagates
-  // unchanged -- never wrapped in `PagesConfigError` -- so a field-type/
-  // widget registration problem and a pages-config problem are never
-  // conflated, exactly like `BlockConfigError` and `PagesConfigError` never
-  // are.
+  // each walking its own array in order under the identical
+  // last-wins-by-array-position rule `defineBlocks` already applies to
+  // blocks. `blocks` itself is not registered here -- it is already the
+  // frozen array a host produced by calling `defineBlocks` before reaching
+  // this call (this module's header comment) -- but its per-property
+  // constraints are applied below, once every declaration and every host
+  // registration exists. A `HostRegistrationError` from either forwarded
+  // call propagates unchanged -- never wrapped in `PagesConfigError` -- so a
+  // field-type/widget registration problem and a pages-config problem are
+  // never conflated, exactly like `BlockConfigError`/`BlockConstraintError`
+  // and `PagesConfigError` never are.
   registerHostFieldType(input.fieldTypes ?? [], {
     onShadowedFieldType: input.hooks?.onShadowedFieldType,
   });
@@ -134,9 +143,17 @@ export function definePagesConfig(input: PagesConfigInput): PagesConfig {
     throw new PagesConfigError(issues);
   }
 
+  // `applyBlockConstraints` (constraints.ts, D-04) validates every
+  // constraint set against the real, already-composed block declarations
+  // and returns each definition with its resolved `constraints` map
+  // attached. A `BlockConstraintError` propagates unchanged here too --
+  // never wrapped in `PagesConfigError` -- for the same reason a
+  // `BlockConfigError`/`HostRegistrationError` above never is.
+  const blocks = applyBlockConstraints(input.blocks, input.constraints ?? []);
+
   return Object.freeze({
     content: input.content,
-    blocks: Object.freeze([...input.blocks]),
+    blocks,
     sectionNestingDepth,
     blockDepthCeiling,
   });

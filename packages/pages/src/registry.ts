@@ -13,11 +13,11 @@
  * union: `getFieldTypeDefinition`/`getFieldTypeWidgets` already resolve a
  * host type by its own key, so a block property only ever needs a string.
  *
- * The registry ships no availability concept (D-09): no field on a block
- * declaration marks a block available/enabled/disabled, no registration
- * config key toggles one, and no lookup filters by it. BLOCK-10's
- * superadmin on/off toggles are entirely Phase 14's, added to the
- * insertion paths then -- never here.
+ * D-09: this registry has no on/off switch of any kind for a block. No
+ * field on a block declaration marks whether a block may currently be used,
+ * no registration config key flips one, and no lookup filters what it
+ * returns by such a state. BLOCK-10's superadmin on/off controls belong
+ * entirely to Phase 14, wired into the insertion paths then -- never here.
  */
 import { getFieldTypeDefinition, getFieldTypeWidgets } from '@plakboek/content';
 import { OWNER_TYPES, type OwnerType } from './types.js';
@@ -88,9 +88,20 @@ export type BlockDefinitionInput = {
   readonly lintExempt?: boolean;
 };
 
+/** One property's resolved installation constraint (D-04), attached to a
+ * `BlockDefinition` by `applyBlockConstraints` (constraints.ts) -- never set
+ * by `defineBlocks`/`toDefinition` itself. Values are already validated
+ * against the property's own field-type schema by the time they land here. */
+export type ResolvedPropertyConstraint =
+  | { readonly kind: 'hidden' }
+  | { readonly kind: 'fixed'; readonly value: unknown }
+  | { readonly kind: 'narrowed'; readonly allowedValues: readonly string[] };
+
 /** The frozen, normalised form of a block declaration: `kind`, `placement`
  * and `upcasters` defaulted, and each property's `widget` resolved to the
- * field type's `defaultWidget` when omitted. */
+ * field type's `defaultWidget` when omitted. `constraints`, when present, is
+ * per-property installation constraints applied by `applyBlockConstraints`
+ * (constraints.ts, plan 04-04 Task 2) -- absent until a host declares any. */
 export type BlockDefinition = {
   readonly key: string;
   readonly kind: BlockKind;
@@ -102,6 +113,7 @@ export type BlockDefinition = {
   readonly upcasters: Readonly<Record<number, BlockUpcaster>>;
   readonly component?: unknown;
   readonly lintExempt?: boolean;
+  readonly constraints?: Readonly<Record<string, ResolvedPropertyConstraint>>;
 };
 
 export const BLOCK_KEY_PATTERN = /^[a-z][A-Za-z0-9]{0,63}$/;
@@ -462,32 +474,100 @@ export function listBlockDefinitions(): readonly BlockDefinition[] {
   return Object.freeze([...registry.values()]);
 }
 
+/** A property as resolved for the editor/write path: the declaration plus
+ * the `constraint` discriminant a caller uses to tell hidden, fixed,
+ * narrowed and unconstrained apart -- never by absence alone (D-04). */
+export type ResolvedBlockProperty = BlockPropertyDefinition & {
+  readonly constraint: 'hidden' | 'fixed' | 'narrowed' | 'none';
+  readonly fixedValue?: unknown;
+  readonly allowedValues?: readonly string[];
+};
+
 /**
  * The single function the editor, the property-panel builder and
  * `validateBlockProps` all read to know a block's real, currently
- * applicable property map -- so a constraint (plan 04-04 Task 2) can never
- * be visible in one place and absent in another. At this point in the plan
- * (before `constrainBlock`/`applyBlockConstraints` exist) it returns the
- * declaration's own properties, frozen, unchanged.
+ * applicable property map -- so a constraint (`constrainBlock`/
+ * `applyBlockConstraints`, constraints.ts) can never be visible in one place
+ * and absent in another. A `hidden` property is omitted entirely: the
+ * declaration still knows it exists (`definition.properties` is untouched),
+ * but nothing reading only this map ever sees it. `fixed` and `narrowed`
+ * properties stay present with their `constraint` discriminant set and their
+ * resolved value/choices attached.
  */
 export function resolveBlockProperties(
   definition: BlockDefinition,
-): Readonly<Record<string, BlockPropertyDefinition>> {
-  return definition.properties;
+): Readonly<Record<string, ResolvedBlockProperty>> {
+  const resolved: Record<string, ResolvedBlockProperty> = {};
+  for (const [propertyKey, property] of Object.entries(definition.properties)) {
+    const propertyConstraint = definition.constraints?.[propertyKey];
+    if (propertyConstraint === undefined) {
+      resolved[propertyKey] = Object.freeze({
+        ...property,
+        constraint: 'none',
+      });
+      continue;
+    }
+    if (propertyConstraint.kind === 'hidden') {
+      continue;
+    }
+    if (propertyConstraint.kind === 'fixed') {
+      resolved[propertyKey] = Object.freeze({
+        ...property,
+        constraint: 'fixed',
+        fixedValue: propertyConstraint.value,
+      });
+      continue;
+    }
+    resolved[propertyKey] = Object.freeze({
+      ...property,
+      constraint: 'narrowed',
+      allowedValues: propertyConstraint.allowedValues,
+    });
+  }
+  return Object.freeze(resolved);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** A `fixed` property accepts only its own fixed value (omitted input is
+ * treated as that value); anything else is `INVALID`. Fixed values are
+ * always JSON-serialisable (they already passed the property's own field
+ * type's value schema in `applyBlockConstraints`), so a structural
+ * `JSON.stringify` comparison is exact and avoids re-implementing a
+ * field-type-aware deep-equal here. */
+function equalsFixedValue(candidate: unknown, fixedValue: unknown): boolean {
+  return JSON.stringify(candidate) === JSON.stringify(fixedValue);
+}
+
+/** A `narrowed` property's submitted value must be drawn from
+ * `allowedValues` -- checked generically as "every string in the submitted
+ * value (a single string for `select`, an array for `multi_select`) is one
+ * of the allowed choice values" so this stays field-type-agnostic rather
+ * than special-casing `select`/`multi_select`'s own shapes. */
+function withinAllowedValues(
+  candidate: unknown,
+  allowedValues: readonly string[],
+): boolean {
+  const allowed = new Set(allowedValues);
+  const values = Array.isArray(candidate) ? candidate : [candidate];
+  return values.every(
+    (value) => typeof value === 'string' && allowed.has(value),
+  );
+}
+
 /**
  * Validates a block instance's `props` against `resolveBlockProperties`
- * (T-04-01), reusing `@plakboek/content`'s field-type registry (D-03): one
- * validation engine serves both content fields and block props. Collects
- * every issue before throwing one `BlockPropsValidationError`, naming only
- * the property key and issue code, never the submitted value. Returns the
- * validated, parsed props object -- unknown input keys are dropped, exactly
- * like `@plakboek/content`'s own field validation.
+ * (T-04-01, T-04-22), reusing `@plakboek/content`'s field-type registry
+ * (D-03): one validation engine serves both content fields and block props,
+ * and every constraint (`hidden`/`fixed`/`narrowed`) is enforced here too --
+ * never only in the editor. Collects every issue before throwing one
+ * `BlockPropsValidationError`, naming only the property key and issue code,
+ * never the submitted value. Returns the validated, parsed props object.
+ * A key not among the resolved (non-hidden) properties -- including a
+ * `hidden` property's own key -- is rejected as `UNKNOWN`, never silently
+ * dropped: a hidden property can never be reached through this door either.
  */
 export function validateBlockProps(
   definition: BlockDefinition,
@@ -498,9 +578,26 @@ export function validateBlockProps(
   const issues: BlockPropsValidationIssue[] = [];
   const validated: Record<string, unknown> = {};
 
+  for (const key of Object.keys(input)) {
+    if (!(key in resolved)) {
+      issues.push({ propertyKey: key, code: 'UNKNOWN' });
+    }
+  }
+
   for (const [propertyKey, property] of Object.entries(resolved)) {
-    const fieldDefinition = getFieldTypeDefinition(property.fieldType);
     const value: unknown = input[propertyKey];
+
+    if (property.constraint === 'fixed') {
+      const candidate = value === undefined ? property.fixedValue : value;
+      if (!equalsFixedValue(candidate, property.fixedValue)) {
+        issues.push({ propertyKey, code: 'INVALID' });
+        continue;
+      }
+      validated[propertyKey] = property.fixedValue;
+      continue;
+    }
+
+    const fieldDefinition = getFieldTypeDefinition(property.fieldType);
 
     if (property.required === true && fieldDefinition.isEmptyValue(value)) {
       issues.push({ propertyKey, code: 'REQUIRED' });
@@ -518,6 +615,14 @@ export function validateBlockProps(
       : (property.options ?? {});
     const result = fieldDefinition.buildValueSchema(options).safeParse(value);
     if (!result.success) {
+      issues.push({ propertyKey, code: 'INVALID' });
+      continue;
+    }
+    if (
+      property.constraint === 'narrowed' &&
+      property.allowedValues !== undefined &&
+      !withinAllowedValues(result.data, property.allowedValues)
+    ) {
       issues.push({ propertyKey, code: 'INVALID' });
       continue;
     }
