@@ -25,6 +25,7 @@ import {
   type ShadowedFieldTypeEvent,
 } from '@plakboek/content';
 import type { PermissionResolver } from '@plakboek/permissions';
+import type { BelowFloorEvent } from './compatibility.js';
 import {
   applyBlockConstraints,
   type BlockConstraintSet,
@@ -178,14 +179,6 @@ export type SectionLintEvent = {
   readonly blockType: string;
   readonly propertyKey: string;
   readonly fieldType: string;
-  readonly occurredAt: Date;
-};
-
-/** Emitted at boot for a block type holding instances below its
- * `minSupportedVersion` floor (D-14, plan 04-07). */
-export type BelowFloorEvent = {
-  readonly blockType: string;
-  readonly count: number;
   readonly occurredAt: Date;
 };
 

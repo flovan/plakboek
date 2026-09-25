@@ -29,7 +29,6 @@ export {
   reportPagesWarning,
 } from './config.js';
 export type {
-  BelowFloorEvent,
   BlockDegradedEvent,
   LocaleRemovedEvent,
   PagesConfig,
@@ -62,11 +61,13 @@ export type {
 // registry.ts
 export {
   BLOCK_KEY_PATTERN,
+  BLOCK_PROPERTY_KEY_PATTERN,
   BlockConfigError,
   BlockPropsValidationError,
   defineBlocks,
   getBlockDefinition,
   listBlockDefinitions,
+  resolveBlockProperties,
   UnknownBlockTypeError,
 } from './registry.js';
 export type {
@@ -74,11 +75,42 @@ export type {
   BlockConfigIssueCode,
   BlockDefinition,
   BlockDefinitionInput,
+  BlockEditorMetadata,
   BlockKind,
+  BlockPlacement,
   BlockPropertyDefinition,
   BlockPropsValidationIssue,
   BlockUpcaster,
+  ResolvedBlockPlacement,
+  ResolvedBlockProperty,
+  ResolvedPropertyConstraint,
 } from './registry.js';
+
+// constraints.ts
+export {
+  applyBlockConstraints,
+  BlockConstraintError,
+  constrainBlock,
+} from './constraints.js';
+export type {
+  BlockConstraintIssue,
+  BlockConstraintIssueCode,
+  BlockConstraintSet,
+  PropertyConstraint,
+} from './constraints.js';
+
+// compatibility.ts
+export {
+  assertBlockCompatibility,
+  BlockCompatibilityError,
+  checkBlockCompatibility,
+} from './compatibility.js';
+export type {
+  BelowFloorBlockEntry,
+  BelowFloorEvent,
+  BlockCompatibilityReport,
+  IncompatibleBlockEntry,
+} from './compatibility.js';
 
 // versioning.ts
 export { upcastOnRead } from './versioning.js';
