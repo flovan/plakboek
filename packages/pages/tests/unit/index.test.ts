@@ -9,7 +9,12 @@ import {
 describe('@plakboek/pages entry point', () => {
   it('exports the block registry and pages config helpers', () => {
     const blocks = defineBlocks([
-      { key: 'hero', label: 'Hero', schemaVersion: 1, properties: {} },
+      {
+        key: 'hero',
+        editor: { label: 'Hero' },
+        schemaVersion: 1,
+        properties: {},
+      },
     ]);
     expect(blocks).toHaveLength(1);
     expect(getBlockDefinition('hero').key).toBe('hero');

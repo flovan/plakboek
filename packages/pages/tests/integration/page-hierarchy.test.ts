@@ -58,7 +58,12 @@ describe('page hierarchy: paths, re-parenting, URL history, slugs (D-21, D-23)',
         timezone: 'UTC',
       }),
       blocks: defineBlocks([
-        { key: 'hero', label: 'Hero', schemaVersion: 1, properties: {} },
+        {
+          key: 'hero',
+          editor: { label: 'Hero' },
+          schemaVersion: 1,
+          properties: {},
+        },
       ]),
     });
 

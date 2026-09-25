@@ -7,9 +7,23 @@
  * `defineBlocks` itself (registry.ts) -- `definePagesConfig` does not call
  * `defineBlocks` on the caller's behalf, so a `BlockConfigError` and a
  * `PagesConfigError` are never conflated.
+ *
+ * `definePagesConfig` is the single registration door blocks, host field
+ * types and host widgets all enter through (EXT-02, D-07): it forwards
+ * `fieldTypes`/`widgets` to `@plakboek/content`'s own validating doors
+ * (`registerHostFieldType`, `registerHostWidget`) in array order, each
+ * under the identical last-wins-by-array-position rule `defineBlocks`
+ * already applies to blocks -- one override rule serves all three kinds.
  */
 import type { AuditDatabase, AuditRecorder } from '@plakboek/auth';
-import type { ContentConfig } from '@plakboek/content';
+import {
+  registerHostWidget,
+  registerHostFieldType,
+  type ContentConfig,
+  type HostFieldTypeDefinition,
+  type HostWidgetDefinition,
+  type ShadowedFieldTypeEvent,
+} from '@plakboek/content';
 import type { PermissionResolver } from '@plakboek/permissions';
 import type { BlockDefinition } from './registry.js';
 
@@ -26,8 +40,11 @@ export type PagesConfig = {
 export type PagesConfigInput = {
   readonly content: ContentConfig;
   readonly blocks: readonly BlockDefinition[];
+  readonly fieldTypes?: readonly HostFieldTypeDefinition[];
+  readonly widgets?: readonly HostWidgetDefinition[];
   readonly sectionNestingDepth?: number;
   readonly blockDepthCeiling?: number;
+  readonly hooks?: PagesHooks;
 };
 
 export type PagesConfigIssueCode =
@@ -71,6 +88,19 @@ function isPositiveInteger(value: unknown): value is number {
  * `DEFAULT_BLOCK_DEPTH_CEILING` (04-RESEARCH.md Pitfall 6 / assumption A2).
  */
 export function definePagesConfig(input: PagesConfigInput): PagesConfig {
+  // The single registration door (EXT-02, D-07): field types, then widgets,
+  // then blocks (Task 2 wires the block/constraint half), each walking its
+  // own array in order under the identical last-wins-by-array-position
+  // rule. A `HostRegistrationError` from either forwarded call propagates
+  // unchanged -- never wrapped in `PagesConfigError` -- so a field-type/
+  // widget registration problem and a pages-config problem are never
+  // conflated, exactly like `BlockConfigError` and `PagesConfigError` never
+  // are.
+  registerHostFieldType(input.fieldTypes ?? [], {
+    onShadowedFieldType: input.hooks?.onShadowedFieldType,
+  });
+  registerHostWidget(input.widgets ?? []);
+
   const issues: PagesConfigIssue[] = [];
 
   if (!Array.isArray(input.blocks) || input.blocks.length === 0) {
@@ -155,6 +185,10 @@ export type PagesHooks = {
   readonly onSectionLint?: (event: SectionLintEvent) => void;
   readonly onBelowFloor?: (event: BelowFloorEvent) => void;
   readonly onLocaleRemoved?: (event: LocaleRemovedEvent) => void;
+  /** Forwarded to `registerHostFieldType` (EXT-02, D-05): fires when a
+   * host `fieldTypes` entry shadows one of `@plakboek/content`'s sixteen
+   * built-in field types -- shadowing is permitted, never silent. */
+  readonly onShadowedFieldType?: (event: ShadowedFieldTypeEvent) => void;
 };
 
 /** Every engine operation's dependency bag: the database handle, the

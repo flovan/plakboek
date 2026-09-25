@@ -100,7 +100,7 @@ describe('Phase 4 tracer: declare blocks, create a page, insert a section and a 
           {
             key: 'section',
             kind: 'section',
-            label: 'Section',
+            editor: { label: 'Section' },
             schemaVersion: 1,
             properties: {
               width: {
@@ -120,7 +120,7 @@ describe('Phase 4 tracer: declare blocks, create a page, insert a section and a 
           },
           {
             key: 'heading',
-            label: 'Heading',
+            editor: { label: 'Heading' },
             schemaVersion: 1,
             properties: {
               text: {
@@ -131,12 +131,21 @@ describe('Phase 4 tracer: declare blocks, create a page, insert a section and a 
               },
             },
           },
-          // No upcaster from 1 to 2 declared on purpose: exercises
-          // upcastOnRead's 'no-upcaster' degraded path below.
+          // schemaVersion 3 with a declared minSupportedVersion of 3 and a
+          // full 2..3 upcaster chain (04-04's D-10: a declaration must
+          // cover every step from 2 to schemaVersion contiguously, or
+          // defineBlocks itself refuses at boot) -- exercises
+          // upcastOnRead's 'below-floor' degraded path below via a raw row
+          // stored under that floor.
           {
             key: 'note',
-            label: 'Note',
-            schemaVersion: 2,
+            editor: { label: 'Note' },
+            schemaVersion: 3,
+            minSupportedVersion: 3,
+            upcasters: {
+              2: (props) => props,
+              3: (props) => props,
+            },
             properties: {},
           },
         ]),
@@ -321,12 +330,17 @@ describe('Phase 4 tracer: declare blocks, create a page, insert a section and a 
         unknownNode?.degraded === true ? unknownNode.degradedReason : undefined,
       ).toBe('unknown-block-type');
 
-      // A registered block whose stored `schema_version` (1) predates the
-      // registry's current version (2, `note`) with no upcaster declared
-      // for the step must degrade with reason `'no-upcaster'` -- this is
-      // what proves `readBlockTree` actually runs `upcastOnRead` per row,
-      // not just a registry-lookup check.
-      const [noUpcasterRow] = await handle.sql<{ id: string }[]>`
+      // A registered block whose stored `schema_version` (1) is below its
+      // declared `minSupportedVersion` (3, `note`) must degrade with
+      // reason `'below-floor'` -- this is what proves `readBlockTree`
+      // actually runs `upcastOnRead` per row, not just a registry-lookup
+      // check. (04-04's D-10 requires a full contiguous upcaster chain
+      // from 2..schemaVersion at declare time, so a genuinely missing
+      // upcaster step is now a boot-time `BlockConfigError`, not a
+      // read-time degradation -- `minSupportedVersion` is the surviving
+      // degraded-read path for a stored version older than a block's
+      // declared floor.)
+      const [belowFloorRow] = await handle.sql<{ id: string }[]>`
         INSERT INTO page_blocks (
           owner_type, owner_id, locale, parent_block_id, block_type, props,
           schema_version, depth, sort_order, version, created_at, updated_at
@@ -335,16 +349,16 @@ describe('Phase 4 tracer: declare blocks, create a page, insert a section and a 
           1, 0, 6000, 1, ${clock().toISOString()}, ${clock().toISOString()}
         ) RETURNING id
       `;
-      const treeWithNoUpcaster = await readBlockTree(handle.db, owner);
-      const noUpcasterNode = treeWithNoUpcaster.find(
-        (node) => node.id === noUpcasterRow?.id,
+      const treeWithBelowFloor = await readBlockTree(handle.db, owner);
+      const belowFloorNode = treeWithBelowFloor.find(
+        (node) => node.id === belowFloorRow?.id,
       );
-      expect(noUpcasterNode?.degraded).toBe(true);
+      expect(belowFloorNode?.degraded).toBe(true);
       expect(
-        noUpcasterNode?.degraded === true
-          ? noUpcasterNode.degradedReason
+        belowFloorNode?.degraded === true
+          ? belowFloorNode.degradedReason
           : undefined,
-      ).toBe('no-upcaster');
+      ).toBe('below-floor');
 
       const deniedError: unknown = await createPage(deps, viewer, {
         locale: 'en',
