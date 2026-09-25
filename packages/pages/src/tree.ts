@@ -20,7 +20,12 @@ import type { AuditActor, AuditDatabase } from '@plakboek/auth';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { PagesDeps } from './config.js';
 import { loadPageForUpdate, StalePageVersionError } from './pages.js';
-import { getBlockDefinition, validateBlockProps } from './registry.js';
+import { assertPlacementAllowed, countAncestorSections } from './placement.js';
+import {
+  getBlockDefinition,
+  validateBlockProps,
+  type BlockDefinition,
+} from './registry.js';
 import { newRevisionBatchId, recordBlockRevision } from './revisions.js';
 import { pageBlocks, pages } from './schema.js';
 import {
@@ -320,15 +325,20 @@ export type InsertBlockInput = {
 
 /**
  * Inserts a block (a structural change, D-38). Through `deps.recorder.run`
- * (`pages:edit` / `block.insert`): loads and locks the owning page `FOR
- * UPDATE`, throwing `StalePageVersionError` when `page.version !==
+ * (`pages:edit` / `block.insert`): resolves `input.blockType`'s definition
+ * first, before any row is loaded, so an unregistered type refuses
+ * immediately (`UnknownBlockTypeError`); loads and locks the owning page
+ * `FOR UPDATE`, throwing `StalePageVersionError` when `page.version !==
  * input.basePageVersion`; loads and locks the parent block `FOR UPDATE`
  * when given and derives `depth` as `parent.depth + 1` (`0` at the root);
- * validates `props` through `validateBlockProps`; computes `sortOrder` as
- * `max(sort_order) + 1000` among siblings when not supplied; inserts with
- * `schema_version` set to the registry's current `schemaVersion` for that
- * block type -- never a default, never null; records a `'create'` block
- * revision; bumps the owning page's `version`.
+ * calls `assertPlacementAllowed` (placement.ts, BLOCK-05, D-08, D-18, D-19)
+ * -- the section rule, the parent/child placement declarations and both
+ * depth caps -- before any write; validates `props` through
+ * `validateBlockProps`; computes `sortOrder` as `max(sort_order) + 1000`
+ * among siblings when not supplied; inserts with `schema_version` set to
+ * the registry's current `schemaVersion` for that block type -- never a
+ * default, never null; records a `'create'` block revision; bumps the
+ * owning page's `version`.
  */
 export async function insertBlock(
   deps: PagesDeps,
@@ -345,6 +355,8 @@ export async function insertBlock(
       entityType: 'page_block',
     },
     async (tx) => {
+      const definition = getBlockDefinition(input.blockType);
+
       const page = await loadPageForUpdate(tx, input.owner.ownerId);
       if (page.version !== input.basePageVersion) {
         throw new StalePageVersionError(
@@ -354,10 +366,12 @@ export async function insertBlock(
         );
       }
 
-      let parentDepth = -1;
+      let parentDefinition: BlockDefinition | null = null;
+      let parentDepth: number | null = null;
+      let parentSectionDepth = 0;
       if (input.parentBlockId !== null) {
         const [parentRow] = await tx
-          .select({ depth: pageBlocks.depth })
+          .select({ depth: pageBlocks.depth, blockType: pageBlocks.blockType })
           .from(pageBlocks)
           .where(eq(pageBlocks.id, input.parentBlockId))
           .for('update');
@@ -365,10 +379,24 @@ export async function insertBlock(
           throw new BlockNotFoundError(input.parentBlockId);
         }
         parentDepth = parentRow.depth;
+        parentDefinition = getBlockDefinition(parentRow.blockType);
+        parentSectionDepth = await countAncestorSections(
+          tx,
+          input.parentBlockId,
+        );
       }
-      const depth = parentDepth + 1;
+      const depth = (parentDepth ?? -1) + 1;
 
-      const definition = getBlockDefinition(input.blockType);
+      assertPlacementAllowed({
+        owner: input.owner,
+        child: definition,
+        parent: parentDefinition,
+        parentDepth,
+        parentSectionDepth,
+        sectionNestingDepth: deps.config.sectionNestingDepth,
+        blockDepthCeiling: deps.config.blockDepthCeiling,
+      });
+
       const validatedProps = validateBlockProps(definition, input.props ?? {});
 
       let sortOrder = input.sortOrder;

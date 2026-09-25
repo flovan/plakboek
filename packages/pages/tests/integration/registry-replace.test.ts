@@ -111,9 +111,14 @@ describe('registry replacement compatibility against stored instances (BLOCK-09,
       });
 
       // -- Seed: two `card` blocks stored at schemaVersion 1 -------------
+      // `kind: 'section'` -- plan 04-05's D-19 rule refuses a plain
+      // `kind: 'block'` type inserted with no parent directly under a page
+      // owner; this fixture inserts two root-level `card` blocks purely to
+      // exercise version/compatibility behavior, not placement rules.
       const cardV1 = defineBlocks([
         {
           key: 'card',
+          kind: 'section',
           editor: { label: 'Card' },
           schemaVersion: 1,
           properties: {},
@@ -163,12 +168,14 @@ describe('registry replacement compatibility against stored instances (BLOCK-09,
       // -- Compatible replacement: card v1 -> v2, upcaster for step 2 ----
       const cardCoreV1 = {
         key: 'card',
+        kind: 'section',
         editor: { label: 'Card (core)' },
         schemaVersion: 1,
         properties: {},
       } as const;
       const cardHostV2 = {
         key: 'card',
+        kind: 'section',
         editor: { label: 'Card (host)' },
         schemaVersion: 2,
         upcasters: {

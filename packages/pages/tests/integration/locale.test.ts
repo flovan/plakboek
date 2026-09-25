@@ -81,8 +81,14 @@ describe('Page locales, translation groups and the cross-package purge (D-34, D-
         timezone: 'UTC',
       }),
       blocks: defineBlocks([
+        // `kind: 'section'` -- plan 04-05's D-19 rule (page children are
+        // always sections) refuses inserting a plain `kind: 'block'` type
+        // with no parent directly under a page owner; this fixture only
+        // needs one root-level block to exercise locale/translation-group
+        // behavior, not placement rules (placement.test.ts owns those).
         {
           key: 'hero',
+          kind: 'section',
           editor: { label: 'Hero' },
           schemaVersion: 1,
           properties: {},
