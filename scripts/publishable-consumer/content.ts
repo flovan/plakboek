@@ -109,10 +109,17 @@ import {
   type FindTranslationsInput,
   getContentTypeByKey,
   getFieldTypeDefinition,
+  getFieldTypeWidgets,
   getOrCreateSingleton,
   type GetOrCreateSingletonInput,
   getRevisionCap,
+  type HostFieldTypeDefinition,
+  HostRegistrationError,
+  type HostRegistrationIssue,
+  type HostRegistrationIssueCode,
+  type HostWidgetDefinition,
   InvalidSlugError,
+  type ShadowedFieldTypeEvent,
   isFieldType,
   isLockLive,
   isNormalizedSlug,
@@ -154,6 +161,8 @@ import {
   renewEditLock,
   type RenewEditLockInput,
   REPEATER_MAX_ITEMS,
+  registerHostFieldType,
+  registerHostWidget,
   reportContentWarning,
   resolveUrlPath,
   restoreEntryFromTrash,
@@ -284,6 +293,7 @@ const functions: Record<string, unknown> = {
   fieldKeyFromLabel,
   getContentTypeByKey,
   getFieldTypeDefinition,
+  getFieldTypeWidgets,
   getOrCreateSingleton,
   getRevisionCap,
   isFieldType,
@@ -300,6 +310,8 @@ const functions: Record<string, unknown> = {
   parseFieldOptions,
   parseUrlPattern,
   publishEntry,
+  registerHostFieldType,
+  registerHostWidget,
   releaseEditLock,
   renameContentTypeKey,
   renameField,
@@ -344,6 +356,7 @@ const errorClasses: Record<string, unknown> = {
   FieldKeyConflictError,
   FieldTypeImmutableError,
   FieldValidationError,
+  HostRegistrationError,
   InvalidSlugError,
   LocaleNotEnabledError,
   LockStateChangedError,
@@ -566,10 +579,17 @@ if (!isFieldType('short_text') || isFieldType('not_a_real_field_type')) {
   fail('isFieldType did not distinguish a real field type from a made-up one');
 }
 
-const shortTextDefinition: FieldTypeDefinition =
+const shortTextDefinition: HostFieldTypeDefinition =
   getFieldTypeDefinition('short_text');
 if (!shortTextDefinition.widgets.includes(shortTextDefinition.defaultWidget)) {
   fail("a registered field type's defaultWidget is not in its own widgets");
+}
+
+const shortTextWidgets = getFieldTypeWidgets('short_text');
+if (shortTextWidgets.join(',') !== shortTextDefinition.widgets.join(',')) {
+  fail(
+    'getFieldTypeWidgets did not equal the built-in tuple with no host widget registered',
+  );
 }
 
 const parsedPattern: ParsedUrlPattern = parseUrlPattern('/blog/{slug}');
@@ -623,6 +643,15 @@ const seedDriftEvent: SeedDriftEvent = {
 const localeRemovedEvent: LocaleRemovedEvent = {
   locale: 'de',
   entryCount: 0,
+  occurredAt: new Date(0),
+};
+const hostRegistrationIssueCode: HostRegistrationIssueCode = 'INVALID_KEY';
+const hostRegistrationIssue: HostRegistrationIssue = {
+  code: 'INVALID_KEY',
+  message: 'invalid host registration',
+};
+const shadowedFieldTypeEvent: ShadowedFieldTypeEvent = {
+  fieldType: 'short_text',
   occurredAt: new Date(0),
 };
 const entryStatus: EntryStatus = 'draft';
@@ -978,6 +1007,9 @@ function neverCalled(
   _deps: ContentDeps,
   _optionsMap: FieldTypeOptionsMap,
   _widgetMap: FieldTypeWidgetMap,
+  _builtInFieldType: FieldTypeDefinition,
+  _hostFieldType: HostFieldTypeDefinition,
+  _hostWidget: HostWidgetDefinition,
 ): number {
   return 1;
 }
@@ -988,6 +1020,9 @@ const typeProofs: unknown[] = [
   contentHooks,
   seedDriftEvent,
   localeRemovedEvent,
+  hostRegistrationIssueCode,
+  hostRegistrationIssue,
+  shadowedFieldTypeEvent,
   entryStatus,
   revisionMode,
   contentTypeRecord,

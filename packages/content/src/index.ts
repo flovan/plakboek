@@ -10,8 +10,10 @@
  * write or read content around the audited, version-checked, locale-filtered
  * paths this package guarantees.
  *
- * - The field-type registration function (field-types/registry.ts) -- the
- *   only way to add or overwrite a field type's definition at runtime.
+ * - The raw, unvalidated field-type registration function (field-types/
+ *   registry.ts) -- the validating public door onto it is
+ *   `registerHostFieldType`, exported below; the raw function stays
+ *   internal.
  * - The save transaction body and its permission-decision and snapshot
  *   helpers (save.ts) -- meant to be replayed by this package's own modules
  *   (restore, shared-field sync), never called directly.
@@ -68,10 +70,24 @@ export {
   isFieldType,
   getFieldTypeDefinition,
   parseFieldOptions,
+  registerHostFieldType,
+  getFieldTypeWidgets,
   UnknownFieldTypeError,
   FieldDefinitionError,
+  HostRegistrationError,
 } from './field-types/registry.js';
-export type { FieldType, FieldTypeDefinition } from './field-types/registry.js';
+export type {
+  FieldType,
+  FieldTypeDefinition,
+  HostFieldTypeDefinition,
+  HostRegistrationIssue,
+  HostRegistrationIssueCode,
+  ShadowedFieldTypeEvent,
+} from './field-types/registry.js';
+
+// widgets.ts
+export { registerHostWidget } from './widgets.js';
+export type { HostWidgetDefinition } from './widgets.js';
 
 // field-types/pattern-safety.ts
 export {
