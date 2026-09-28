@@ -56,6 +56,11 @@ import {
 import { blockRevisions, pageBlocks, pages } from './schema.js';
 import { getPageEditLocking } from './settings.js';
 import {
+  computeSubtreeShape,
+  rewriteDescendantDepths,
+  walkSubtree,
+} from './subtree.js';
+import {
   OWNER_TYPES,
   type BlockNode,
   type BlockRecord,
@@ -712,48 +717,6 @@ async function loadBlockSnapshot(
   return row ?? null;
 }
 
-type SubtreeWalkRow = {
-  readonly id: string;
-  readonly parentBlockId: string | null;
-  readonly blockType: string;
-  readonly relDepth: number;
-};
-
-/** Walks `rootBlockId` and every descendant in ONE recursive CTE query,
- * returning each row's id, its real `parent_block_id` and its depth
- * relative to `rootBlockId` (`0` for the root itself, `1` for its direct
- * children, ...). `moveBlock` uses this for the circular-move refusal (the
- * destination is refused when it is the root itself or appears among these
- * rows) and for the moved subtree's own height and section-height
- * (RESEARCH Pitfall 6, D-18) -- never a query per descendant. */
-async function walkSubtree(
-  db: AuditDatabase,
-  rootBlockId: string,
-): Promise<readonly SubtreeWalkRow[]> {
-  const result = await db.execute(sql`
-    WITH RECURSIVE subtree AS (
-      SELECT id, parent_block_id, block_type, 0 AS rel_depth
-      FROM page_blocks
-      WHERE id = ${rootBlockId}
-
-      UNION ALL
-
-      SELECT pb.id, pb.parent_block_id, pb.block_type, subtree.rel_depth + 1
-      FROM page_blocks pb
-      JOIN subtree ON pb.parent_block_id = subtree.id
-    )
-    SELECT id, parent_block_id AS "parentBlockId", block_type AS "blockType",
-      rel_depth AS "relDepth"
-    FROM subtree
-  `);
-  return resultRows(result).map((row) => ({
-    id: asString(row.id, 'id'),
-    parentBlockId: asNullableString(row.parentBlockId),
-    blockType: asString(row.blockType, 'blockType'),
-    relDepth: asNumber(row.relDepth, 'relDepth'),
-  }));
-}
-
 /** Loads the `sort_order` of an optional named sibling, `FOR UPDATE`-locked
  * from the destination sibling list -- `moveBlock`'s `beforeSiblingId`/
  * `afterSiblingId` inputs resolve through this. `null` when the input
@@ -893,28 +856,8 @@ export async function moveBlock(
         throw new CircularMoveError(input.blockId, input.newParentBlockId);
       }
 
-      let subtreeHeight = 0;
-      let subtreeSectionHeight = 0;
-      const sectionDepthById = new Map<string, number>();
-      for (const row of [...subtreeRows].sort(
-        (a, b) => a.relDepth - b.relDepth,
-      )) {
-        let isSectionBlock: boolean;
-        try {
-          isSectionBlock = getBlockDefinition(row.blockType).kind === 'section';
-        } catch {
-          isSectionBlock = false;
-        }
-        const parentSectionDepthWithinSubtree =
-          row.id === input.blockId
-            ? 0
-            : (sectionDepthById.get(row.parentBlockId ?? '') ?? 0);
-        const sectionDepth =
-          parentSectionDepthWithinSubtree + (isSectionBlock ? 1 : 0);
-        sectionDepthById.set(row.id, sectionDepth);
-        subtreeHeight = Math.max(subtreeHeight, row.relDepth);
-        subtreeSectionHeight = Math.max(subtreeSectionHeight, sectionDepth);
-      }
+      const { height: subtreeHeight, sectionHeight: subtreeSectionHeight } =
+        computeSubtreeShape(subtreeRows, input.blockId);
 
       const definition = getBlockDefinition(current.blockType);
       const ownerRef: OwnerRef = {
@@ -1035,26 +978,16 @@ export async function moveBlock(
 
       // Recomputes every descendant's `depth` in ONE batched statement, keyed
       // on the descendant ids and their depth relative to the moved block
-      // (already collected above) -- never a query per row. Mirrors
-      // `pages.ts`'s `applySubtreeRewrite`, the identical one-statement
-      // multi-row rewrite shape one level up the tree.
+      // (already collected above) -- never a query per row. Extracted to
+      // `subtree.ts`'s `rewriteDescendantDepths` (code review CR-02) so
+      // `moveBlock` and `restoreRevisionBatch`'s `'move'`-kind replay share
+      // one implementation; mirrors `pages.ts`'s `applySubtreeRewrite`, the
+      // identical one-statement multi-row rewrite shape one level up the
+      // tree.
       const descendantRows = subtreeRows.filter(
         (row) => row.id !== input.blockId,
       );
-      if (descendantRows.length > 0) {
-        const depthValuesClause = sql.join(
-          descendantRows.map(
-            (row) =>
-              sql`(${row.id}::uuid, ${movedBlockNewDepth + row.relDepth}::integer)`,
-          ),
-          sql`, `,
-        );
-        await tx.execute(sql`
-          UPDATE page_blocks SET depth = v.new_depth
-          FROM (VALUES ${depthValuesClause}) AS v(id, new_depth)
-          WHERE page_blocks.id = v.id
-        `);
-      }
+      await rewriteDescendantDepths(tx, movedBlockNewDepth, descendantRows);
 
       await recordBlockRevision(tx, {
         blockId: current.id,

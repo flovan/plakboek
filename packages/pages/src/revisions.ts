@@ -19,7 +19,12 @@ import { asc, eq, sql } from 'drizzle-orm';
 import type { PagesDeps } from './config.js';
 import { assertPageWritable } from './locks.js';
 import { loadPageForUpdate, StalePageVersionError } from './pages.js';
-import { assertPlacementAllowed, countAncestorSections } from './placement.js';
+import {
+  assertPlacementAllowed,
+  BlockDepthExceededError,
+  countAncestorSections,
+  SectionNestingDepthExceededError,
+} from './placement.js';
 import {
   BlockPropsValidationError,
   getBlockDefinition,
@@ -29,6 +34,11 @@ import {
 } from './registry.js';
 import { blockRevisions, pageBlocks, pages } from './schema.js';
 import { getPageEditLocking } from './settings.js';
+import {
+  computeSubtreeShape,
+  rewriteDescendantDepths,
+  walkSubtree,
+} from './subtree.js';
 import {
   BLOCK_CHANGE_TYPES,
   BLOCK_REVISION_KINDS,
@@ -923,17 +933,57 @@ export async function restoreRevisionBatch(
             );
           }
 
+          // CR-02: a 'move' revision only ever records the moved block's
+          // OWN row (04-06) -- its descendants, if it still has any live
+          // ones, kept their existing rows untouched. The
+          // `assertPlacementAllowed` call above only re-checks this single
+          // node, exactly like an insert; a relocation must additionally
+          // account for whatever subtree the restored block is still
+          // carrying with it, the same way `moveBlock` itself does
+          // (RESEARCH Pitfall 6) -- otherwise a restore could recreate a
+          // shape the depth ceiling/section-nesting cap exist to forbid,
+          // and leave every descendant's stored `depth` desynced from the
+          // tree it now sits in.
+          const subtreeRows = await walkSubtree(tx, block.blockId);
+          const { height: subtreeHeight, sectionHeight: subtreeSectionHeight } =
+            computeSubtreeShape(subtreeRows, block.blockId);
+
+          const restoredDepth = (parentDepth ?? -1) + 1;
+          const finalDepth = restoredDepth + subtreeHeight;
+          if (finalDepth > deps.config.blockDepthCeiling) {
+            throw new BlockDepthExceededError(
+              deps.config.blockDepthCeiling,
+              finalDepth,
+            );
+          }
+          const finalSectionDepth = parentSectionDepth + subtreeSectionHeight;
+          if (finalSectionDepth > deps.config.sectionNestingDepth) {
+            throw new SectionNestingDepthExceededError(
+              deps.config.sectionNestingDepth,
+              finalSectionDepth,
+            );
+          }
+
           await tx
             .update(pageBlocks)
             .set({
               parentBlockId: raw.parentBlockId,
               sortOrder: raw.sortOrder,
-              depth: raw.depth,
+              depth: restoredDepth,
               version: sql`${pageBlocks.version} + 1`,
               updatedAt: restoredAt,
               updatedBy: actor.userId,
             })
             .where(eq(pageBlocks.id, block.blockId));
+
+          // Recomputes every live descendant's `depth` in the same batched
+          // statement `moveBlock` uses (`subtree.ts`'s
+          // `rewriteDescendantDepths`) -- never leaving a descendant's
+          // depth relative to the block's PRE-restore position.
+          const descendantRows = subtreeRows.filter(
+            (row) => row.id !== block.blockId,
+          );
+          await rewriteDescendantDepths(tx, restoredDepth, descendantRows);
 
           await recordBlockRevision(tx, {
             blockId: current.id,

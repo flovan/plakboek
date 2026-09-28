@@ -9,6 +9,7 @@ import {
   createAuditRecorder,
   createUserWithRole,
   PermissionDeniedError,
+  SUPERADMIN_ROLE_KEY,
   type AuditActor,
   type AuditRecorder,
 } from '@plakboek/auth';
@@ -22,8 +23,12 @@ import {
 } from '@plakboek/permissions';
 import { describe, expect, it } from 'vitest';
 import { definePagesConfig, type PagesDeps } from '../../src/config.js';
-import { BlockPlacementError } from '../../src/placement.js';
 import { createPage, getPage, StalePageVersionError } from '../../src/pages.js';
+import {
+  BlockDepthExceededError,
+  BlockPlacementError,
+  SectionNestingDepthExceededError,
+} from '../../src/placement.js';
 import { defineBlocks } from '../../src/registry.js';
 import {
   computeBlockRestorePreview,
@@ -559,6 +564,404 @@ describe('restore preview classification and audited batch restore (D-13)', () =
       );
     } finally {
       if (handle !== undefined) await handle.close();
+      await testDatabase.drop();
+    }
+  });
+});
+
+describe("restoreRevisionBatch's 'move' replay enforces the same subtree-height-aware ceilings moveBlock does (code review CR-02)", () => {
+  const subtreeRoles = defineRoles({ ...defaultRoles, viewer: ['pages:read'] });
+
+  async function setupSubtreeFixture(): Promise<{
+    readonly testDatabase: Awaited<ReturnType<typeof createTestDatabase>>;
+    readonly handle: Db;
+    readonly deps: PagesDeps;
+    readonly superadmin: AuditActor;
+  }> {
+    const testDatabase = await createTestDatabase();
+    await runMigrations({ connectionString: testDatabase.connectionString });
+    const handle = createDb({
+      connectionString: testDatabase.connectionString,
+    });
+    const resolver: PermissionResolver = createPermissionResolver(subtreeRoles);
+    const recorder: AuditRecorder = createAuditRecorder({
+      db: handle.db,
+      resolver,
+    });
+    const superadminUser = await createUserWithRole(handle.db, {
+      id: randomUUID(),
+      email: `cr02-${randomUUID()}@example.com`,
+      name: 'CR-02 Owner',
+      roleKey: SUPERADMIN_ROLE_KEY,
+    });
+    const superadmin: AuditActor = {
+      userId: superadminUser.userId,
+      roleKey: superadminUser.roleKey,
+    };
+    // Same fixture shape `tree-writes.test.ts` uses for `moveBlock`'s own
+    // subtree-height-aware checks -- a low `blockDepthCeiling`/
+    // `sectionNestingDepth` makes both cheap to reach, and `wrapper`'s
+    // `allowedChildren: 'any'` lets a subtree with real height be built
+    // without needing a section at every level.
+    const config = definePagesConfig({
+      content: defineContentConfig({
+        locales: ['en'],
+        defaultLocale: 'en',
+        timezone: 'UTC',
+      }),
+      blocks: defineBlocks([
+        {
+          key: 'section',
+          kind: 'section',
+          editor: { label: 'Section' },
+          schemaVersion: 1,
+          properties: {},
+        },
+        {
+          key: 'heading',
+          editor: { label: 'Heading' },
+          schemaVersion: 1,
+          properties: {},
+        },
+        {
+          key: 'wrapper',
+          editor: { label: 'Wrapper' },
+          schemaVersion: 1,
+          properties: {},
+          placement: { allowedChildren: 'any' },
+        },
+      ]),
+      sectionNestingDepth: 2,
+      blockDepthCeiling: 4,
+    });
+    const clock = (): Date => new Date('2026-09-28T12:00:00.000Z');
+    const deps: PagesDeps = {
+      db: handle.db,
+      recorder,
+      resolver,
+      config,
+      now: clock,
+    };
+    return { testDatabase, handle, deps, superadmin };
+  }
+
+  async function blockRow(
+    handle: Db,
+    blockId: string,
+  ): Promise<{
+    parentBlockId: string | null;
+    depth: number;
+    version: number;
+  }> {
+    const [row] = await handle.sql<
+      { parentBlockId: string | null; depth: number; version: number }[]
+    >`
+      SELECT parent_block_id AS "parentBlockId", depth, version
+      FROM page_blocks WHERE id = ${blockId}
+    `;
+    if (row === undefined) throw new Error(`block ${blockId} not found`);
+    return row;
+  }
+
+  /** Fabricates a `'move'`-kind `block_revisions` row directly -- the same
+   * raw-INSERT technique the suite above already uses for an otherwise-
+   * unreachable degraded case (the `rollbackBatchId` fixture): a restore
+   * that would breach a ceiling can never be produced by a LIVE `moveBlock`
+   * call (it enforces the identical check itself), so the only way to prove
+   * a restore refuses the same shape is to record a revision describing a
+   * destination that was legal when some other historical move recorded it,
+   * then let the live tree drift (gain descendants, in this case) before
+   * the restore runs. */
+  async function insertFabricatedMoveRevision(
+    handle: Db,
+    input: {
+      readonly blockId: string;
+      readonly ownerId: string;
+      readonly locale: string;
+      readonly blockType: string;
+      readonly recordedParentBlockId: string | null;
+      readonly recordedDepth: number;
+      readonly recordedSortOrder: number;
+      readonly authorId: string;
+    },
+  ): Promise<string> {
+    const revisionBatchId = randomUUID();
+    await handle.sql`
+      INSERT INTO block_revisions (
+        block_id, owner_type, owner_id, locale, revision_batch_id,
+        change_type, kind, block_type, parent_block_id, sort_order,
+        depth, props, schema_version, author_id, created_at
+      ) VALUES (
+        ${input.blockId}, 'page', ${input.ownerId}, ${input.locale}, ${revisionBatchId},
+        'move', 'save', ${input.blockType}, ${input.recordedParentBlockId}, ${input.recordedSortOrder},
+        ${input.recordedDepth}, '{}'::jsonb, 1, ${input.authorId},
+        '2026-09-28T11:00:00.000Z'::timestamptz
+      )
+    `;
+    return revisionBatchId;
+  }
+
+  it("refuses a 'move' restore whose recorded destination, combined with the block's LIVE subtree height, breaches blockDepthCeiling -- even though the block's own resulting depth alone would fit exactly at the ceiling", async () => {
+    const { testDatabase, handle, deps, superadmin } =
+      await setupSubtreeFixture();
+    try {
+      const page = await createPage(deps, superadmin, {
+        locale: 'en',
+        title: 'Depth ceiling restore',
+      });
+      const ownerRef = {
+        ownerType: 'page' as const,
+        ownerId: page.id,
+        locale: 'en',
+      };
+      const section = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'section',
+        parentBlockId: null,
+        basePageVersion: page.version,
+      });
+      let fresh = await getPage(handle.db, page.id);
+      const w1 = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'wrapper',
+        parentBlockId: section.id,
+        basePageVersion: fresh!.version,
+      });
+      fresh = await getPage(handle.db, page.id);
+      const w2 = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'wrapper',
+        parentBlockId: w1.id,
+        basePageVersion: fresh!.version,
+      });
+      fresh = await getPage(handle.db, page.id);
+      const w3 = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'wrapper',
+        parentBlockId: w2.id,
+        basePageVersion: fresh!.version,
+      });
+      fresh = await getPage(handle.db, page.id);
+      const wrapperX = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'wrapper',
+        parentBlockId: section.id,
+        basePageVersion: fresh!.version,
+      });
+      fresh = await getPage(handle.db, page.id);
+      const leafY = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'heading',
+        parentBlockId: wrapperX.id,
+        basePageVersion: fresh!.version,
+      });
+
+      const beforeX = await blockRow(handle, wrapperX.id);
+      const beforeY = await blockRow(handle, leafY.id);
+
+      // Recorded destination is w3 (depth 3): a single-node check (an
+      // insert-equivalent) would approve depth 3 + 1 = 4, exactly the
+      // ceiling. wrapperX's LIVE subtree (itself + leafY, height 1) would
+      // actually land leafY at depth 5 -- past the ceiling.
+      const revisionBatchId = await insertFabricatedMoveRevision(handle, {
+        blockId: wrapperX.id,
+        ownerId: page.id,
+        locale: 'en',
+        blockType: 'wrapper',
+        recordedParentBlockId: w3.id,
+        recordedDepth: 4,
+        recordedSortOrder: 1000,
+        authorId: superadmin.userId,
+      });
+
+      const pageBefore = await getPage(handle.db, page.id);
+      const error: unknown = await restoreRevisionBatch(deps, superadmin, {
+        revisionBatchId,
+        pageId: page.id,
+        basePageVersion: pageBefore!.version,
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(BlockDepthExceededError);
+      expect((error as BlockDepthExceededError).ceiling).toBe(4);
+      expect((error as BlockDepthExceededError).attempted).toBe(5);
+
+      expect(await blockRow(handle, wrapperX.id)).toEqual(beforeX);
+      expect(await blockRow(handle, leafY.id)).toEqual(beforeY);
+      const pageAfter = await getPage(handle.db, page.id);
+      expect(pageAfter!.version).toBe(pageBefore!.version);
+    } finally {
+      await handle.close();
+      await testDatabase.drop();
+    }
+  });
+
+  it("refuses a 'move' restore whose recorded destination, combined with the block's LIVE section-only subtree height, breaches sectionNestingDepth", async () => {
+    const { testDatabase, handle, deps, superadmin } =
+      await setupSubtreeFixture();
+    try {
+      const page = await createPage(deps, superadmin, {
+        locale: 'en',
+        title: 'Section cap restore',
+      });
+      const ownerRef = {
+        ownerType: 'page' as const,
+        ownerId: page.id,
+        locale: 'en',
+      };
+      const sectionC = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'section',
+        parentBlockId: null,
+        basePageVersion: page.version,
+      });
+      let fresh = await getPage(handle.db, page.id);
+      const sectionA = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'section',
+        parentBlockId: null,
+        basePageVersion: fresh!.version,
+      });
+      fresh = await getPage(handle.db, page.id);
+      const sectionB = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'section',
+        parentBlockId: sectionA.id,
+        basePageVersion: fresh!.version,
+      });
+
+      const beforeA = await blockRow(handle, sectionA.id);
+      const beforeB = await blockRow(handle, sectionB.id);
+
+      // sectionA's LIVE subtree already contains a nested section
+      // (sectionB), so its own section-height is 2. The recorded
+      // destination is sectionC (section-depth 1, inclusive of itself) --
+      // a single-node check would approve 1 + 1 = 2, exactly the cap.
+      // Restoring the whole live subtree reaches section-depth 3.
+      const revisionBatchId = await insertFabricatedMoveRevision(handle, {
+        blockId: sectionA.id,
+        ownerId: page.id,
+        locale: 'en',
+        blockType: 'section',
+        recordedParentBlockId: sectionC.id,
+        recordedDepth: 1,
+        recordedSortOrder: 1000,
+        authorId: superadmin.userId,
+      });
+
+      const pageBefore = await getPage(handle.db, page.id);
+      const error: unknown = await restoreRevisionBatch(deps, superadmin, {
+        revisionBatchId,
+        pageId: page.id,
+        basePageVersion: pageBefore!.version,
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(SectionNestingDepthExceededError);
+      expect((error as SectionNestingDepthExceededError).cap).toBe(2);
+      expect((error as SectionNestingDepthExceededError).attempted).toBe(3);
+
+      expect(await blockRow(handle, sectionA.id)).toEqual(beforeA);
+      expect(await blockRow(handle, sectionB.id)).toEqual(beforeB);
+      const pageAfter = await getPage(handle.db, page.id);
+      expect(pageAfter!.version).toBe(pageBefore!.version);
+    } finally {
+      await handle.close();
+      await testDatabase.drop();
+    }
+  });
+
+  it("a 'move' restore recomputes a LIVE descendant's depth relative to the block's RESTORED position, rather than leaving it relative to the pre-restore position", async () => {
+    const { testDatabase, handle, deps, superadmin } =
+      await setupSubtreeFixture();
+    try {
+      const page = await createPage(deps, superadmin, {
+        locale: 'en',
+        title: 'Descendant depth recompute',
+      });
+      const ownerRef = {
+        ownerType: 'page' as const,
+        ownerId: page.id,
+        locale: 'en',
+      };
+      const section = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'section',
+        parentBlockId: null,
+        basePageVersion: page.version,
+      });
+      let fresh = await getPage(handle.db, page.id);
+      // A second root section -- `wrapper` is `kind: 'block'`, so it can
+      // never sit directly under the page itself (D-19); it needs a
+      // section destination to move into.
+      const sectionZ = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'section',
+        parentBlockId: null,
+        basePageVersion: fresh!.version,
+      });
+      fresh = await getPage(handle.db, page.id);
+      const wrapperA = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'wrapper',
+        parentBlockId: section.id,
+        basePageVersion: fresh!.version,
+      });
+      fresh = await getPage(handle.db, page.id);
+      const wrapperX = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'wrapper',
+        parentBlockId: wrapperA.id,
+        basePageVersion: fresh!.version,
+      });
+      fresh = await getPage(handle.db, page.id);
+      const leafY = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'heading',
+        parentBlockId: wrapperX.id,
+        basePageVersion: fresh!.version,
+      });
+      expect((await blockRow(handle, wrapperX.id)).depth).toBe(2);
+      expect((await blockRow(handle, leafY.id)).depth).toBe(3);
+
+      // Move wrapperX (and leafY with it) to sectionZ -- the 'move'
+      // revision this records captures wrapperX's PRE-move state:
+      // parentBlockId = wrapperA.id, depth = 2 (restoring this batch later
+      // sends wrapperX back there).
+      fresh = await getPage(handle.db, page.id);
+      const wrapperXBeforeMove = await blockRow(handle, wrapperX.id);
+      await moveBlock(deps, superadmin, {
+        blockId: wrapperX.id,
+        baseVersion: wrapperXBeforeMove.version,
+        pageId: page.id,
+        basePageVersion: fresh!.version,
+        newParentBlockId: sectionZ.id,
+      });
+      expect((await blockRow(handle, wrapperX.id)).depth).toBe(1);
+      expect((await blockRow(handle, leafY.id)).depth).toBe(2);
+
+      const [moveBatchRow] = await handle.sql<{ revisionBatchId: string }[]>`
+        SELECT revision_batch_id AS "revisionBatchId" FROM block_revisions
+        WHERE block_id = ${wrapperX.id} AND change_type = 'move'
+        ORDER BY created_at DESC LIMIT 1
+      `;
+      const revisionBatchId = moveBatchRow!.revisionBatchId;
+
+      const pageBeforeRestore = await getPage(handle.db, page.id);
+      await restoreRevisionBatch(deps, superadmin, {
+        revisionBatchId,
+        pageId: page.id,
+        basePageVersion: pageBeforeRestore!.version,
+      });
+
+      const wrapperXAfter = await blockRow(handle, wrapperX.id);
+      const leafYAfter = await blockRow(handle, leafY.id);
+      expect(wrapperXAfter.parentBlockId).toBe(wrapperA.id);
+      expect(wrapperXAfter.depth).toBe(2);
+      // CR-02: the pre-fix code only wrote wrapperX's own row (using its
+      // recorded historical depth) and never touched leafY -- leafY would
+      // stay at depth 1 (its PRE-restore, root-relative depth) instead of
+      // being recomputed to depth 3, relative to wrapperX's restored
+      // position under wrapperA.
+      expect(leafYAfter.depth).toBe(3);
+    } finally {
+      await handle.close();
       await testDatabase.drop();
     }
   });
