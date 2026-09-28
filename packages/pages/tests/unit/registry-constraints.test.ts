@@ -5,17 +5,22 @@
  * `validateBlockProps` (registry.ts) tell the three states apart by a
  * `constraint` discriminant rather than by absence alone.
  */
+import { defineContentConfig } from '@plakboek/content';
 import { describe, expect, it } from 'vitest';
 import {
   applyBlockConstraints,
   BlockConstraintError,
   constrainBlock,
 } from '../../src/constraints.js';
+import { definePagesConfig } from '../../src/config.js';
+import { buildSnapshotTree } from '../../src/publish.js';
 import {
   defineBlocks,
+  getBlockDefinition,
   resolveBlockProperties,
   validateBlockProps,
 } from '../../src/registry.js';
+import type { BlockNode } from '../../src/types.js';
 
 const cardChoices = {
   choices: [
@@ -237,5 +242,127 @@ describe('applyBlockConstraints/constrainBlock (BLOCK-08, D-04)', () => {
         title: 'Hello',
       }),
     ).toThrow('invalid block props');
+  });
+});
+
+/**
+ * Registration wiring (D-04): `defineBlocks` populates the module-level
+ * registry `getBlockDefinition` reads from with the UNCONSTRAINED
+ * declarations; `applyBlockConstraints`'s resolved output (proven above)
+ * only takes effect on a real write/read/publish path once
+ * `definePagesConfig` re-registers those SAME constrained definitions
+ * (`registerResolvedBlocks`, registry.ts). These tests prove the wiring
+ * itself -- through `definePagesConfig` and `getBlockDefinition`, never
+ * against a hand-built `BlockDefinition` -- so a regression that re-detaches
+ * the two (as this codebase actually shipped once) fails here immediately.
+ */
+describe('definePagesConfig re-registers constrained definitions (registry wiring, D-04)', () => {
+  const content = defineContentConfig({
+    locales: ['en'],
+    defaultLocale: 'en',
+    timezone: 'UTC',
+  });
+
+  function defineWiredCard() {
+    return defineBlocks([
+      {
+        key: 'wiredCard',
+        editor: { label: 'Wired card' },
+        schemaVersion: 1,
+        properties: {
+          image: { fieldType: 'image', label: 'Image', options: {} },
+          padding: {
+            fieldType: 'select',
+            label: 'Padding',
+            options: {
+              choices: [
+                { value: 'sm', labels: { en: 'Small' } },
+                { value: 'lg', labels: { en: 'Large' } },
+              ],
+            },
+          },
+          variant: {
+            fieldType: 'select',
+            label: 'Variant',
+            options: cardChoices,
+          },
+          title: { fieldType: 'short_text', label: 'Title', options: {} },
+        },
+      },
+    ]);
+  }
+
+  it('a fixed constraint refuses a conflicting write through getBlockDefinition/validateBlockProps, not only a hand-built BlockDefinition', () => {
+    definePagesConfig({
+      content,
+      blocks: defineWiredCard(),
+      constraints: [constrainBlock('wiredCard', { padding: { fixed: 'lg' } })],
+    });
+
+    const resolved = getBlockDefinition('wiredCard');
+    expect(
+      validateBlockProps(resolved, { padding: 'lg', title: 'Hello' }).padding,
+    ).toBe('lg');
+    expect(() =>
+      validateBlockProps(resolved, { padding: 'sm', title: 'Hello' }),
+    ).toThrow('invalid block props');
+  });
+
+  it('a narrowed constraint refuses an out-of-range value the unconstrained field type would allow, through getBlockDefinition/validateBlockProps', () => {
+    definePagesConfig({
+      content,
+      blocks: defineWiredCard(),
+      constraints: [
+        constrainBlock('wiredCard', {
+          variant: { allow: ['primary', 'ghost'] },
+        }),
+      ],
+    });
+
+    const resolved = getBlockDefinition('wiredCard');
+    // 'secondary' is one of `cardChoices`' own declared choices -- the
+    // unconstrained field type's own value schema accepts it; only the
+    // registered constraint refuses it.
+    expect(
+      validateBlockProps(resolved, { variant: 'primary', title: 'Hello' })
+        .variant,
+    ).toBe('primary');
+    expect(() =>
+      validateBlockProps(resolved, { variant: 'secondary', title: 'Hello' }),
+    ).toThrow('invalid block props');
+  });
+
+  it('a hidden constrained property is omitted by buildSnapshotTree (publish.ts) reading through getBlockDefinition, not only a hand-built BlockDefinition', () => {
+    definePagesConfig({
+      content,
+      blocks: defineWiredCard(),
+      constraints: [constrainBlock('wiredCard', { image: 'hidden' })],
+    });
+
+    const now = new Date('2026-09-25T09:00:00.000Z');
+    const leakedNode: BlockNode = {
+      id: 'block-1',
+      ownerType: 'page',
+      ownerId: 'owner-1',
+      locale: 'en',
+      parentBlockId: null,
+      blockType: 'wiredCard',
+      // Raw stored props still carry a value for the now-hidden `image`
+      // property (a row written before the constraint existed, or by a
+      // caller that reached storage some other way) -- `buildSnapshotTree`
+      // must never surface it once the definition it reads marks it hidden.
+      props: { image: 'https://example.com/leaked.png', title: 'Hello' },
+      schemaVersion: 1,
+      depth: 0,
+      sortOrder: 1000,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      degraded: false,
+      children: [],
+    };
+
+    const snapshot = buildSnapshotTree([leakedNode]);
+    expect(snapshot.blocks[0]?.props).toEqual({ title: 'Hello' });
   });
 });
