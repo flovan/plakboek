@@ -36,6 +36,7 @@ import type {
 } from '@plakboek/auth';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { PagesDeps } from './config.js';
+import { assertPageWritable } from './locks.js';
 import {
   getPage,
   loadPageForUpdate,
@@ -51,6 +52,7 @@ import {
   pages,
   pageUrlHistory,
 } from './schema.js';
+import { getPageEditLocking } from './settings.js';
 import type { PageRecord, PageStatus } from './types.js';
 
 /** Thrown when a page's current status doesn't allow the requested
@@ -249,6 +251,12 @@ export async function unpublishPage(
           current.version,
         );
       }
+      assertPageWritable(
+        [current],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
       if (current.status !== 'published') {
         throw new PageStatusError(current.id, current.status, ['published']);
       }
@@ -338,6 +346,12 @@ export async function schedulePage(
           current.version,
         );
       }
+      assertPageWritable(
+        [current],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
       if (current.status !== 'draft') {
         throw new PageStatusError(current.id, current.status, ['draft']);
       }
@@ -411,6 +425,12 @@ export async function unschedulePage(
           current.version,
         );
       }
+      assertPageWritable(
+        [current],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
       if (current.status !== 'scheduled') {
         throw new PageStatusError(current.id, current.status, ['scheduled']);
       }
@@ -548,6 +568,16 @@ export async function trashPage(
         current.locale,
         current.path,
       );
+      // The whole subtree, not just the root: trashing a page a colleague
+      // is actively editing a DESCENDANT of is exactly the collision the
+      // lock exists to prevent, and `assertPageWritable` already refuses on
+      // the first offending row in the list it is given.
+      assertPageWritable(
+        subtree,
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
       const trashedAt = now();
 
       // A descendant already `trashed` by its OWN, earlier operation is
@@ -638,6 +668,12 @@ export async function restorePageFromTrash(
           current.version,
         );
       }
+      assertPageWritable(
+        [current],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
       if (current.status !== 'trashed') {
         throw new PageStatusError(current.id, current.status, ['trashed']);
       }
@@ -832,6 +868,15 @@ export async function deletePagePermanently(
         tx,
         current.locale,
         current.path,
+      );
+      // Same reasoning as `trashPage`: the whole subtree, not just the
+      // root -- a permanent delete reaching a descendant a colleague is
+      // actively editing is the same collision, one statement lower.
+      assertPageWritable(
+        subtree,
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
       );
       const impact = await computePagePermanentDeleteImpact(tx, {
         pageId: input.pageId,

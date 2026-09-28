@@ -13,12 +13,14 @@ import type {
 } from '@plakboek/auth';
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { PagesDeps } from './config.js';
+import { assertPageWritable } from './locks.js';
 import {
   assertPageSlugAvailable,
   composePagePath,
   generateUniquePageSlug,
 } from './page-slug.js';
 import { pages, pageUrlHistory } from './schema.js';
+import { getPageEditLocking } from './settings.js';
 import { PAGE_STATUSES, type PageRecord, type PageStatus } from './types.js';
 
 // All slug errors -- including the format/availability/generation checks
@@ -605,6 +607,12 @@ export async function renamePage(
           page.version,
         );
       }
+      assertPageWritable(
+        [page],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
 
       let parentPath: string | null = null;
       if (page.parentPageId !== null) {
@@ -730,6 +738,12 @@ export async function movePage(
           page.version,
         );
       }
+      assertPageWritable(
+        [page],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
 
       let destinationParentPath: string | null = null;
       if (input.newParentPageId !== null) {

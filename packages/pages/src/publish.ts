@@ -20,6 +20,7 @@ import type {
 } from '@plakboek/auth';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PagesDeps, PagesHooks } from './config.js';
+import { assertPageWritable } from './locks.js';
 import { getPage, loadPageForUpdate, PageNotFoundError } from './pages.js';
 import {
   assertPageAddressAvailable,
@@ -34,7 +35,7 @@ import {
 } from './registry.js';
 import { newRevisionBatchId, recordBlockRevision } from './revisions.js';
 import { pagePublications, pages } from './schema.js';
-import { getPageUrlPattern } from './settings.js';
+import { getPageEditLocking, getPageUrlPattern } from './settings.js';
 import { StalePageVersionError, readBlockTree } from './tree.js';
 import type { BlockNode, PageRecord } from './types.js';
 import type { DegradedReason } from './versioning.js';
@@ -297,6 +298,14 @@ async function materialisePublication(
   hooks: PagesHooks | undefined,
   options: { readonly isDraft: boolean },
 ): Promise<MaterialisePublicationResult> {
+  // The one guard call this whole module needs: covers `publishPage` (a
+  // real edit, version-checked by its own caller before this helper ever
+  // runs) and `createDraftSnapshot` (which takes no `baseVersion` at all) --
+  // a colleague's live lock on the page refuses a preview exactly as it
+  // refuses a real publish, since a preview reads the same live tree a
+  // publish would (D-32).
+  assertPageWritable([page], await getPageEditLocking(tx), actor.userId, now());
+
   const tree = await readBlockTree(
     tx,
     { ownerType: 'page', ownerId: page.id, locale: page.locale },

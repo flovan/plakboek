@@ -24,13 +24,19 @@ import type {
 import { getRevisionCap } from '@plakboek/content';
 import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { PagesDeps, PagesHooks } from './config.js';
+import { assertPageWritable } from './locks.js';
 import {
   needsRebalance,
   nextSortOrder,
   rebalancedOrders,
   sortOrderBetween,
 } from './ordering.js';
-import { loadPageForUpdate, StalePageVersionError } from './pages.js';
+import {
+  getPage,
+  loadPageForUpdate,
+  PageNotFoundError,
+  StalePageVersionError,
+} from './pages.js';
 import {
   assertPlacementAllowed,
   BlockDepthExceededError,
@@ -48,6 +54,7 @@ import {
   recordBlockRevision,
 } from './revisions.js';
 import { blockRevisions, pageBlocks, pages } from './schema.js';
+import { getPageEditLocking } from './settings.js';
 import {
   OWNER_TYPES,
   type BlockNode,
@@ -417,6 +424,12 @@ export async function insertBlock(
           page.version,
         );
       }
+      assertPageWritable(
+        [page],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
 
       let parentDefinition: BlockDefinition | null = null;
       let parentDepth: number | null = null;
@@ -575,6 +588,26 @@ export async function updateBlockProps(
           current.version,
         );
       }
+
+      // A property edit takes no `basePageVersion` (D-38) -- it never
+      // checks or bumps the owning page's version -- but it is still an
+      // edit to the page's content, so it still honours the page lock. The
+      // owning page is loaded unlocked (no `FOR UPDATE`) purely for the
+      // guard: taking an exclusive lock on the page row here, after the
+      // block row above is already locked, would reverse this package's
+      // established page-then-block lock ordering (`moveBlock`/
+      // `deleteBlock` lock the page first) and risk an ABBA deadlock
+      // against them.
+      const page = await getPage(tx, current.ownerId);
+      if (page === null) {
+        throw new PageNotFoundError(current.ownerId);
+      }
+      assertPageWritable(
+        [page],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
 
       const definition = getBlockDefinition(current.blockType);
       const validatedProps = validateBlockProps(definition, input.props);
@@ -807,6 +840,12 @@ export async function moveBlock(
           page.version,
         );
       }
+      assertPageWritable(
+        [page],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
 
       const [current] = await tx
         .select()
@@ -1210,6 +1249,12 @@ export async function deleteBlock(
           page.version,
         );
       }
+      assertPageWritable(
+        [page],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
 
       const [current] = await tx
         .select()
