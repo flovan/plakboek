@@ -505,7 +505,8 @@ revision writer and its cap-pruning sweep, the row-locking page read and the
 append-only URL-history writer, the write-time placement/depth/section
 guards and the ancestor walk behind them, transaction-scoped slug
 generation and availability and the address-availability check, the
-edit-lock write guard every mutation calls internally, the shared
+edit-lock write guard every single-page mutation calls internally (see the
+lock-exempt bulk operations above), the shared
 publication materialiser, the props validator and the constraint applier,
 and every Drizzle schema table stay internal -- with them a consumer could
 write or read pages/blocks around the audited, version-checked,

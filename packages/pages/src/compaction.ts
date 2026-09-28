@@ -161,7 +161,10 @@ export type CompactBlockTypeInput = {
  * compaction is a real change to the row, so a concurrent editor holding an
  * older base version is told, not silently overwritten), and gets one
  * `update`-kind revision, all rewritten rows in this run sharing one
- * `revision_batch_id` so the pre-compaction props stay recoverable (D-13).
+ * `revision_batch_id` so the run is inspectable as a unit (D-13). Note the
+ * revision this writes carries the POST-compaction props, matching the
+ * package convention; the pre-compaction props survive only in the row's
+ * previous revision, which `pruneBlockRevisions` may already have removed.
  *
  * Deliberately lock-exempt (T-04-58): this rewrites every stored instance of
  * one block type across every page that holds it, project-wide -- not a
