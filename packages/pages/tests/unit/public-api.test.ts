@@ -588,4 +588,15 @@ describe('README drift', () => {
       .map((row) => row.name);
     expect(sorted(documented)).toEqual(sorted(PUBLIC_TYPES));
   });
+
+  it("documents the registry API as a host-facing contract -- so EXT-02's documented-API requirement cannot be silently deleted", () => {
+    const readme = readFileSync(README_PATH, 'utf8');
+    expect(readme).toContain('## Registering blocks, field types and widgets');
+    expect(readme).toContain('definePagesConfig');
+    expect(readme).toContain('constrainBlock');
+    // The override-order paragraph specifically -- distinct from
+    // `definePagesConfig`/`constrainBlock` merely appearing in a Public API
+    // table row, which would survive the paragraph's deletion undetected.
+    expect(readme).toContain('position alone decides');
+  });
 });
