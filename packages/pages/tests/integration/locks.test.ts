@@ -520,6 +520,111 @@ const CALL_SITES: readonly CallSite[] = [
   },
 ];
 
+/** One call site whose write reaches a whole subtree, not only the page it
+ * is called on -- `movePage`/`renamePage`/`restorePageFromTrash` each
+ * rewrite every descendant's row too (T-04-58). `build` creates a root page
+ * and one child beneath it as `creator`, returning both ids plus a thunk
+ * that performs the write on the ROOT as `actor` -- so a lock acquired on
+ * the DESCENDANT (never the root itself) is what every case below
+ * exercises, proving the guard covers the whole loaded subtree and not just
+ * the row named in the call's own `pageId`. */
+type DescendantLockCallSite = {
+  readonly name: string;
+  readonly build: (
+    deps: PagesDeps,
+    creator: AuditActor,
+  ) => Promise<{
+    readonly rootPageId: string;
+    readonly descendantPageId: string;
+    readonly call: (deps: PagesDeps, actor: AuditActor) => Promise<unknown>;
+  }>;
+};
+
+const DESCENDANT_LOCK_CALL_SITES: readonly DescendantLockCallSite[] = [
+  {
+    name: 'movePage',
+    build: async (deps, creator) => {
+      const destination = await createPage(deps, creator, {
+        locale: 'en',
+        title: `descendant movePage destination ${randomUUID()}`,
+      });
+      const root = await createPage(deps, creator, {
+        locale: 'en',
+        title: `descendant movePage root ${randomUUID()}`,
+      });
+      const child = await createPage(deps, creator, {
+        locale: 'en',
+        title: `descendant movePage child ${randomUUID()}`,
+        parentPageId: root.id,
+      });
+      return {
+        rootPageId: root.id,
+        descendantPageId: child.id,
+        call: (deps2, actor) =>
+          movePage(deps2, actor, {
+            pageId: root.id,
+            baseVersion: root.version,
+            newParentPageId: destination.id,
+          }),
+      };
+    },
+  },
+  {
+    name: 'renamePage',
+    build: async (deps, creator) => {
+      const root = await createPage(deps, creator, {
+        locale: 'en',
+        title: `descendant renamePage root ${randomUUID()}`,
+      });
+      const child = await createPage(deps, creator, {
+        locale: 'en',
+        title: `descendant renamePage child ${randomUUID()}`,
+        parentPageId: root.id,
+      });
+      return {
+        rootPageId: root.id,
+        descendantPageId: child.id,
+        call: (deps2, actor) =>
+          renamePage(deps2, actor, {
+            pageId: root.id,
+            baseVersion: root.version,
+            slug: `renamed-${randomUUID()}`,
+          }),
+      };
+    },
+  },
+  {
+    name: 'restorePageFromTrash',
+    build: async (deps, creator) => {
+      const root = await createPage(deps, creator, {
+        locale: 'en',
+        title: `descendant restorePageFromTrash root ${randomUUID()}`,
+      });
+      const child = await createPage(deps, creator, {
+        locale: 'en',
+        title: `descendant restorePageFromTrash child ${randomUUID()}`,
+        parentPageId: root.id,
+      });
+      // trashPage cascades over the whole subtree, so the child is trashed
+      // (and shares the root's `trashed_at`) too -- exactly the state
+      // `restorePageFromTrash` reads back.
+      const trashed = await trashPage(deps, creator, {
+        pageId: root.id,
+        baseVersion: root.version,
+      });
+      return {
+        rootPageId: root.id,
+        descendantPageId: child.id,
+        call: (deps2, actor) =>
+          restorePageFromTrash(deps2, actor, {
+            pageId: root.id,
+            baseVersion: trashed.version,
+          }),
+      };
+    },
+  },
+];
+
 describe('page+locale edit locking: the write guard, proven against real Postgres (D-39, D-41, 03 D-43/44/45)', () => {
   let testDatabase: TestDatabase;
   let handle: Db;
@@ -773,6 +878,51 @@ describe('page+locale edit locking: the write guard, proven against real Postgre
       async (site) => {
         const { pageId, call } = await site.build(deps, userA);
         await acquirePageLock(deps, userA, { pageId });
+        clock.advance(PAGE_EDIT_LOCK_TTL_SECONDS + 1);
+
+        const result = await call(deps, userB);
+        expect(result).toBeDefined();
+      },
+    );
+  });
+
+  describe('descendant lock: the whole subtree is guarded, not only the root (T-04-58)', () => {
+    it.each(DESCENDANT_LOCK_CALL_SITES)(
+      '$name: refused with PageLockedError while userA holds a live lock on a DESCENDANT (never the root), changing nothing',
+      async (site) => {
+        const { rootPageId, descendantPageId, call } = await site.build(
+          deps,
+          userA,
+        );
+        await acquirePageLock(deps, userA, { pageId: descendantPageId });
+
+        const before = await mustGetPage(deps, rootPageId);
+        const error: unknown = await call(deps, userB).catch(
+          (caught: unknown) => caught,
+        );
+        expect(error).toBeInstanceOf(PageLockedError);
+
+        const after = await mustGetPage(deps, rootPageId);
+        expect(after.version).toBe(before.version);
+      },
+    );
+
+    it.each(DESCENDANT_LOCK_CALL_SITES)(
+      '$name: succeeds for the descendant lock holder itself',
+      async (site) => {
+        const { descendantPageId, call } = await site.build(deps, userA);
+        await acquirePageLock(deps, userA, { pageId: descendantPageId });
+
+        const result = await call(deps, userA);
+        expect(result).toBeDefined();
+      },
+    );
+
+    it.each(DESCENDANT_LOCK_CALL_SITES)(
+      '$name: succeeds for anyone once the descendant lock has lapsed (injected clock, not a real wait)',
+      async (site) => {
+        const { descendantPageId, call } = await site.build(deps, userA);
+        await acquirePageLock(deps, userA, { pageId: descendantPageId });
         clock.advance(PAGE_EDIT_LOCK_TTL_SECONDS + 1);
 
         const result = await call(deps, userB);
