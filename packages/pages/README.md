@@ -491,6 +491,15 @@ whichever later phase builds the history/restore UI.
 | `RenewPageLockInput`               | type     | Input to `renewPageLock`                                             |
 | `TakeOverPageLockInput`            | type     | Input to `takeOverPageLock`                                          |
 
+**Deliberately lock-exempt.** `compactBlockType` (schema compaction),
+`setPageUrlPattern` (the project-wide URL pattern change) and `purgeLocale`
+(the locale purge) never call the write guard above -- each is a project-wide
+administrative bulk operation, not a single page's edit, and a per-page edit
+lock blocking one would be impractical. Each is gated by its own permission
+(`pages:edit`, `pages:publish`, and the dual `pages:delete-permanent` +
+`entries:delete-permanent` check respectively) and recorded through
+`deps.recorder.run` instead.
+
 Nothing else is reachable from the entry point. In particular the block-
 revision writer and its cap-pruning sweep, the row-locking page read and the
 append-only URL-history writer, the write-time placement/depth/section

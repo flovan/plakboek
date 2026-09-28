@@ -162,6 +162,13 @@ export type CompactBlockTypeInput = {
  * older base version is told, not silently overwritten), and gets one
  * `update`-kind revision, all rewritten rows in this run sharing one
  * `revision_batch_id` so the pre-compaction props stay recoverable (D-13).
+ *
+ * Deliberately lock-exempt (T-04-58): this rewrites every stored instance of
+ * one block type across every page that holds it, project-wide -- not a
+ * single page's edit. It never calls `assertPageWritable`. A per-page edit
+ * lock blocking a project-wide schema compaction would be impractical; the
+ * `pages:edit` permission check and the `recorder.run` audit trail are this
+ * operation's own guard.
  */
 export async function compactBlockType(
   deps: PagesDeps,

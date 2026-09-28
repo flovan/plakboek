@@ -343,6 +343,12 @@ export type SetPageUrlPatternInput = {
  * changes, no history is recorded, but the audited mutation still records
  * one row. Runs through `deps.recorder.run` (`pages:publish` /
  * `page.set-url-pattern`).
+ *
+ * Deliberately lock-exempt (T-04-58): this rewrites `resolved_path` on
+ * every published page, project-wide -- not a single page's edit. It never
+ * calls `assertPageWritable`. A per-page edit lock blocking a project-wide
+ * URL-pattern change would be impractical; the `pages:publish` permission
+ * check and the `recorder.run` audit trail are this operation's own guard.
  */
 export async function setPageUrlPattern(
   deps: PagesDeps,

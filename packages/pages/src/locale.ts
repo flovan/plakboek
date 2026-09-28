@@ -253,6 +253,13 @@ export type PurgeLocaleInput = { readonly locale: string };
  * `pages` -- then calls `purgeLocaleEntriesInTransaction` on the *same*
  * transaction so the two engines either both complete or both roll back.
  * Returns the recomputed counts from both engines.
+ *
+ * Deliberately lock-exempt (T-04-58): this deletes every page and block row
+ * for a whole locale, project-wide -- not a single page's edit. It never
+ * calls `assertPageWritable`. A per-page edit lock blocking a locale purge
+ * would be impractical; the dual `pages:delete-permanent` +
+ * `entries:delete-permanent` permission check above and the `recorder.run`
+ * audit trail are this operation's own guard.
  */
 export async function purgeLocale(
   deps: PagesDeps,
