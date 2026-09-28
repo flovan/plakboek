@@ -459,9 +459,37 @@ export function defineBlocks(
   return Object.freeze([...byKey.values()]);
 }
 
+/**
+ * Replaces the module-level registry wholesale with an already-resolved set
+ * of definitions -- called by `definePagesConfig` (config.ts) once
+ * `applyBlockConstraints` has attached each block's resolved `constraints`
+ * map, so `getBlockDefinition` (and everything that reads through it:
+ * `insertBlock`, `updateBlockProps`, `moveBlock`, `buildPageSnapshot`, ...)
+ * resolves the SAME constrained definitions `definePagesConfig` returns as
+ * `PagesConfig.blocks` -- never the unconstrained set `defineBlocks` first
+ * registered. Whole-registry replacement, not a merge, mirrors `defineBlocks`
+ * itself (D-05): `definePagesConfig` is meant to be the one authoritative
+ * call composing a host's real config, so calling it again (a host's own
+ * config module re-evaluated, or a test process building a fresh config
+ * per test) simply replaces the registry again -- the same last-call-wins
+ * semantics `defineBlocks` already has, not a new source of drift. Not part
+ * of this package's public barrel: a caller reaching this directly could
+ * desync the registry from a `PagesConfig` no one holds anymore.
+ */
+export function registerResolvedBlocks(
+  definitions: readonly BlockDefinition[],
+): void {
+  registry.clear();
+  for (const definition of definitions) {
+    registry.set(definition.key, definition);
+  }
+}
+
 /** Reads a block's definition by its `block_type`/key, from the
- * module-level registry `defineBlocks` populates. Throws
- * `UnknownBlockTypeError` when absent. */
+ * module-level registry `defineBlocks` populates and `definePagesConfig`
+ * (config.ts) then re-populates with each block's resolved constraints
+ * (`registerResolvedBlocks`, D-04). Throws `UnknownBlockTypeError` when
+ * absent. */
 export function getBlockDefinition(key: string): BlockDefinition {
   const definition = registry.get(key);
   if (definition === undefined) {

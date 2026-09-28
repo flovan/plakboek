@@ -14,6 +14,12 @@
  * (`registerHostFieldType`, `registerHostWidget`) in array order, each
  * under the identical last-wins-by-array-position rule `defineBlocks`
  * already applies to blocks -- one override rule serves all three kinds.
+ * After `applyBlockConstraints` (constraints.ts, D-04) resolves each block's
+ * per-property constraints, `registerResolvedBlocks` (registry.ts)
+ * re-populates the module-level registry with those SAME constrained
+ * definitions, so `getBlockDefinition` -- and every write/publish path that
+ * calls it -- can never resolve a different, unconstrained definition than
+ * the one this function returns as `PagesConfig.blocks`.
  */
 import type { AuditDatabase, AuditRecorder } from '@plakboek/auth';
 import {
@@ -30,7 +36,7 @@ import {
   applyBlockConstraints,
   type BlockConstraintSet,
 } from './constraints.js';
-import type { BlockDefinition } from './registry.js';
+import { registerResolvedBlocks, type BlockDefinition } from './registry.js';
 import {
   lintSectionProperties,
   reportSectionLint,
@@ -167,6 +173,16 @@ export function definePagesConfig(input: PagesConfigInput): PagesConfig {
   // never wrapped in `PagesConfigError` -- for the same reason a
   // `BlockConfigError`/`HostRegistrationError` above never is.
   const blocks = applyBlockConstraints(input.blocks, input.constraints ?? []);
+
+  // `defineBlocks` (registry.ts) already populated the module-level
+  // registry with the UNCONSTRAINED definitions -- `getBlockDefinition` and
+  // everything reading through it (`insertBlock`, `updateBlockProps`,
+  // `moveBlock`, `buildPageSnapshot`, ...) must resolve the SAME constrained
+  // definitions this function returns as `PagesConfig.blocks`, or a declared
+  // `hidden`/`fixed`/`narrowed` constraint would type-check and boot cleanly
+  // while having zero effect on any real write or publish path. This is the
+  // one call that keeps the two in sync (D-04).
+  registerResolvedBlocks(blocks);
 
   // The D-17 boot-time section lint (section-lint.ts) runs last, only after
   // registration and every collect-then-throw validation above has already
