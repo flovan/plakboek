@@ -607,13 +607,6 @@ export async function renamePage(
           page.version,
         );
       }
-      assertPageWritable(
-        [page],
-        await getPageEditLocking(tx),
-        actor.userId,
-        now(),
-      );
-
       let parentPath: string | null = null;
       if (page.parentPageId !== null) {
         const [parent] = await tx
@@ -640,6 +633,19 @@ export async function renamePage(
       const newPrefix = composePagePath(parentPath, newSlug);
 
       const subtree = await loadSubtreeForUpdate(tx, page.locale, page.path);
+      // The whole subtree, not just the renamed page's own row: a slug
+      // change rewrites path/version on every descendant too
+      // (applySubtreeRewrite, below), which is exactly the collision a
+      // colleague's live lock on any one of them exists to prevent. `subtree`
+      // already contains the renamed page's own row (loadSubtreeForUpdate's
+      // `path = rootPath` branch), so one call covers both -- mirrors
+      // lifecycle.ts's trashPage/deletePagePermanently precedent.
+      assertPageWritable(
+        subtree,
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
       const destinations = computeSubtreeDestinations(
         subtree,
         page.path,
@@ -738,13 +744,6 @@ export async function movePage(
           page.version,
         );
       }
-      assertPageWritable(
-        [page],
-        await getPageEditLocking(tx),
-        actor.userId,
-        now(),
-      );
-
       let destinationParentPath: string | null = null;
       if (input.newParentPageId !== null) {
         const [destinationParent] = await tx
@@ -762,6 +761,20 @@ export async function movePage(
       }
 
       const subtree = await loadSubtreeForUpdate(tx, page.locale, page.path);
+      // The whole subtree, not just the moved page's own row: moving
+      // rewrites path/parent_page_id/version on every descendant too
+      // (applySubtreeRewrite, below), which is exactly the collision a
+      // colleague's live lock on any one of them exists to prevent.
+      // `subtree` already contains the moved page's own row
+      // (loadSubtreeForUpdate's `path = rootPath` branch), so one call
+      // covers both -- mirrors lifecycle.ts's
+      // trashPage/deletePagePermanently precedent.
+      assertPageWritable(
+        subtree,
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
 
       if (input.newParentPageId !== null) {
         const isSelfOrDescendant = subtree.some(

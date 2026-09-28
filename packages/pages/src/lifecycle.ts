@@ -668,12 +668,6 @@ export async function restorePageFromTrash(
           current.version,
         );
       }
-      assertPageWritable(
-        [current],
-        await getPageEditLocking(tx),
-        actor.userId,
-        now(),
-      );
       if (current.status !== 'trashed') {
         throw new PageStatusError(current.id, current.status, ['trashed']);
       }
@@ -713,6 +707,19 @@ export async function restorePageFromTrash(
           ),
         )
         .for('update');
+      // The whole matched subtree, not just the restored page's own row:
+      // restoring rewrites status/trashed_at/version on every one of these
+      // rows (the batched UPDATE below), which is exactly the collision a
+      // colleague's live lock on any one of them exists to prevent. `rows`
+      // already contains the restored page's own row (subtreeCondition's
+      // `path = rootPath` branch), so one call covers both -- mirrors this
+      // module's own trashPage/deletePagePermanently precedent.
+      assertPageWritable(
+        rows,
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
       const ids = rows.map((row) => row.id);
 
       const updatedAt = now();
