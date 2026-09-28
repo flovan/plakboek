@@ -22,6 +22,11 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PagesDeps, PagesHooks } from './config.js';
 import { getPage, loadPageForUpdate, PageNotFoundError } from './pages.js';
 import {
+  assertPageAddressAvailable,
+  computePageResolvedPath,
+  pageUrlCollisionFromUniqueViolation,
+} from './page-routing.js';
+import {
   BlockPropsValidationError,
   getBlockDefinition,
   resolveBlockProperties,
@@ -29,6 +34,7 @@ import {
 } from './registry.js';
 import { newRevisionBatchId, recordBlockRevision } from './revisions.js';
 import { pagePublications, pages } from './schema.js';
+import { getPageUrlPattern } from './settings.js';
 import { StalePageVersionError, readBlockTree } from './tree.js';
 import type { BlockNode, PageRecord } from './types.js';
 import type { DegradedReason } from './versioning.js';
@@ -271,10 +277,17 @@ type MaterialisePublicationResult = {
  * manifest-referenced revisions are both `'publish'`-kind and therefore
  * never pruned (D-28). Inserts the `page_publications` row with
  * `is_draft` set from `options.isDraft`. Only a non-draft additionally
- * moves the owning page's `live_publication_id`, `status` to
- * `'published'`, `published_at` and (only the first time) `
- * first_published_at`, and bumps `pages.version` -- a draft touches none
- * of those: taking a preview is not an edit.
+ * materialises the page's address (D-22): reads the project-wide pattern
+ * (`getPageUrlPattern`), computes `resolved_path` from this page's own
+ * `locale`/`path` (`computePageResolvedPath`), and checks it is free
+ * (`assertPageAddressAvailable`) before writing it -- a 23505 on
+ * `pages_locale_resolved_path_unique` from a concurrent publish racing
+ * past that check is mapped through `pageUrlCollisionFromUniqueViolation`
+ * into the same domain error, never a bare driver error. It then moves the
+ * owning page's `live_publication_id`, `status` to `'published'`,
+ * `published_at` and (only the first time) its first-published marker,
+ * and bumps `pages.version` -- a draft touches none of those, including
+ * the address: taking a preview is not an edit.
  */
 async function materialisePublication(
   tx: AuditTransaction,
@@ -348,18 +361,40 @@ async function materialisePublication(
   }
 
   if (!options.isDraft) {
-    await tx
-      .update(pages)
-      .set({
-        livePublicationId: publication.id,
-        status: 'published',
-        publishedAt,
-        ...(page.firstPublishedAt === null
-          ? { firstPublishedAt: publishedAt }
-          : {}),
-        version: sql`${pages.version} + 1`,
-      })
-      .where(eq(pages.id, page.id));
+    const pattern = await getPageUrlPattern(tx);
+    const resolvedPath = computePageResolvedPath({
+      pattern,
+      locale: page.locale,
+      path: page.path,
+    });
+    await assertPageAddressAvailable(tx, {
+      locale: page.locale,
+      resolvedPath,
+      excludePageId: page.id,
+    });
+
+    try {
+      await tx
+        .update(pages)
+        .set({
+          livePublicationId: publication.id,
+          status: 'published',
+          resolvedPath,
+          publishedAt,
+          ...(page.firstPublishedAt === null
+            ? { firstPublishedAt: publishedAt }
+            : {}),
+          version: sql`${pages.version} + 1`,
+        })
+        .where(eq(pages.id, page.id));
+    } catch (error) {
+      const collision = pageUrlCollisionFromUniqueViolation(error, {
+        locale: page.locale,
+        resolvedPath,
+      });
+      if (collision !== null) throw collision;
+      throw error;
+    }
   }
 
   const record = toPagePublicationRecord(publication);
