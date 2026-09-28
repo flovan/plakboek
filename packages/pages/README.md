@@ -405,6 +405,16 @@ point, so an export cannot be added or removed without updating them.
 | `RestoreRevisionBatchInput`       | type     | Input to `restoreRevisionBatch`                                               |
 | `RevisionBatchSummary`            | type     | One entry in `listPageRevisionBatches`' result                                |
 
+**Known limitation:** `restoreRevisionBatch` recreates a single deleted
+block correctly under a fresh id. Restoring a whole subtree deleted
+together in one batch (several blocks recreated at once, a descendant
+whose recorded `parent_block_id` names a sibling also being recreated in
+the same call) does not remap that linkage onto the siblings' newly
+assigned ids -- it fails loudly with a foreign-key violation rather than
+silently reparenting onto the wrong block. A single deleted block restores
+correctly today; multi-block subtree-delete restore is deferred to
+whichever later phase builds the history/restore UI.
+
 ### Publish and draft snapshots (D-30..D-33)
 
 | Export                      | Kind     | Purpose                                                                                        |
