@@ -24,6 +24,7 @@ import {
   defineRoles,
   type PermissionResolver,
 } from '@plakboek/permissions';
+import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { definePagesConfig, type PagesDeps } from '../../src/config.js';
 import {
@@ -54,6 +55,8 @@ import {
 } from '../../src/pages.js';
 import { createDraftSnapshot, publishPage } from '../../src/publish.js';
 import { defineBlocks } from '../../src/registry.js';
+import { restoreRevisionBatch } from '../../src/revisions.js';
+import { blockRevisions } from '../../src/schema.js';
 import { setPageEditLocking } from '../../src/settings.js';
 import { createPageTranslation } from '../../src/translations.js';
 import {
@@ -470,6 +473,47 @@ const CALL_SITES: readonly CallSite[] = [
           deletePagePermanently(deps2, actor, {
             pageId: page.id,
             baseVersion: page.version,
+          }),
+      };
+    },
+  },
+  {
+    // Code review CR-01: `restoreRevisionBatch` (revisions.ts) writes
+    // `page_blocks` rows and bumps `pages.version` exactly like every other
+    // structural write in this package, but shipped (04-08) before the page
+    // edit lock (04-14) existed, so it was never wired into this call-site
+    // table -- the exact gap the review caught.
+    name: 'restoreRevisionBatch',
+    build: async (deps, creator) => {
+      const page = await createPage(deps, creator, {
+        locale: 'en',
+        title: `restoreRevisionBatch ${randomUUID()}`,
+      });
+      const owner = ownerOf(page.id, 'en');
+      const section = await insertBlock(deps, creator, {
+        owner,
+        blockType: 'section',
+        parentBlockId: null,
+        basePageVersion: page.version,
+      });
+      const [revisionRow] = await deps.db
+        .select({ revisionBatchId: blockRevisions.revisionBatchId })
+        .from(blockRevisions)
+        .where(
+          and(
+            eq(blockRevisions.blockId, section.id),
+            eq(blockRevisions.changeType, 'create'),
+          ),
+        );
+      const revisionBatchId = revisionRow!.revisionBatchId;
+      const fresh = await mustGetPage(deps, page.id);
+      return {
+        pageId: page.id,
+        call: (deps2, actor) =>
+          restoreRevisionBatch(deps2, actor, {
+            revisionBatchId,
+            pageId: page.id,
+            basePageVersion: fresh.version,
           }),
       };
     },

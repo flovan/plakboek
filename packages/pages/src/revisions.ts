@@ -17,6 +17,7 @@ import type {
 import { getFieldTypeDefinition } from '@plakboek/content';
 import { asc, eq, sql } from 'drizzle-orm';
 import type { PagesDeps } from './config.js';
+import { assertPageWritable } from './locks.js';
 import { loadPageForUpdate, StalePageVersionError } from './pages.js';
 import { assertPlacementAllowed, countAncestorSections } from './placement.js';
 import {
@@ -27,6 +28,7 @@ import {
   type BlockDefinition,
 } from './registry.js';
 import { blockRevisions, pageBlocks, pages } from './schema.js';
+import { getPageEditLocking } from './settings.js';
 import {
   BLOCK_CHANGE_TYPES,
   BLOCK_REVISION_KINDS,
@@ -799,6 +801,12 @@ export async function restoreRevisionBatch(
           page.version,
         );
       }
+      assertPageWritable(
+        [page],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
 
       const rawRows = await loadBatchRevisionRows(tx, input.revisionBatchId);
       const rawByRevisionId = new Map(rawRows.map((row) => [row.id, row]));
