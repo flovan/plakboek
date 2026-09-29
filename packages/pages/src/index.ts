@@ -306,6 +306,7 @@ export {
   computeBlockDeleteImpact,
   deleteBlock,
   insertBlock,
+  InvalidSiblingReferenceError,
   moveBlock,
   readBlockTree,
   StaleBlockVersionError,

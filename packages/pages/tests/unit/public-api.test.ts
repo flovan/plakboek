@@ -123,6 +123,7 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   computeBlockDeleteImpact: 'function',
   deleteBlock: 'function',
   insertBlock: 'function',
+  InvalidSiblingReferenceError: 'class',
   moveBlock: 'function',
   readBlockTree: 'function',
   StaleBlockVersionError: 'class',
@@ -426,6 +427,12 @@ const ERROR_FACTORIES: Readonly<
   BlockNotFoundError: (K) => new (K as new (id: string) => unknown)('block-id'),
   CircularMoveError: (K) =>
     new (K as new (b: string, d: string) => unknown)('block-id', 'other-id'),
+  InvalidSiblingReferenceError: (K) =>
+    new (K as new (s: string, e: string | null, a: string | null) => unknown)(
+      'sibling-id',
+      'expected-parent-id',
+      'actual-parent-id',
+    ),
   StaleBlockVersionError: (K) =>
     new (K as new (id: string, e: number, a: number) => unknown)(
       'block-id',

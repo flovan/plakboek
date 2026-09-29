@@ -38,6 +38,7 @@ import {
   CircularMoveError,
   deleteBlock,
   insertBlock,
+  InvalidSiblingReferenceError,
   moveBlock,
   readBlockTree,
 } from '../../src/tree.js';
@@ -508,6 +509,73 @@ describe('moveBlock/deleteBlock/computeBlockDeleteImpact (D-08, D-18, D-27, D-38
     expect(secondRow.sortOrder % 1000).toBe(0);
     expect(movingRow.sortOrder).toBeGreaterThan(firstRow.sortOrder);
     expect(movingRow.sortOrder).toBeLessThan(secondRow.sortOrder);
+  });
+
+  it('a beforeSiblingId/afterSiblingId belonging to an unrelated parent throws InvalidSiblingReferenceError and writes nothing (code review WR-02)', async () => {
+    const page = await freshPage(
+      'Sibling reference must belong to destination',
+    );
+    const owner = ownerOf(page);
+    const destination = await insert(page, owner, 'section', null);
+    const destinationSibling = await insert(
+      page,
+      owner,
+      'heading',
+      destination.id,
+    );
+    const unrelatedParent = await insert(page, owner, 'section', null);
+    const unrelatedSibling = await insert(
+      page,
+      owner,
+      'heading',
+      unrelatedParent.id,
+    );
+    const moving = await insert(page, owner, 'heading', destination.id);
+    const before = await blockRow(moving.id);
+
+    const errorAsBefore: unknown = await moveBlock(deps, actor, {
+      blockId: moving.id,
+      baseVersion: moving.version,
+      pageId: page.id,
+      basePageVersion: (await currentPage(page.id)).version,
+      newParentBlockId: destination.id,
+      beforeSiblingId: unrelatedSibling.id,
+    }).catch((caught: unknown) => caught);
+    expect(errorAsBefore).toBeInstanceOf(InvalidSiblingReferenceError);
+    expect((errorAsBefore as InvalidSiblingReferenceError).siblingId).toBe(
+      unrelatedSibling.id,
+    );
+    expect(
+      (errorAsBefore as InvalidSiblingReferenceError).expectedParentBlockId,
+    ).toBe(destination.id);
+    expect(
+      (errorAsBefore as InvalidSiblingReferenceError).actualParentBlockId,
+    ).toBe(unrelatedParent.id);
+    expect(await blockRow(moving.id)).toEqual(before);
+
+    const errorAsAfter: unknown = await moveBlock(deps, actor, {
+      blockId: moving.id,
+      baseVersion: moving.version,
+      pageId: page.id,
+      basePageVersion: (await currentPage(page.id)).version,
+      newParentBlockId: destination.id,
+      afterSiblingId: unrelatedSibling.id,
+    }).catch((caught: unknown) => caught);
+    expect(errorAsAfter).toBeInstanceOf(InvalidSiblingReferenceError);
+    expect(await blockRow(moving.id)).toEqual(before);
+
+    // A sibling id that DOES belong to the destination parent still works,
+    // proving the check is scoped to the mismatch, not siblings generally.
+    await moveBlock(deps, actor, {
+      blockId: moving.id,
+      baseVersion: moving.version,
+      pageId: page.id,
+      basePageVersion: (await currentPage(page.id)).version,
+      newParentBlockId: destination.id,
+      beforeSiblingId: destinationSibling.id,
+    });
+    const orderedIds = await siblingIdsInOrder(destination.id, page.id);
+    expect(orderedIds).toEqual([destinationSibling.id, moving.id]);
   });
 
   it('deleting a block with two descendants removes three rows and writes three delete-kind revisions sharing one revision_batch_id', async () => {

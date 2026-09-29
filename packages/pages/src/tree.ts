@@ -691,6 +691,38 @@ export class CircularMoveError extends Error {
   }
 }
 
+/** Thrown by `moveBlock` when `beforeSiblingId`/`afterSiblingId` names a
+ * block that does not actually belong to the destination parent -- e.g. a
+ * caller-supplied id left over from an unrelated parent's sibling list.
+ * Without this check the id would still resolve (`resolveSiblingSortOrder`
+ * loads purely by id), and the moved block's `sort_order` would be computed
+ * relative to a block outside its real sibling list (code review WR-02). */
+export class InvalidSiblingReferenceError extends Error {
+  readonly siblingId: string;
+  readonly expectedParentBlockId: string | null;
+  readonly actualParentBlockId: string | null;
+
+  constructor(
+    siblingId: string,
+    expectedParentBlockId: string | null,
+    actualParentBlockId: string | null,
+  ) {
+    super(
+      `@plakboek/pages: sibling "${siblingId}" does not belong to destination parent ${
+        expectedParentBlockId === null
+          ? '"<root>"'
+          : `"${expectedParentBlockId}"`
+      } (its actual parent is ${
+        actualParentBlockId === null ? '"<root>"' : `"${actualParentBlockId}"`
+      })`,
+    );
+    this.name = 'InvalidSiblingReferenceError';
+    this.siblingId = siblingId;
+    this.expectedParentBlockId = expectedParentBlockId;
+    this.actualParentBlockId = actualParentBlockId;
+  }
+}
+
 /** Loads a block's `parentBlockId`/`sortOrder`/`depth` for `moveBlock`'s
  * pre-transaction audit `before` snapshot (mirrors `pages.ts`'s
  * `movePage`/`renamePage`, which pre-fetch the same way before opening
@@ -721,19 +753,35 @@ async function loadBlockSnapshot(
  * from the destination sibling list -- `moveBlock`'s `beforeSiblingId`/
  * `afterSiblingId` inputs resolve through this. `null` when the input
  * itself is `null`/`undefined` (an end-of-list placement); throws
- * `BlockNotFoundError` when a named sibling id no longer exists. */
+ * `BlockNotFoundError` when a named sibling id no longer exists, and
+ * `InvalidSiblingReferenceError` when it exists but its own
+ * `parent_block_id` does not match `expectedParentBlockId` -- otherwise a
+ * caller-supplied id belonging to an unrelated parent would still be
+ * accepted, and the moved block's `sort_order` computed relative to it
+ * (code review WR-02). */
 async function resolveSiblingSortOrder(
   tx: AuditTransaction,
   siblingId: string | null | undefined,
+  expectedParentBlockId: string | null,
 ): Promise<number | null> {
   if (siblingId === null || siblingId === undefined) return null;
   const [row] = await tx
-    .select({ sortOrder: pageBlocks.sortOrder })
+    .select({
+      sortOrder: pageBlocks.sortOrder,
+      parentBlockId: pageBlocks.parentBlockId,
+    })
     .from(pageBlocks)
     .where(eq(pageBlocks.id, siblingId))
     .for('update');
   if (row === undefined) {
     throw new BlockNotFoundError(siblingId);
+  }
+  if (row.parentBlockId !== expectedParentBlockId) {
+    throw new InvalidSiblingReferenceError(
+      siblingId,
+      expectedParentBlockId,
+      row.parentBlockId,
+    );
   }
   return row.sortOrder;
 }
@@ -894,10 +942,12 @@ export async function moveBlock(
       const beforeOrder = await resolveSiblingSortOrder(
         tx,
         input.beforeSiblingId,
+        input.newParentBlockId,
       );
       const afterOrder = await resolveSiblingSortOrder(
         tx,
         input.afterSiblingId,
+        input.newParentBlockId,
       );
       let newSortOrder = sortOrderBetween(beforeOrder, afterOrder);
       if (needsRebalance(beforeOrder, afterOrder)) {
