@@ -1,5 +1,24 @@
 # @plakboek/content
 
+## 0.3.0
+
+### Minor Changes
+
+- [#11](https://github.com/flovan/plakboek/pull/11) [`f3b3682`](https://github.com/flovan/plakboek/commit/f3b368200d7df12f2ff9835b3aed8ca157a3d1d1) Thanks [@flovan](https://github.com/flovan)! - Add `registerHostFieldType` and `registerHostWidget`, a public, documented
+  way for a host to add its own field types and widgets without editing
+  core (EXT-02).
+
+- [#11](https://github.com/flovan/plakboek/pull/11) [`9f8f7a7`](https://github.com/flovan/plakboek/commit/9f8f7a7ef835bd9a6645d531f69ad73b3a334f2a) Thanks [@flovan](https://github.com/flovan)! - Add `computeLocalePurgeEntriesImpact`, `purgeLocaleEntries` and
+  `purgeLocaleEntriesInTransaction`, a public, audited way to preview and
+  permanently delete every entry in a locale.
+
+### Patch Changes
+
+- Updated dependencies [[`74d9ad8`](https://github.com/flovan/plakboek/commit/74d9ad820f0233a967b741cae735165237763d81)]:
+  - @plakboek/db@0.4.0
+  - @plakboek/auth@0.2.2
+  - @plakboek/permissions@0.4.0
+
 ## 0.2.0
 
 ### Minor Changes
