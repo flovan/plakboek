@@ -1,5 +1,13 @@
 # @plakboek/auth
 
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [[`74d9ad8`](https://github.com/flovan/plakboek/commit/74d9ad820f0233a967b741cae735165237763d81)]:
+  - @plakboek/db@0.4.0
+  - @plakboek/permissions@0.4.0
+
 ## 0.2.1
 
 ### Patch Changes

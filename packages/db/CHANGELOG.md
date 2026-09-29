@@ -1,5 +1,13 @@
 # @plakboek/db
 
+## 0.4.0
+
+### Minor Changes
+
+- [#11](https://github.com/flovan/plakboek/pull/11) [`74d9ad8`](https://github.com/flovan/plakboek/commit/74d9ad820f0233a967b741cae735165237763d81) Thanks [@flovan](https://github.com/flovan)! - Add the 0003_page_block_engine migration, creating the page and block-tree
+  tables (pages, page_blocks, block_revisions, page_publications,
+  page_url_history, page_engine_settings) used by @plakboek/pages.
+
 ## 0.3.0
 
 ### Minor Changes
