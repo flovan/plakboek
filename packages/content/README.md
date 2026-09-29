@@ -32,12 +32,17 @@ them.
 
 Nothing else is reachable from the entry point. In particular the save
 transaction body and its permission/snapshot helpers, the unfiltered and
-row-locking entry reads, the field-type registration function, every
-field type's own definition constant, the transaction-scoped writers
-(revisions, URL history, key history, the reference index, slug
+row-locking entry reads, the raw, unvalidated field-type registration
+function (the validating public door onto it is `registerHostFieldType`,
+below), every field type's own definition constant, the transaction-scoped
+writers (revisions, URL history, key history, the reference index, slug
 generation), and every Drizzle schema table stay internal: with them a
 consumer could write or read content around the audited, version-checked,
-locale-filtered paths this package guarantees.
+locale-filtered paths this package guarantees. One deliberate exception:
+`purgeLocaleEntriesInTransaction` takes a transaction handle too, but is
+exported anyway so `@plakboek/pages`'s cross-package `purgeLocale` can run it
+inside its own transaction (D-37) -- a caller using it owns the audit record
+for the whole operation it's part of.
 
 ### Host config
 
@@ -68,16 +73,63 @@ locale-filtered paths this package guarantees.
 
 ### Field-type registry (read side)
 
-| Export                   | Kind     | Purpose                                                                             |
-| ------------------------ | -------- | ----------------------------------------------------------------------------------- |
-| `FIELD_TYPES`            | constant | The sixteen registered field types, in `content_type_fields_field_type_check` order |
-| `isFieldType`            | function | Whether a string is one of `FIELD_TYPES`                                            |
-| `getFieldTypeDefinition` | function | The registered `FieldTypeDefinition` for a field type                               |
-| `parseFieldOptions`      | function | Validates a field type's `options` against its own schema                           |
-| `UnknownFieldTypeError`  | class    | A `field_type` string has no registered definition                                  |
-| `FieldDefinitionError`   | class    | Invalid `options` for a field type, or an empty generated field key                 |
-| `FieldType`              | type     | One of `FIELD_TYPES`                                                                |
-| `FieldTypeDefinition`    | type     | One field type's contract: options schema, value-schema builder, widgets            |
+| Export                      | Kind     | Purpose                                                                                        |
+| --------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `FIELD_TYPES`               | constant | The sixteen registered field types, in `content_type_fields_field_type_check` order            |
+| `isFieldType`               | function | Whether a string is one of `FIELD_TYPES`                                                       |
+| `getFieldTypeDefinition`    | function | The registered `FieldTypeDefinition` (or host definition) for a field type                     |
+| `parseFieldOptions`         | function | Validates a field type's `options` against its own schema                                      |
+| `registerHostFieldType`     | function | Registers one or more host field types, collect-then-throw validated                           |
+| `getFieldTypeWidgets`       | function | A field type's own widgets plus every widget registered for it through `registerHostWidget`    |
+| `UnknownFieldTypeError`     | class    | A `field_type` string has no registered definition                                             |
+| `FieldDefinitionError`      | class    | Invalid `options` for a field type, or an empty generated field key                            |
+| `HostRegistrationError`     | class    | Thrown by `registerHostFieldType`/`registerHostWidget` with every problem found                |
+| `FieldType`                 | type     | One of `FIELD_TYPES`                                                                           |
+| `FieldTypeDefinition`       | type     | One built-in field type's contract: options schema, value-schema builder, widgets              |
+| `HostFieldTypeDefinition`   | type     | A host field type's own contract; identical to `FieldTypeDefinition` except a plain string key |
+| `HostRegistrationIssue`     | type     | One `registerHostFieldType`/`registerHostWidget` problem                                       |
+| `HostRegistrationIssueCode` | type     | One `HostRegistrationIssue` problem code                                                       |
+| `ShadowedFieldTypeEvent`    | type     | What `onShadowedFieldType` receives when a host registration overwrites a built-in             |
+
+### Registering host field types and widgets
+
+| Export                 | Kind     | Purpose                                                                |
+| ---------------------- | -------- | ---------------------------------------------------------------------- |
+| `registerHostWidget`   | function | Registers an additional widget against an existing field type          |
+| `HostWidgetDefinition` | type     | One host widget declaration: `fieldType`, `widget`, opaque `component` |
+
+A host registers its own field types and widgets from its own config
+module at boot, the same way it registers blocks (D-07): the last entry
+with a given key wins, and shadowing a built-in field type is permitted but
+never silent -- it fires `onShadowedFieldType` (or a console warning by
+default) before the overwrite.
+
+```ts
+import { registerHostFieldType, registerHostWidget } from '@plakboek/content';
+
+registerHostFieldType([
+  {
+    fieldType: 'color',
+    optionsSchema: z.strictObject({}),
+    buildValueSchema: () => z.string().regex(/^#[0-9a-f]{6}$/),
+    isEmptyValue: (value) =>
+      value === undefined || value === null || value === '',
+    widgets: ['color-picker'],
+    defaultWidget: 'color-picker',
+    allowedInRepeater: true,
+  },
+]);
+
+registerHostWidget([{ fieldType: 'short_text', widget: 'markdown-editor' }]);
+```
+
+A host field type registered this way is usable everywhere a built-in one
+is: `getFieldTypeDefinition` resolves it by name, `addField` accepts it
+where `content_type_fields.field_type` allows it, and a repeater accepts it
+as a sub-field when it declares `allowedInRepeater: true`. `isFieldType`
+stays scoped to the sixteen built-ins only -- host types are validated in
+the application layer, not by the `content_type_fields_field_type_check`
+CHECK constraint.
 
 ### Field-type validation constants
 
@@ -413,3 +465,20 @@ locale-filtered paths this package guarantees.
 | `EntryReferenceUsageEntry`        | type     | One entry in `computeEntryReferenceUsage`'s result                               |
 | `EntryReferenceUsage`             | type     | The result of `computeEntryReferenceUsage`                                       |
 | `ComputeEntryReferenceUsageInput` | type     | Input to `computeEntryReferenceUsage`                                            |
+
+### Locale purge
+
+| Export                            | Kind     | Purpose                                                                                              |
+| --------------------------------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `computeLocalePurgeEntriesImpact` | function | Previews what purging a locale's entries would delete; writes nothing                                |
+| `purgeLocaleEntries`              | function | Deletes every entry, revision, URL-history and reference row in a locale, audited                    |
+| `purgeLocaleEntriesInTransaction` | function | The same purge with no `recorder.run` of its own, for a caller running it inside its own transaction |
+| `LocalePurgeEntriesImpact`        | type     | The result of `computeLocalePurgeEntriesImpact`/`purgeLocaleEntries`                                 |
+| `LocalePurgeEntriesInput`         | type     | Input to all three: `{ locale }`                                                                     |
+
+Nothing in this package purges a locale implicitly (D-37): `checkContentLocales`
+only ever reports a removed locale's rows. `purgeLocaleEntries` is the one
+audited, permission-gated door for actually deleting them, requiring
+`entries:delete-permanent`. `@plakboek/pages`'s cross-package `purgeLocale`
+calls `purgeLocaleEntriesInTransaction` directly, inside its own transaction,
+so a page-engine purge and this entry purge commit or roll back together.

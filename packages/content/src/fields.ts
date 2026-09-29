@@ -10,6 +10,7 @@ import type { ContentDeps } from './config.js';
 import {
   FieldDefinitionError,
   getFieldTypeDefinition,
+  getFieldTypeWidgets,
   isFieldType,
   parseFieldOptions,
   type FieldType,
@@ -267,9 +268,10 @@ export async function addField(
         const definition = getFieldTypeDefinition(input.fieldType);
         const options = parseFieldOptions(input.fieldType, input.options ?? {});
         const widget = input.widget ?? definition.defaultWidget;
-        if (!definition.widgets.includes(widget)) {
+        const widgets = getFieldTypeWidgets(input.fieldType);
+        if (!widgets.includes(widget)) {
           throw new FieldDefinitionError('widget', [
-            `widget "${widget}" is not one of "${input.fieldType}"'s widgets (${definition.widgets.join(', ')})`,
+            `widget "${widget}" is not one of "${input.fieldType}"'s widgets (${widgets.join(', ')})`,
           ]);
         }
         let validatedDefault: unknown;
@@ -674,9 +676,10 @@ export async function updateField(
           ? parseFieldOptions(fieldType, input.options)
           : current.options;
       const widget = input.widget ?? current.widget;
-      if (!definition.widgets.includes(widget)) {
+      const widgets = getFieldTypeWidgets(fieldType);
+      if (!widgets.includes(widget)) {
         throw new FieldDefinitionError('widget', [
-          `widget "${widget}" is not one of "${fieldType}"'s widgets (${definition.widgets.join(', ')})`,
+          `widget "${widget}" is not one of "${fieldType}"'s widgets (${widgets.join(', ')})`,
         ]);
       }
 

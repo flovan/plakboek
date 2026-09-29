@@ -34,8 +34,13 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   isFieldType: 'function',
   getFieldTypeDefinition: 'function',
   parseFieldOptions: 'function',
+  registerHostFieldType: 'function',
+  getFieldTypeWidgets: 'function',
   UnknownFieldTypeError: 'class',
   FieldDefinitionError: 'class',
+  HostRegistrationError: 'class',
+  // widgets
+  registerHostWidget: 'function',
   // field-types/pattern-safety
   PATTERN_MAX_LENGTH: 'constant',
   isSafePattern: 'function',
@@ -197,6 +202,10 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   computeEntryReferenceUsage: 'function',
   ReferenceTargetMissingError: 'class',
   ReferenceTypeNotAllowedError: 'class',
+  // locale-purge
+  computeLocalePurgeEntriesImpact: 'function',
+  purgeLocaleEntries: 'function',
+  purgeLocaleEntriesInTransaction: 'function',
 });
 
 /** Every type the entry point exports. Types leave no runtime trace, so this
@@ -219,6 +228,12 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   // field-types/registry
   'FieldType',
   'FieldTypeDefinition',
+  'HostFieldTypeDefinition',
+  'HostRegistrationIssue',
+  'HostRegistrationIssueCode',
+  'ShadowedFieldTypeEvent',
+  // widgets
+  'HostWidgetDefinition',
   // field-types/options-map
   'FieldTypeOptionsMap',
   'FieldTypeWidgetMap',
@@ -330,6 +345,9 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'EntryReferenceUsageEntry',
   'EntryReferenceUsage',
   'ComputeEntryReferenceUsageInput',
+  // locale-purge
+  'LocalePurgeEntriesImpact',
+  'LocalePurgeEntriesInput',
 ]);
 
 /**
@@ -423,6 +441,7 @@ const ERROR_FACTORIES: Readonly<
     new (K as new (f: string) => unknown)('made_up'),
   FieldDefinitionError: (K) =>
     new (K as new (c: string, i: unknown[]) => unknown)('field key', []),
+  HostRegistrationError: (K) => new (K as new (i: unknown[]) => unknown)([]),
   FieldValidationError: (K) => new (K as new (i: unknown[]) => unknown)([]),
   SlugConflictError: (K) =>
     new (K as new (s: string, l: string, c: string) => unknown)(

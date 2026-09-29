@@ -72,7 +72,10 @@ tables (`"user"`, `session`, `account`, `verification`, `two_factor`) and
 the append-only `audit_log`. `0002_content_engine` follows it, creating the
 content engine tables (`content_types`, `content_type_fields`,
 `content_entries`, `entry_revisions` and their history, seed, reference and
-settings tables) used by `@plakboek/content`. See
+settings tables) used by `@plakboek/content`. `0003_page_block_engine`
+creates the page and block-tree tables (`pages`, `page_blocks`,
+`block_revisions`, `page_publications`, `page_url_history`,
+`page_engine_settings`) used by `@plakboek/pages`. See
 [`MIGRATIONS.md`](./MIGRATIONS.md) for how later migrations are added, the
 transactional-vs-existence-guarded-statement decision, and what each thrown
 error class means.

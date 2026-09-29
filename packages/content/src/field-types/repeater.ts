@@ -10,20 +10,27 @@
  * is validated by the sub-field's own value schema, and issues carry a path
  * of `[itemIndex, subFieldKey, ...]` under the field's own key.
  *
- * `getFieldTypeDefinition`/`isFieldType` are imported as real values from
- * `registry.ts`, which in turn imports this module to register it --
+ * `getFieldTypeDefinition` is imported as a real value from `registry.ts`,
+ * which in turn imports this module to register it --
  * `registry.ts` -> `repeater.ts` -> `registry.ts`. This is harmless because
- * this module never calls them at its own top level: `repeaterOptionsSchema`
+ * this module never calls it at its own top level: `repeaterOptionsSchema`
  * only *stores* the `superRefine`/`transform` callbacks below, it doesn't
  * invoke them, so by the time anything actually calls into the registry
  * (well after both modules have finished loading), every binding is fully
  * initialized.
+ *
+ * A sub-field's `fieldType` is resolved through `getFieldTypeDefinition`,
+ * not `isFieldType` (EXT-02, D-07): a host-registered field type is not one
+ * of the sixteen `FIELD_TYPES` values `isFieldType` checks, but must still
+ * be usable inside a repeater when it declares `allowedInRepeater`. An
+ * unresolvable `fieldType` is caught as `UnknownFieldTypeError` instead.
  */
 import { z } from 'zod';
 import {
   getFieldTypeDefinition,
-  isFieldType,
+  UnknownFieldTypeError,
   type FieldTypeDefinition,
+  type HostFieldTypeDefinition,
 } from './registry.js';
 
 export const REPEATER_MAX_ITEMS = 200;
@@ -63,15 +70,20 @@ const repeaterOptionsSchema = z
       }
       seenKeys.add(field.key);
 
-      if (!isFieldType(field.fieldType)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['fields', index, 'fieldType'],
-          message: `unknown field type "${field.fieldType}"`,
-        });
-        continue;
+      let definition: HostFieldTypeDefinition;
+      try {
+        definition = getFieldTypeDefinition(field.fieldType);
+      } catch (error) {
+        if (error instanceof UnknownFieldTypeError) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['fields', index, 'fieldType'],
+            message: `unknown field type "${field.fieldType}"`,
+          });
+          continue;
+        }
+        throw error;
       }
-      const definition = getFieldTypeDefinition(field.fieldType);
       if (!definition.allowedInRepeater) {
         ctx.addIssue({
           code: 'custom',
@@ -120,7 +132,7 @@ type RepeaterOptions = z.infer<typeof repeaterOptionsSchema>;
 type ResolvedSubField = {
   readonly key: string;
   readonly required: boolean;
-  readonly definition: FieldTypeDefinition<unknown>;
+  readonly definition: HostFieldTypeDefinition<unknown>;
   readonly options: unknown;
 };
 
@@ -129,10 +141,18 @@ function resolveSubFields(
 ): readonly ResolvedSubField[] {
   const resolved: ResolvedSubField[] = [];
   for (const field of fields) {
-    if (!isFieldType(field.fieldType) || field.fieldType === 'repeater') {
+    let definition: HostFieldTypeDefinition;
+    try {
+      definition = getFieldTypeDefinition(field.fieldType);
+    } catch (error) {
+      if (error instanceof UnknownFieldTypeError) {
+        continue;
+      }
+      throw error;
+    }
+    if (!definition.allowedInRepeater) {
       continue;
     }
-    const definition = getFieldTypeDefinition(field.fieldType);
     resolved.push({
       key: field.key,
       required: field.required === true,
