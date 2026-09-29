@@ -114,6 +114,16 @@ function isPositiveInteger(value: unknown): value is number {
  * frozen copy, defaulting `sectionNestingDepth` to
  * `DEFAULT_SECTION_NESTING_DEPTH` (D-18) and `blockDepthCeiling` to
  * `DEFAULT_BLOCK_DEPTH_CEILING` (04-RESEARCH.md Pitfall 6 / assumption A2).
+ *
+ * Call this exactly ONCE per process (registry.ts's own `WARNING` comment
+ * has the full hazard): it re-populates `registry.ts`'s process-wide,
+ * module-level block registry via `registerResolvedBlocks`, so a second,
+ * unrelated call in the same process -- a second host config composed
+ * alongside this one, or two test files sharing a Vitest worker without
+ * isolating module state -- silently reverts every subsequent
+ * `getBlockDefinition` read to that second call's definitions, desyncing
+ * this call's `PagesConfig.blocks` from what the registry actually enforces,
+ * with no error raised anywhere (code review WR-04).
  */
 export function definePagesConfig(input: PagesConfigInput): PagesConfig {
   // The single registration door (EXT-02, D-07): field types, then widgets,

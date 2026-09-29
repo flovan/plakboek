@@ -198,6 +198,23 @@ export class BlockPropsValidationError extends Error {
 // Keyed by plain `string`, populated by `defineBlocks` -- block types are a
 // host-declared, host-extensible registry (D-01), not a fixed built-in set
 // registered once at module load like `@plakboek/content`'s field types.
+//
+// WARNING (code review WR-04): this is process-wide, mutable, module-level
+// state, not scoped to any one `PagesConfig`. `getBlockDefinition`,
+// `resolveBlockProperties` and `validateBlockProps` all read THIS map, never
+// a `PagesConfig.blocks` value a particular caller holds -- so a second,
+// unrelated call to `defineBlocks` (a second host config composed in the
+// same process, or two test files sharing a worker without isolating module
+// state) silently reverts every read through this registry to that second
+// call's definitions, desyncing any `hidden`/`fixed`/`narrowed` constraint
+// an earlier `definePagesConfig` call resolved and is still relying on --
+// with no error raised anywhere. `definePagesConfig` (config.ts) is
+// documented as the one authoritative call composing a host's real config
+// for exactly this reason: call it exactly ONCE per process (per Vitest
+// worker, per server instance). Threading the resolved block map through
+// `PagesDeps` instead of this shared singleton would remove the hazard
+// entirely, but is a real API-shape change and out of scope for a review
+// fix -- this comment is the deliberate, do-nothing-riskier mitigation.
 const registry = new Map<string, BlockDefinition>();
 
 function resolvePlacement(
