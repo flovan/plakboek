@@ -32,6 +32,7 @@ import {
   deletePagePermanently,
   PageStatusError,
   restorePageFromTrash,
+  schedulePage,
   trashPage,
 } from '../../src/lifecycle.js';
 import { createPage, getPage } from '../../src/pages.js';
@@ -199,6 +200,39 @@ describe('page lifecycle: trash, restore and the permanent delete with its impac
     const childAfterRestore = await getPage(db, child.id);
     expect(childAfterRestore?.status).toBe('draft');
     expect(childAfterRestore?.trashedAt).toBeNull();
+  });
+
+  it('trashing a scheduled page directly clears scheduledAt, and restoring never lets it resurface (code review WR-03)', async () => {
+    const page = await createPage(deps, actor, {
+      locale: 'en',
+      title: 'Scheduled then trashed',
+      slug: 'scheduled-then-trashed',
+    });
+    const scheduledAt = new Date('2026-10-15T09:00:00.000Z');
+    const scheduled = await schedulePage(deps, actor, {
+      pageId: page.id,
+      baseVersion: page.version,
+      scheduledAt,
+    });
+    expect(scheduled.status).toBe('scheduled');
+    expect(scheduled.scheduledAt).toEqual(scheduledAt);
+
+    // Trashed WITHOUT going through unschedulePage first -- exactly the
+    // path that used to leave a 'trashed' row still carrying a
+    // non-null scheduled_at.
+    const trashed = await trashPage(deps, actor, {
+      pageId: page.id,
+      baseVersion: scheduled.version,
+    });
+    expect(trashed.status).toBe('trashed');
+    expect(trashed.scheduledAt).toBeNull();
+
+    const restored = await restorePageFromTrash(deps, actor, {
+      pageId: page.id,
+      baseVersion: trashed.version,
+    });
+    expect(restored.status).toBe('draft');
+    expect(restored.scheduledAt).toBeNull();
   });
 
   it('restoring does not resurrect a descendant trashed by a separate, earlier operation', async () => {

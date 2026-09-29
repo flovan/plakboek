@@ -519,10 +519,10 @@ export type TrashPageInput = {
  * entirely untouched -- appends one `trashed` `page_url_history` row per
  * row whose `resolved_path` is non-null (carrying that address), then
  * applies ONE batched `UPDATE` over that filtered set -- `status` to
- * `'trashed'`, `resolved_path` and `live_publication_id` cleared, `version`
- * bumped -- all sharing the SAME `trashed_at` instant (taken once from
- * `deps.now()`). That shared instant, and the exclusion of already-trashed
- * rows, is what `restorePageFromTrash` matches on: a descendant trashed
+ * `'trashed'`, `resolved_path`, `live_publication_id` and `scheduled_at`
+ * cleared, `version` bumped -- all sharing the SAME `trashed_at` instant
+ * (taken once from `deps.now()`). That shared instant, and the exclusion of
+ * already-trashed rows, is what `restorePageFromTrash` matches on: a descendant trashed
  * earlier keeps its OWN, different `trashed_at` and is never swept back up
  * by this page's own later restore. Runs through `deps.recorder.run`
  * (`pages:delete` / `page.trash`).
@@ -610,6 +610,15 @@ export async function trashPage(
           trashedAt,
           resolvedPath: null,
           livePublicationId: null,
+          // WR-03: a 'scheduled' page trashed directly (without going
+          // through unschedulePage first) must not keep carrying a
+          // scheduledAt into 'trashed' -- every other field that stops
+          // applying to the new status is cleared here already
+          // (resolvedPath, livePublicationId), and a stale schedule is no
+          // exception: restorePageFromTrash always returns a page to
+          // 'draft', never back to 'scheduled', so nothing downstream
+          // reinterprets this value once it's cleared.
+          scheduledAt: null,
           version: sql`${pages.version} + 1`,
           updatedAt: trashedAt,
           updatedBy: actor.userId,
@@ -634,9 +643,11 @@ export async function trashPage(
  * is still `trashed`, writing nothing. Otherwise selects the page and
  * every descendant whose `trashed_at` equals THIS page's own `trashed_at`
  * (the shared-instant match, never a re-derived subtree) and applies ONE
- * batched `UPDATE` over that set: `status` to `'draft'`, `trashed_at`
- * cleared. Never sets `resolved_path` and never republishes -- restoring
- * is not the same act as publishing again. Runs through
+ * batched `UPDATE` over that set: `status` to `'draft'`, `trashed_at` and
+ * `scheduled_at` cleared -- a restore never returns a page to `'scheduled'`,
+ * so any schedule it carried (possibly already elapsed by restore time)
+ * must not resurface. Never sets `resolved_path` and never republishes --
+ * restoring is not the same act as publishing again. Runs through
  * `deps.recorder.run` (`pages:delete` / `page.restore`).
  */
 export async function restorePageFromTrash(
@@ -728,6 +739,16 @@ export async function restorePageFromTrash(
         .set({
           status: 'draft',
           trashedAt: null,
+          // WR-03: a page can reach 'trashed' still carrying a scheduledAt
+          // (trashPage now clears it going forward, but a row trashed
+          // before that fix, or restored from a backup, may still have
+          // one). restorePageFromTrash always returns to 'draft', never
+          // back to 'scheduled', so a schedule that may already be in the
+          // past by the time of restore must not resurface silently --
+          // clear it here too, the same "never leave a stale value for a
+          // field that no longer applies" discipline every other
+          // transition in this module follows.
+          scheduledAt: null,
           version: sql`${pages.version} + 1`,
           updatedAt,
           updatedBy: actor.userId,
