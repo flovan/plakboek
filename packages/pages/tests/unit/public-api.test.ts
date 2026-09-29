@@ -133,6 +133,7 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   listBatchRevisions: 'function',
   listPageRevisionBatches: 'function',
   restoreRevisionBatch: 'function',
+  RestoreParentNotFoundError: 'class',
   RestoreTargetNotFoundError: 'class',
   RevisionBatchNotFoundError: 'class',
   // publish
@@ -435,6 +436,8 @@ const ERROR_FACTORIES: Readonly<
     new (K as new (o: unknown[]) => unknown)([
       { revisionId: 'rev-id', blockId: 'block-id', blockType: 'hero' },
     ]),
+  RestoreParentNotFoundError: (K) =>
+    new (K as new (r: string, p: string) => unknown)('rev-id', 'parent-id'),
   RestoreTargetNotFoundError: (K) =>
     new (K as new (r: string, b: string) => unknown)('rev-id', 'block-id'),
   RevisionBatchNotFoundError: (K) =>

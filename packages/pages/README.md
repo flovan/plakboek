@@ -393,6 +393,7 @@ point, so an export cannot be added or removed without updating them.
 | `listBatchRevisions`              | function | Expands one revision batch into its block revisions                           |
 | `listPageRevisionBatches`         | function | Rolls a page's block revisions up to one row per save/publish batch           |
 | `restoreRevisionBatch`            | function | Restores a revision batch as one audited, version-checked, validated mutation |
+| `RestoreParentNotFoundError`      | class    | A restored revision's recorded parent block no longer exists                  |
 | `RestoreTargetNotFoundError`      | class    | A restored revision's block no longer exists to restore onto                  |
 | `RevisionBatchNotFoundError`      | class    | A revision batch id names no rows                                             |
 | `BlockRevisionSummary`            | type     | One entry in `listBatchRevisions`' result                                     |

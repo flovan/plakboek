@@ -480,6 +480,27 @@ export class RestoreTargetNotFoundError extends Error {
   }
 }
 
+/** Thrown by `restoreRevisionBatch` when a `'create'`, `'update'` or
+ * `'move'` revision records a `parentBlockId` that no longer exists (the
+ * parent was itself deleted or purged since the revision was recorded).
+ * Refused explicitly here rather than either treating the restore as a
+ * root placement (which `assertPlacementAllowed` would wrongly approve) or
+ * letting `page_blocks.parent_block_id`'s foreign key fail the transaction
+ * with a raw, unmapped driver error (code review WR-01). */
+export class RestoreParentNotFoundError extends Error {
+  readonly revisionId: string;
+  readonly parentBlockId: string;
+
+  constructor(revisionId: string, parentBlockId: string) {
+    super(
+      `@plakboek/pages: cannot restore revision "${revisionId}" -- its recorded parent block "${parentBlockId}" no longer exists`,
+    );
+    this.name = 'RestoreParentNotFoundError';
+    this.revisionId = revisionId;
+    this.parentBlockId = parentBlockId;
+  }
+}
+
 export type RestorePropertyOutcome = {
   readonly propertyKey: string;
   readonly status: 'mapped' | 'defaulted' | 'dropped' | 'failed';
@@ -853,14 +874,18 @@ export async function restoreRevisionBatch(
             .from(pageBlocks)
             .where(eq(pageBlocks.id, raw.parentBlockId))
             .for('update');
-          if (parentRow !== undefined) {
-            parentDepth = parentRow.depth;
-            parentDefinition = getBlockDefinition(parentRow.blockType);
-            parentSectionDepth = await countAncestorSections(
-              tx,
+          if (parentRow === undefined) {
+            throw new RestoreParentNotFoundError(
+              block.revisionId,
               raw.parentBlockId,
             );
           }
+          parentDepth = parentRow.depth;
+          parentDefinition = getBlockDefinition(parentRow.blockType);
+          parentSectionDepth = await countAncestorSections(
+            tx,
+            raw.parentBlockId,
+          );
         }
 
         assertPlacementAllowed({

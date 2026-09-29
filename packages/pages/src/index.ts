@@ -326,6 +326,7 @@ export {
   listBatchRevisions,
   listPageRevisionBatches,
   restoreRevisionBatch,
+  RestoreParentNotFoundError,
   RestoreTargetNotFoundError,
   RevisionBatchNotFoundError,
 } from './revisions.js';

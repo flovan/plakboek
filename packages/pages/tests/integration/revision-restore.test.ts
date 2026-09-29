@@ -34,6 +34,7 @@ import {
   computeBlockRestorePreview,
   DegradedRestoreError,
   listBatchRevisions,
+  RestoreParentNotFoundError,
   restoreRevisionBatch,
 } from '../../src/revisions.js';
 import {
@@ -960,6 +961,157 @@ describe("restoreRevisionBatch's 'move' replay enforces the same subtree-height-
       // being recomputed to depth 3, relative to wrapperX's restored
       // position under wrapperA.
       expect(leafYAfter.depth).toBe(3);
+    } finally {
+      await handle.close();
+      await testDatabase.drop();
+    }
+  });
+});
+
+describe('restoreRevisionBatch refuses a restore whose recorded parent block no longer exists, rather than crashing on the page_blocks foreign key (code review WR-01)', () => {
+  it('throws RestoreParentNotFoundError -- not a raw FK violation -- when a multi-level subtree delete-batch is restored and the parent row is recreated under a NEW id', async () => {
+    const testDatabase = await createTestDatabase();
+    await runMigrations({ connectionString: testDatabase.connectionString });
+    const handle = createDb({
+      connectionString: testDatabase.connectionString,
+    });
+    try {
+      const resolver: PermissionResolver = createPermissionResolver(roles);
+      const recorder: AuditRecorder = createAuditRecorder({
+        db: handle.db,
+        resolver,
+      });
+      const superadminUser = await createUserWithRole(handle.db, {
+        id: randomUUID(),
+        email: `wr01-${randomUUID()}@example.com`,
+        name: 'WR-01 Owner',
+        roleKey: SUPERADMIN_ROLE_KEY,
+      });
+      const superadmin: AuditActor = {
+        userId: superadminUser.userId,
+        roleKey: superadminUser.roleKey,
+      };
+      const config = definePagesConfig({
+        content: defineContentConfig({
+          locales: ['en'],
+          defaultLocale: 'en',
+          timezone: 'UTC',
+        }),
+        blocks: defineBlocks([
+          {
+            key: 'section',
+            kind: 'section',
+            editor: { label: 'Section' },
+            schemaVersion: 1,
+            properties: {},
+          },
+          {
+            key: 'wrapper',
+            editor: { label: 'Wrapper' },
+            schemaVersion: 1,
+            properties: {},
+            placement: { allowedChildren: 'any' },
+          },
+          {
+            key: 'note',
+            editor: { label: 'Note' },
+            schemaVersion: 1,
+            properties: {
+              body: { fieldType: 'short_text', label: 'Body', required: false },
+            },
+          },
+        ]),
+      });
+      const clock = (): Date => new Date('2026-09-29T12:00:00.000Z');
+      const deps: PagesDeps = {
+        db: handle.db,
+        recorder,
+        resolver,
+        config,
+        now: clock,
+      };
+
+      const page = await createPage(deps, superadmin, {
+        locale: 'en',
+        title: 'WR-01 fixture',
+      });
+      const ownerRef = {
+        ownerType: 'page' as const,
+        ownerId: page.id,
+        locale: 'en',
+      };
+      const section = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'section',
+        parentBlockId: null,
+        basePageVersion: page.version,
+      });
+      let fresh = await getPage(handle.db, page.id);
+      const wrapper = await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'wrapper',
+        parentBlockId: section.id,
+        basePageVersion: fresh!.version,
+      });
+      fresh = await getPage(handle.db, page.id);
+      await insertBlock(deps, superadmin, {
+        owner: ownerRef,
+        blockType: 'note',
+        parentBlockId: wrapper.id,
+        props: { body: 'nested' },
+        basePageVersion: fresh!.version,
+      });
+
+      // Delete the whole `wrapper` subtree (wrapper + note) in ONE
+      // `deleteBlock` call: the cascade removes both rows and records one
+      // 'delete'-kind revision per row, sharing the same `revisionBatchId`.
+      fresh = await getPage(handle.db, page.id);
+      await deleteBlock(deps, superadmin, {
+        blockId: wrapper.id,
+        baseVersion: wrapper.version,
+        pageId: page.id,
+        basePageVersion: fresh!.version,
+      });
+
+      // `block_revisions.block_id` is `ON DELETE SET NULL` against
+      // `page_blocks.id` -- once the cascade delete removes both rows, the
+      // just-recorded revision rows for both `wrapper` and `note` read back
+      // with `block_id` null, so the batch must be found by `owner_id`,
+      // like the top-level suite's own `deleteBatchId` lookup does.
+      const [batchRow] = await handle.sql<{ revisionBatchId: string }[]>`
+        SELECT revision_batch_id AS "revisionBatchId" FROM block_revisions
+        WHERE change_type = 'delete' AND owner_id = ${page.id}
+        LIMIT 1
+      `;
+      const revisionBatchId = batchRow!.revisionBatchId;
+
+      // A restored 'delete' revision always gets a FRESH id
+      // (`restoreRevisionBatch`'s `newId = randomUUID()`) -- restoring this
+      // batch recreates `wrapper` (depth 1, processed first) under a new
+      // id, then tries to recreate `note` (depth 2) under its recorded
+      // `parentBlockId` (wrapper's OLD id), which no longer resolves to any
+      // row. Before the fix this fell straight through to the
+      // `page_blocks.parent_block_id` foreign key and crashed with a raw,
+      // unmapped Postgres error.
+      const pageBeforeRestore = await getPage(handle.db, page.id);
+      const error: unknown = await restoreRevisionBatch(deps, superadmin, {
+        revisionBatchId,
+        pageId: page.id,
+        basePageVersion: pageBeforeRestore!.version,
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(RestoreParentNotFoundError);
+      expect((error as RestoreParentNotFoundError).parentBlockId).toBe(
+        wrapper.id,
+      );
+
+      // Nothing was written -- the whole restore is one transaction.
+      const recreated = await handle.sql<{ id: string }[]>`
+        SELECT id FROM page_blocks WHERE parent_block_id = ${section.id}
+      `;
+      expect(recreated).toHaveLength(0);
+      const pageAfter = await getPage(handle.db, page.id);
+      expect(pageAfter!.version).toBe(pageBeforeRestore!.version);
     } finally {
       await handle.close();
       await testDatabase.drop();
