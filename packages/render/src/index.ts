@@ -21,6 +21,9 @@ export type {
   BlockIdentity,
 } from './block-component.js';
 
+// head
+export type { DocumentInput, PageHead, RenderDocument } from './head.js';
+
 // edit-proxy
 export { NOOP_EDIT } from './edit-proxy.js';
 export type { EditAttributes, EditProxy } from './edit-proxy.js';

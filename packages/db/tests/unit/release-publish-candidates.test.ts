@@ -62,10 +62,12 @@ describe('release publish candidates', () => {
     // this list, rather than something the release pipeline can miss.
     expect(publishable).toEqual([
       '@plakboek/auth',
+      '@plakboek/cache',
       '@plakboek/content',
       '@plakboek/db',
       '@plakboek/pages',
       '@plakboek/permissions',
+      '@plakboek/render',
     ]);
   });
 

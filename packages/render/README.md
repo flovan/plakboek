@@ -17,10 +17,11 @@ pnpm add @plakboek/render react react-dom
 ## Status
 
 The block-authoring contract (`BlockComponent`, `EditProxy`, `NOOP_EDIT`) and
-the database-free leaf renderers on the server entry are implemented. The
-visitor request handler lands in a later plan of the same phase. No block,
-section or block component ships here: the block catalogue belongs to the
-host, and a later phase supplies the built-in one.
+the database-free leaf renderers on the server entry (the SEO head emitter
+and the default document composer) are implemented. The visitor request
+handler lands in a later plan of the same phase. No block, section or block
+component ships here: the block catalogue belongs to the host, and a later
+phase supplies the built-in one.
 
 ## Root versus server entry
 
@@ -53,7 +54,16 @@ updating them.
 | `BlockComponent`        | type     | A block's render function: a plain function of `BlockComponentProps`   |
 | `EditAttributes`        | type     | `data-` attributes the editor binds to                                 |
 | `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes     |
+| `PageHead`              | type     | What a document composer needs to write a page's `<head>`              |
+| `DocumentInput`         | type     | `{ head, body }`: what a document composer receives                    |
+| `RenderDocument`        | type     | A host's document composer: `(input) => string`                        |
 
 ### Server entry: `@plakboek/render/server`
 
-This entry has no exports yet; its renderers are added by the next change.
+| Export                  | Kind     | Purpose                                                                  |
+| ----------------------- | -------- | ------------------------------------------------------------------------ |
+| `buildPageHead`         | function | Builds a page's head from its stored SEO set; never reads the request    |
+| `renderHeadHtml`        | function | Renders a `PageHead` to escaped markup through `renderToStaticMarkup`    |
+| `renderDefaultDocument` | function | Wraps rendered body markup in a complete document with no script element |
+| `PageHeadInput`         | type     | Input to `buildPageHead`                                                 |
+| `PageSeoInput`          | type     | The stored SEO set as a structural type                                  |
