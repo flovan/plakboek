@@ -75,11 +75,11 @@ point, so an export cannot be added or removed without updating them.
 
 ### Layers
 
-| Export                | Kind     | Purpose                                                                         |
-| --------------------- | -------- | ------------------------------------------------------------------------------- |
-| `composeInvalidators` | function | Fans one purge out to every layer in parallel; one failure never stops the rest |
-| `purgePageTags`       | function | Purges the page tag of each page id; an empty list makes no call                |
-| `CachePurgeError`     | class    | Thrown by a composed purge when any layer failed; `failures` holds each error   |
+| Export                | Kind     | Purpose                                                                                                                         |
+| --------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `composeInvalidators` | function | Fans one purge out to every layer in parallel; one failure never stops the rest                                                 |
+| `purgePageTags`       | function | Purges the page tag of each page id; an empty list makes no call                                                                |
+| `CachePurgeError`     | class    | Thrown by a composed purge when any layer failed; `failures` holds each error, `failedLayers` the position of each failed layer |
 
 ### Memory cache
 

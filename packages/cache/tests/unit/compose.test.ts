@@ -65,6 +65,7 @@ describe('composeInvalidators', () => {
     expect(b.calls).toEqual([['page:x']]);
     expect(error).toBeInstanceOf(CachePurgeError);
     expect((error as CachePurgeError).failures).toEqual([failure]);
+    expect((error as CachePurgeError).failedLayers).toEqual([0]);
   });
 
   it('treats a layer that throws synchronously as a rejection', async () => {
@@ -92,6 +93,7 @@ describe('composeInvalidators', () => {
       .purge(['page:x'])
       .catch((caught: unknown) => caught)) as CachePurgeError;
     expect(error.failures).toHaveLength(2);
+    expect(error.failedLayers).toEqual([0, 1]);
     expect(error.message).toContain('2');
     expect(error.message).not.toContain('secret detail');
   });

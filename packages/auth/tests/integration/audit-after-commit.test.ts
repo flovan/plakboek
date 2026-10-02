@@ -10,6 +10,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AfterCommitRegistrationError,
+  AfterCommitTimeoutError,
   AuditWriteError,
   PermissionDeniedError,
   createAuditRecorder,
@@ -382,6 +383,133 @@ describe('after-commit callbacks (D-18, PUB-11)', () => {
     expect(line).toContain('user');
     expect(line).toContain('TypeError');
     expect(line).not.toContain('secret-parameter-value');
+  });
+
+  it('stops waiting for a callback that does not settle, reports a timeout and runs the next one', async () => {
+    const { handle, resolver, superadmin, editor } = fixture();
+    const failures: AfterCommitFailure[] = [];
+    const recorder = createAuditRecorder({
+      db: handle.db,
+      resolver,
+      afterCommitTimeoutMs: 40,
+      onAfterCommitFailed: (failure) => {
+        failures.push(failure);
+      },
+    });
+    const order: string[] = [];
+
+    const startedAt = Date.now();
+    const result = await recorder.run(
+      superadmin,
+      renameEntry(editor.userId),
+      async (_tx, context) => {
+        context.afterCommit(
+          () => new Promise<void>(() => undefined), // never settles
+        );
+        context.afterCommit(() => {
+          order.push('second');
+        });
+        return { result: 'committed' };
+      },
+    );
+
+    expect(result).toBe('committed');
+    expect(order).toEqual(['second']);
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.error).toMatchObject({
+      name: 'AfterCommitTimeoutError',
+      timeoutMs: 40,
+    });
+    expect(failures[0]?.error).toBeInstanceOf(AfterCommitTimeoutError);
+    expect(await nameOf(editor.userId)).toBe('Editor');
+  });
+
+  it('swallows a rejection that arrives after the timeout', async () => {
+    const { handle, resolver, superadmin, editor } = fixture();
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    const failures: AfterCommitFailure[] = [];
+    try {
+      const recorder = createAuditRecorder({
+        db: handle.db,
+        resolver,
+        afterCommitTimeoutMs: 20,
+        onAfterCommitFailed: (failure) => {
+          failures.push(failure);
+        },
+      });
+      await recorder.run(
+        superadmin,
+        renameEntry(editor.userId),
+        async (_tx, context) => {
+          context.afterCommit(async () => {
+            await sleep(60);
+            throw new Error('late failure');
+          });
+          return { result: undefined };
+        },
+      );
+      await sleep(120);
+      expect(failures).toHaveLength(1);
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
+  it('does not time out a callback that settles within the bound', async () => {
+    const { handle, resolver, superadmin, editor } = fixture();
+    const failures: AfterCommitFailure[] = [];
+    const recorder = createAuditRecorder({
+      db: handle.db,
+      resolver,
+      afterCommitTimeoutMs: 500,
+      onAfterCommitFailed: (failure) => {
+        failures.push(failure);
+      },
+    });
+    await recorder.run(
+      superadmin,
+      renameEntry(editor.userId),
+      async (_tx, context) => {
+        context.afterCommit(async () => {
+          await sleep(20);
+        });
+        return { result: undefined };
+      },
+    );
+    expect(failures).toEqual([]);
+  });
+
+  it('names the failed layers in the default log line for a composed purge failure', async () => {
+    const { handle, resolver, superadmin, editor } = fixture();
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const recorder = createAuditRecorder({ db: handle.db, resolver });
+    // The shape a composed cache purge throws, without a cache dependency.
+    class CachePurgeError extends Error {
+      override name = 'CachePurgeError';
+      readonly failures = [new TypeError('secret layer detail')];
+      readonly failedLayers = [1];
+    }
+
+    await recorder.run(
+      superadmin,
+      renameEntry(editor.userId),
+      async (_tx, context) => {
+        context.afterCommit(() => {
+          throw new CachePurgeError('2 layers');
+        });
+        return { result: undefined };
+      },
+    );
+
+    const line = String(consoleError.mock.calls[0]?.[0]);
+    expect(line).toContain('CachePurgeError');
+    expect(line).toContain('1 failed: layer 1: TypeError');
+    expect(line).not.toContain('secret layer detail');
   });
 
   it('refuses afterCommit on a recorder bound to a transaction', async () => {

@@ -46,6 +46,7 @@ export {
   PermissionDeniedError,
   AuditWriteError,
   AfterCommitRegistrationError,
+  AfterCommitTimeoutError,
 } from './audit.js';
 export type {
   AfterCommitCallback,

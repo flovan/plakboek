@@ -49,6 +49,7 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   PermissionDeniedError: 'class',
   AuditWriteError: 'class',
   AfterCommitRegistrationError: 'class',
+  AfterCommitTimeoutError: 'class',
   // audit-redaction
   REDACTED_KEYS: 'constant',
   REDACTION_MARKER: 'constant',
@@ -223,6 +224,8 @@ const ERROR_FACTORIES: Readonly<
       'nested-transaction',
       'page.publish',
     ),
+  AfterCommitTimeoutError: (K) =>
+    new (K as new (a: string, t: number) => unknown)('page.publish', 10_000),
   InvalidOrExpiredTokenError: (K) =>
     new (K as new (p: string) => unknown)('set-password'),
   CredentialWriteError: (K) =>

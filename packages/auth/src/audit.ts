@@ -148,8 +148,19 @@ export type AuditDeps = {
    * type and error name only. A hook that throws or rejects cannot change
    * the outcome: `run` still resolves with the mutation's result. */
   readonly onAfterCommitFailed?: AfterCommitFailureHook;
+  /** How long each after-commit callback may run before `run` stops waiting
+   * for it and reports an `AfterCommitTimeoutError` through
+   * `onAfterCommitFailed`. Defaults to `DEFAULT_AFTER_COMMIT_TIMEOUT_MS`;
+   * `Infinity` waits without limit; any other non-positive or non-numeric
+   * value is ignored. The callback itself keeps running: a timed-out purge
+   * is NOT retried, so a layer that needs a guarantee needs a host-level
+   * retry or outbox. */
+  readonly afterCommitTimeoutMs?: number;
   readonly now?: () => Date;
 };
+
+/** The default bound on one after-commit callback, in milliseconds. */
+export const DEFAULT_AFTER_COMMIT_TIMEOUT_MS = 10_000;
 
 export type AuditRecorder = {
   run<T>(
@@ -241,6 +252,21 @@ export class AfterCommitRegistrationError extends Error {
 
 const MAX_CAUSE_DEPTH = 3;
 
+/** Thrown into `onAfterCommitFailed` when an after-commit callback has not
+ * settled within `AuditDeps.afterCommitTimeoutMs`. The mutation had already
+ * committed; the callback may still complete. */
+export class AfterCommitTimeoutError extends Error {
+  readonly timeoutMs: number;
+
+  constructor(action: string, timeoutMs: number) {
+    super(
+      `@plakboek/auth: an after-commit callback for "${action}" did not settle within ${timeoutMs} ms; not waiting any longer`,
+    );
+    this.name = 'AfterCommitTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 /** Error names and SQLSTATE codes along the cause chain. Messages are left
  * out on purpose: a failed Drizzle query's message quotes its parameters,
  * which here are the entity's before/after state. */
@@ -251,11 +277,27 @@ function describeCause(cause: unknown): string {
     if (!(current instanceof Error)) break;
     const code: unknown = Reflect.get(current, 'code');
     parts.push(
-      typeof code === 'string' ? `${current.name} ${code}` : current.name,
+      (typeof code === 'string' ? `${current.name} ${code}` : current.name) +
+        describeAggregate(current),
     );
     current = current.cause;
   }
   return parts.length > 0 ? parts.join(' <- ') : 'unknown error';
+}
+
+/** For an error that bundles several failures, as a composed cache purge
+ * does (`failures`, with `failedLayers` parallel to it): how many failed and
+ * which, by error name and layer position. Names only, like the rest. */
+function describeAggregate(error: Error): string {
+  const failures: unknown = Reflect.get(error, 'failures');
+  if (!Array.isArray(failures)) return '';
+  const layers: unknown = Reflect.get(error, 'failedLayers');
+  const named = failures.map((failure: unknown, index) => {
+    const layer: unknown = Array.isArray(layers) ? layers[index] : undefined;
+    const label = failure instanceof Error ? failure.name : 'unknown error';
+    return typeof layer === 'number' ? `layer ${layer}: ${label}` : label;
+  });
+  return ` [${failures.length} failed: ${named.join(', ')}]`;
 }
 
 function defaultOnAuditWriteFailed(failure: AuditWriteFailure): void {
@@ -400,6 +442,44 @@ function auditWriteFailure(
   };
 }
 
+function afterCommitTimeout(configured: number | undefined): number {
+  if (configured === Infinity) return Infinity;
+  return typeof configured === 'number' &&
+    Number.isFinite(configured) &&
+    configured > 0
+    ? configured
+    : DEFAULT_AFTER_COMMIT_TIMEOUT_MS;
+}
+
+/** Awaits `callback`, but stops waiting after `timeoutMs`. The callback is
+ * not cancelled; a rejection that arrives after the timeout is swallowed here
+ * because the timeout has already been reported. */
+async function runBounded(
+  callback: AfterCommitCallback,
+  timeoutMs: number,
+  action: string,
+): Promise<void> {
+  const running = new Promise<void>((resolve) => {
+    resolve(callback());
+  });
+  if (timeoutMs === Infinity) {
+    await running;
+    return;
+  }
+  running.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new AfterCommitTimeoutError(action, timeoutMs));
+    }, timeoutMs);
+  });
+  try {
+    await Promise.race([running, timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Checks `entry.permission` against the actor's role, then -- inside one
  * transaction -- either records the refusal and throws
@@ -411,8 +491,9 @@ function auditWriteFailure(
  *
  * Callbacks the mutation registered through `context.afterCommit` run only
  * once the transaction has committed an allowed mutation, one at a time in
- * registration order, and are awaited before this resolves. One that throws
- * is reported through `onAfterCommitFailed` and changes nothing else.
+ * registration order, and are awaited before this resolves. One that throws,
+ * or that has not settled within `afterCommitTimeoutMs`, is reported through
+ * `onAfterCommitFailed` and changes nothing else.
  */
 export async function runAuditedMutation<T>(
   deps: AuditDeps,
@@ -510,11 +591,13 @@ export async function runAuditedMutation<T>(
     throw new PermissionDeniedError(entry.permission, actor.roleKey);
   }
 
-  // The transaction has committed. Each callback is isolated: the mutation is
-  // already durable, so a failed purge is reported, never propagated.
+  // The transaction has committed. Each callback is isolated and bounded: the
+  // mutation is already durable, so a failed or hung purge is reported, never
+  // propagated and never waited on forever.
+  const timeoutMs = afterCommitTimeout(deps.afterCommitTimeoutMs);
   for (const callback of callbacks) {
     try {
-      await callback();
+      await runBounded(callback, timeoutMs, entry.action);
     } catch (error) {
       reportAfterCommitFailure(
         deps.onAfterCommitFailed ?? defaultOnAfterCommitFailed,

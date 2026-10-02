@@ -8,16 +8,25 @@ import { pageTag } from './tags.js';
 
 /** Thrown by a composed purge when one or more layers failed. The message
  * names the failure count only: a layer's own error can quote its endpoint
- * or credentials, so the errors travel in `failures` for the caller's hook. */
+ * or credentials, so the errors travel in `failures` for the caller's hook.
+ * `failedLayers` holds the zero-based position, in the order the layers were
+ * given to `composeInvalidators`, of each layer that failed, parallel to
+ * `failures`, so a log can name which layer needs attention. */
 export class CachePurgeError extends Error {
   readonly failures: readonly unknown[];
+  readonly failedLayers: readonly number[];
 
-  constructor(failures: readonly unknown[], layerCount: number) {
+  constructor(
+    failures: readonly unknown[],
+    layerCount: number,
+    failedLayers: readonly number[] = [],
+  ) {
     super(
       `[@plakboek/cache] ${failures.length} of ${layerCount} cache layers failed to purge`,
     );
     this.name = 'CachePurgeError';
     this.failures = failures;
+    this.failedLayers = failedLayers;
   }
 }
 
@@ -34,11 +43,16 @@ export function composeInvalidators(
       const settled = await Promise.allSettled(
         layers.map(async (layer) => await layer.purge(tags)),
       );
-      const failures = settled.flatMap((result) =>
-        result.status === 'rejected' ? [result.reason as unknown] : [],
-      );
+      const failures: unknown[] = [];
+      const failedLayers: number[] = [];
+      settled.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          failures.push(result.reason as unknown);
+          failedLayers.push(index);
+        }
+      });
       if (failures.length > 0) {
-        throw new CachePurgeError(failures, layers.length);
+        throw new CachePurgeError(failures, layers.length, failedLayers);
       }
     },
   };
