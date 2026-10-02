@@ -76,6 +76,16 @@ Every request goes through the same steps in the same order:
 4. **Render** the published snapshot.
 5. **Store** the HTML under the canonical path.
 
+The ticket makes a publish safe under load. A cache ticket is taken before any
+data is read, and the fill passes it back: if the page was purged after the
+ticket (a publish committed while this render was in flight), the cache refuses
+the fill, so a render that read pre-publish data can never overwrite what
+comes after it, and the next visitor gets the new version. With a cache,
+concurrent misses for the same canonical path and the same ticket share one
+render; the ticket is part of that sharing key, so a request that took its
+ticket after a purge never joins a render that started before it. Without a
+cache nothing is shared and every request renders.
+
 ## Block rendering policy
 
 One bad block never takes a page down.

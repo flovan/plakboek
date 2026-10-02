@@ -28,6 +28,7 @@ import type { RenderDocument } from './head.js';
 import { reportRenderEvent, type RenderHooks } from './hooks.js';
 import { normalizeVisitorPath } from './path.js';
 import { renderPageSnapshot } from './render-snapshot.js';
+import { createSingleFlight } from './single-flight.js';
 
 export type VisitorHandler = (request: Request) => Promise<Response>;
 
@@ -118,44 +119,69 @@ function etagOf(bytes: Uint8Array): string {
   return `"${createHash('sha256').update(bytes).digest('base64url')}"`;
 }
 
-function htmlResponse(
+/**
+ * What a flight produces: plain data, never a `Response`, because a response
+ * body can be read once and every waiter needs its own. A redirect keeps its
+ * location bare so each request appends its own query string.
+ */
+type Outcome =
+  | { readonly kind: 'redirect'; readonly location: string }
+  | {
+      readonly kind: 'html';
+      readonly status: number;
+      readonly headers: readonly (readonly [string, string])[];
+      readonly body: Uint8Array | string;
+    };
+
+function htmlOutcome(
   status: number,
   body: string,
   cacheControl: string,
-): Response {
-  return new Response(body, {
+): Outcome {
+  return {
+    kind: 'html',
     status,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'X-Content-Type-Options': 'nosniff',
-      'Cache-Control': cacheControl,
-    },
-  });
+    headers: [
+      ['Content-Type', 'text/html; charset=utf-8'],
+      ['X-Content-Type-Options', 'nosniff'],
+      ['Cache-Control', cacheControl],
+    ],
+    body,
+  };
 }
 
-function redirectResponse(location: string, search: string): Response {
-  return new Response(null, {
-    status: 308,
-    headers: {
-      Location: `${location}${search}`,
-      'Cache-Control': REDIRECT_CACHE_CONTROL,
-    },
-  });
-}
-
-function pageResponse(
+function pageOutcome(
   entry: Pick<CacheEntry, 'body' | 'etag' | 'contentLanguage'>,
   degraded: boolean,
-): Response {
-  return new Response(entry.body, {
+): Outcome {
+  return {
+    kind: 'html',
     status: 200,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Content-Language': entry.contentLanguage,
-      'X-Content-Type-Options': 'nosniff',
-      ETag: entry.etag,
-      'Cache-Control': degraded ? NO_STORE : PAGE_CACHE_CONTROL,
-    },
+    headers: [
+      ['Content-Type', 'text/html; charset=utf-8'],
+      ['Content-Language', entry.contentLanguage],
+      ['X-Content-Type-Options', 'nosniff'],
+      ['ETag', entry.etag],
+      ['Cache-Control', degraded ? NO_STORE : PAGE_CACHE_CONTROL],
+    ],
+    body: entry.body,
+  };
+}
+
+/** Turns a shared outcome into one request's own response. */
+function toResponse(outcome: Outcome, search: string): Response {
+  if (outcome.kind === 'redirect') {
+    return new Response(null, {
+      status: 308,
+      headers: {
+        Location: `${outcome.location}${search}`,
+        'Cache-Control': REDIRECT_CACHE_CONTROL,
+      },
+    });
+  }
+  return new Response(outcome.body, {
+    status: outcome.status,
+    headers: new Headers(outcome.headers.map(([name, value]) => [name, value])),
   });
 }
 
@@ -167,6 +193,7 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
   const homeSlug = deps.homeSlug ?? DEFAULT_HOME_SLUG;
   const components = createComponentMap(config.blocks, hooks);
   const encoder = new TextEncoder();
+  const flights = createSingleFlight<Outcome>();
 
   /** A cache failure is reported and the request continues uncached. */
   async function guarded<T>(
@@ -186,57 +213,69 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
     }
   }
 
-  async function serveMiss(
-    url: URL,
+  /** Resolves, renders and (with a cache) stores one canonical path. */
+  async function produce(
     key: string,
     ticket: number | undefined,
-    seen: { pageId: string | null },
-  ): Promise<Response> {
-    const resolution = await resolveVisitorPage(db, {
-      publicPath: key,
-      locales: config.content.locales,
-      defaultLocale: config.content.defaultLocale,
-      homeSlug,
-    });
+  ): Promise<Outcome> {
+    const seen: { pageId: string | null } = { pageId: null };
+    try {
+      const resolution = await resolveVisitorPage(db, {
+        publicPath: key,
+        locales: config.content.locales,
+        defaultLocale: config.content.defaultLocale,
+        homeSlug,
+      });
 
-    if (resolution.kind === 'redirect') {
-      return redirectResponse(resolution.location, url.search);
-    }
-    if (resolution.kind === 'not-found') {
-      return htmlResponse(404, NOT_FOUND_BODY, NO_STORE);
-    }
-    // Defensive: HTML is only ever stored under the canonical key (D-16), so
-    // a page that resolved under a different spelling is redirected instead.
-    if (resolution.publicPath !== key) {
-      return redirectResponse(resolution.publicPath, url.search);
-    }
+      if (resolution.kind === 'redirect') {
+        return { kind: 'redirect', location: resolution.location };
+      }
+      if (resolution.kind === 'not-found') {
+        return htmlOutcome(404, NOT_FOUND_BODY, NO_STORE);
+      }
+      // Defensive: HTML is only ever stored under the canonical key (D-16),
+      // so a page that resolved under another spelling is redirected instead.
+      if (resolution.publicPath !== key) {
+        return { kind: 'redirect', location: resolution.publicPath };
+      }
 
-    const { view } = resolution;
-    seen.pageId = view.page.id;
-    const rendered = renderPageSnapshot({
-      view,
-      publicPath: key,
-      components,
-      hooks,
-      siteUrl,
-      resolveAssetUrl,
-    });
-    const html = renderDocument({ head: rendered.head, body: rendered.body });
-    const body = encoder.encode(html);
-    const entry = {
-      body,
-      etag: etagOf(body),
-      contentLanguage: view.page.locale,
-      manifestHash: view.publication.manifestHash,
-      buildId: null,
-    } satisfies CacheEntry;
+      const { view } = resolution;
+      seen.pageId = view.page.id;
+      const rendered = renderPageSnapshot({
+        view,
+        publicPath: key,
+        components,
+        hooks,
+        siteUrl,
+        resolveAssetUrl,
+      });
+      const html = renderDocument({ head: rendered.head, body: rendered.body });
+      const body = encoder.encode(html);
+      const entry = {
+        body,
+        etag: etagOf(body),
+        contentLanguage: view.page.locale,
+        manifestHash: view.publication.manifestHash,
+        buildId: null,
+      } satisfies CacheEntry;
 
-    if (cache !== undefined && ticket !== undefined && !rendered.degraded) {
-      await guarded('set', key, () =>
-        cache.set(key, entry, { tags: rendered.tags, ticket }),
-      );
+      // The ticket this request took before reading anything is what makes a
+      // fill that raced a purge refuse itself.
+      if (cache !== undefined && ticket !== undefined && !rendered.degraded) {
+        await guarded('set', key, () =>
+          cache.set(key, entry, { tags: rendered.tags, ticket }),
+        );
+      }
+      return pageOutcome(entry, rendered.degraded);
+    } catch (error) {
+      // Reported once per flight, not once per waiter.
+      reportRenderEvent('onRenderError', hooks?.onRenderError, {
+        publicPath: key,
+        pageId: seen.pageId,
+        error,
+      });
+      return htmlOutcome(500, SERVER_ERROR_BODY, NO_STORE);
     }
-    return pageResponse(entry, rendered.degraded);
   }
 
   return async (request) => {
@@ -245,34 +284,37 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
     // Canonicalise before the cache and before any database statement.
     const normalized = normalizeVisitorPath(url.pathname);
     if (normalized.kind === 'not-found') {
-      return htmlResponse(404, NOT_FOUND_BODY, NO_STORE);
+      return toResponse(htmlOutcome(404, NOT_FOUND_BODY, NO_STORE), '');
     }
     if (normalized.kind === 'redirect') {
-      return redirectResponse(normalized.location, url.search);
+      return toResponse(
+        { kind: 'redirect', location: normalized.location },
+        url.search,
+      );
     }
     const key = normalized.path;
 
     // The ticket and the cache read come BEFORE any database read: a purge
-    // that lands after the ticket makes the fill below refuse itself.
+    // that lands after the ticket makes the fill refuse itself.
     let ticket: number | undefined;
     if (cache !== undefined) {
       ticket = await guarded('ticket', key, () => cache.ticket());
       if (ticket !== undefined) {
         const hit = await guarded('get', key, () => cache.get(key));
-        if (hit !== undefined) return pageResponse(hit, false);
+        if (hit !== undefined) return toResponse(pageOutcome(hit, false), '');
       }
     }
 
-    const seen: { pageId: string | null } = { pageId: null };
-    try {
-      return await serveMiss(url, key, ticket, seen);
-    } catch (error) {
-      reportRenderEvent('onRenderError', hooks?.onRenderError, {
-        publicPath: key,
-        pageId: seen.pageId,
-        error,
-      });
-      return htmlResponse(500, SERVER_ERROR_BODY, NO_STORE);
-    }
+    // Concurrent misses share one render, but only within one purge epoch:
+    // the ticket in the flight key stops a request taken after a purge from
+    // joining a render that started before it. Without a cache there is no
+    // purge epoch to key by, and every request renders.
+    const outcome =
+      ticket === undefined
+        ? await produce(key, ticket)
+        : await flights.run(`${String(ticket)}\u0000${key}`, () =>
+            produce(key, ticket),
+          );
+    return toResponse(outcome, url.search);
   };
 }
