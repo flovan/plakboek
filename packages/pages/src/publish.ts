@@ -18,6 +18,7 @@ import type {
   AuditDatabase,
   AuditTransaction,
 } from '@plakboek/auth';
+import { normalizeEntrySeo } from '@plakboek/content';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PagesDeps, PagesHooks } from './config.js';
 import { assertPageWritable } from './locks.js';
@@ -56,7 +57,64 @@ export type SnapshotBlock = {
   readonly children: readonly SnapshotBlock[];
 };
 
-export type PageSnapshot = { readonly blocks: readonly SnapshotBlock[] };
+/** The head-relevant subset of a page's SEO set, as frozen into a published
+ * snapshot (D-13). Structurally assignable to `@plakboek/render`'s
+ * `PageSeoInput`. `sitemapInclude` is a sitemap concern, not a head one. */
+export type PublishedPageSeo = {
+  readonly title: string | null;
+  readonly description: string | null;
+  readonly imageAssetId: string | null;
+  readonly canonicalUrl: string | null;
+  readonly noindex: boolean;
+  readonly nofollow: boolean;
+};
+
+/**
+ * What a publication freezes: the block tree plus the page's `title` and head
+ * SEO set as they were when it was published, so a retitle or an SEO edit only
+ * reaches visitors through a publish, exactly like a block edit.
+ *
+ * `title` and `seo` are optional only because a snapshot written before they
+ * were materialised carries neither; `readSnapshotPageMeta` is the one reader
+ * and decides what such a snapshot serves. Every snapshot written now has both.
+ */
+export type PageSnapshot = {
+  readonly blocks: readonly SnapshotBlock[];
+  readonly title?: string;
+  readonly seo?: PublishedPageSeo;
+};
+
+/** Picks the head fields out of a stored SEO value; never throws. */
+function toPublishedPageSeo(value: unknown): PublishedPageSeo {
+  const seo = normalizeEntrySeo(value);
+  return {
+    title: seo.title,
+    description: seo.description,
+    imageAssetId: seo.imageAssetId,
+    canonicalUrl: seo.canonicalUrl,
+    noindex: seo.noindex,
+    nofollow: seo.nofollow,
+  };
+}
+
+/**
+ * The title and head SEO set a published snapshot carries. A snapshot
+ * published before these were materialised (no `title`, no `seo`) serves an
+ * empty title and the default SEO set (indexable, no overrides) until the page
+ * is republished: reading the live `pages` row instead would put working data
+ * back on the visitor path. The default SEO set is also what such a page
+ * served before, because no writer for a page's SEO exists yet; only the
+ * title is lost, and republishing restores it.
+ */
+export function readSnapshotPageMeta(snapshot: PageSnapshot): {
+  readonly title: string;
+  readonly seo: PublishedPageSeo;
+} {
+  return {
+    title: typeof snapshot.title === 'string' ? snapshot.title : '',
+    seo: toPublishedPageSeo(snapshot.seo),
+  };
+}
 
 /**
  * Materialises the nested shape the renderer consumes, built in memory in
@@ -359,7 +417,11 @@ async function materialisePublication(
       pageId: page.id,
       locale: page.locale,
       isDraft: options.isDraft,
-      snapshot: buildResult.snapshot,
+      snapshot: {
+        ...buildResult.snapshot,
+        title: page.title,
+        seo: toPublishedPageSeo(page.seo),
+      },
       revisionManifest: manifest,
       manifestHash,
       publishedBy: actor.userId,

@@ -425,6 +425,13 @@ When `PagesDeps.invalidator` is set, `publishPage` purges the page's cache tag
 after its transaction commits; a refused publish purges nothing and a failing
 purge never fails the committed publish.
 
+A publication freezes the page's `title` and head SEO set next to its block
+tree, so retitling a page or editing its SEO reaches visitors only through the
+next publish, exactly like a block edit. A snapshot published before these were
+frozen carries neither: it serves an empty title and the default SEO set
+(indexable, no overrides) until the page is republished, and the visitor path
+never falls back to the live `pages` row for them.
+
 | Export                      | Kind     | Purpose                                                                                        |
 | --------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
 | `createDraftSnapshot`       | function | Builds a draft snapshot from a page's current tree, identical to what publishing would produce |
@@ -435,7 +442,7 @@ purge never fails the committed publish.
 | `CreateDraftSnapshotInput`  | type     | Input to `createDraftSnapshot`                                                                 |
 | `DegradedSnapshotBlock`     | type     | One block that stopped a publish or draft from being built                                     |
 | `PagePublicationRecord`     | type     | A stored publication row: snapshot, revision manifest, hash, `isDraft`                         |
-| `PageSnapshot`              | type     | The materialised, nested snapshot tree                                                         |
+| `PageSnapshot`              | type     | The materialised snapshot: block tree plus the frozen title and head SEO set                   |
 | `PublishPageInput`          | type     | Input to `publishPage`                                                                         |
 | `SnapshotBlock`             | type     | One block in the materialised snapshot tree                                                    |
 
@@ -543,7 +550,7 @@ lock blocking one would be impractical. Each is gated by its own permission
 | `toPublicPagePath`          | function | The public URL path of a stored `(locale, path)` address -- the inverse of the matcher     |
 | `MatchPublicPagePathInput`  | type     | Input to `matchPublicPagePath`                                                             |
 | `PublicPagePathMatch`       | type     | The matcher's result: `match`, `redirect` or `none`                                        |
-| `PublishedPageSeo`          | type     | The head-relevant subset of a page's stored SEO set                                        |
+| `PublishedPageSeo`          | type     | The head-relevant subset of a page's SEO set, as frozen into its publication               |
 | `PublishedPageView`         | type     | The narrow published view: page id, locale, title, address, SEO, plus the live publication |
 | `ResolvePublishedPageInput` | type     | Input to `resolvePublishedPage`                                                            |
 | `ResolveVisitorPageInput`   | type     | Input to `resolveVisitorPage`                                                              |
@@ -551,8 +558,9 @@ lock blocking one would be impractical. Each is gated by its own permission
 | `VisitorPageResolution`     | type     | The composite's result: `page`, `redirect` or `not-found`                                  |
 
 `resolved_path` is read exactly as it is stored (`en/about-us` under the
-default pattern); only the resolver maps between that and the public path, so
-there is no migration. The default locale is served without a locale prefix
+default pattern) and is the only working-side value the resolver reads; the
+view's title and SEO come out of the published snapshot. Only the resolver maps
+that stored form to the public path, so there is no migration. The default locale is served without a locale prefix
 (`/about-us` is English, `/nl/over-ons` is Dutch) and its prefixed spelling
 (`/en/about-us`) resolves to a redirect whose target is the bare form, which a
 render handler answers with a 308. A locale root (`/`, `/nl`) is the published

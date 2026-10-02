@@ -31,14 +31,18 @@
  *   later phase's (D-24).
  */
 import type { AuditDatabase } from '@plakboek/auth';
-import { normalizeEntrySeo } from '@plakboek/content';
 import { and, eq } from 'drizzle-orm';
 import {
   parsePageUrlPattern,
   resolvePageUrlPath,
   type ParsedPageUrlPattern,
 } from './page-url-pattern.js';
-import { asPageSnapshot, type PageSnapshot } from './publish.js';
+import {
+  asPageSnapshot,
+  readSnapshotPageMeta,
+  type PageSnapshot,
+  type PublishedPageSeo,
+} from './publish.js';
 import { pagePublications, pages } from './schema.js';
 import { getPageUrlPattern } from './settings.js';
 
@@ -267,16 +271,7 @@ export function matchPublicPagePath(
   return { kind: 'none' };
 }
 
-/** The head-relevant subset of a page's stored SEO set (D-13). Structurally
- * assignable to `@plakboek/render`'s `PageSeoInput`. */
-export type PublishedPageSeo = {
-  readonly title: string | null;
-  readonly description: string | null;
-  readonly imageAssetId: string | null;
-  readonly canonicalUrl: string | null;
-  readonly noindex: boolean;
-  readonly nofollow: boolean;
-};
+export type { PublishedPageSeo };
 
 /** What a visitor-path caller may see of a published page: nothing from the
  * working tree, no revision manifest, no author. */
@@ -308,9 +303,13 @@ export type ResolvePublishedPageInput = {
  * atomic, unlike `readPublishedSnapshot`'s pointer-then-row pair, which can
  * join a pointer to a row an unpublish just removed.
  *
- * The visitor path reads the live `pages` row for `resolved_path`, `title` and
- * `seo` only -- the fixed column list below is what makes that acceptable
- * (D-21's recorded accepted cost). Both `status = 'published'` and
+ * The visitor path reads the live `pages` row for `resolved_path` only (plus
+ * the ids and the status/pointer it filters on) -- the fixed column list below
+ * is what makes that acceptable (D-21's recorded accepted cost). The page's
+ * `title` and SEO set come out of the published snapshot, frozen at publish
+ * time, so renaming a page or editing its SEO changes nothing a visitor sees
+ * until the next publish. A snapshot published before they were materialised
+ * serves an empty title and the default SEO set (see `readSnapshotPageMeta`). Both `status = 'published'` and
  * `is_draft = false` are required, so a draft, scheduled, trashed or
  * unpublished page and a draft snapshot are invisible by construction.
  */
@@ -323,9 +322,7 @@ export async function resolvePublishedPage(
     .select({
       pageId: pages.id,
       locale: pages.locale,
-      title: pages.title,
       resolvedPath: pages.resolvedPath,
-      seo: pages.seo,
       publicationId: pagePublications.id,
       manifestHash: pagePublications.manifestHash,
       publishedAt: pagePublications.publishedAt,
@@ -344,27 +341,21 @@ export async function resolvePublishedPage(
     .limit(1);
   if (row === undefined) return null;
 
-  const seo = normalizeEntrySeo(row.seo);
+  const snapshot = asPageSnapshot(row.snapshot);
+  const meta = readSnapshotPageMeta(snapshot);
   return {
     page: {
       id: row.pageId,
       locale: row.locale,
-      title: row.title,
+      title: meta.title,
       resolvedPath: row.resolvedPath ?? input.resolvedPath,
-      seo: {
-        title: seo.title,
-        description: seo.description,
-        imageAssetId: seo.imageAssetId,
-        canonicalUrl: seo.canonicalUrl,
-        noindex: seo.noindex,
-        nofollow: seo.nofollow,
-      },
+      seo: meta.seo,
     },
     publication: {
       id: row.publicationId,
       manifestHash: row.manifestHash,
       publishedAt: row.publishedAt,
-      snapshot: asPageSnapshot(row.snapshot),
+      snapshot,
     },
   };
 }

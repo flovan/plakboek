@@ -196,6 +196,16 @@ describe('publishPage/buildPageSnapshot/readPublishedSnapshot (D-30, D-31, D-33)
           ],
         },
       ],
+      // The page's title and head SEO set are frozen with the tree.
+      title: 'Home',
+      seo: {
+        title: null,
+        description: null,
+        imageAssetId: null,
+        canonicalUrl: null,
+        noindex: false,
+        nofollow: false,
+      },
     });
 
     const pageAfterPublish = await getPage(db, page.id);

@@ -260,15 +260,14 @@ describe('per-page purge triggers, observed through the visitor handler', () => 
     expect(await status(world, '/old-slug')).toBe(404);
   });
 
-  it('title-only rename: the cached page keeps serving but carries the new title after a re-render', async () => {
+  it('title-only rename: the visitor keeps the published title until the page is republished', async () => {
     const page = await publishAndWarm(
       world,
       { locale: 'en', title: 'Before', text: 'Title body', slug: 'retitle' },
       '/retitle',
     );
     const cachedBody = await (await visit(world.handler, '/retitle')).text();
-    expect(cachedBody).toContain('Before');
-    const rendersBefore = renderCounts.heading;
+    expect(cachedBody).toContain('<title>Before</title>');
 
     await renamePage(world.deps, world.fixture.superadmin, {
       pageId: page.pageId,
@@ -276,13 +275,21 @@ describe('per-page purge triggers, observed through the visitor handler', () => 
       title: 'After',
     });
 
+    // The title is frozen into the publication, so the rename is a working
+    // edit: the re-rendered page still carries the published title.
     expect(world.purged).toEqual([[pageTag(page.pageId)]]);
+    const rendersBefore = renderCounts.heading;
     const response = await visit(world.handler, '/retitle');
     expect(response.status).toBe(200);
     const body = await response.text();
-    expect(body).toContain('<title>After</title>');
-    expect(body).not.toContain('Before');
+    expect(body).toContain('<title>Before</title>');
+    expect(body).not.toContain('After');
     expect(renderCounts.heading).toBe(rendersBefore + 1);
+
+    await republish(world, page.pageId);
+    const published = await (await visit(world.handler, '/retitle')).text();
+    expect(published).toContain('<title>After</title>');
+    expect(published).not.toContain('Before');
   });
 });
 

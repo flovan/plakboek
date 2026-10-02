@@ -39,12 +39,12 @@ import {
 } from './fixtures.js';
 
 const ALLOWED_TABLES = ['pages', 'page_publications', 'page_engine_settings'];
+// `title` and `seo` are deliberately absent: both are frozen into the
+// published snapshot at publish time, so the live row supplies neither.
 const ALLOWED_PAGES_COLUMNS = [
   'id',
   'locale',
-  'title',
   'resolved_path',
-  'seo',
   'status',
   'live_publication_id',
 ];

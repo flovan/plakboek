@@ -687,7 +687,8 @@ export async function renamePage(
       }
       // A slug change addresses the whole subtree differently, so every
       // page in it is purged. A title-only rename purges the page alone: the
-      // served <title> falls back to the page title.
+      // served <title> is frozen into the publication, so it changes at the
+      // next publish, not here.
       registerPagePurge(
         deps,
         context,

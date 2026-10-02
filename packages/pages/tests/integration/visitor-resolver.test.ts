@@ -211,7 +211,7 @@ describe('visitor resolution (D-20..D-26)', () => {
   }
 
   it('resolves a published page from its bare default-locale path with the published snapshot, hash, title and SEO', async () => {
-    const page = await publishedPage({
+    const fixture = await draftPage({
       locale: 'en',
       title: 'About us',
       slug: 'about-us',
@@ -221,8 +221,9 @@ describe('visitor resolution (D-20..D-26)', () => {
         title: 'SEO title',
         noindex: true,
         sitemapInclude: false,
-      })}::jsonb WHERE id = ${page.pageId}
+      })}::jsonb WHERE id = ${fixture.pageId}
     `;
+    const page = { ...fixture, publication: await publish(fixture.pageId) };
 
     const result = asPage(await resolveVisitorPage(db, visit('/about-us')));
     expect(result.publicPath).toBe('/about-us');
@@ -251,6 +252,65 @@ describe('visitor resolution (D-20..D-26)', () => {
       'publishedAt',
       'snapshot',
     ]);
+  });
+
+  it('keeps the published title and SEO set when the live page row changes until the next publish', async () => {
+    const page = await publishedPage({
+      locale: 'en',
+      title: 'Before',
+      slug: 'frozen-meta',
+    });
+    await handle.sql`
+      UPDATE pages
+      SET title = 'After',
+          seo = ${JSON.stringify({ title: 'Live SEO', noindex: true })}::jsonb
+      WHERE id = ${page.pageId}
+    `;
+
+    const stale = asPage(await resolveVisitorPage(db, visit('/frozen-meta')));
+    expect(stale.view.page.title).toBe('Before');
+    expect(stale.view.page.seo.title).toBeNull();
+    expect(stale.view.page.seo.noindex).toBe(false);
+
+    await publish(page.pageId);
+    const fresh = asPage(await resolveVisitorPage(db, visit('/frozen-meta')));
+    expect(fresh.view.page.title).toBe('After');
+    expect(fresh.view.page.seo.title).toBe('Live SEO');
+    expect(fresh.view.page.seo.noindex).toBe(true);
+  });
+
+  it('serves an empty title and the default SEO set for a snapshot published before they were frozen', async () => {
+    const page = await publishedPage({
+      locale: 'en',
+      title: 'Legacy',
+      slug: 'legacy-snapshot',
+    });
+    await handle.sql`
+      UPDATE page_publications
+      SET snapshot = snapshot - 'title' - 'seo'
+      WHERE id = ${page.publication.id}
+    `;
+    // Live values must not leak in as a substitute.
+    await handle.sql`
+      UPDATE pages
+      SET title = 'Live only',
+          seo = ${JSON.stringify({ title: 'Live SEO', noindex: true })}::jsonb
+      WHERE id = ${page.pageId}
+    `;
+
+    const result = asPage(
+      await resolveVisitorPage(db, visit('/legacy-snapshot')),
+    );
+    expect(result.view.page.title).toBe('');
+    expect(result.view.page.seo).toEqual({
+      title: null,
+      description: null,
+      imageAssetId: null,
+      canonicalUrl: null,
+      noindex: false,
+      nofollow: false,
+    });
+    expect(result.view.publication.snapshot.blocks).toHaveLength(1);
   });
 
   it('keeps serving the published snapshot after the live tree is edited and a draft snapshot is taken', async () => {
