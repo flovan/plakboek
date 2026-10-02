@@ -10,7 +10,11 @@
  * both the page engine and `@plakboek/content`'s entries, in one shared
  * transaction.
  */
-import { PermissionDeniedError, type AuditActor } from '@plakboek/auth';
+import {
+  PermissionDeniedError,
+  type AuditActor,
+  type AuditMutationContext,
+} from '@plakboek/auth';
 import {
   computeLocalePurgeEntriesImpact,
   purgeLocaleEntriesInTransaction,
@@ -21,6 +25,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { AuditDatabase, AuditTransaction } from '@plakboek/auth';
 import type { LocaleRemovedEvent, PagesConfig, PagesDeps } from './config.js';
 import { reportPagesWarning } from './config.js';
+import { registerGlobalPurge } from './purge.js';
 import {
   blockRevisions,
   pageBlocks,
@@ -297,7 +302,7 @@ export async function purgeLocale(
       entityId: input.locale,
       before: impactCounts,
     },
-    async (tx: AuditTransaction) => {
+    async (tx: AuditTransaction, context: AuditMutationContext) => {
       const pagesImpact = await countPageLocale(tx, input.locale);
 
       await tx
@@ -325,6 +330,7 @@ export async function purgeLocale(
         pages: pagesImpact,
         entries,
       });
+      registerGlobalPurge(deps, context);
       return { result, after: result };
     },
   );

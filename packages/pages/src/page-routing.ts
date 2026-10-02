@@ -28,6 +28,7 @@ import {
   type ParsedPageUrlPattern,
 } from './page-url-pattern.js';
 import { recordPageUrlHistory } from './pages.js';
+import { registerGlobalPurge } from './purge.js';
 import { pageEngineSettings, pages } from './schema.js';
 import {
   PageEngineSettingsMissingError,
@@ -367,7 +368,7 @@ export async function setPageUrlPattern(
       entityId: String(SETTINGS_ROW_ID),
       before: { urlPattern: currentPattern },
     },
-    async (tx) => {
+    async (tx, context) => {
       const [settingsRow] = await tx
         .select({ urlPattern: pageEngineSettings.urlPattern })
         .from(pageEngineSettings)
@@ -437,6 +438,12 @@ export async function setPageUrlPattern(
         .update(pageEngineSettings)
         .set({ urlPattern: input.newPattern, updatedAt })
         .where(eq(pageEngineSettings.id, SETTINGS_ROW_ID));
+
+      // A project-wide address rewrite changes every public URL; a call that
+      // stores the same value changes nothing.
+      if (input.newPattern !== settingsRow.urlPattern) {
+        registerGlobalPurge(deps, context);
+      }
 
       const result: PageUrlPatternChangeImpact = {
         currentPattern: settingsRow.urlPattern,

@@ -437,6 +437,30 @@ purge never fails the committed publish.
 | `PublishPageInput`          | type     | Input to `publishPage`                                                                         |
 | `SnapshotBlock`             | type     | One block in the materialised snapshot tree                                                    |
 
+### Cache invalidation (D-18, D-19)
+
+Every write that changes what a visitor can see purges the affected cache tags
+after its transaction commits, through `PagesDeps.invalidator`. A refused,
+denied or rolled-back write purges nothing, and a failing purge never fails the
+write: the failure reaches the recorder's `onAfterCommitFailed` hook instead.
+
+| Write path                                                                           | Purges                                         |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| publish                                                                              | `page:<id>`                                    |
+| unpublish                                                                            | `page:<id>`                                    |
+| trash, permanent delete                                                              | `page:<id>` of every page in the subtree       |
+| restore                                                                              | `page:<id>` of every restored page             |
+| move, rename with a new slug                                                         | `page:<id>` of every page in the subtree       |
+| rename with only a new title                                                         | `page:<id>` of the renamed page                |
+| URL-pattern change (only when the stored value changes)                              | `global`                                       |
+| locale purge                                                                         | `global`                                       |
+| schedule, unschedule                                                                 | none (the Phase 13 job calls `purgePageTags`)  |
+| block writes, revision restore, compaction, locks, create, translate, draft snapshot | none (live side only, never visitor-reachable) |
+
+A moved or renamed published page is unaddressed until it is republished: its
+old and new URLs both answer 404, and each descendant stays unaddressed until
+it is republished too (redirects over `page_url_history` arrive in Phase 16).
+
 ### Page status transitions (D-20)
 
 | Export                             | Kind     | Purpose                                                                       |

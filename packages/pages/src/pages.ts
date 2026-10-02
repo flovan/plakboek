@@ -19,6 +19,7 @@ import {
   composePagePath,
   generateUniquePageSlug,
 } from './page-slug.js';
+import { registerPagePurge } from './purge.js';
 import { pages, pageUrlHistory } from './schema.js';
 import { getPageEditLocking } from './settings.js';
 import { PAGE_STATUSES, type PageRecord, type PageStatus } from './types.js';
@@ -598,7 +599,7 @@ export async function renamePage(
             },
           }),
     },
-    async (tx) => {
+    async (tx, context) => {
       const page = await loadPageForUpdate(tx, input.pageId);
       if (page.version !== input.baseVersion) {
         throw new StalePageVersionError(
@@ -684,6 +685,15 @@ export async function renamePage(
           '@plakboek/pages: renamed page vanished mid-transaction',
         );
       }
+      // A slug change addresses the whole subtree differently, so every
+      // page in it is purged. A title-only rename purges the page alone: the
+      // served <title> falls back to the page title.
+      registerPagePurge(
+        deps,
+        context,
+        newPrefix === page.path ? [page.id] : subtree.map((row) => row.id),
+      );
+
       const record = toPageRecord(renamedRow);
       return {
         result: record,
@@ -735,7 +745,7 @@ export async function movePage(
         ? {}
         : { before: { parentPageId: before.parentPageId, path: before.path } }),
     },
-    async (tx) => {
+    async (tx, context) => {
       const page = await loadPageForUpdate(tx, input.pageId);
       if (page.version !== input.baseVersion) {
         throw new StalePageVersionError(
@@ -812,6 +822,19 @@ export async function movePage(
       if (movedRow === undefined) {
         throw new Error('@plakboek/pages: moved page vanished mid-transaction');
       }
+      // Every page whose address changed loses its cached HTML; a move to
+      // the current parent changes no address and purges the page alone.
+      const addressChanged = destinations.some(
+        (destination) => destination.newPath !== destination.oldPath,
+      );
+      registerPagePurge(
+        deps,
+        context,
+        addressChanged
+          ? destinations.map((destination) => destination.id)
+          : [page.id],
+      );
+
       const record = toPageRecord(movedRow);
       return {
         result: record,

@@ -34,7 +34,16 @@ import {
   trashPage,
   unpublishPage,
 } from '../../src/lifecycle.js';
-import { createPage, getPage, StalePageVersionError } from '../../src/pages.js';
+import { purgeLocale } from '../../src/locale.js';
+import { setPageUrlPattern } from '../../src/page-routing.js';
+import {
+  CircularPageMoveError,
+  createPage,
+  getPage,
+  movePage,
+  renamePage,
+  StalePageVersionError,
+} from '../../src/pages.js';
 import { publishPage } from '../../src/publish.js';
 import { defineBlocks } from '../../src/registry.js';
 import type { PageRecord } from '../../src/types.js';
@@ -337,5 +346,121 @@ describe('purge registration: tags per trigger, after commit only (D-18, D-19)',
     expect(failures).toHaveLength(1);
     expect(failures[0]?.action).toBe('page.unpublish');
     expect(afterCommitFailures).toEqual([]);
+  });
+
+  it('movePage purges the moved page and its descendant', async () => {
+    const moved = await published('purge-move-a');
+    const child = await published('child', moved);
+    const target = await published('purge-move-target');
+    calls = [];
+
+    await movePage(deps, actor, {
+      pageId: moved.id,
+      baseVersion: (await reload(moved)).version,
+      newParentPageId: target.id,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(sorted(calls[0]!)).toEqual(sorted([tagOf(moved), tagOf(child)]));
+  });
+
+  it('movePage to the current parent changes no address and purges the page alone', async () => {
+    const parent = await published('purge-move-same');
+    const page = await published('leaf', parent);
+    await published('sibling-child', page);
+    calls = [];
+
+    await movePage(deps, actor, {
+      pageId: page.id,
+      baseVersion: (await reload(page)).version,
+      newParentPageId: parent.id,
+    });
+
+    expect(calls).toEqual([[tagOf(page)]]);
+  });
+
+  it('renamePage with a new slug purges the page and its descendant', async () => {
+    const page = await published('purge-rename-slug');
+    const child = await published('child', page);
+    calls = [];
+
+    await renamePage(deps, actor, {
+      pageId: page.id,
+      baseVersion: (await reload(page)).version,
+      slug: 'purge-rename-slug-new',
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(sorted(calls[0]!)).toEqual(sorted([tagOf(page), tagOf(child)]));
+  });
+
+  it('renamePage with only a new title purges the page alone', async () => {
+    const page = await published('purge-rename-title');
+    await published('child', page);
+    calls = [];
+
+    await renamePage(deps, actor, {
+      pageId: page.id,
+      baseVersion: (await reload(page)).version,
+      title: 'A new title',
+    });
+
+    expect(calls).toEqual([[tagOf(page)]]);
+  });
+
+  it('a renamePage refused as stale and a movePage refused as circular leave the spy uncalled', async () => {
+    const parent = await published('purge-refused-write');
+    const child = await published('child', parent);
+    calls = [];
+
+    await expect(
+      renamePage(deps, actor, {
+        pageId: parent.id,
+        baseVersion: parent.version - 1,
+        slug: 'never-applied',
+      }),
+    ).rejects.toBeInstanceOf(StalePageVersionError);
+    await expect(
+      movePage(deps, actor, {
+        pageId: parent.id,
+        baseVersion: (await reload(parent)).version,
+        newParentPageId: child.id,
+      }),
+    ).rejects.toBeInstanceOf(CircularPageMoveError);
+
+    expect(calls).toEqual([]);
+  });
+
+  it('purgeLocale of a disabled locale purges global', async () => {
+    await published('purge-locale-root', undefined, 'nl');
+    const narrowed: PagesDeps = {
+      ...deps,
+      config: {
+        ...config,
+        content: { ...config.content, locales: ['en'] },
+      },
+    };
+    calls = [];
+
+    await purgeLocale(narrowed, actor, { locale: 'nl' });
+
+    expect(calls).toEqual([['global']]);
+  });
+
+  it('setPageUrlPattern purges global when the pattern changes and nothing when it does not', async () => {
+    calls = [];
+
+    await setPageUrlPattern(deps, actor, {
+      newPattern: 'site/{locale}/{path}',
+    });
+    expect(calls).toEqual([['global']]);
+
+    calls = [];
+    await setPageUrlPattern(deps, actor, {
+      newPattern: 'site/{locale}/{path}',
+    });
+    expect(calls).toEqual([]);
+
+    await setPageUrlPattern(deps, actor, { newPattern: '{locale}/{path}' });
   });
 });

@@ -329,6 +329,9 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
  * `index.ts`'s own header comment for the full rationale behind each).
  */
 const WITHHELD: readonly string[] = Object.freeze([
+  // purge.ts
+  'registerPagePurge',
+  'registerGlobalPurge',
   // revisions.ts
   'recordBlockRevision',
   'pruneBlockRevisions',
