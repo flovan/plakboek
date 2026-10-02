@@ -2,8 +2,8 @@
  * The block robustness policy (D-14, D-29) through the real visitor handler
  * and real Postgres: a throwing block is dropped, reported and never cached;
  * a block type missing from the running config renders nothing and stays
- * cacheable; an error raised below a block's own call fails the render as an
- * uncached 500 with no error detail in the body.
+ * cacheable; an error raised below a block's own call (by a component the
+ * block returns) is contained to that block the same way.
  */
 import { createMemoryCache } from '@plakboek/cache';
 import {
@@ -169,15 +169,21 @@ describe('block robustness through the visitor handler', () => {
     }
   });
 
-  it('turns an error below a block into an uncached 500 with no error detail', async () => {
+  it('contains an error raised by a component a block returns to that block', async () => {
     const fixture = await createFixture();
     try {
       const deps = pagesDepsFor(fixture);
       const published = await publishHeadingPage(deps, fixture.superadmin, {
         locale: 'en',
         title: 'About us',
-        text: 'Hello',
+        text: 'Heading A',
       });
+      await appendBlock(deps, fixture.superadmin, {
+        pageId: published.pageId,
+        sectionId: published.sectionId,
+        blockType: 'boom',
+      });
+      await republish(deps, fixture.superadmin, published.pageId);
       const Thrower = (): never => {
         throw new Error('secret failure detail');
       };
@@ -187,8 +193,12 @@ describe('block robustness through the visitor handler', () => {
         db: fixture.handle.db,
         config: withBlocks(
           fixtureConfig.blocks.map((definition) =>
-            definition.key === 'heading'
-              ? { ...definition, component: () => createElement(Thrower) }
+            definition.key === 'boom'
+              ? {
+                  ...definition,
+                  component: () =>
+                    createElement('p', null, createElement(Thrower)),
+                }
               : definition,
           ),
         ),
@@ -198,22 +208,56 @@ describe('block robustness through the visitor handler', () => {
 
       const first = await visit(handler, '/about-us');
       const body = await first.text();
-      expect(first.status).toBe(500);
-      expect(first.headers.get('Cache-Control')).toBe('no-store');
+      // The failing block is dropped; its sibling and the section survive.
+      expect(first.status).toBe(200);
+      expect(body).toContain('<h2>Heading A</h2>');
+      expect(body).not.toContain('<p>');
       expect(body).not.toContain('secret failure detail');
-      expect(body).not.toMatch(/\bat\s+\S+\s*\(/);
-      expect(onRenderError).toHaveBeenCalledTimes(1);
-      expect(onRenderError.mock.calls[0]?.[0]).toMatchObject({
-        publicPath: '/about-us',
+      expect(body).not.toContain('plakboek-block-');
+      expect(first.headers.get('Cache-Control')).toBe('no-store');
+      expect(onRenderError).not.toHaveBeenCalled();
+      expect(onBlockRenderError).toHaveBeenCalledTimes(1);
+      expect(onBlockRenderError.mock.calls[0]?.[0]).toMatchObject({
+        blockType: 'boom',
         pageId: published.pageId,
       });
-      // The error sits below the block's own call, so containment never ran.
-      expect(onBlockRenderError).not.toHaveBeenCalled();
 
-      // Nothing was cached: the next request fails and reports again.
+      // Nothing was cached: the next request renders and reports again.
       const second = await visit(handler, '/about-us');
-      expect(second.status).toBe(500);
-      expect(onRenderError).toHaveBeenCalledTimes(2);
+      expect(second.status).toBe(200);
+      expect(await second.text()).toBe(body);
+      expect(onBlockRenderError).toHaveBeenCalledTimes(2);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('keeps a contained block ahead of later siblings and nested blocks in document order', async () => {
+    const fixture = await createFixture();
+    try {
+      const deps = pagesDepsFor(fixture);
+      const published = await publishHeadingPage(deps, fixture.superadmin, {
+        locale: 'en',
+        title: 'About us',
+        text: 'Heading A',
+      });
+      await appendBlock(deps, fixture.superadmin, {
+        pageId: published.pageId,
+        sectionId: published.sectionId,
+        blockType: 'heading',
+        props: { text: 'Heading B' },
+      });
+      await republish(deps, fixture.superadmin, published.pageId);
+      const handler = createVisitorHandler({
+        db: fixture.handle.db,
+        config: fixtureConfig,
+        cache: createMemoryCache(),
+      });
+      const response = await visit(handler, '/about-us');
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain(
+        '<section><h2>Heading A</h2><h2>Heading B</h2></section>',
+      );
     } finally {
       await fixture.close();
     }

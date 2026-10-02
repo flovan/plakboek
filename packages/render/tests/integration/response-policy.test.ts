@@ -11,13 +11,7 @@ import {
   type CacheEntry,
   type CacheSetOptions,
 } from '@plakboek/cache';
-import {
-  getPage,
-  insertBlock,
-  publishPage,
-  type BlockDefinition,
-} from '@plakboek/pages';
-import { createElement } from 'react';
+import { getPage, insertBlock, publishPage } from '@plakboek/pages';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createVisitorHandler, type VisitorHandler } from '../../src/server.js';
 import {
@@ -68,22 +62,13 @@ const THROWING_DB = new Proxy(
 
 const PAGE_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 
-function withBlocks(blocks: readonly BlockDefinition[]): typeof fixtureConfig {
-  return { ...fixtureConfig, blocks };
-}
-
-/** A config whose heading component renders an element that throws. */
-function failingConfig(): typeof fixtureConfig {
-  const Thrower = (): never => {
-    throw new Error('secret failure detail');
-  };
-  return withBlocks(
-    fixtureConfig.blocks.map((definition) =>
-      definition.key === 'heading'
-        ? { ...definition, component: () => createElement(Thrower) }
-        : definition,
-    ),
-  );
+/**
+ * A document composer that throws. An error inside a block is contained to
+ * that block, so the shared-render failure these tests need comes from the
+ * one place outside every block.
+ */
+function failingDocument(): never {
+  throw new Error('secret failure detail');
 }
 
 let fixture: Fixture;
@@ -248,7 +233,8 @@ describe('a host-supplied error response', () => {
     const renderError = vi.fn((_request: Request) => hostError());
     const handler = createVisitorHandler({
       db: fixture.handle.db,
-      config: failingConfig(),
+      config: fixtureConfig,
+      renderDocument: failingDocument,
       cache: createMemoryCache(),
       renderError,
       hooks: { onRenderError },
@@ -265,7 +251,8 @@ describe('a host-supplied error response', () => {
     const onRenderError = vi.fn();
     const handler = createVisitorHandler({
       db: fixture.handle.db,
-      config: failingConfig(),
+      config: fixtureConfig,
+      renderDocument: failingDocument,
       renderError: () => {
         throw new Error('hook broke');
       },
@@ -286,7 +273,8 @@ describe('a host-supplied error response', () => {
     const renderError = vi.fn((_request: Request) => hostError());
     const handler: VisitorHandler = createVisitorHandler({
       db: fixture.handle.db,
-      config: failingConfig(),
+      config: fixtureConfig,
+      renderDocument: failingDocument,
       cache: createMemoryCache(),
       renderError,
       hooks: { onRenderError },

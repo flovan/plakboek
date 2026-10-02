@@ -6,15 +6,24 @@
  * branch on a block's `kind` exists here.
  *
  * Containment (D-14, D-29): a block's component is called as a plain function
- * inside `BlockHost`'s own render, so hooks keep working, and that one call
- * is wrapped in a try/catch. A block with no component renders nothing and
- * is reported; the outcome is deterministic for a snapshot, so the page stays
- * cacheable. A block that throws, or returns a promise (rendering here is
- * synchronous), is dropped together with its subtree, reported, and marks the
- * render `degraded` so the handler serves it uncached. No error boundary or
- * Suspense is used: neither reports errors on this renderer. An error raised
- * by an element a block returns sits outside the inline guard and fails the
- * whole render, which the handler turns into a 500 that is never cached.
+ * inside `BlockHost`'s own render, so hooks keep working, and the element tree
+ * it returns is rendered to a string right there, inside the same try/catch.
+ * So an error raised by the block's own body AND an error raised by any
+ * component it returns (a shared image, a rich-text renderer, ...) is
+ * contained to that block. A block with no component renders nothing and is
+ * reported; the outcome is deterministic for a snapshot, so the page stays
+ * cacheable. A block that throws, whose output throws, or that returns a
+ * promise (rendering here is synchronous) is dropped together with its
+ * subtree, reported, and marks the render `degraded` so the handler serves it
+ * uncached. No error boundary or Suspense is used: neither reports errors on
+ * this renderer.
+ *
+ * A contained block's markup cannot be handed back to React as raw HTML
+ * without a wrapper element, so `BlockHost` returns a text sentinel made of
+ * unescaped characters and the finished strings are spliced in afterwards.
+ * The sentinel carries a per-render random nonce, so no block can forge one.
+ * Only an error outside every block (the head, the document composer) still
+ * fails the whole render, which the handler turns into an uncached 500.
  */
 import { GLOBAL_TAG, pageTag } from '@plakboek/cache';
 import type { PublishedPageView, SnapshotBlock } from '@plakboek/pages';
@@ -44,7 +53,13 @@ export type RenderedPage = {
 };
 
 /** Render-local state: created per `renderPageSnapshot` call, never shared. */
-type RenderState = { degraded: boolean };
+type RenderState = {
+  degraded: boolean;
+  /** Per-render secret that makes block sentinels unforgeable. */
+  readonly nonce: string;
+  /** Finished markup of every contained block, by sentinel index. */
+  readonly rendered: string[];
+};
 
 type BlockHostProps = {
   readonly block: SnapshotBlock;
@@ -68,6 +83,20 @@ function isThenable(value: unknown): boolean {
     value !== null &&
     typeof Reflect.get(value, 'then') === 'function'
   );
+}
+
+function sentinelFor(state: RenderState, index: number): string {
+  return `plakboek-block-${state.nonce}-${String(index)}-end`;
+}
+
+/** Replaces every sentinel with its block's markup, nested blocks included. */
+function spliceBlocks(markup: string, state: RenderState): string {
+  const pattern = new RegExp(`plakboek-block-${state.nonce}-(\\d+)-end`, 'g');
+  const expand = (text: string): string =>
+    text.replace(pattern, (_match, index: string) =>
+      expand(state.rendered[Number(index)] ?? ''),
+    );
+  return expand(markup);
 }
 
 /**
@@ -116,7 +145,9 @@ function BlockHost({
       Promise.resolve(rendered).catch(() => undefined);
       throw new AsyncBlockComponentError();
     }
-    return rendered as ReactNode;
+    const html = renderToStaticMarkup(<>{rendered as ReactNode}</>);
+    state.rendered.push(html);
+    return sentinelFor(state, state.rendered.length - 1);
   } catch (error) {
     state.degraded = true;
     reportRenderEvent('onBlockRenderError', hooks?.onBlockRenderError, {
@@ -134,7 +165,11 @@ export function renderPageSnapshot(
   input: RenderPageSnapshotInput,
 ): RenderedPage {
   const { view, components, hooks } = input;
-  const state: RenderState = { degraded: false };
+  const state: RenderState = {
+    degraded: false,
+    nonce: globalThis.crypto.randomUUID().replaceAll('-', ''),
+    rendered: [],
+  };
   const pageId = view.page.id;
   const head = buildPageHead({
     lang: view.page.locale,
@@ -144,7 +179,7 @@ export function renderPageSnapshot(
     siteUrl: input.siteUrl,
     resolveAssetUrl: input.resolveAssetUrl,
   });
-  const body = renderToStaticMarkup(
+  const shell = renderToStaticMarkup(
     <>
       {view.publication.snapshot.blocks.map((block) => (
         <BlockHost
@@ -158,6 +193,7 @@ export function renderPageSnapshot(
       ))}
     </>,
   );
+  const body = spliceBlocks(shell, state);
   return {
     head,
     body,

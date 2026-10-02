@@ -150,15 +150,15 @@ One bad block never takes a page down.
   config no longer declares (a snapshot outlives the code that wrote it) and a
   type declared without a component. The page is still served 200 and stays
   cacheable, because the outcome is the same for a given snapshot and code.
-- A block component that throws, or returns a promise (rendering is
-  synchronous), is dropped together with its subtree. Its siblings still render,
+- A block component that throws, whose returned elements throw (a shared
+  image, a rich-text renderer, any nested component), or that returns a
+  promise (rendering is synchronous), is dropped together with its subtree. Its siblings still render,
   `onBlockRenderError({ blockType, blockId, pageId, error })` fires once, and
   the response is served with `Cache-Control: no-store` and never written to the
   cache, so a transient error is not pinned.
-- An error raised by an element a block returns, below the block's own call,
-  is outside that containment and fails the whole render. The handler reports
-  `onRenderError` and answers a 500 with `Cache-Control: no-store`, no error
-  text in the body, and nothing cached.
+- An error outside every block (the head, the document composer) fails the
+  whole render. The handler reports `onRenderError` and answers a 500 with
+  `Cache-Control: no-store`, no error text in the body, and nothing cached.
 - A block declared with a `component` that is not a plain function (a `memo` or
   `forwardRef` object, a class component, any other value) is refused when the
   handler is created: `createVisitorHandler` throws one

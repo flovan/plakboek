@@ -151,6 +151,38 @@ describe('throwing blocks (D-29)', () => {
     expect(rendered.degraded).toBe(true);
   });
 
+  it('contains an error raised by a component the block returns, and keeps the markup safe', () => {
+    const onBlockRenderError = vi.fn();
+    const Thrower = (): never => {
+      throw new Error('nested failure');
+    };
+    const rendered = render(
+      [
+        block('s1', 'section', {}, [
+          block('n1', 'nested'),
+          block('h1', 'heading', { text: '<b>& kept</b>' }),
+        ]),
+      ],
+      {
+        components: new Map<string, BlockComponent>([
+          ['heading', Heading],
+          ['section', Section],
+          ['nested', () => createElement('div', null, createElement(Thrower))],
+        ]),
+        hooks: { onBlockRenderError },
+      },
+    );
+    expect(rendered.body).toBe(
+      '<section><h2>&lt;b&gt;&amp; kept&lt;/b&gt;</h2></section>',
+    );
+    expect(rendered.degraded).toBe(true);
+    expect(onBlockRenderError).toHaveBeenCalledTimes(1);
+    expect(onBlockRenderError.mock.calls[0]?.[0]).toMatchObject({
+      blockType: 'nested',
+      blockId: 'n1',
+    });
+  });
+
   it('treats a component that returns a promise as a throwing block', () => {
     const onBlockRenderError = vi.fn();
     const asyncBlock = (async () =>
