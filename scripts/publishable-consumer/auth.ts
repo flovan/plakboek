@@ -2,6 +2,7 @@ import {
   AUDIT_RETENTION_DAYS,
   AUTH_EMAIL_KINDS,
   AfterCommitRegistrationError,
+  AfterCommitTimeoutError,
   AuditWriteError,
   AuthConfigError,
   CREDENTIAL_SET_ACTION,
@@ -155,6 +156,7 @@ const functions: Record<string, unknown> = {
 
 const errorClasses: Record<string, unknown> = {
   AfterCommitRegistrationError,
+  AfterCommitTimeoutError,
   AuditWriteError,
   AuthConfigError,
   CredentialWriteError,
@@ -259,6 +261,15 @@ if (
   registrationError.reason !== 'nested-transaction'
 ) {
   fail('AfterCommitRegistrationError does not construct as documented');
+}
+
+const timeoutError = new AfterCommitTimeoutError('page.publish', 10_000);
+if (
+  !(timeoutError instanceof Error) ||
+  timeoutError.name !== 'AfterCommitTimeoutError' ||
+  timeoutError.timeoutMs !== 10_000
+) {
+  fail('AfterCommitTimeoutError does not construct as documented');
 }
 
 const documentedValueCount =
