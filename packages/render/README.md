@@ -163,6 +163,38 @@ One bad block never takes a page down.
   rejects cannot break a render. With no hook set, the fallback logs ids and the
   error name only, never the error message, which may carry editor content.
 
+## Visitor/edit seam
+
+Editing happens on the rendered site itself, so a visitor page and an editing
+request meet at one small seam.
+
+- **The `_edit` request flow.** The server, never the client, decides. A request
+  carrying `_edit` goes to an injected `EditEntrypoint`, a separate module the
+  host composes into the handler, so the visitor handler imports nothing
+  editor-related and editor code never reaches a visitor bundle. The entrypoint
+  verifies the editor's session and resolves a `Response`, or `null` for anyone
+  who may not edit, which the handler turns into a bounce to the same page
+  without `_edit`.
+- **The `EditEntrypoint` contract.** `(request, context) => Promise<Response |
+null>`, where `context` is `{ url, visitorLocation }`. The editor package
+  (a later phase) fills it. The bounce location is always a relative path with
+  runs of `/` collapsed, so it can never redirect off the site.
+- **The bootstrap.** `renderToolbarBootstrap()` returns one static inline
+  `<script>` of at most 2 KB, framework-free, the same string on every call. It
+  does nothing unless the non-secret `EDITOR_FLAG_KEY` flag is set in
+  `localStorage` and `TOOLBAR_DISMISSED_KEY` is not. When active it shows an
+  Edit pill in a closed shadow root, so the site's CSS cannot reach it, and
+  navigates to the same URL with `_edit=1`. It fetches nothing and never grants
+  anything: a client-side flag is only a hint that an editor signed in on this
+  browser, and the server-side `_edit` handling decides who may edit. The editor
+  sets and clears the flag at sign-in and sign-out.
+- **CSP.** Shared caches serve identical bytes to every visitor, so a
+  per-request nonce is impossible. Allow the script by its hash instead, with
+  the exported constant: `script-src 'sha256-...'` where the value is
+  `TOOLBAR_BOOTSTRAP_CSP_HASH`.
+- **Keeping editor code out.** A module-graph test added later in this phase
+  checks that no editor package is reachable from this package's build.
+
 ## Root versus server entry
 
 The package publishes two subpaths.
@@ -200,26 +232,30 @@ updating them.
 
 ### Server entry: `@plakboek/render/server`
 
-| Export                      | Kind     | Purpose                                                                  |
-| --------------------------- | -------- | ------------------------------------------------------------------------ |
-| `buildPageHead`             | function | Builds a page's head from its stored SEO set; never reads the request    |
-| `renderHeadHtml`            | function | Renders a `PageHead` to escaped markup through `renderToStaticMarkup`    |
-| `renderDefaultDocument`     | function | Wraps rendered body markup in a complete document with no script element |
-| `createVisitorHandler`      | function | Builds the Fetch-standard visitor request handler over frozen deps       |
-| `VisitorHandlerConfigError` | class    | Thrown by `createVisitorHandler` with every invalid dependency           |
-| `renderPageSnapshot`        | function | Renders a published snapshot to a head and a body through one React pass |
-| `createComponentMap`        | function | Builds the block-type to component map from the host's block definitions |
-| `PageHeadInput`             | type     | Input to `buildPageHead`                                                 |
-| `PageSeoInput`              | type     | The stored SEO set as a structural type                                  |
-| `VisitorHandler`            | type     | `(request: Request) => Promise<Response>`                                |
-| `VisitorHandlerDeps`        | type     | Input to `createVisitorHandler`                                          |
-| `VisitorHandlerConfigIssue` | type     | One `createVisitorHandler` configuration problem                         |
-| `ComponentMap`              | type     | A read-only map from block type to `BlockComponent`                      |
-| `RenderPageSnapshotInput`   | type     | Input to `renderPageSnapshot`                                            |
-| `RenderedPage`              | type     | The head, body, cache tags and degraded flag of a rendered page          |
-| `RenderHooks`               | type     | Optional host hooks: unknown block, render error, cache error and more   |
-| `UnknownBlockEvent`         | type     | What `onUnknownBlock` receives                                           |
-| `MissingComponentEvent`     | type     | What `onMissingComponent` receives                                       |
-| `BlockRenderErrorEvent`     | type     | What `onBlockRenderError` receives                                       |
-| `RenderErrorEvent`          | type     | What `onRenderError` receives                                            |
-| `CacheErrorEvent`           | type     | What `onCacheError` receives                                             |
+| Export                       | Kind     | Purpose                                                                  |
+| ---------------------------- | -------- | ------------------------------------------------------------------------ |
+| `buildPageHead`              | function | Builds a page's head from its stored SEO set; never reads the request    |
+| `renderHeadHtml`             | function | Renders a `PageHead` to escaped markup through `renderToStaticMarkup`    |
+| `renderDefaultDocument`      | function | Wraps rendered body markup in a complete document with no script element |
+| `createVisitorHandler`       | function | Builds the Fetch-standard visitor request handler over frozen deps       |
+| `VisitorHandlerConfigError`  | class    | Thrown by `createVisitorHandler` with every invalid dependency           |
+| `renderPageSnapshot`         | function | Renders a published snapshot to a head and a body through one React pass |
+| `createComponentMap`         | function | Builds the block-type to component map from the host's block definitions |
+| `PageHeadInput`              | type     | Input to `buildPageHead`                                                 |
+| `PageSeoInput`               | type     | The stored SEO set as a structural type                                  |
+| `VisitorHandler`             | type     | `(request: Request) => Promise<Response>`                                |
+| `VisitorHandlerDeps`         | type     | Input to `createVisitorHandler`                                          |
+| `VisitorHandlerConfigIssue`  | type     | One `createVisitorHandler` configuration problem                         |
+| `renderToolbarBootstrap`     | function | The one inline script a visitor page carries; inert until an editor flag |
+| `TOOLBAR_BOOTSTRAP_CSP_HASH` | constant | The `sha256-...` of that script's text, for a host's `script-src`        |
+| `EditEntrypoint`             | type     | `(request, context) => Promise<Response \| null>`: the editor's entry    |
+| `EditRequestContext`         | type     | The parsed URL and the `visitorLocation` an `EditEntrypoint` receives    |
+| `ComponentMap`               | type     | A read-only map from block type to `BlockComponent`                      |
+| `RenderPageSnapshotInput`    | type     | Input to `renderPageSnapshot`                                            |
+| `RenderedPage`               | type     | The head, body, cache tags and degraded flag of a rendered page          |
+| `RenderHooks`                | type     | Optional host hooks: unknown block, render error, cache error and more   |
+| `UnknownBlockEvent`          | type     | What `onUnknownBlock` receives                                           |
+| `MissingComponentEvent`      | type     | What `onMissingComponent` receives                                       |
+| `BlockRenderErrorEvent`      | type     | What `onBlockRenderError` receives                                       |
+| `RenderErrorEvent`           | type     | What `onRenderError` receives                                            |
+| `CacheErrorEvent`            | type     | What `onCacheError` receives                                             |

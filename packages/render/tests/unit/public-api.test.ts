@@ -59,6 +59,9 @@ const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   // handler
   createVisitorHandler: 'function',
   VisitorHandlerConfigError: 'class',
+  // edit-seam
+  renderToolbarBootstrap: 'function',
+  TOOLBAR_BOOTSTRAP_CSP_HASH: 'constant',
 });
 
 const SERVER_TYPES: readonly string[] = Object.freeze([
@@ -81,6 +84,9 @@ const SERVER_TYPES: readonly string[] = Object.freeze([
   'VisitorHandler',
   'VisitorHandlerConfigIssue',
   'VisitorHandlerDeps',
+  // edit-seam
+  'EditEntrypoint',
+  'EditRequestContext',
 ]);
 
 type Documented = { readonly name: string; readonly kind: string };

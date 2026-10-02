@@ -39,3 +39,10 @@ export type {
   VisitorHandlerConfigIssue,
   VisitorHandlerDeps,
 } from './handler.js';
+
+// edit-seam
+export {
+  renderToolbarBootstrap,
+  TOOLBAR_BOOTSTRAP_CSP_HASH,
+} from './edit-seam.js';
+export type { EditEntrypoint, EditRequestContext } from './edit-seam.js';
