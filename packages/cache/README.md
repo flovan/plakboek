@@ -36,6 +36,16 @@ each hold their own cache and do not share purges, so a purge in one does not
 reach the other until its entries expire (`ttlMs`, ten minutes by default).
 Run a single process, or put a shared backend behind the same contract.
 
+## Layers
+
+The in-process LRU is one cache layer. A reverse proxy or a CDN in front of
+the server, added when the deployment is decided, is another. A writer holds
+one `CacheInvalidator`; `composeInvalidators(lru, proxy)` returns one that
+purges every layer in parallel. A layer that fails never stops the others:
+the composed purge still calls every layer and then rejects with a
+`CachePurgeError` carrying each failure, which the page engine reports after
+the publish has committed instead of failing it.
+
 ## Public API
 
 Every export of `@plakboek/cache`, grouped the way `src/index.ts` groups
@@ -62,6 +72,14 @@ point, so an export cannot be added or removed without updating them.
 | `CacheSetOptions`  | type | The tags a fill depends on and the ticket taken before its read     |
 | `CacheInvalidator` | type | The write side: `purge(tags)`                                       |
 | `CacheBackend`     | type | An invalidator plus `ticket()`, `get(key)` and `set(key, entry, o)` |
+
+### Layers
+
+| Export                | Kind     | Purpose                                                                         |
+| --------------------- | -------- | ------------------------------------------------------------------------------- |
+| `composeInvalidators` | function | Fans one purge out to every layer in parallel; one failure never stops the rest |
+| `purgePageTags`       | function | Purges the page tag of each page id; an empty list makes no call                |
+| `CachePurgeError`     | class    | Thrown by a composed purge when any layer failed; `failures` holds each error   |
 
 ### Memory cache
 

@@ -35,3 +35,10 @@ export {
   MemoryCacheConfigError,
 } from './memory.js';
 export type { MemoryCacheOptions } from './memory.js';
+
+// compose
+export {
+  CachePurgeError,
+  composeInvalidators,
+  purgePageTags,
+} from './compose.js';

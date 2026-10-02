@@ -24,6 +24,10 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   isCacheTag: 'function',
   menuTag: 'function',
   pageTag: 'function',
+  // compose
+  CachePurgeError: 'class',
+  composeInvalidators: 'function',
+  purgePageTags: 'function',
   // memory
   createMemoryCache: 'function',
   DEFAULT_MEMORY_CACHE_MAX_BYTES: 'constant',
@@ -47,6 +51,11 @@ const ERROR_FACTORIES: Readonly<
 > = Object.freeze({
   InvalidCacheTagError: (K) =>
     new (K as new (helper: string) => unknown)('pageTag'),
+  CachePurgeError: (K) =>
+    new (K as new (failures: unknown[], layerCount: number) => unknown)(
+      [new Error('layer failed')],
+      2,
+    ),
   MemoryCacheConfigError: (K) =>
     new (K as new (issues: string[]) => unknown)(['maxEntries is invalid']),
 });
