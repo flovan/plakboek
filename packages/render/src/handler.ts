@@ -23,8 +23,14 @@ import {
   createComponentMap,
   listInvalidBlockComponents,
 } from './components.js';
+import { EDIT_PARAM } from './constants.js';
 import { matchesIfNoneMatch } from './conditional.js';
 import { renderDefaultDocument } from './document.js';
+import {
+  editBounceLocation,
+  renderToolbarBootstrap,
+  type EditEntrypoint,
+} from './edit-seam.js';
 import type { RenderDocument } from './head.js';
 import { reportRenderEvent, type RenderHooks } from './hooks.js';
 import { MAX_VISITOR_PATH_LENGTH, normalizeVisitorPath } from './path.js';
@@ -74,6 +80,16 @@ export type VisitorHandlerDeps = {
    * `_` and `-`, 1 to 128 characters.
    */
   readonly buildId?: string;
+  /**
+   * The editor's entrypoint, composed in by the host from a separate module
+   * (the editor package provides it). A request carrying `_edit` goes here
+   * instead of the visitor path: it verifies the session on the server and
+   * resolves `null` for anyone who may not edit, who is then bounced to the
+   * same URL without `_edit`. Its response is served as `private, no-store`.
+   * This module never imports editor code. Without it every `_edit` request
+   * is bounced.
+   */
+  readonly edit?: EditEntrypoint;
 };
 
 export type VisitorHandlerConfigIssue = {
@@ -111,6 +127,8 @@ const BUILD_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 const REDIRECT_CACHE_CONTROL = 'public, max-age=3600';
 const PAGE_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 const NO_STORE = 'no-store';
+/** What an editor response is forced to: no shared cache may ever keep it. */
+const EDIT_CACHE_CONTROL = 'private, no-store';
 
 const NOT_FOUND_BODY =
   '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Not found</title></head><body><h1>Not found</h1></body></html>';
@@ -268,7 +286,7 @@ function toResponse(
 export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
   validate(deps);
   const { db, config, cache, hooks, siteUrl, resolveAssetUrl } = deps;
-  const { notFound, renderError } = deps;
+  const { notFound, renderError, edit } = deps;
   const buildId = deps.buildId ?? null;
   const healthyPageCacheControl = deps.cacheControl ?? PAGE_CACHE_CONTROL;
   const renderDocument = deps.renderDocument ?? renderDefaultDocument;
@@ -331,7 +349,11 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
         siteUrl,
         resolveAssetUrl,
       });
-      const html = renderDocument({ head: rendered.head, body: rendered.body });
+      // The one script a visitor page carries is part of the cached bytes.
+      const html = renderDocument({
+        head: rendered.head,
+        body: `${rendered.body}${renderToolbarBootstrap()}`,
+      });
       const body = encoder.encode(html);
       const entry = {
         body,
@@ -392,6 +414,43 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
     }
   }
 
+  /**
+   * The `_edit` branch. It only routes: nothing here reads or writes the
+   * visitor cache, renders a page or touches the database, and the answer is
+   * never stored. A bounce is a 302, not a 308, so a user who later gains the
+   * editor role is not locked out by a remembered redirect.
+   */
+  async function editResponse(request: Request, url: URL): Promise<Response> {
+    const visitorLocation = editBounceLocation(url);
+    const bounce = (): Response =>
+      new Response(null, {
+        status: 302,
+        headers: { Location: visitorLocation, 'Cache-Control': NO_STORE },
+      });
+    if (edit === undefined) return bounce();
+    try {
+      const editor = await edit(request, { url, visitorLocation });
+      if (editor === null) return bounce();
+      // A copy: the entrypoint's own headers may be immutable, and its
+      // `Cache-Control` is exactly what must not survive.
+      const headers = new Headers(editor.headers);
+      headers.set('Cache-Control', EDIT_CACHE_CONTROL);
+      return new Response(editor.body, {
+        status: editor.status,
+        statusText: editor.statusText,
+        headers,
+      });
+    } catch (error) {
+      const publicPath = url.pathname.slice(0, MAX_VISITOR_PATH_LENGTH);
+      reportRenderEvent('onRenderError', hooks?.onRenderError, {
+        publicPath,
+        pageId: null,
+        error,
+      });
+      return await errorResponse(request, 500, publicPath);
+    }
+  }
+
   async function respond(request: Request): Promise<Response> {
     // Only a read is answered: anything else never reaches the cache or the
     // database, and a 405 is never stored by anything downstream.
@@ -402,6 +461,11 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
       });
     }
     const url = new URL(request.url);
+
+    // An editing request is detected here, on the server, before the visitor
+    // path, the cache or the database are involved in any way.
+    if (url.searchParams.has(EDIT_PARAM))
+      return await editResponse(request, url);
 
     // Canonicalise before the cache and before any database statement.
     const normalized = normalizeVisitorPath(url.pathname);

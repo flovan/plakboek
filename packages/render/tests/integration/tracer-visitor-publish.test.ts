@@ -10,7 +10,10 @@
 import { createMemoryCache } from '@plakboek/cache';
 import { publishPage, updateBlockProps } from '@plakboek/pages';
 import { describe, expect, it } from 'vitest';
-import { createVisitorHandler } from '../../src/server.js';
+import {
+  createVisitorHandler,
+  renderToolbarBootstrap,
+} from '../../src/server.js';
 import {
   createFixture,
   fixtureConfig,
@@ -48,7 +51,9 @@ describe('Phase 5 tracer: a visitor gets the published page from cache, and a pu
       expect(firstBody).toContain('<title>About us</title>');
       expect(firstBody).toContain('<h2>Hello v1</h2>');
       expect(firstBody).not.toMatch(/ data-/);
-      expect(firstBody).not.toContain('<script');
+      // The only script a visitor page carries is the inert toolbar bootstrap.
+      expect(firstBody.match(/<script/g)).toHaveLength(1);
+      expect(firstBody).toContain(renderToolbarBootstrap());
       expect(first.headers.get('Content-Type')).toBe(
         'text/html; charset=utf-8',
       );

@@ -16,6 +16,8 @@ import {
   buildPageHead,
   renderDefaultDocument,
   renderHeadHtml,
+  renderToolbarBootstrap,
+  TOOLBAR_BOOTSTRAP_CSP_HASH,
   type PageHeadInput,
   type PageSeoInput,
 } from '@plakboek/render/server';
@@ -82,6 +84,16 @@ expectEqual('head has no script', headMarkup.includes('<script'), false);
 expectEqual('document doctype', html.startsWith('<!DOCTYPE html>'), true);
 expectEqual('document has no script', html.includes('<script'), false);
 expectEqual('document body', html.includes('<main>probe</main>'), true);
+expectEqual(
+  'bootstrap CSP hash',
+  TOOLBAR_BOOTSTRAP_CSP_HASH.startsWith('sha256-'),
+  true,
+);
+expectEqual(
+  'bootstrap is one inline script',
+  renderToolbarBootstrap().startsWith('<script>'),
+  true,
+);
 
 if (failures.length > 0) {
   console.error(failures.join('\n'));
