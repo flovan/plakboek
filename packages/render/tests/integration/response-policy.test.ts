@@ -329,6 +329,42 @@ describe('a host-supplied error response', () => {
   });
 });
 
+describe('a stored URL pattern that no longer parses', () => {
+  it('answers a reported 404 per request instead of a 500, and caches nothing', async () => {
+    const world = await createFixture();
+    try {
+      await publishHeadingPage(pagesDepsFor(world), world.superadmin, {
+        locale: 'en',
+        title: 'About us',
+        text: 'About',
+      });
+      await world.handle
+        .sql`UPDATE page_engine_settings SET url_pattern = '{path}.html' WHERE id = 1`;
+      const onRenderError = vi.fn();
+      const handler = createVisitorHandler({
+        db: world.handle.db,
+        config: fixtureConfig,
+        cache: createMemoryCache(),
+        hooks: { onRenderError },
+      });
+
+      for (const path of ['/about-us', '/missing']) {
+        const response = await visit(handler, path);
+        expect([path, response.status]).toEqual([path, 404]);
+        expect(response.headers.get('Cache-Control')).toBe('no-store');
+      }
+      expect(onRenderError).toHaveBeenCalledTimes(2);
+      expect(onRenderError.mock.calls[0]?.[0]).toMatchObject({
+        publicPath: '/about-us',
+        pageId: null,
+        error: { name: 'PageUrlPatternError' },
+      });
+    } finally {
+      await world.close();
+    }
+  });
+});
+
 describe('the default responses', () => {
   it('keeps the page 200 policy untouched', async () => {
     const handler = createVisitorHandler({

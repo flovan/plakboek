@@ -28,6 +28,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { definePagesConfig, type PagesDeps } from '../../src/config.js';
 import { schedulePage, trashPage, unpublishPage } from '../../src/lifecycle.js';
 import { createPage, getPage } from '../../src/pages.js';
+import { setPageUrlPattern } from '../../src/page-routing.js';
 import { createDraftSnapshot, publishPage } from '../../src/publish.js';
 import { defineBlocks } from '../../src/registry.js';
 import { insertBlock, updateBlockProps } from '../../src/tree.js';
@@ -500,6 +501,33 @@ describe('visitor resolution (D-20..D-26)', () => {
     expect(
       await resolveVisitorPage(db, visit('/de/ueber-uns', ['en', 'nl'])),
     ).toEqual({ kind: 'not-found' });
+  });
+
+  it('fails closed with invalid-pattern instead of throwing when the stored pattern no longer parses', async () => {
+    await publishedPage({ locale: 'en', title: 'Legacy', slug: 'legacy-url' });
+    // A pattern written before literals were restricted: new writes are
+    // refused by the parser, but a stored one can still be here.
+    await handle.sql`UPDATE page_engine_settings SET url_pattern = '{path}.html' WHERE id = 1`;
+    try {
+      const result = await resolveVisitorPage(db, visit('/legacy-url'));
+      expect(result.kind).toBe('invalid-pattern');
+      if (result.kind !== 'invalid-pattern') throw new Error('unreachable');
+      expect(result.error.issues.map((issue) => issue.code)).toEqual([
+        'INVALID_LITERAL',
+      ]);
+      // Even junk and redirect-shaped paths answer the same, never a throw.
+      expect((await resolveVisitorPage(db, visit('/en/legacy-url'))).kind).toBe(
+        'invalid-pattern',
+      );
+      // The documented recovery: replacing the pattern through the API works
+      // even though the stored one cannot be parsed.
+      await setPageUrlPattern(deps, actor, { newPattern: '{locale}/{path}' });
+      expect((await resolveVisitorPage(db, visit('/legacy-url'))).kind).toBe(
+        'page',
+      );
+    } finally {
+      await handle.sql`UPDATE page_engine_settings SET url_pattern = '{locale}/{path}' WHERE id = 1`;
+    }
   });
 
   it('costs two selects for a page, one for a redirect and a malformed path, two for a miss, and never reads the working tree', async () => {

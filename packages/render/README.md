@@ -126,6 +126,11 @@ cache) and returns the same status and headers with an empty body.
   once per request, while a failure shared by concurrent requests is reported
   once. `page_url_history` is not consulted: redirects over it belong to a later
   phase.
+- A stored URL pattern that no longer parses (written before pattern literals
+  were restricted) addresses nothing: every request answers a `404` with
+  `Cache-Control: no-store`, reported through `onRenderError` with a
+  `PageUrlPatternError`, rather than a `500`. Replace the pattern with
+  `setPageUrlPattern` to recover.
 - **`cacheControl`.** Replaces the page policy on healthy `200` responses for a
   downstream layer the host can purge (compose it into the pages invalidator
   through `composeInvalidators`). Degraded pages, `404`, `405`, `500` and

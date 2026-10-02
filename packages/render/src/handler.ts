@@ -357,6 +357,16 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
       if (resolution.kind === 'not-found') {
         return { kind: 'not-found' };
       }
+      if (resolution.kind === 'invalid-pattern') {
+        // A stored URL pattern that no longer parses addresses nothing: fail
+        // closed with a 404 and report it, instead of a 500 on every request.
+        reportRenderEvent('onRenderError', hooks?.onRenderError, {
+          publicPath: key,
+          pageId: null,
+          error: resolution.error,
+        });
+        return { kind: 'not-found' };
+      }
       // Defensive: HTML is only ever stored under the canonical key (D-16),
       // so a page that resolved under another spelling is redirected instead.
       if (resolution.publicPath !== key) {

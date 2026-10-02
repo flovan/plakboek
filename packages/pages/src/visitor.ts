@@ -33,6 +33,7 @@
 import type { AuditDatabase } from '@plakboek/auth';
 import { and, eq } from 'drizzle-orm';
 import {
+  PageUrlPatternError,
   parsePageUrlPattern,
   resolvePageUrlPath,
   type ParsedPageUrlPattern,
@@ -369,7 +370,14 @@ export type VisitorPageResolution =
       readonly view: PublishedPageView;
     }
   | { readonly kind: 'redirect'; readonly location: string }
-  | { readonly kind: 'not-found' };
+  | { readonly kind: 'not-found' }
+  /** The stored pattern no longer parses (for example a pattern written
+   * before literals were restricted). Nothing can be addressed, so a caller
+   * answers a 404 and reports `error`; it is never thrown per request. */
+  | {
+      readonly kind: 'invalid-pattern';
+      readonly error: PageUrlPatternError;
+    };
 
 /**
  * Resolves a public URL path for a visitor: the stored URL pattern (one
@@ -377,13 +385,27 @@ export type VisitorPageResolution =
  * joined published read (a second statement). A redirect or an unshaped path
  * costs the pattern read alone. `page_blocks`, `block_revisions` and
  * `page_url_history` are never touched (D-24).
+ *
+ * A stored pattern is parsed strictly on write but may predate that rule. One
+ * that does not parse resolves to `invalid-pattern` instead of throwing, so a
+ * single bad setting cannot turn every request into an error: the visitor path
+ * fails closed (nothing is addressable) and the caller reports it.
  */
 export async function resolveVisitorPage(
   db: AuditDatabase,
   input: ResolveVisitorPageInput,
 ): Promise<VisitorPageResolution> {
   const pattern = await getPageUrlPattern(db);
-  const matched = matchPublicPagePath(pattern, input);
+  let parsed: ParsedPageUrlPattern;
+  try {
+    parsed = parsePageUrlPattern(pattern);
+  } catch (error) {
+    if (error instanceof PageUrlPatternError) {
+      return { kind: 'invalid-pattern', error };
+    }
+    throw error;
+  }
+  const matched = matchPublicPagePath(parsed, input);
   if (matched.kind === 'redirect') {
     return { kind: 'redirect', location: matched.location };
   }

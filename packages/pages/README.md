@@ -555,7 +555,7 @@ lock blocking one would be impractical. Each is gated by its own permission
 | `ResolvePublishedPageInput` | type     | Input to `resolvePublishedPage`                                                            |
 | `ResolveVisitorPageInput`   | type     | Input to `resolveVisitorPage`                                                              |
 | `ToPublicPagePathInput`     | type     | Input to `toPublicPagePath`                                                                |
-| `VisitorPageResolution`     | type     | The composite's result: `page`, `redirect` or `not-found`                                  |
+| `VisitorPageResolution`     | type     | The composite's result: `page`, `redirect`, `not-found` or `invalid-pattern`               |
 
 `resolved_path` is read exactly as it is stored (`en/about-us` under the
 default pattern) and is the only working-side value the resolver reads; the
@@ -572,6 +572,11 @@ default locale is addressable. Only the enabled locales passed in are
 candidates, so a removed locale (its rows are kept) can never be reached by
 URL. A resolution reads at most two statements -- the URL pattern, then the
 joined select -- and a redirect or an unshaped path stops after the first.
+A stored URL pattern that no longer parses (one written before pattern literals
+were restricted to lowercase letters, digits and hyphens) resolves to
+`invalid-pattern` rather than throwing, so a single bad setting fails closed
+instead of failing every request; the render handler answers it with a reported 404. Publishing still refuses with a `PageUrlPatternError` until the pattern is
+replaced through `setPageUrlPattern`.
 Draft, scheduled, trashed and unpublished pages and draft snapshots never
 resolve, and the view never carries the revision manifest, the publisher, the
 working block tree or any lock or version column. Only pages resolve; entry
