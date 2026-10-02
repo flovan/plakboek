@@ -96,7 +96,7 @@ make an error cacheable.
 | Method other than `GET` or `HEAD`        | 405    | `no-store`, with `Allow: GET, HEAD` and an empty body; answered before any cache or database access |
 | Page                                     | 200    | `public, max-age=0, must-revalidate`, or the host's `cacheControl`                                  |
 | Degraded page (a block was dropped)      | 200    | `no-store`, never overridden                                                                        |
-| Unchanged page for a conditional request | 304    | the page's own policy (conditional requests land in a later plan of this phase)                     |
+| Unchanged page for a conditional request | 304    | the page's own policy, with its `ETag` and no body; never for a degraded page                       |
 | Canonicalisation, locale and home        | 308    | `public, max-age=3600`                                                                              |
 | `_edit` bounce for a non-editor          | 302    | `no-store` (wired in a later plan of this phase)                                                    |
 | Not found                                | 404    | `no-store`; the body can be the host's `notFound` page                                              |
@@ -106,6 +106,12 @@ Page responses carry `Content-Type: text/html; charset=utf-8`, `Content-Language
 (the page's locale), `X-Content-Type-Options: nosniff` and an `ETag` (the
 sha256 of the served bytes). There is no `Vary`: the locale is part of the URL,
 and the page never depends on a request header.
+
+A request whose `If-None-Match` names the page's `ETag` (the exact tag, a weak
+`W/` form, an entry in a comma separated list, or `*`) is answered `304` with the
+`ETag` and `Cache-Control` of the `200` and no body, from a cache hit at zero
+database cost. `HEAD` runs the same pipeline as `GET` (a cold `HEAD` fills the
+cache) and returns the same status and headers with an empty body.
 
 - **Host not-found and error pages.** `notFound(request)` and
   `renderError(request)` return a `Response`. Its body and headers are kept, but

@@ -23,6 +23,7 @@ import {
   createComponentMap,
   listInvalidBlockComponents,
 } from './components.js';
+import { matchesIfNoneMatch } from './conditional.js';
 import { renderDefaultDocument } from './document.js';
 import type { RenderDocument } from './head.js';
 import { reportRenderEvent, type RenderHooks } from './hooks.js';
@@ -179,6 +180,9 @@ type PageOutcome = {
   readonly kind: 'page';
   readonly headers: readonly (readonly [string, string])[];
   readonly body: Uint8Array;
+  readonly etag: string;
+  /** A degraded page is transient, so it is never answered with a 304. */
+  readonly degraded: boolean;
 };
 type RedirectOutcome = { readonly kind: 'redirect'; readonly location: string };
 type Outcome =
@@ -190,9 +194,12 @@ type Outcome =
 function pageOutcome(
   entry: Pick<CacheEntry, 'body' | 'etag' | 'contentLanguage'>,
   cacheControl: string,
+  degraded: boolean,
 ): PageOutcome {
   return {
     kind: 'page',
+    etag: entry.etag,
+    degraded,
     headers: [
       ['Content-Type', 'text/html; charset=utf-8'],
       ['Content-Language', entry.contentLanguage],
@@ -226,10 +233,15 @@ function sealedHostResponse(host: Response, status: 404 | 500): Response {
   return new Response(host.body, { status, headers });
 }
 
-/** Turns a shared page or redirect outcome into one request's own response. */
+/**
+ * Turns a shared page or redirect outcome into one request's own response. A
+ * healthy page whose ETag the request's `If-None-Match` names is a 304 that
+ * keeps the 200's `ETag` and `Cache-Control` and drops everything else.
+ */
 function toResponse(
   outcome: RedirectOutcome | PageOutcome,
   search: string,
+  ifNoneMatch: string | null,
 ): Response {
   if (outcome.kind === 'redirect') {
     return new Response(null, {
@@ -240,10 +252,16 @@ function toResponse(
       },
     });
   }
-  return new Response(outcome.body, {
-    status: 200,
-    headers: new Headers(outcome.headers.map(([name, value]) => [name, value])),
-  });
+  const headers = new Headers(
+    outcome.headers.map(([name, value]) => [name, value]),
+  );
+  if (!outcome.degraded && matchesIfNoneMatch(ifNoneMatch, outcome.etag)) {
+    const notModified = new Headers({ ETag: outcome.etag });
+    const cacheControl = headers.get('Cache-Control');
+    if (cacheControl !== null) notModified.set('Cache-Control', cacheControl);
+    return new Response(null, { status: 304, headers: notModified });
+  }
+  return new Response(outcome.body, { status: 200, headers });
 }
 
 /** Builds a visitor request handler over frozen dependencies. */
@@ -333,6 +351,7 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
       return pageOutcome(
         entry,
         rendered.degraded ? NO_STORE : healthyPageCacheControl,
+        rendered.degraded,
       );
     } catch (error) {
       // Reported once per flight, not once per waiter.
@@ -373,7 +392,7 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
     }
   }
 
-  return async (request) => {
+  async function respond(request: Request): Promise<Response> {
     // Only a read is answered: anything else never reaches the cache or the
     // database, and a 405 is never stored by anything downstream.
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -397,9 +416,11 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
       return toResponse(
         { kind: 'redirect', location: normalized.location },
         url.search,
+        null,
       );
     }
     const key = normalized.path;
+    const ifNoneMatch = request.headers.get('if-none-match');
 
     // The ticket and the cache read come BEFORE any database read: a purge
     // that lands after the ticket makes the fill refuse itself.
@@ -411,7 +432,11 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
         // An entry another build wrote is a miss: it is re-rendered and the
         // fill overwrites it, so older HTML never outlives its build.
         if (hit !== undefined && hit.buildId === buildId) {
-          return toResponse(pageOutcome(hit, healthyPageCacheControl), '');
+          return toResponse(
+            pageOutcome(hit, healthyPageCacheControl, false),
+            '',
+            ifNoneMatch,
+          );
         }
       }
     }
@@ -432,6 +457,17 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
     if (outcome.kind === 'error') {
       return await errorResponse(request, 500, key);
     }
-    return toResponse(outcome, url.search);
+    return toResponse(outcome, url.search, ifNoneMatch);
+  }
+
+  return async (request) => {
+    const response = await respond(request);
+    // HEAD runs the same pipeline as GET (so a cold HEAD fills the cache) and
+    // keeps the status and headers, but never carries a body.
+    if (request.method !== 'HEAD') return response;
+    return new Response(null, {
+      status: response.status,
+      headers: response.headers,
+    });
   };
 }
