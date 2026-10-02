@@ -21,8 +21,9 @@ SEO head emitter, the default document composer, the snapshot renderer and a
 first visitor request handler (`createVisitorHandler`) are implemented: a
 published page is served as complete server-rendered HTML, repeat requests
 come from an optional cache, and a publish purges the page after commit.
-Conditional requests, HEAD, concurrent-fill coalescing and block error
-containment land in later plans of the same phase. No block, section or block
+Block error containment is in place;
+conditional requests, HEAD and concurrent-fill coalescing land in later plans
+of the same phase. No block, section or block
 component ships here: the block catalogue belongs to the host, and a later
 phase supplies the built-in one.
 
@@ -50,6 +51,34 @@ const response = await handler(new Request('https://example.com/about-us'));
   `PagesDeps.invalidator` so a publish purges it after commit.
 - A cache or render failure is reported through the `RenderHooks` and never
   surfaces as error detail in a response.
+
+## Block rendering policy
+
+One bad block never takes a page down.
+
+- A block type with no component renders nothing and is reported through
+  `onUnknownBlock({ blockType, blockId, pageId })`. This covers both a type the
+  config no longer declares (a snapshot outlives the code that wrote it) and a
+  type declared without a component. The page is still served 200 and stays
+  cacheable, because the outcome is the same for a given snapshot and code.
+- A block component that throws, or returns a promise (rendering is
+  synchronous), is dropped together with its subtree. Its siblings still render,
+  `onBlockRenderError({ blockType, blockId, pageId, error })` fires once, and
+  the response is served with `Cache-Control: no-store` and never written to the
+  cache, so a transient error is not pinned.
+- An error raised by an element a block returns, below the block's own call,
+  is outside that containment and fails the whole render. The handler reports
+  `onRenderError` and answers a 500 with `Cache-Control: no-store`, no error
+  text in the body, and nothing cached.
+- A block declared with a `component` that is not a plain function (a `memo` or
+  `forwardRef` object, a class component, any other value) is refused when the
+  handler is created: `createVisitorHandler` throws one
+  `VisitorHandlerConfigError` naming every offending block key. A block declared
+  without a component is reported once through `onMissingComponent({ blockType })`
+  and never refuses.
+- Every hook goes through a never-throwing reporter: a hook that throws or
+  rejects cannot break a render. With no hook set, the fallback logs ids and the
+  error name only, never the error message, which may carry editor content.
 
 ## Root versus server entry
 
