@@ -211,6 +211,43 @@ describe('an injected edit entrypoint', () => {
     expect(renderCounts.heading).toBe(0);
   });
 
+  it('has every proxy-targeted cache header stripped from the response it returned', async () => {
+    const edit: EditEntrypoint = () =>
+      Promise.resolve(
+        new Response(EDITOR_HTML, {
+          headers: {
+            'Surrogate-Control': 'max-age=600',
+            'CDN-Cache-Control': 'max-age=600',
+            'Cloudflare-CDN-Cache-Control': 'max-age=600',
+            Expires: 'Wed, 21 Oct 2037 07:28:00 GMT',
+            ETag: '"editor"',
+            'Last-Modified': 'Wed, 21 Oct 2015 07:28:00 GMT',
+            Age: '30',
+            'X-Editor': '1',
+          },
+        }),
+      );
+    const handler = createVisitorHandler({
+      db: THROWING_DB,
+      config: fixtureConfig,
+      edit,
+    });
+    const response = await visit(handler, '/about-us?_edit=1');
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(response.headers.get('X-Editor')).toBe('1');
+    for (const name of [
+      'Surrogate-Control',
+      'CDN-Cache-Control',
+      'Cloudflare-CDN-Cache-Control',
+      'Expires',
+      'ETag',
+      'Last-Modified',
+      'Age',
+    ]) {
+      expect([name, response.headers.get(name)]).toEqual([name, null]);
+    }
+  });
+
   it('keeps a non-200 status and the status text of the response it returned', async () => {
     const edit: EditEntrypoint = () =>
       Promise.resolve(new Response('no', { status: 403 }));

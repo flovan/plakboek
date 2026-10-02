@@ -177,6 +177,43 @@ describe('a host-supplied not-found response', () => {
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 
+  it('strips every proxy-targeted cache header from a host 404 as well as Cache-Control', async () => {
+    const handler = createVisitorHandler({
+      db: THROWING_DB,
+      config: fixtureConfig,
+      notFound: () =>
+        new Response('<h1>Gone</h1>', {
+          status: 200,
+          headers: {
+            'Cache-Control': 'public, max-age=600',
+            'Surrogate-Control': 'max-age=600',
+            'CDN-Cache-Control': 'max-age=600',
+            'Cloudflare-CDN-Cache-Control': 'max-age=600',
+            Expires: 'Wed, 21 Oct 2037 07:28:00 GMT',
+            ETag: '"host"',
+            'Last-Modified': 'Wed, 21 Oct 2015 07:28:00 GMT',
+            Age: '30',
+            'X-Host': 'kept',
+          },
+        }),
+    });
+    const response = await visit(handler, '/wp-login.php');
+    expect(response.status).toBe(404);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(response.headers.get('X-Host')).toBe('kept');
+    for (const name of [
+      'Surrogate-Control',
+      'CDN-Cache-Control',
+      'Cloudflare-CDN-Cache-Control',
+      'Expires',
+      'ETag',
+      'Last-Modified',
+      'Age',
+    ]) {
+      expect([name, response.headers.get(name)]).toEqual([name, null]);
+    }
+  });
+
   it('serves the host response for a junk path rejected before the database', async () => {
     const handler = createVisitorHandler({
       db: THROWING_DB,

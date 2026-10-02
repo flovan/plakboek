@@ -116,7 +116,11 @@ cache) and returns the same status and headers with an empty body.
 - **Host not-found and error pages.** `notFound(request)` and
   `renderError(request)` return a `Response`. Its body and headers are kept, but
   its status is forced to `404` or `500` and its `Cache-Control` to `no-store`
-  on a copy, so a host page can never become a cacheable soft-404. A hook that
+  on a copy, and the proxy-targeted freshness and validator headers
+  (`Surrogate-Control`, `CDN-Cache-Control`, `Cloudflare-CDN-Cache-Control`,
+  `Expires`, `ETag`, `Last-Modified`, `Age`) are removed, so a host page can
+  never become a cacheable soft-404. A response from the edit entrypoint gets
+  the same stripping with `Cache-Control: private, no-store`. A hook that
   throws, rejects or returns something that is not a `Response` is reported
   through `onRenderError` and replaced by the default page. The hook is called
   once per request, while a failure shared by concurrent requests is reported

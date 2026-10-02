@@ -130,6 +130,31 @@ const NO_STORE = 'no-store';
 /** What an editor response is forced to: no shared cache may ever keep it. */
 const EDIT_CACHE_CONTROL = 'private, no-store';
 
+/**
+ * Every header through which a shared cache or CDN may be told to keep, or to
+ * revalidate, a response: the CDN-targeted freshness headers that some proxies
+ * prefer over `Cache-Control`, plus the validators and age a stored copy would
+ * be served with. A host or editor response is stripped of all of them.
+ */
+const PROXY_CACHE_HEADERS = [
+  'Surrogate-Control',
+  'CDN-Cache-Control',
+  'Cloudflare-CDN-Cache-Control',
+  'Expires',
+  'ETag',
+  'Last-Modified',
+  'Age',
+] as const;
+
+/** Copies `source` and forces it uncacheable by any layer. A copy is required:
+ * a foreign response's headers can be immutable. */
+function uncacheableHeaders(source: Headers, cacheControl: string): Headers {
+  const headers = new Headers(source);
+  for (const name of PROXY_CACHE_HEADERS) headers.delete(name);
+  headers.set('Cache-Control', cacheControl);
+  return headers;
+}
+
 const NOT_FOUND_BODY =
   '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Not found</title></head><body><h1>Not found</h1></body></html>';
 const SERVER_ERROR_BODY =
@@ -246,8 +271,7 @@ function defaultErrorResponse(status: 404 | 500): Response {
  * `Cache-Control` are exactly what must not survive.
  */
 function sealedHostResponse(host: Response, status: 404 | 500): Response {
-  const headers = new Headers(host.headers);
-  headers.set('Cache-Control', NO_STORE);
+  const headers = uncacheableHeaders(host.headers, NO_STORE);
   return new Response(host.body, { status, headers });
 }
 
@@ -431,10 +455,9 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
     try {
       const editor = await edit(request, { url, visitorLocation });
       if (editor === null) return bounce();
-      // A copy: the entrypoint's own headers may be immutable, and its
-      // `Cache-Control` is exactly what must not survive.
-      const headers = new Headers(editor.headers);
-      headers.set('Cache-Control', EDIT_CACHE_CONTROL);
+      // The entrypoint's own `Cache-Control` and every proxy-targeted
+      // freshness or validator header is exactly what must not survive.
+      const headers = uncacheableHeaders(editor.headers, EDIT_CACHE_CONTROL);
       return new Response(editor.body, {
         status: editor.status,
         statusText: editor.statusText,
