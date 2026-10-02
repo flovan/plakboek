@@ -17,7 +17,10 @@ import {
   type PagesConfig,
   type PagesDeps,
 } from '@plakboek/pages';
-import { createComponentMap } from './components.js';
+import {
+  createComponentMap,
+  listInvalidBlockComponents,
+} from './components.js';
 import { renderDefaultDocument } from './document.js';
 import type { RenderDocument } from './head.js';
 import { reportRenderEvent, type RenderHooks } from './hooks.js';
@@ -41,7 +44,10 @@ export type VisitorHandlerDeps = {
 };
 
 export type VisitorHandlerConfigIssue = {
-  readonly code: 'INVALID_SITE_URL' | 'INVALID_HOME_SLUG';
+  readonly code:
+    | 'INVALID_SITE_URL'
+    | 'INVALID_HOME_SLUG'
+    | 'invalid-block-component';
   readonly message: string;
 };
 
@@ -96,6 +102,12 @@ function validate(deps: VisitorHandlerDeps): void {
       message: `homeSlug must match ${HOME_SLUG_PATTERN.source}`,
     });
   }
+  for (const key of listInvalidBlockComponents(deps.config.blocks)) {
+    issues.push({
+      code: 'invalid-block-component',
+      message: `block "${key}" declares a component that is not a plain function component (memo, forwardRef and class components are not supported: wrap them in a function)`,
+    });
+  }
   if (issues.length > 0) throw new VisitorHandlerConfigError(issues);
 }
 
@@ -140,7 +152,7 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
   const { db, config, cache, hooks, siteUrl, resolveAssetUrl } = deps;
   const renderDocument = deps.renderDocument ?? renderDefaultDocument;
   const homeSlug = deps.homeSlug ?? DEFAULT_HOME_SLUG;
-  const components = createComponentMap(config.blocks);
+  const components = createComponentMap(config.blocks, hooks);
   const encoder = new TextEncoder();
 
   /** A cache failure is reported and the request continues uncached. */
