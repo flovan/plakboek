@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@plakboek/auth": "workspace:*",
+    "@plakboek/cache": "workspace:*",
     "@plakboek/content": "workspace:*",
     "@plakboek/db": "workspace:*",
     "@plakboek/permissions": "workspace:*",

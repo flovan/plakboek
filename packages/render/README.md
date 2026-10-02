@@ -16,12 +16,40 @@ pnpm add @plakboek/render react react-dom
 
 ## Status
 
-The block-authoring contract (`BlockComponent`, `EditProxy`, `NOOP_EDIT`) and
-the database-free leaf renderers on the server entry (the SEO head emitter
-and the default document composer) are implemented. The visitor request
-handler lands in a later plan of the same phase. No block, section or block
+The block-authoring contract (`BlockComponent`, `EditProxy`, `NOOP_EDIT`), the
+SEO head emitter, the default document composer, the snapshot renderer and a
+first visitor request handler (`createVisitorHandler`) are implemented: a
+published page is served as complete server-rendered HTML, repeat requests
+come from an optional cache, and a publish purges the page after commit.
+Conditional requests, HEAD, concurrent-fill coalescing and block error
+containment land in later plans of the same phase. No block, section or block
 component ships here: the block catalogue belongs to the host, and a later
 phase supplies the built-in one.
+
+## The visitor handler
+
+`createVisitorHandler(deps)` returns a Fetch-standard
+`(request: Request) => Promise<Response>`. It needs no framework and no HTTP
+server, and holds no module-level state, so two handlers in one process work
+independently.
+
+```ts
+const handler = createVisitorHandler({ db, config, cache });
+const response = await handler(new Request('https://example.com/about-us'));
+```
+
+- The component for each block comes from `config.blocks`, built once when the
+  handler is created.
+- The cache key is the URL path; a query string is never part of it. Without
+  `cache` nothing is stored and every request renders.
+- On a miss the handler reads only the published snapshot, never the working
+  block tree, so editing a page changes nothing a visitor receives until the
+  next publish.
+- The cache ticket is taken before any database read, so a fill that races a
+  purge is refused. Pass the same cache object to the page engine as
+  `PagesDeps.invalidator` so a publish purges it after commit.
+- A cache or render failure is reported through the `RenderHooks` and never
+  surfaces as error detail in a response.
 
 ## Root versus server entry
 
@@ -60,10 +88,26 @@ updating them.
 
 ### Server entry: `@plakboek/render/server`
 
-| Export                  | Kind     | Purpose                                                                  |
-| ----------------------- | -------- | ------------------------------------------------------------------------ |
-| `buildPageHead`         | function | Builds a page's head from its stored SEO set; never reads the request    |
-| `renderHeadHtml`        | function | Renders a `PageHead` to escaped markup through `renderToStaticMarkup`    |
-| `renderDefaultDocument` | function | Wraps rendered body markup in a complete document with no script element |
-| `PageHeadInput`         | type     | Input to `buildPageHead`                                                 |
-| `PageSeoInput`          | type     | The stored SEO set as a structural type                                  |
+| Export                      | Kind     | Purpose                                                                  |
+| --------------------------- | -------- | ------------------------------------------------------------------------ |
+| `buildPageHead`             | function | Builds a page's head from its stored SEO set; never reads the request    |
+| `renderHeadHtml`            | function | Renders a `PageHead` to escaped markup through `renderToStaticMarkup`    |
+| `renderDefaultDocument`     | function | Wraps rendered body markup in a complete document with no script element |
+| `createVisitorHandler`      | function | Builds the Fetch-standard visitor request handler over frozen deps       |
+| `VisitorHandlerConfigError` | class    | Thrown by `createVisitorHandler` with every invalid dependency           |
+| `renderPageSnapshot`        | function | Renders a published snapshot to a head and a body through one React pass |
+| `createComponentMap`        | function | Builds the block-type to component map from the host's block definitions |
+| `PageHeadInput`             | type     | Input to `buildPageHead`                                                 |
+| `PageSeoInput`              | type     | The stored SEO set as a structural type                                  |
+| `VisitorHandler`            | type     | `(request: Request) => Promise<Response>`                                |
+| `VisitorHandlerDeps`        | type     | Input to `createVisitorHandler`                                          |
+| `VisitorHandlerConfigIssue` | type     | One `createVisitorHandler` configuration problem                         |
+| `ComponentMap`              | type     | A read-only map from block type to `BlockComponent`                      |
+| `RenderPageSnapshotInput`   | type     | Input to `renderPageSnapshot`                                            |
+| `RenderedPage`              | type     | The head, body, cache tags and degraded flag of a rendered page          |
+| `RenderHooks`               | type     | Optional host hooks: unknown block, render error, cache error and more   |
+| `UnknownBlockEvent`         | type     | What `onUnknownBlock` receives                                           |
+| `MissingComponentEvent`     | type     | What `onMissingComponent` receives                                       |
+| `BlockRenderErrorEvent`     | type     | What `onBlockRenderError` receives                                       |
+| `RenderErrorEvent`          | type     | What `onRenderError` receives                                            |
+| `CacheErrorEvent`           | type     | What `onCacheError` receives                                             |

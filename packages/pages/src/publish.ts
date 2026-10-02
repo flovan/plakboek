@@ -18,6 +18,7 @@ import type {
   AuditDatabase,
   AuditTransaction,
 } from '@plakboek/auth';
+import { pageTag } from '@plakboek/cache';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PagesDeps, PagesHooks } from './config.js';
 import { assertPageWritable } from './locks.js';
@@ -436,7 +437,7 @@ export async function publishPage(
       entityType: 'page',
       entityId: input.pageId,
     },
-    async (tx) => {
+    async (tx, context) => {
       const page = await loadPageForUpdate(tx, input.pageId);
       if (page.version !== input.baseVersion) {
         throw new StalePageVersionError(
@@ -454,6 +455,16 @@ export async function publishPage(
         deps.hooks,
         { isDraft: false },
       );
+
+      // The purge runs only after this transaction commits (D-18): purging
+      // first would let a concurrent visitor re-fill the old version.
+      const { invalidator } = deps;
+      if (invalidator !== undefined) {
+        const tags = [pageTag(page.id)];
+        context.afterCommit(async () => {
+          await invalidator.purge(tags);
+        });
+      }
 
       return {
         result: record,
@@ -495,6 +506,7 @@ export async function createDraftSnapshot(
       entityId: input.pageId,
     },
     async (tx) => {
+      // A draft snapshot is never visitor-reachable, so it purges nothing.
       const page = await getPage(tx, input.pageId);
       if (page === null) {
         throw new PageNotFoundError(input.pageId);

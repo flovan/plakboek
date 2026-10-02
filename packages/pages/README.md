@@ -142,20 +142,20 @@ point, so an export cannot be added or removed without updating them.
 
 ### Host config
 
-| Export                          | Kind     | Purpose                                                                                                         |
-| ------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
-| `definePagesConfig`             | function | Validates and freezes a host's blocks/field types/widgets/constraints, registering all of them                  |
-| `PagesConfigError`              | class    | Thrown by `definePagesConfig` with every problem found                                                          |
-| `reportPagesWarning`            | function | Calls a host-supplied hook so it can never throw or reject into the caller                                      |
-| `DEFAULT_SECTION_NESTING_DEPTH` | constant | `2`: the default section-nesting cap (D-18)                                                                     |
-| `DEFAULT_BLOCK_DEPTH_CEILING`   | constant | `12`: the default coarse block-depth ceiling                                                                    |
-| `LocaleRemovedEvent`            | type     | What `onLocaleRemoved` receives when a removed locale still holds pages                                         |
-| `PagesConfig`                   | type     | The frozen, validated result of `definePagesConfig`                                                             |
-| `PagesConfigInput`              | type     | Input to `definePagesConfig`                                                                                    |
-| `PagesConfigIssue`              | type     | One `definePagesConfig` problem                                                                                 |
-| `PagesConfigIssueCode`          | type     | `NO_BLOCKS`, `INVALID_SECTION_NESTING_DEPTH`, `INVALID_BLOCK_DEPTH_CEILING`                                     |
-| `PagesDeps`                     | type     | The dependency bag every engine operation takes: `db`, `recorder`, `resolver`, `config`, optional `hooks`/`now` |
-| `PagesHooks`                    | type     | Optional warning hooks a host passes on `PagesDeps`                                                             |
+| Export                          | Kind     | Purpose                                                                                                                       |
+| ------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `definePagesConfig`             | function | Validates and freezes a host's blocks/field types/widgets/constraints, registering all of them                                |
+| `PagesConfigError`              | class    | Thrown by `definePagesConfig` with every problem found                                                                        |
+| `reportPagesWarning`            | function | Calls a host-supplied hook so it can never throw or reject into the caller                                                    |
+| `DEFAULT_SECTION_NESTING_DEPTH` | constant | `2`: the default section-nesting cap (D-18)                                                                                   |
+| `DEFAULT_BLOCK_DEPTH_CEILING`   | constant | `12`: the default coarse block-depth ceiling                                                                                  |
+| `LocaleRemovedEvent`            | type     | What `onLocaleRemoved` receives when a removed locale still holds pages                                                       |
+| `PagesConfig`                   | type     | The frozen, validated result of `definePagesConfig`                                                                           |
+| `PagesConfigInput`              | type     | Input to `definePagesConfig`                                                                                                  |
+| `PagesConfigIssue`              | type     | One `definePagesConfig` problem                                                                                               |
+| `PagesConfigIssueCode`          | type     | `NO_BLOCKS`, `INVALID_SECTION_NESTING_DEPTH`, `INVALID_BLOCK_DEPTH_CEILING`                                                   |
+| `PagesDeps`                     | type     | The dependency bag every engine operation takes: `db`, `recorder`, `resolver`, `config`, optional `hooks`/`invalidator`/`now` |
+| `PagesHooks`                    | type     | Optional warning hooks a host passes on `PagesDeps`                                                                           |
 
 ### Status and kind catalogues
 
@@ -418,6 +418,10 @@ correctly today; multi-block subtree-delete restore is deferred to
 whichever later phase builds the history/restore UI.
 
 ### Publish and draft snapshots (D-30..D-33)
+
+When `PagesDeps.invalidator` is set, `publishPage` purges the page's cache tag
+after its transaction commits; a refused publish purges nothing and a failing
+purge never fails the committed publish.
 
 | Export                      | Kind     | Purpose                                                                                        |
 | --------------------------- | -------- | ---------------------------------------------------------------------------------------------- |

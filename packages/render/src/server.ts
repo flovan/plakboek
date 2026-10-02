@@ -10,3 +10,32 @@ export type { PageHeadInput, PageSeoInput } from './head.js';
 
 // document
 export { renderDefaultDocument } from './document.js';
+
+// components
+export { createComponentMap } from './components.js';
+export type { ComponentMap } from './components.js';
+
+// hooks
+export type {
+  BlockRenderErrorEvent,
+  CacheErrorEvent,
+  MissingComponentEvent,
+  RenderErrorEvent,
+  RenderHooks,
+  UnknownBlockEvent,
+} from './hooks.js';
+
+// render-snapshot
+export { renderPageSnapshot } from './render-snapshot.js';
+export type {
+  RenderedPage,
+  RenderPageSnapshotInput,
+} from './render-snapshot.js';
+
+// handler
+export { createVisitorHandler, VisitorHandlerConfigError } from './handler.js';
+export type {
+  VisitorHandler,
+  VisitorHandlerConfigIssue,
+  VisitorHandlerDeps,
+} from './handler.js';

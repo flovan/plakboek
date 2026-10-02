@@ -439,6 +439,9 @@ importers:
       '@plakboek/auth':
         specifier: workspace:*
         version: link:../auth
+      '@plakboek/cache':
+        specifier: workspace:*
+        version: link:../cache
       '@plakboek/content':
         specifier: workspace:*
         version: link:../content

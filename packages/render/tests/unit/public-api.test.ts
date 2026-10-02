@@ -6,8 +6,8 @@
  * build's entry names drift apart. Reads source and README from disk, so it
  * runs before a build.
  *
- * Neither entry exports an error class today; the "no extra values" checks
- * below catch one appearing without a matching list entry.
+ * The "no extra values" checks below catch an export appearing without a
+ * matching list entry.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -52,12 +52,35 @@ const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   renderHeadHtml: 'function',
   // document
   renderDefaultDocument: 'function',
+  // components
+  createComponentMap: 'function',
+  // render-snapshot
+  renderPageSnapshot: 'function',
+  // handler
+  createVisitorHandler: 'function',
+  VisitorHandlerConfigError: 'class',
 });
 
 const SERVER_TYPES: readonly string[] = Object.freeze([
   // head
   'PageHeadInput',
   'PageSeoInput',
+  // components
+  'ComponentMap',
+  // hooks
+  'BlockRenderErrorEvent',
+  'CacheErrorEvent',
+  'MissingComponentEvent',
+  'RenderErrorEvent',
+  'RenderHooks',
+  'UnknownBlockEvent',
+  // render-snapshot
+  'RenderedPage',
+  'RenderPageSnapshotInput',
+  // handler
+  'VisitorHandler',
+  'VisitorHandlerConfigIssue',
+  'VisitorHandlerDeps',
 ]);
 
 type Documented = { readonly name: string; readonly kind: string };
