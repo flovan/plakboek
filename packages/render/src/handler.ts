@@ -4,10 +4,12 @@
  * holds no module-level state, and never writes to the database, so two
  * handlers over two configs in one process work independently (D-04).
  *
- * Per request: the cache key is the URL path (the query string is never
- * part of it), a cache ticket is taken and the cache read BEFORE any
- * database access, and only a miss resolves the page, renders its snapshot
- * and fills the cache. Without a cache nothing is stored (D-17).
+ * Per request: the URL path is canonicalised first (a non-canonical spelling
+ * is a redirect, junk is a 404, neither touches the cache or the database),
+ * the canonical path is the cache key (the query string is never part of it),
+ * a cache ticket is taken and the cache read BEFORE any database access, and
+ * only a miss resolves the page, renders its snapshot and fills the cache.
+ * Without a cache nothing is stored (D-17).
  */
 import { createHash } from 'node:crypto';
 import type { CacheBackend, CacheEntry } from '@plakboek/cache';
@@ -24,6 +26,7 @@ import {
 import { renderDefaultDocument } from './document.js';
 import type { RenderDocument } from './head.js';
 import { reportRenderEvent, type RenderHooks } from './hooks.js';
+import { normalizeVisitorPath } from './path.js';
 import { renderPageSnapshot } from './render-snapshot.js';
 
 export type VisitorHandler = (request: Request) => Promise<Response>;
@@ -130,6 +133,16 @@ function htmlResponse(
   });
 }
 
+function redirectResponse(location: string, search: string): Response {
+  return new Response(null, {
+    status: 308,
+    headers: {
+      Location: `${location}${search}`,
+      'Cache-Control': REDIRECT_CACHE_CONTROL,
+    },
+  });
+}
+
 function pageResponse(
   entry: Pick<CacheEntry, 'body' | 'etag' | 'contentLanguage'>,
   degraded: boolean,
@@ -187,16 +200,15 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
     });
 
     if (resolution.kind === 'redirect') {
-      return new Response(null, {
-        status: 308,
-        headers: {
-          Location: `${resolution.location}${url.search}`,
-          'Cache-Control': REDIRECT_CACHE_CONTROL,
-        },
-      });
+      return redirectResponse(resolution.location, url.search);
     }
     if (resolution.kind === 'not-found') {
       return htmlResponse(404, NOT_FOUND_BODY, NO_STORE);
+    }
+    // Defensive: HTML is only ever stored under the canonical key (D-16), so
+    // a page that resolved under a different spelling is redirected instead.
+    if (resolution.publicPath !== key) {
+      return redirectResponse(resolution.publicPath, url.search);
     }
 
     const { view } = resolution;
@@ -229,7 +241,16 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
 
   return async (request) => {
     const url = new URL(request.url);
-    const key = url.pathname;
+
+    // Canonicalise before the cache and before any database statement.
+    const normalized = normalizeVisitorPath(url.pathname);
+    if (normalized.kind === 'not-found') {
+      return htmlResponse(404, NOT_FOUND_BODY, NO_STORE);
+    }
+    if (normalized.kind === 'redirect') {
+      return redirectResponse(normalized.location, url.search);
+    }
+    const key = normalized.path;
 
     // The ticket and the cache read come BEFORE any database read: a purge
     // that lands after the ticket makes the fill below refuse itself.

@@ -52,6 +52,30 @@ const response = await handler(new Request('https://example.com/about-us'));
 - A cache or render failure is reported through the `RenderHooks` and never
   surfaces as error detail in a response.
 
+## Request handling
+
+Every request goes through the same steps in the same order:
+
+1. **Canonicalise** the path. Runs of `/` collapse, a trailing `/` is dropped
+   (except for `/`) and letters are lowercased. A request that is not already
+   canonical gets a `308` to the canonical spelling, with the query string
+   preserved, `Cache-Control: public, max-age=3600` and a `Location` that is
+   always a same-origin path starting with exactly one `/`. A path that cannot
+   be a stored address (anything outside lowercase letters, digits, hyphens and
+   single slashes, or longer than 2048 characters) is a `404` with
+   `Cache-Control: no-store`, answered without a database statement or a cache
+   lookup. This is complete because a page URL pattern's literals are limited
+   to that same alphabet (`@plakboek/pages`).
+2. **Look up the cache** under the canonical path (a cache ticket is taken
+   first).
+3. **Resolve** the published page on a miss: the unprefixed default locale
+   (`/en/about-us` redirects to `/about-us`), the locale root serving the
+   `home` page (`/home` redirects to `/`, `/nl/home` to `/nl`), and a `404`
+   for an unknown or removed locale or a missing page. Redirects and `404`s
+   are never cached.
+4. **Render** the published snapshot.
+5. **Store** the HTML under the canonical path.
+
 ## Block rendering policy
 
 One bad block never takes a page down.
