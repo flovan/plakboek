@@ -205,9 +205,12 @@ describe('audited mutations (USER-08, D-05, D-06)', () => {
           before: { name: 'Owner' },
           after: { name: 'Hijacked' },
         },
-        async (tx) => {
+        async (tx, context) => {
           mutationRan = true;
-          return await renameMutation(superadmin.userId, 'Hijacked')(tx);
+          return await renameMutation(superadmin.userId, 'Hijacked')(
+            tx,
+            context,
+          );
         },
       )
       .catch((caught: unknown) => caught);

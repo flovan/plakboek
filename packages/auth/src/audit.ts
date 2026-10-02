@@ -25,6 +25,14 @@
  * `audit_log` is append-only. Nothing in this package updates its rows, and
  * the retention prune (`pruneAuditLog`, D-07) is the sole statement that
  * deletes from it.
+ *
+ * Work that must only happen once a change is durable, such as purging a
+ * served cache, registers through `AuditMutationContext.afterCommit`. It runs
+ * outside the transaction, after it has committed: inside it, a concurrent
+ * read could refill the cache from pre-commit data, and a mutation that later
+ * rolls back would still have purged. Callbacks run in registration order,
+ * are awaited before `run` resolves, and never fail the committed mutation
+ * (D-18).
  */
 import type { Permission, PermissionResolver } from '@plakboek/permissions';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
@@ -75,8 +83,26 @@ export type AuditTransaction = Parameters<
  * savepoint). */
 export type AuditDatabase = PgDatabase<PgQueryResultHKT>;
 
+/** Work to run once the mutation's transaction has committed. */
+export type AfterCommitCallback = () => void | Promise<void>;
+
+/** What a mutation receives next to its transaction handle. */
+export type AuditMutationContext = {
+  /**
+   * Registers `callback` to run after the transaction has committed, in
+   * registration order, awaited one at a time and each isolated from the
+   * others and from the mutation's result. None run for a denied, thrown,
+   * audit-write-failed or rolled-back mutation. Throws
+   * `AfterCommitRegistrationError` when the recorder's database handle is
+   * itself a transaction (the commit would not be this call's) or when called
+   * after the mutation has returned.
+   */
+  afterCommit(callback: AfterCommitCallback): void;
+};
+
 export type AuditedMutation<T> = (
   tx: AuditTransaction,
+  context: AuditMutationContext,
 ) => Promise<{ readonly result: T; readonly after?: unknown }>;
 
 /** Reported after an audit insert failed and its transaction rolled back.
@@ -95,6 +121,21 @@ export type AuditWriteFailure = {
 
 export type AuditFailureHook = (failure: AuditWriteFailure) => void;
 
+/** Reported when an after-commit callback threw or rejected. The mutation had
+ * already committed and its result is unaffected. Carries opaque identifiers
+ * and the callback's own error only -- never the before/after payloads. */
+export type AfterCommitFailure = {
+  readonly permission: Permission;
+  readonly action: string;
+  readonly entityType: string;
+  readonly entityId?: string;
+  readonly actorUserId: string;
+  readonly occurredAt: Date;
+  readonly error: unknown;
+};
+
+export type AfterCommitFailureHook = (failure: AfterCommitFailure) => void;
+
 export type AuditDeps = {
   readonly db: AuditDatabase;
   readonly resolver: PermissionResolver;
@@ -102,6 +143,11 @@ export type AuditDeps = {
    * Defaults to one `console.error` line. A hook that throws or rejects
    * cannot change the outcome: `AuditWriteError` is still thrown. */
   readonly onAuditWriteFailed?: AuditFailureHook;
+  /** Called once per after-commit callback that threw or rejected, after the
+   * commit. Defaults to one `console.error` line carrying the action, entity
+   * type and error name only. A hook that throws or rejects cannot change
+   * the outcome: `run` still resolves with the mutation's result. */
+  readonly onAfterCommitFailed?: AfterCommitFailureHook;
   readonly now?: () => Date;
 };
 
@@ -175,6 +221,24 @@ export class AuditWriteError extends Error {
   }
 }
 
+/** Thrown by `AuditMutationContext.afterCommit` when the callback could not
+ * be tied to a commit of this call's own: `'nested-transaction'` when the
+ * recorder is bound to an enclosing transaction, whose commit is not this
+ * call's to observe, and `'closed'` when the mutation has already returned. */
+export class AfterCommitRegistrationError extends Error {
+  readonly reason: 'nested-transaction' | 'closed';
+
+  constructor(reason: 'nested-transaction' | 'closed', action: string) {
+    super(
+      reason === 'nested-transaction'
+        ? `@plakboek/auth: cannot register after-commit work for "${action}": the recorder is bound to a transaction, so its commit is not this call's`
+        : `@plakboek/auth: cannot register after-commit work for "${action}": the mutation has already returned`,
+    );
+    this.name = 'AfterCommitRegistrationError';
+    this.reason = reason;
+  }
+}
+
 const MAX_CAUSE_DEPTH = 3;
 
 /** Error names and SQLSTATE codes along the cause chain. Messages are left
@@ -232,6 +296,50 @@ function reportAuditWriteFailure(
     }
   } catch (hookError) {
     logHookFailure(failure, hookError);
+  }
+}
+
+function defaultOnAfterCommitFailed(failure: AfterCommitFailure): void {
+  // oxlint-disable-next-line no-console -- the documented default fallback hook; a host overrides `onAfterCommitFailed` to route elsewhere
+  console.error(
+    `[@plakboek/auth] after-commit callback failed for "${failure.action}" on ${failure.entityType} (${describeCause(failure.error)})`,
+  );
+}
+
+function logAfterCommitHookFailure(
+  failure: AfterCommitFailure,
+  hookError: unknown,
+): void {
+  try {
+    // oxlint-disable-next-line no-console -- last-resort fallback when a host-supplied hook itself throws; nothing else can report this
+    console.error(
+      `[@plakboek/auth] onAfterCommitFailed hook threw while handling "${failure.action}" on ${failure.entityType}`,
+      hookError,
+    );
+  } catch {
+    // Never let a broken console/logger escape either.
+  }
+}
+
+/** Invokes the hook once. A broken hook -- synchronous throw or rejected
+ * promise -- is logged and never escalates past the caller. */
+function reportAfterCommitFailure(
+  hook: AfterCommitFailureHook,
+  failure: AfterCommitFailure,
+): void {
+  try {
+    const returned: unknown = hook(failure);
+    if (
+      typeof returned === 'object' &&
+      returned !== null &&
+      typeof Reflect.get(returned, 'then') === 'function'
+    ) {
+      void Promise.resolve(returned).catch((hookError: unknown) => {
+        logAfterCommitHookFailure(failure, hookError);
+      });
+    }
+  } catch (hookError) {
+    logAfterCommitHookFailure(failure, hookError);
   }
 }
 
@@ -300,6 +408,11 @@ function auditWriteFailure(
  * mutation back, reports through `onAuditWriteFailed` and throws
  * `AuditWriteError`. A mutation that throws on its own rolls back and
  * writes no row, because nothing changed.
+ *
+ * Callbacks the mutation registered through `context.afterCommit` run only
+ * once the transaction has committed an allowed mutation, one at a time in
+ * registration order, and are awaited before this resolves. One that throws
+ * is reported through `onAfterCommitFailed` and changes nothing else.
  */
 export async function runAuditedMutation<T>(
   deps: AuditDeps,
@@ -331,6 +444,28 @@ export async function runAuditedMutation<T>(
     }
   }
 
+  const callbacks: AfterCommitCallback[] = [];
+  let closed = false;
+  // A transaction handle declares `rollback()`; the database itself does not.
+  // Work registered against a transaction would run before its outermost
+  // commit, which is exactly what this facility exists to prevent.
+  const boundToTransaction =
+    typeof Reflect.get(deps.db, 'rollback') === 'function';
+  const context: AuditMutationContext = {
+    afterCommit(callback) {
+      if (boundToTransaction) {
+        throw new AfterCommitRegistrationError(
+          'nested-transaction',
+          entry.action,
+        );
+      }
+      if (closed) {
+        throw new AfterCommitRegistrationError('closed', entry.action);
+      }
+      callbacks.push(callback);
+    },
+  };
+
   let outcome: AuditOutcome<T>;
   try {
     outcome = await deps.db.transaction(
@@ -345,7 +480,13 @@ export async function runAuditedMutation<T>(
           return { allowed: false };
         }
 
-        const { result, after } = await mutation(tx);
+        let mutated: Awaited<ReturnType<AuditedMutation<T>>>;
+        try {
+          mutated = await mutation(tx, context);
+        } finally {
+          closed = true;
+        }
+        const { result, after } = mutated;
         await writeAuditRow(tx, {
           outcome: 'allowed',
           before: entry.before,
@@ -367,6 +508,27 @@ export async function runAuditedMutation<T>(
 
   if (!outcome.allowed) {
     throw new PermissionDeniedError(entry.permission, actor.roleKey);
+  }
+
+  // The transaction has committed. Each callback is isolated: the mutation is
+  // already durable, so a failed purge is reported, never propagated.
+  for (const callback of callbacks) {
+    try {
+      await callback();
+    } catch (error) {
+      reportAfterCommitFailure(
+        deps.onAfterCommitFailed ?? defaultOnAfterCommitFailed,
+        {
+          permission: entry.permission,
+          action: entry.action,
+          entityType: entry.entityType,
+          ...(entry.entityId !== undefined ? { entityId: entry.entityId } : {}),
+          actorUserId: actor.userId,
+          occurredAt: now(),
+          error,
+        },
+      );
+    }
   }
   return outcome.result;
 }
