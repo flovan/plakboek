@@ -11,7 +11,12 @@ import {
   type CacheEntry,
   type CacheSetOptions,
 } from '@plakboek/cache';
-import type { BlockDefinition } from '@plakboek/pages';
+import {
+  getPage,
+  insertBlock,
+  publishPage,
+  type BlockDefinition,
+} from '@plakboek/pages';
 import { createElement } from 'react';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createVisitorHandler, type VisitorHandler } from '../../src/server.js';
@@ -308,5 +313,115 @@ describe('the default responses', () => {
     const response = await visit(handler, '/about-us');
     expect(response.status).toBe(200);
     expect(response.headers.get('Cache-Control')).toBe(PAGE_CACHE_CONTROL);
+  });
+});
+
+describe('the page Cache-Control override', () => {
+  const OVERRIDE = 'public, max-age=60, s-maxage=86400';
+
+  it('applies to a healthy page only: degraded pages, 404s and redirects keep their fixed policies', async () => {
+    const deps = pagesDepsFor(fixture);
+    const boomPage = await publishHeadingPage(deps, fixture.superadmin, {
+      locale: 'en',
+      title: 'Boom page',
+      text: 'Before the boom',
+    });
+    const page = await getPage(deps.db, boomPage.pageId);
+    if (page === null) throw new Error('page missing');
+    await insertBlock(deps, fixture.superadmin, {
+      owner: { ownerType: 'page', ownerId: page.id, locale: page.locale },
+      blockType: 'boom',
+      parentBlockId: boomPage.sectionId,
+      basePageVersion: page.version,
+    });
+    const withBoom = await getPage(deps.db, boomPage.pageId);
+    if (withBoom === null) throw new Error('page missing');
+    await publishPage(deps, fixture.superadmin, {
+      pageId: boomPage.pageId,
+      baseVersion: withBoom.version,
+    });
+
+    const handler = createVisitorHandler({
+      db: fixture.handle.db,
+      config: fixtureConfig,
+      cache: createMemoryCache(),
+      cacheControl: OVERRIDE,
+      hooks: { onBlockRenderError: () => undefined },
+    });
+
+    const healthy = await visit(handler, '/about-us');
+    expect(healthy.status).toBe(200);
+    expect(healthy.headers.get('Cache-Control')).toBe(OVERRIDE);
+
+    // Served from the cache the second time, with the same header.
+    const cached = await visit(handler, '/about-us');
+    expect(cached.headers.get('Cache-Control')).toBe(OVERRIDE);
+
+    const degraded = await visit(handler, '/boom-page');
+    expect(degraded.status).toBe(200);
+    expect(degraded.headers.get('Cache-Control')).toBe('no-store');
+
+    const missing = await visit(handler, '/missing');
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get('Cache-Control')).toBe('no-store');
+
+    const redirect = await visit(handler, '/About-Us');
+    expect(redirect.status).toBe(308);
+    expect(redirect.headers.get('Cache-Control')).toBe('public, max-age=3600');
+  });
+});
+
+describe('build-id staleness on cached entries', () => {
+  it('re-renders an entry another build wrote and overwrites it', async () => {
+    resetRenderCounts();
+    const cache = createMemoryCache();
+    const handlerFor = (buildId: string): VisitorHandler =>
+      createVisitorHandler({
+        db: fixture.handle.db,
+        config: fixtureConfig,
+        cache,
+        buildId,
+      });
+    const b1 = handlerFor('b1');
+    const b2 = handlerFor('b2');
+
+    await (await visit(b1, '/about-us')).text();
+    expect(renderCounts.heading).toBe(1);
+
+    // b2 misses on the entry b1 wrote, renders, and overwrites it.
+    await (await visit(b2, '/about-us')).text();
+    expect(renderCounts.heading).toBe(2);
+    await (await visit(b2, '/about-us')).text();
+    expect(renderCounts.heading).toBe(2);
+
+    // b1 now finds b2's entry and treats it as a miss in turn.
+    await (await visit(b1, '/about-us')).text();
+    expect(renderCounts.heading).toBe(3);
+  });
+
+  it('stores the handler build id on the entry', async () => {
+    const cache = createMemoryCache();
+    const handler = createVisitorHandler({
+      db: fixture.handle.db,
+      config: fixtureConfig,
+      cache,
+      buildId: 'abc123',
+    });
+    await (await visit(handler, '/about-us')).text();
+    expect((await cache.get('/about-us'))?.buildId).toBe('abc123');
+  });
+
+  it('keeps hitting entries when no build id is set, storing null', async () => {
+    resetRenderCounts();
+    const cache = createMemoryCache();
+    const handler = createVisitorHandler({
+      db: fixture.handle.db,
+      config: fixtureConfig,
+      cache,
+    });
+    await (await visit(handler, '/about-us')).text();
+    await (await visit(handler, '/about-us')).text();
+    expect(renderCounts.heading).toBe(1);
+    expect((await cache.get('/about-us'))?.buildId).toBeNull();
   });
 });

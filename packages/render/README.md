@@ -86,6 +86,55 @@ render; the ticket is part of that sharing key, so a request that took its
 ticket after a purge never joins a render that started before it. Without a
 cache nothing is shared and every request renders.
 
+## HTTP response policy
+
+Every response class has one caching policy, and nothing a host plugs in can
+make an error cacheable.
+
+| Response                                 | Status | `Cache-Control`                                                                                     |
+| ---------------------------------------- | ------ | --------------------------------------------------------------------------------------------------- |
+| Method other than `GET` or `HEAD`        | 405    | `no-store`, with `Allow: GET, HEAD` and an empty body; answered before any cache or database access |
+| Page                                     | 200    | `public, max-age=0, must-revalidate`, or the host's `cacheControl`                                  |
+| Degraded page (a block was dropped)      | 200    | `no-store`, never overridden                                                                        |
+| Unchanged page for a conditional request | 304    | the page's own policy (conditional requests land in a later plan of this phase)                     |
+| Canonicalisation, locale and home        | 308    | `public, max-age=3600`                                                                              |
+| `_edit` bounce for a non-editor          | 302    | `no-store` (wired in a later plan of this phase)                                                    |
+| Not found                                | 404    | `no-store`; the body can be the host's `notFound` page                                              |
+| Failed render                            | 500    | `no-store`; the body can be the host's `renderError` page                                           |
+
+Page responses carry `Content-Type: text/html; charset=utf-8`, `Content-Language`
+(the page's locale), `X-Content-Type-Options: nosniff` and an `ETag` (the
+sha256 of the served bytes). There is no `Vary`: the locale is part of the URL,
+and the page never depends on a request header.
+
+- **Host not-found and error pages.** `notFound(request)` and
+  `renderError(request)` return a `Response`. Its body and headers are kept, but
+  its status is forced to `404` or `500` and its `Cache-Control` to `no-store`
+  on a copy, so a host page can never become a cacheable soft-404. A hook that
+  throws, rejects or returns something that is not a `Response` is reported
+  through `onRenderError` and replaced by the default page. The hook is called
+  once per request, while a failure shared by concurrent requests is reported
+  once. `page_url_history` is not consulted: redirects over it belong to a later
+  phase.
+- **`cacheControl`.** Replaces the page policy on healthy `200` responses for a
+  downstream layer the host can purge (compose it into the pages invalidator
+  through `composeInvalidators`). Degraded pages, `404`, `405`, `500` and
+  redirects keep their fixed policies. 1 to 256 printable ASCII characters,
+  validated when the handler is created.
+- **`buildId`.** Identifies the deployed render code, for example a commit hash
+  (letters, digits, `.`, `_` and `-`, up to 128 characters, validated at
+  creation). Entries are stored with it; an entry written by a different build is
+  treated as a miss, re-rendered and overwritten, so HTML from an older build
+  never survives a deploy on a shared or long-lived cache. Two builds sharing one
+  cache during a rolling deploy therefore re-render each other's entries until
+  the old build stops: correct, just more renders. A `global` purge stays
+  available as the explicit alternative.
+
+### Not handled here
+
+The handler owns neither `robots.txt` nor a health endpoint: those are host
+routes (Phase 6), and the sitemap belongs to Phase 16.
+
 ## Block rendering policy
 
 One bad block never takes a page down.

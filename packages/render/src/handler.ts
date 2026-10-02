@@ -57,13 +57,31 @@ export type VisitorHandlerDeps = {
    * the status forced to 500.
    */
   readonly renderError?: (request: Request) => Response | Promise<Response>;
+  /**
+   * Replaces `public, max-age=0, must-revalidate` on healthy 200 page
+   * responses, for a downstream layer the host can purge (compose it into the
+   * pages invalidator through `composeInvalidators`). Degraded pages, 404s,
+   * 405s, 500s and redirects keep their fixed policies. 1 to 256 printable
+   * ASCII characters.
+   */
+  readonly cacheControl?: string;
+  /**
+   * Identifies the deployed render code, for example a commit hash. Entries
+   * are stored with it, and an entry written by a different build is treated
+   * as a miss, re-rendered and overwritten, so HTML from an older build never
+   * survives a deploy on a shared or long-lived cache. Letters, digits `.`,
+   * `_` and `-`, 1 to 128 characters.
+   */
+  readonly buildId?: string;
 };
 
 export type VisitorHandlerConfigIssue = {
   readonly code:
     | 'INVALID_SITE_URL'
     | 'INVALID_HOME_SLUG'
-    | 'invalid-block-component';
+    | 'invalid-block-component'
+    | 'invalid-cache-control'
+    | 'invalid-build-id';
   readonly message: string;
 };
 
@@ -84,6 +102,9 @@ export class VisitorHandlerConfigError extends Error {
 }
 
 const HOME_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/** Printable ASCII only: this rejects CR, LF and every other control byte. */
+const CACHE_CONTROL_PATTERN = /^[\x20-\x7E]{1,256}$/;
+const BUILD_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 
 /** A redirect is bounded so a changed default locale is not pinned forever. */
 const REDIRECT_CACHE_CONTROL = 'public, max-age=3600';
@@ -116,6 +137,22 @@ function validate(deps: VisitorHandlerDeps): void {
     issues.push({
       code: 'INVALID_HOME_SLUG',
       message: `homeSlug must match ${HOME_SLUG_PATTERN.source}`,
+    });
+  }
+  if (
+    deps.cacheControl !== undefined &&
+    !CACHE_CONTROL_PATTERN.test(deps.cacheControl)
+  ) {
+    issues.push({
+      code: 'invalid-cache-control',
+      message:
+        'cacheControl must be 1 to 256 printable ASCII characters (no line breaks)',
+    });
+  }
+  if (deps.buildId !== undefined && !BUILD_ID_PATTERN.test(deps.buildId)) {
+    issues.push({
+      code: 'invalid-build-id',
+      message: `buildId must match ${BUILD_ID_PATTERN.source}`,
     });
   }
   for (const key of listInvalidBlockComponents(deps.config.blocks)) {
@@ -152,7 +189,7 @@ type Outcome =
 
 function pageOutcome(
   entry: Pick<CacheEntry, 'body' | 'etag' | 'contentLanguage'>,
-  degraded: boolean,
+  cacheControl: string,
 ): PageOutcome {
   return {
     kind: 'page',
@@ -161,7 +198,7 @@ function pageOutcome(
       ['Content-Language', entry.contentLanguage],
       ['X-Content-Type-Options', 'nosniff'],
       ['ETag', entry.etag],
-      ['Cache-Control', degraded ? NO_STORE : PAGE_CACHE_CONTROL],
+      ['Cache-Control', cacheControl],
     ],
     body: entry.body,
   };
@@ -214,6 +251,8 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
   validate(deps);
   const { db, config, cache, hooks, siteUrl, resolveAssetUrl } = deps;
   const { notFound, renderError } = deps;
+  const buildId = deps.buildId ?? null;
+  const healthyPageCacheControl = deps.cacheControl ?? PAGE_CACHE_CONTROL;
   const renderDocument = deps.renderDocument ?? renderDefaultDocument;
   const homeSlug = deps.homeSlug ?? DEFAULT_HOME_SLUG;
   const components = createComponentMap(config.blocks, hooks);
@@ -281,7 +320,7 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
         etag: etagOf(body),
         contentLanguage: view.page.locale,
         manifestHash: view.publication.manifestHash,
-        buildId: null,
+        buildId,
       } satisfies CacheEntry;
 
       // The ticket this request took before reading anything is what makes a
@@ -291,7 +330,10 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
           cache.set(key, entry, { tags: rendered.tags, ticket }),
         );
       }
-      return pageOutcome(entry, rendered.degraded);
+      return pageOutcome(
+        entry,
+        rendered.degraded ? NO_STORE : healthyPageCacheControl,
+      );
     } catch (error) {
       // Reported once per flight, not once per waiter.
       reportRenderEvent('onRenderError', hooks?.onRenderError, {
@@ -366,7 +408,11 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
       ticket = await guarded('ticket', key, () => cache.ticket());
       if (ticket !== undefined) {
         const hit = await guarded('get', key, () => cache.get(key));
-        if (hit !== undefined) return toResponse(pageOutcome(hit, false), '');
+        // An entry another build wrote is a miss: it is re-rendered and the
+        // fill overwrites it, so older HTML never outlives its build.
+        if (hit !== undefined && hit.buildId === buildId) {
+          return toResponse(pageOutcome(hit, healthyPageCacheControl), '');
+        }
       }
     }
 
