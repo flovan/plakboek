@@ -48,6 +48,7 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   runAuditedMutation: 'function',
   PermissionDeniedError: 'class',
   AuditWriteError: 'class',
+  AfterCommitRegistrationError: 'class',
   // audit-redaction
   REDACTED_KEYS: 'constant',
   REDACTION_MARKER: 'constant',
@@ -113,11 +114,15 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'CreateUserResult',
   'UserCreationExecutor',
   // audit
+  'AfterCommitCallback',
+  'AfterCommitFailure',
+  'AfterCommitFailureHook',
   'AuditActor',
   'AuditDatabase',
   'AuditDeps',
   'AuditEntryInput',
   'AuditFailureHook',
+  'AuditMutationContext',
   'AuditRecorder',
   'AuditTransaction',
   'AuditWriteFailure',
@@ -212,6 +217,11 @@ const ERROR_FACTORIES: Readonly<
       'users:create',
       'user.invite',
       new Error('cause'),
+    ),
+  AfterCommitRegistrationError: (K) =>
+    new (K as new (r: string, a: string) => unknown)(
+      'nested-transaction',
+      'page.publish',
     ),
   InvalidOrExpiredTokenError: (K) =>
     new (K as new (p: string) => unknown)('set-password'),

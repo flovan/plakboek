@@ -45,13 +45,18 @@ export {
   runAuditedMutation,
   PermissionDeniedError,
   AuditWriteError,
+  AfterCommitRegistrationError,
 } from './audit.js';
 export type {
+  AfterCommitCallback,
+  AfterCommitFailure,
+  AfterCommitFailureHook,
   AuditActor,
   AuditDatabase,
   AuditDeps,
   AuditEntryInput,
   AuditFailureHook,
+  AuditMutationContext,
   AuditRecorder,
   AuditTransaction,
   AuditWriteFailure,

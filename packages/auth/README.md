@@ -71,21 +71,52 @@ audited paths described here.
 
 ### Audit log
 
-| Export                  | Kind     | Purpose                                                                                                                                                                                                                                  |
-| ----------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createAuditRecorder`   | function | Binds database, permission resolver, failure hook and clock, and returns an `AuditRecorder`: the single call site for gated mutations                                                                                                    |
-| `runAuditedMutation`    | function | The unbound form of `run`: permission check, mutation and audit row in one transaction                                                                                                                                                   |
-| `PermissionDeniedError` | class    | Thrown once a refusal has been recorded; carries the permission and role key only                                                                                                                                                        |
-| `AuditWriteError`       | class    | The audit row could not be written, so the mutation was rolled back; a self-service change was already made and is not undone                                                                                                            |
-| `AuditActor`            | type     | The acting user's id and role key, and `impersonatedBy` while impersonating                                                                                                                                                              |
-| `AuditDatabase`         | type     | Any Drizzle Postgres handle that can open a transaction                                                                                                                                                                                  |
-| `AuditDeps`             | type     | `db`, `resolver`, and optionally `onAuditWriteFailed` and `now`                                                                                                                                                                          |
-| `AuditEntryInput`       | type     | Permission, action, entity and the before and after states of one audit row                                                                                                                                                              |
-| `AuditFailureHook`      | type     | Called once per failed audit write, after the rollback                                                                                                                                                                                   |
-| `AuditRecorder`         | type     | `run(actor, entry, mutation)` for gated mutations, `recordDenied(actor, entry)` for a refusal made for another reason, and `recordSelfService(actor, entry)` for a user's change to their own account, stored with `permission` `'self'` |
-| `AuditTransaction`      | type     | The transaction a mutation runs in                                                                                                                                                                                                       |
-| `AuditWriteFailure`     | type     | What the failure hook receives: identifiers and the error, never the payload                                                                                                                                                             |
-| `AuditedMutation`       | type     | A mutation that runs inside the audit transaction and returns `{ result, after }`                                                                                                                                                        |
+| Export                         | Kind     | Purpose                                                                                                                                                                                                                                  |
+| ------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createAuditRecorder`          | function | Binds database, permission resolver, failure hook and clock, and returns an `AuditRecorder`: the single call site for gated mutations                                                                                                    |
+| `runAuditedMutation`           | function | The unbound form of `run`: permission check, mutation and audit row in one transaction                                                                                                                                                   |
+| `PermissionDeniedError`        | class    | Thrown once a refusal has been recorded; carries the permission and role key only                                                                                                                                                        |
+| `AfterCommitRegistrationError` | class    | Thrown by `afterCommit` when the recorder is bound to a transaction or the mutation already returned                                                                                                                                     |
+| `AuditWriteError`              | class    | The audit row could not be written, so the mutation was rolled back; a self-service change was already made and is not undone                                                                                                            |
+| `AfterCommitCallback`          | type     | Work registered through `afterCommit`; runs once the transaction has committed                                                                                                                                                           |
+| `AfterCommitFailure`           | type     | What `onAfterCommitFailed` receives: identifiers and the callback's error, never the payload                                                                                                                                             |
+| `AfterCommitFailureHook`       | type     | Called once per after-commit callback that threw or rejected                                                                                                                                                                             |
+| `AuditActor`                   | type     | The acting user's id and role key, and `impersonatedBy` while impersonating                                                                                                                                                              |
+| `AuditDatabase`                | type     | Any Drizzle Postgres handle that can open a transaction                                                                                                                                                                                  |
+| `AuditDeps`                    | type     | `db`, `resolver`, and optionally `onAuditWriteFailed`, `onAfterCommitFailed` and `now`                                                                                                                                                   |
+| `AuditEntryInput`              | type     | Permission, action, entity and the before and after states of one audit row                                                                                                                                                              |
+| `AuditFailureHook`             | type     | Called once per failed audit write, after the rollback                                                                                                                                                                                   |
+| `AuditMutationContext`         | type     | The second argument a mutation receives: `afterCommit(callback)`                                                                                                                                                                         |
+| `AuditRecorder`                | type     | `run(actor, entry, mutation)` for gated mutations, `recordDenied(actor, entry)` for a refusal made for another reason, and `recordSelfService(actor, entry)` for a user's change to their own account, stored with `permission` `'self'` |
+| `AuditTransaction`             | type     | The transaction a mutation runs in                                                                                                                                                                                                       |
+| `AuditWriteFailure`            | type     | What the failure hook receives: identifiers and the error, never the payload                                                                                                                                                             |
+| `AuditedMutation`              | type     | A mutation that runs inside the audit transaction, receives `(tx, context)` and returns `{ result, after }`                                                                                                                              |
+
+#### After-commit work
+
+A mutation can register work that must only happen once its change is
+durable, such as purging a served cache, through the second argument it
+receives:
+
+```ts
+await recorder.run(actor, entry, async (tx, context) => {
+  // ...write through tx...
+  context.afterCommit(async () => {
+    await purge();
+  });
+  return { result };
+});
+```
+
+The rules: callbacks run only after the transaction has committed, in
+registration order, one at a time, and are awaited before `run` resolves.
+They never run when the permission is denied, the mutation throws, the audit
+row cannot be written, or the transaction rolls back. A callback that throws
+or rejects never fails or alters the committed mutation: the failure is
+reported once through `onAfterCommitFailed` (default: one `console.error`
+line with the action, entity type and error name only). `afterCommit` throws
+`AfterCommitRegistrationError` when the recorder is bound to a transaction
+(the commit would not be its own) or when called after the mutation returned.
 
 ### Audit payload redaction
 
