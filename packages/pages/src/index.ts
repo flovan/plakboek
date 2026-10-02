@@ -55,7 +55,9 @@
  * `buildPageSnapshot`, `computeManifestHash`, `publish.ts`) -- a host reads
  * the finished record through `publishPage`/`createDraftSnapshot`/
  * `readPublishedSnapshot`/`readLatestDraftSnapshot`, never assembles one
- * itself; the revision-batch id minter (`newRevisionBatchId`, `revisions.ts`)
+ * itself; the stored-snapshot narrowing cast (`asPageSnapshot`, `publish.ts`),
+ * internal wiring `visitor.ts` shares with the publication mapper; the
+ * revision-batch id minter (`newRevisionBatchId`, `revisions.ts`)
  * and the row-to-record mapper (`toPageRecord`, `pages.ts`), both internal
  * wiring with no reason for a caller to invoke directly; and the two
  * unique-violation-to-domain-error mappers (`pageSlugConflictFromUniqueViolation`,
@@ -422,3 +424,22 @@ export type {
   RenewPageLockInput,
   TakeOverPageLockInput,
 } from './locks.js';
+
+// visitor.ts
+export {
+  DEFAULT_HOME_SLUG,
+  matchPublicPagePath,
+  resolvePublishedPage,
+  resolveVisitorPage,
+  toPublicPagePath,
+} from './visitor.js';
+export type {
+  MatchPublicPagePathInput,
+  PublicPagePathMatch,
+  PublishedPageSeo,
+  PublishedPageView,
+  ResolvePublishedPageInput,
+  ResolveVisitorPageInput,
+  ToPublicPagePathInput,
+  VisitorPageResolution,
+} from './visitor.js';

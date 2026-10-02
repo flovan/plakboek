@@ -174,6 +174,12 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   releasePageLock: 'function',
   renewPageLock: 'function',
   takeOverPageLock: 'function',
+  // visitor
+  DEFAULT_HOME_SLUG: 'constant',
+  matchPublicPagePath: 'function',
+  resolvePublishedPage: 'function',
+  resolveVisitorPage: 'function',
+  toPublicPagePath: 'function',
 });
 
 /** Every type the entry point exports. Types leave no runtime trace, so this
@@ -305,6 +311,15 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'ReleasePageLockInput',
   'RenewPageLockInput',
   'TakeOverPageLockInput',
+  // visitor
+  'MatchPublicPagePathInput',
+  'PublicPagePathMatch',
+  'PublishedPageSeo',
+  'PublishedPageView',
+  'ResolvePublishedPageInput',
+  'ResolveVisitorPageInput',
+  'ToPublicPagePathInput',
+  'VisitorPageResolution',
 ]);
 
 /**
@@ -353,6 +368,7 @@ const WITHHELD: readonly string[] = Object.freeze([
   'buildSnapshotTree',
   'buildPageSnapshot',
   'computeManifestHash',
+  'asPageSnapshot',
   // schema.ts -- every table
   'pages',
   'pageBlocks',

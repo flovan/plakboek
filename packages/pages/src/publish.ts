@@ -217,7 +217,7 @@ export class DegradedBlockPublishError extends Error {
   }
 }
 
-function asPageSnapshot(value: Record<string, unknown>): PageSnapshot {
+export function asPageSnapshot(value: Record<string, unknown>): PageSnapshot {
   return value as unknown as PageSnapshot;
 }
 

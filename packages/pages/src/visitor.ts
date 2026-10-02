@@ -30,11 +30,17 @@
  * - The previous-address history is never consulted: redirects over it are a
  *   later phase's (D-24).
  */
+import type { AuditDatabase } from '@plakboek/auth';
+import { normalizeEntrySeo } from '@plakboek/content';
+import { and, eq } from 'drizzle-orm';
 import {
   parsePageUrlPattern,
   resolvePageUrlPath,
   type ParsedPageUrlPattern,
 } from './page-url-pattern.js';
+import { asPageSnapshot, type PageSnapshot } from './publish.js';
+import { pagePublications, pages } from './schema.js';
+import { getPageUrlPattern } from './settings.js';
 
 /** The hierarchy path of the page served at a locale's root (D-26). */
 export const DEFAULT_HOME_SLUG = 'home';
@@ -259,4 +265,143 @@ export function matchPublicPagePath(
   }
 
   return { kind: 'none' };
+}
+
+/** The head-relevant subset of a page's stored SEO set (D-13). Structurally
+ * assignable to `@plakboek/render`'s `PageSeoInput`. */
+export type PublishedPageSeo = {
+  readonly title: string | null;
+  readonly description: string | null;
+  readonly imageAssetId: string | null;
+  readonly canonicalUrl: string | null;
+  readonly noindex: boolean;
+  readonly nofollow: boolean;
+};
+
+/** What a visitor-path caller may see of a published page: nothing from the
+ * working tree, no revision manifest, no author. */
+export type PublishedPageView = {
+  readonly page: {
+    readonly id: string;
+    readonly locale: string;
+    readonly title: string;
+    readonly resolvedPath: string;
+    readonly seo: PublishedPageSeo;
+  };
+  readonly publication: {
+    readonly id: string;
+    readonly manifestHash: string;
+    readonly publishedAt: Date;
+    readonly snapshot: PageSnapshot;
+  };
+};
+
+export type ResolvePublishedPageInput = {
+  readonly locale: string;
+  readonly resolvedPath: string;
+};
+
+/**
+ * Reads the published page stored at `(locale, resolvedPath)`: ONE joined
+ * select of `pages` to the publication its `live_publication_id` points at,
+ * keyed on the existing partial unique index. It is one round trip and
+ * atomic, unlike `readPublishedSnapshot`'s pointer-then-row pair, which can
+ * join a pointer to a row an unpublish just removed.
+ *
+ * The visitor path reads the live `pages` row for `resolved_path`, `title` and
+ * `seo` only -- the fixed column list below is what makes that acceptable
+ * (D-21's recorded accepted cost). Both `status = 'published'` and
+ * `is_draft = false` are required, so a draft, scheduled, trashed or
+ * unpublished page and a draft snapshot are invisible by construction.
+ */
+export async function resolvePublishedPage(
+  db: AuditDatabase,
+  input: ResolvePublishedPageInput,
+): Promise<PublishedPageView | null> {
+  const livePublication = eq(pagePublications.id, pages.livePublicationId);
+  const [row] = await db
+    .select({
+      pageId: pages.id,
+      locale: pages.locale,
+      title: pages.title,
+      resolvedPath: pages.resolvedPath,
+      seo: pages.seo,
+      publicationId: pagePublications.id,
+      manifestHash: pagePublications.manifestHash,
+      publishedAt: pagePublications.publishedAt,
+      snapshot: pagePublications.snapshot,
+    })
+    .from(pages)
+    .innerJoin(pagePublications, livePublication)
+    .where(
+      and(
+        eq(pages.locale, input.locale),
+        eq(pages.resolvedPath, input.resolvedPath),
+        eq(pages.status, 'published'),
+        eq(pagePublications.isDraft, false),
+      ),
+    )
+    .limit(1);
+  if (row === undefined) return null;
+
+  const seo = normalizeEntrySeo(row.seo);
+  return {
+    page: {
+      id: row.pageId,
+      locale: row.locale,
+      title: row.title,
+      resolvedPath: row.resolvedPath ?? input.resolvedPath,
+      seo: {
+        title: seo.title,
+        description: seo.description,
+        imageAssetId: seo.imageAssetId,
+        canonicalUrl: seo.canonicalUrl,
+        noindex: seo.noindex,
+        nofollow: seo.nofollow,
+      },
+    },
+    publication: {
+      id: row.publicationId,
+      manifestHash: row.manifestHash,
+      publishedAt: row.publishedAt,
+      snapshot: asPageSnapshot(row.snapshot),
+    },
+  };
+}
+
+export type ResolveVisitorPageInput = MatchPublicPagePathInput;
+
+export type VisitorPageResolution =
+  | {
+      readonly kind: 'page';
+      readonly publicPath: string;
+      readonly view: PublishedPageView;
+    }
+  | { readonly kind: 'redirect'; readonly location: string }
+  | { readonly kind: 'not-found' };
+
+/**
+ * Resolves a public URL path for a visitor: the stored URL pattern (one
+ * statement), the pure public-path mapping, then -- only for a match -- the
+ * joined published read (a second statement). A redirect or an unshaped path
+ * costs the pattern read alone. `page_blocks`, `block_revisions` and
+ * `page_url_history` are never touched (D-24).
+ */
+export async function resolveVisitorPage(
+  db: AuditDatabase,
+  input: ResolveVisitorPageInput,
+): Promise<VisitorPageResolution> {
+  const pattern = await getPageUrlPattern(db);
+  const matched = matchPublicPagePath(pattern, input);
+  if (matched.kind === 'redirect') {
+    return { kind: 'redirect', location: matched.location };
+  }
+  if (matched.kind === 'none') return { kind: 'not-found' };
+
+  const view = await resolvePublishedPage(db, {
+    locale: matched.locale,
+    resolvedPath: matched.resolvedPath,
+  });
+  if (view === null) return { kind: 'not-found' };
+  return { kind: 'page', publicPath: matched.publicPath, view };
 }

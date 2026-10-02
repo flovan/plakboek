@@ -502,6 +502,43 @@ lock blocking one would be impractical. Each is gated by its own permission
 `entries:delete-permanent` check respectively) and recorded through
 `deps.recorder.run` instead.
 
+### Visitor resolution (D-20..D-26)
+
+| Export                      | Kind     | Purpose                                                                                    |
+| --------------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `DEFAULT_HOME_SLUG`         | constant | The hierarchy path (`home`) of the page served at a locale's root                          |
+| `matchPublicPagePath`       | function | Maps a public URL path to a stored `(locale, path, resolvedPath)`, a redirect, or `none`   |
+| `resolvePublishedPage`      | function | One joined read of the published, non-draft page at `(locale, resolvedPath)`, or `null`    |
+| `resolveVisitorPage`        | function | The composite the render handler calls: pattern read, path mapping, published read         |
+| `toPublicPagePath`          | function | The public URL path of a stored `(locale, path)` address -- the inverse of the matcher     |
+| `MatchPublicPagePathInput`  | type     | Input to `matchPublicPagePath`                                                             |
+| `PublicPagePathMatch`       | type     | The matcher's result: `match`, `redirect` or `none`                                        |
+| `PublishedPageSeo`          | type     | The head-relevant subset of a page's stored SEO set                                        |
+| `PublishedPageView`         | type     | The narrow published view: page id, locale, title, address, SEO, plus the live publication |
+| `ResolvePublishedPageInput` | type     | Input to `resolvePublishedPage`                                                            |
+| `ResolveVisitorPageInput`   | type     | Input to `resolveVisitorPage`                                                              |
+| `ToPublicPagePathInput`     | type     | Input to `toPublicPagePath`                                                                |
+| `VisitorPageResolution`     | type     | The composite's result: `page`, `redirect` or `not-found`                                  |
+
+`resolved_path` is read exactly as it is stored (`en/about-us` under the
+default pattern); only the resolver maps between that and the public path, so
+there is no migration. The default locale is served without a locale prefix
+(`/about-us` is English, `/nl/over-ons` is Dutch) and its prefixed spelling
+(`/en/about-us`) resolves to a redirect whose target is the bare form, which a
+render handler answers with a 308. A locale root (`/`, `/nl`) is the published
+page whose hierarchy path is the home slug, and the explicit `/home` spelling
+redirects to the root. The locale prefix wins over a default-locale page whose
+first segment equals an enabled locale code, so an English page with slug `nl`
+is unreachable at `/nl/...`. Under a pattern without `{locale}` only the
+default locale is addressable. Only the enabled locales passed in are
+candidates, so a removed locale (its rows are kept) can never be reached by
+URL. A resolution reads at most two statements -- the URL pattern, then the
+joined select -- and a redirect or an unshaped path stops after the first.
+Draft, scheduled, trashed and unpublished pages and draft snapshots never
+resolve, and the view never carries the revision manifest, the publisher, the
+working block tree or any lock or version column. Only pages resolve; entry
+URLs and the previous-address history are not consulted.
+
 Nothing else is reachable from the entry point. In particular the block-
 revision writer and its cap-pruning sweep, the row-locking page read and the
 append-only URL-history writer, the write-time placement/depth/section
