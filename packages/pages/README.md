@@ -291,6 +291,8 @@ point, so an export cannot be added or removed without updating them.
 
 ### Page URL patterns (D-22)
 
+A pattern's literal text may contain only lowercase letters, digits, hyphens and `/` (anything else is an `INVALID_LITERAL` issue), so every public page URL is lowercase and free of percent-encoding, which lets the visitor handler reject junk paths before any database access without ever losing a real page.
+
 | Export                        | Kind     | Purpose                                                       |
 | ----------------------------- | -------- | ------------------------------------------------------------- |
 | `DEFAULT_PAGE_URL_PATTERN`    | constant | `'{locale}/{path}'`: the seeded project-wide pattern          |

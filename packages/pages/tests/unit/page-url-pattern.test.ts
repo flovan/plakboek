@@ -6,6 +6,7 @@ import {
   PageUrlPatternError,
   parsePageUrlPattern,
   resolvePageUrlPath,
+  type PageUrlPatternIssue,
   type ParsedPageUrlPattern,
 } from '../../src/page-url-pattern.js';
 
@@ -173,6 +174,51 @@ describe('parsePageUrlPattern', () => {
     expect(codes).toContain('UNKNOWN_TOKEN');
     expect(codes).toContain('DUPLICATE_TOKEN');
     expect(issues).toHaveLength(4);
+  });
+});
+
+describe('parsePageUrlPattern literal alphabet', () => {
+  function issuesOf(pattern: string): readonly PageUrlPatternIssue[] {
+    try {
+      parsePageUrlPattern(pattern);
+    } catch (caught) {
+      return caught instanceof PageUrlPatternError ? caught.issues : [];
+    }
+    return [];
+  }
+
+  it.each([
+    '{locale}/{path}',
+    '{path}',
+    'site/{locale}/{path}',
+    '{path}/{locale}',
+    '{locale}/{path}/v2',
+    'nl-be/{path}',
+  ])('accepts %s', (pattern) => {
+    expect(issuesOf(pattern)).toEqual([]);
+  });
+
+  it.each([
+    ['Site/{path}', 'INVALID_LITERAL', 'Site/'],
+    ['{path}.html', 'INVALID_LITERAL', '.html'],
+    ['pages_v2/{path}', 'INVALID_LITERAL', 'pages_v2/'],
+    ['{locale}/~{path}', 'INVALID_LITERAL', '/~'],
+    ['a b/{path}', 'INVALID_LITERAL', 'a b/'],
+    ['café/{path}', 'INVALID_LITERAL', 'café/'],
+  ])(
+    'rejects %s with %s for the offending literal',
+    (pattern, code, literal) => {
+      const issues = issuesOf(pattern);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]?.code).toBe(code);
+      expect(issues[0]?.value).toBe(literal);
+    },
+  );
+
+  it('reports INVALID_LITERAL and TRAILING_SLASH together, never one at a time', () => {
+    const codes = issuesOf('Site/{path}/').map((issue) => issue.code);
+    expect(codes).toContain('INVALID_LITERAL');
+    expect(codes).toContain('TRAILING_SLASH');
   });
 });
 
