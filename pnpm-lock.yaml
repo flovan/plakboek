@@ -501,6 +501,70 @@ importers:
         specifier: 'catalog:'
         version: 5.0.0(@types/node@22.20.2)(vite@8.3.0(@types/node@22.20.2))
 
+  packages/render:
+    dependencies:
+      '@plakboek/cache':
+        specifier: workspace:*
+        version: link:../cache
+      '@plakboek/pages':
+        specifier: workspace:*
+        version: link:../pages
+    devDependencies:
+      '@arethetypeswrong/cli':
+        specifier: 'catalog:'
+        version: 0.18.5
+      '@plakboek/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@plakboek/content':
+        specifier: workspace:*
+        version: link:../content
+      '@plakboek/db':
+        specifier: workspace:*
+        version: link:../db
+      '@plakboek/permissions':
+        specifier: workspace:*
+        version: link:../permissions
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.2
+      '@types/pg':
+        specifier: 'catalog:'
+        version: 8.23.1
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.3.0(@types/react@19.3.0)
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.2(@types/pg@8.23.1)(kysely@0.29.5)(pg@8.23.0)(postgres@3.4.9)
+      pg:
+        specifier: 'catalog:'
+        version: 8.23.0
+      postgres:
+        specifier: 'catalog:'
+        version: 3.4.9
+      publint:
+        specifier: 'catalog:'
+        version: 0.3.24
+      react:
+        specifier: 'catalog:'
+        version: 19.3.0
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.3.0(react@19.3.0)
+      tsdown:
+        specifier: 'catalog:'
+        version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(typescript@7.0.2)
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.0(@types/node@22.20.2)(vite@8.3.0(@types/node@22.20.2))
+
 packages:
 
   '@andrewbranch/untar.js@1.0.4':
