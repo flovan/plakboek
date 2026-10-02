@@ -18,7 +18,6 @@ import type {
   AuditDatabase,
   AuditTransaction,
 } from '@plakboek/auth';
-import { pageTag } from '@plakboek/cache';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PagesDeps, PagesHooks } from './config.js';
 import { assertPageWritable } from './locks.js';
@@ -34,6 +33,7 @@ import {
   resolveBlockProperties,
   validateBlockProps,
 } from './registry.js';
+import { registerPagePurge } from './purge.js';
 import { newRevisionBatchId, recordBlockRevision } from './revisions.js';
 import { pagePublications, pages } from './schema.js';
 import { getPageEditLocking, getPageUrlPattern } from './settings.js';
@@ -456,15 +456,8 @@ export async function publishPage(
         { isDraft: false },
       );
 
-      // The purge runs only after this transaction commits (D-18): purging
-      // first would let a concurrent visitor re-fill the old version.
-      const { invalidator } = deps;
-      if (invalidator !== undefined) {
-        const tags = [pageTag(page.id)];
-        context.afterCommit(async () => {
-          await invalidator.purge(tags);
-        });
-      }
+      // Purges after this transaction commits (D-18, purge.ts).
+      registerPagePurge(deps, context, [page.id]);
 
       return {
         result: record,

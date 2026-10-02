@@ -39,6 +39,10 @@
  *   `constraints.ts`) -- reachable only through `resolveBlockProperties` and
  *   the write paths; a caller validating props outside a real write could
  *   diverge from what the write path actually persists.
+ * - The after-commit purge registration helpers (`purge.ts`) -- the single
+ *   place every write path registers its cache purge; a caller reaching
+ *   them could purge (or skip purging) for a write this package did not
+ *   perform, out of step with the commit it follows.
  * - Every Drizzle schema table -- a consumer able to read or write these
  *   directly could bypass every guarantee above.
  *
