@@ -326,6 +326,7 @@ A pattern's literal text may contain only lowercase letters, digits, hyphens and
 | ------------------------------------ | -------- | ------------------------------------------------------------------------------------- |
 | `computePageResolvedPath`            | function | Computes a page's resolved address from the pattern and its own locale/path           |
 | `computeUrlPatternChangeImpact`      | function | Previews what changing the project-wide pattern would move or collide                 |
+| `PageAddressUnreachableError`        | class    | `publishPage` refused: the page's public path would not lead back to the page         |
 | `PageUrlCollisionError`              | class    | A page's resolved address is already held by another page in the same locale          |
 | `PageUrlPatternCollisionError`       | class    | A pattern change would give two published pages the same resolved address             |
 | `setPageUrlPattern`                  | function | Changes the project-wide page URL pattern, recomputing every published page's address |
@@ -566,8 +567,11 @@ that stored form to the public path, so there is no migration. The default local
 render handler answers with a 308. A locale root (`/`, `/nl`) is the published
 page whose hierarchy path is the home slug, and the explicit `/home` spelling
 redirects to the root. The locale prefix wins over a default-locale page whose
-first segment equals an enabled locale code, so an English page with slug `nl`
-is unreachable at `/nl/...`. Under a pattern without `{locale}` only the
+first segment equals an enabled locale code, so `publishPage` refuses an English
+page whose path starts with `nl` or `en` (`PageAddressUnreachableError`) rather
+than publishing a page nobody can reach; preview snapshots are not affected.
+The check runs at publish time only, so enabling a locale later does not
+re-check pages that are already published. Under a pattern without `{locale}` only the
 default locale is addressable. Only the enabled locales passed in are
 candidates, so a removed locale (its rows are kept) can never be reached by
 URL. A resolution reads at most two statements -- the URL pattern, then the

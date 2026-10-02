@@ -28,6 +28,11 @@ import {
   type ParsedPageUrlPattern,
 } from './page-url-pattern.js';
 import { recordPageUrlHistory } from './pages.js';
+import {
+  checkPublicPageAddress,
+  DEFAULT_HOME_SLUG,
+  type PublicPageAddressCheck,
+} from './public-path.js';
 import { registerGlobalPurge } from './purge.js';
 import { pageEngineSettings, pages } from './schema.js';
 import {
@@ -89,6 +94,75 @@ export class PageUrlCollisionError extends Error {
     this.resolvedPath = resolvedPath;
     this.existingPageId = existingPageId;
   }
+}
+
+/** Thrown by `publishPage` when the page's public path would not lead to the
+ * page: the default locale is served without its prefix, so a default-locale
+ * page whose path starts with an enabled locale code (`nl/x`, `en/about`) is
+ * indistinguishable from, or redirected away from, another address. Nothing is
+ * published; rename the page (or its ancestor) to a slug that is not a locale
+ * code. */
+export class PageAddressUnreachableError extends Error {
+  readonly locale: string;
+  readonly path: string;
+  readonly publicPath: string;
+  /** What the page's public path does instead of reaching the page. */
+  readonly outcome: 'redirect' | 'other-address' | 'none';
+
+  constructor(
+    locale: string,
+    path: string,
+    publicPath: string,
+    outcome: 'redirect' | 'other-address' | 'none',
+  ) {
+    super(
+      `@plakboek/pages: page "${path}" in locale "${locale}" would be served at "${publicPath}", which ${
+        outcome === 'redirect'
+          ? 'redirects to a different address'
+          : outcome === 'other-address'
+            ? 'is the address of a different page'
+            : 'matches no page'
+      } -- rename it to a path whose first segment is not an enabled locale code`,
+    );
+    this.name = 'PageAddressUnreachableError';
+    this.locale = locale;
+    this.path = path;
+    this.publicPath = publicPath;
+    this.outcome = outcome;
+  }
+}
+
+export type AssertPageAddressReachableInput = {
+  readonly pattern: string | ParsedPageUrlPattern;
+  readonly locale: string;
+  readonly path: string;
+  readonly locales: readonly string[];
+  readonly defaultLocale: string;
+};
+
+/**
+ * Throws `PageAddressUnreachableError` when the page's own public path would
+ * not resolve back to it. The home slug is the package default
+ * (`DEFAULT_HOME_SLUG`); a host's own home slug cannot change the outcome,
+ * which depends on the locale-code prefix alone.
+ */
+export function assertPageAddressReachable(
+  input: AssertPageAddressReachableInput,
+): void {
+  const check: PublicPageAddressCheck = checkPublicPageAddress(input.pattern, {
+    locale: input.locale,
+    path: input.path,
+    locales: input.locales,
+    defaultLocale: input.defaultLocale,
+    homeSlug: DEFAULT_HOME_SLUG,
+  });
+  if (check.reachable) return;
+  throw new PageAddressUnreachableError(
+    input.locale,
+    input.path,
+    check.publicPath,
+    check.outcome,
+  );
 }
 
 export type AssertPageAddressAvailableInput = {

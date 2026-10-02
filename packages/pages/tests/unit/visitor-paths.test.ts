@@ -5,6 +5,7 @@
  * single-locale pattern and the documented locale-prefix shadowing rule.
  */
 import { describe, expect, it } from 'vitest';
+import { checkPublicPageAddress } from '../../src/public-path.js';
 import {
   DEFAULT_HOME_SLUG,
   matchPublicPagePath,
@@ -319,5 +320,54 @@ describe('toPublicPagePath', () => {
         homeSlug: 'home',
       }),
     ).toBe('/nl');
+  });
+});
+
+describe('checkPublicPageAddress (a page whose public path leads elsewhere)', () => {
+  const check = (
+    pattern: string,
+    locale: string,
+    path: string,
+    locales: readonly string[] = ['en', 'nl'],
+  ) =>
+    checkPublicPageAddress(pattern, {
+      locale,
+      path,
+      locales,
+      defaultLocale: 'en',
+      homeSlug: DEFAULT_HOME_SLUG,
+    });
+
+  it('accepts ordinary addresses, the home slug and a non-default locale page named like a locale', () => {
+    expect(check('{locale}/{path}', 'en', 'about-us')).toEqual({
+      reachable: true,
+      publicPath: '/about-us',
+    });
+    expect(check('{locale}/{path}', 'en', 'home').reachable).toBe(true);
+    expect(check('{locale}/{path}', 'nl', 'over-ons').reachable).toBe(true);
+    // The Dutch page `en` lives at `/nl/en`: the prefix wins, so it is fine.
+    expect(check('{locale}/{path}', 'nl', 'en').reachable).toBe(true);
+  });
+
+  it('refuses a default-locale page whose path starts with the default locale code', () => {
+    expect(check('{locale}/{path}', 'en', 'en/about')).toEqual({
+      reachable: false,
+      publicPath: '/en/about',
+      outcome: 'redirect',
+    });
+  });
+
+  it('refuses a default-locale page whose path starts with another enabled locale code', () => {
+    expect(check('{locale}/{path}', 'en', 'nl/x')).toEqual({
+      reachable: false,
+      publicPath: '/nl/x',
+      outcome: 'other-address',
+    });
+    expect(check('{locale}/{path}', 'en', 'nl').reachable).toBe(false);
+  });
+
+  it('only cares about locale codes that are enabled, and about patterns that carry the locale', () => {
+    expect(check('{locale}/{path}', 'en', 'de/x').reachable).toBe(true);
+    expect(check('{path}', 'en', 'nl/x').reachable).toBe(true);
   });
 });

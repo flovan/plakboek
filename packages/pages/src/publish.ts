@@ -25,6 +25,7 @@ import { assertPageWritable } from './locks.js';
 import { getPage, loadPageForUpdate, PageNotFoundError } from './pages.js';
 import {
   assertPageAddressAvailable,
+  assertPageAddressReachable,
   computePageResolvedPath,
   pageUrlCollisionFromUniqueViolation,
 } from './page-routing.js';
@@ -340,7 +341,8 @@ type MaterialisePublicationResult = {
  * materialises the page's address (D-22): reads the project-wide pattern
  * (`getPageUrlPattern`), computes `resolved_path` from this page's own
  * `locale`/`path` (`computePageResolvedPath`), and checks it is free
- * (`assertPageAddressAvailable`) before writing it -- a 23505 on
+ * (`assertPageAddressAvailable`) and that its public path leads back to the
+ * page (`assertPageAddressReachable`) before writing it -- a 23505 on
  * `pages_locale_resolved_path_unique` from a concurrent publish racing
  * past that check is mapped through `pageUrlCollisionFromUniqueViolation`
  * into the same domain error, never a bare driver error. It then moves the
@@ -355,7 +357,11 @@ async function materialisePublication(
   actor: AuditActor,
   now: () => Date,
   hooks: PagesHooks | undefined,
-  options: { readonly isDraft: boolean },
+  options: {
+    readonly isDraft: boolean;
+    /** The locale set the page's public path is checked against. */
+    readonly content: { locales: readonly string[]; defaultLocale: string };
+  },
 ): Promise<MaterialisePublicationResult> {
   // The one guard call this whole module needs: covers `publishPage` (a
   // real edit, version-checked by its own caller before this helper ever
@@ -444,6 +450,13 @@ async function materialisePublication(
       resolvedPath,
       excludePageId: page.id,
     });
+    assertPageAddressReachable({
+      pattern,
+      locale: page.locale,
+      path: page.path,
+      locales: options.content.locales,
+      defaultLocale: options.content.defaultLocale,
+    });
 
     try {
       await tx
@@ -515,7 +528,7 @@ export async function publishPage(
         actor,
         now,
         deps.hooks,
-        { isDraft: false },
+        { isDraft: false, content: deps.config.content },
       );
 
       // Purges after this transaction commits (D-18, purge.ts).
@@ -573,7 +586,7 @@ export async function createDraftSnapshot(
         actor,
         now,
         deps.hooks,
-        { isDraft: true },
+        { isDraft: true, content: deps.config.content },
       );
 
       return {

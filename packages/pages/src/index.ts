@@ -259,6 +259,7 @@ export type {
 export {
   computePageResolvedPath,
   computeUrlPatternChangeImpact,
+  PageAddressUnreachableError,
   PageUrlCollisionError,
   PageUrlPatternCollisionError,
   setPageUrlPattern,

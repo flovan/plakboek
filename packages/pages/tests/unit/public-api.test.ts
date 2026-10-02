@@ -97,6 +97,7 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   // page-routing
   computePageResolvedPath: 'function',
   computeUrlPatternChangeImpact: 'function',
+  PageAddressUnreachableError: 'class',
   PageUrlCollisionError: 'class',
   PageUrlPatternCollisionError: 'class',
   setPageUrlPattern: 'function',
@@ -419,6 +420,13 @@ const ERROR_FACTORIES: Readonly<
     ),
   PageUrlPatternError: (K) => new (K as new (i: unknown[]) => unknown)([]),
   PageEngineSettingsMissingError: (K) => new (K as new () => unknown)(),
+  PageAddressUnreachableError: (K) =>
+    new (K as new (l: string, p: string, u: string, o: string) => unknown)(
+      'en',
+      'nl/about',
+      '/nl/about',
+      'other-address',
+    ),
   PageUrlCollisionError: (K) =>
     new (K as new (l: string, p: string, e: string | null) => unknown)(
       'en',

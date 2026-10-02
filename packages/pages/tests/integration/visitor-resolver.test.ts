@@ -486,6 +486,55 @@ describe('visitor resolution (D-20..D-26)', () => {
     });
   });
 
+  it('refuses to publish a default-locale page whose public path would lead to another address', async () => {
+    const hijacked = await draftPage({
+      locale: 'en',
+      title: 'Hijacked',
+      slug: 'nl',
+    });
+    const current = await getPage(db, hijacked.pageId);
+    await expect(
+      publishPage(deps, actor, {
+        pageId: hijacked.pageId,
+        baseVersion: current?.version ?? 0,
+      }),
+    ).rejects.toMatchObject({
+      name: 'PageAddressUnreachableError',
+      path: 'nl',
+      publicPath: '/nl',
+    });
+    // Nothing was published, and a preview is still allowed.
+    expect((await getPage(db, hijacked.pageId))?.status).toBe('draft');
+    await createDraftSnapshot(deps, actor, { pageId: hijacked.pageId });
+
+    const prefixed = await draftPage({
+      locale: 'en',
+      title: 'Prefixed',
+      slug: 'en',
+    });
+    const prefixedRow = await getPage(db, prefixed.pageId);
+    await expect(
+      publishPage(deps, actor, {
+        pageId: prefixed.pageId,
+        baseVersion: prefixedRow?.version ?? 0,
+      }),
+    ).rejects.toMatchObject({
+      name: 'PageAddressUnreachableError',
+      outcome: 'redirect',
+    });
+
+    // The same slug is fine in a non-default locale: the prefix wins there.
+    const dutch = await publishedPage({
+      locale: 'nl',
+      title: 'Engels',
+      slug: 'en',
+    });
+    const resolved = asPage(
+      await resolveVisitorPage(db, visit('/nl/en', ['en', 'nl', 'de'])),
+    );
+    expect(resolved.view.page.id).toBe(dutch.pageId);
+  });
+
   it('never matches a locale that is absent from the enabled list, though its rows are kept', async () => {
     const german = await publishedPage({
       locale: 'de',
