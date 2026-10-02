@@ -26,7 +26,7 @@ import {
 import { renderDefaultDocument } from './document.js';
 import type { RenderDocument } from './head.js';
 import { reportRenderEvent, type RenderHooks } from './hooks.js';
-import { normalizeVisitorPath } from './path.js';
+import { MAX_VISITOR_PATH_LENGTH, normalizeVisitorPath } from './path.js';
 import { renderPageSnapshot } from './render-snapshot.js';
 import { createSingleFlight } from './single-flight.js';
 
@@ -45,6 +45,18 @@ export type VisitorHandlerDeps = {
   /** The installation's absolute origin, used for canonical URLs. */
   readonly siteUrl?: string;
   readonly resolveAssetUrl?: (assetId: string) => string | null;
+  /**
+   * The not-found page. Its body and headers are served, but the status is
+   * forced to 404 and `Cache-Control` to `no-store`, so a host page can never
+   * become a cacheable soft-404. A hook that throws is reported through
+   * `onRenderError` and replaced by the default.
+   */
+  readonly notFound?: (request: Request) => Response | Promise<Response>;
+  /**
+   * The error page for a failed render, treated exactly like `notFound` with
+   * the status forced to 500.
+   */
+  readonly renderError?: (request: Request) => Response | Promise<Response>;
 };
 
 export type VisitorHandlerConfigIssue = {
@@ -122,41 +134,28 @@ function etagOf(bytes: Uint8Array): string {
 /**
  * What a flight produces: plain data, never a `Response`, because a response
  * body can be read once and every waiter needs its own. A redirect keeps its
- * location bare so each request appends its own query string.
+ * location bare so each request appends its own query string, and a
+ * not-found or an error carries nothing at all: each request builds its own
+ * response from the host hook (or the default).
  */
+type PageOutcome = {
+  readonly kind: 'page';
+  readonly headers: readonly (readonly [string, string])[];
+  readonly body: Uint8Array;
+};
+type RedirectOutcome = { readonly kind: 'redirect'; readonly location: string };
 type Outcome =
-  | { readonly kind: 'redirect'; readonly location: string }
-  | {
-      readonly kind: 'html';
-      readonly status: number;
-      readonly headers: readonly (readonly [string, string])[];
-      readonly body: Uint8Array | string;
-    };
-
-function htmlOutcome(
-  status: number,
-  body: string,
-  cacheControl: string,
-): Outcome {
-  return {
-    kind: 'html',
-    status,
-    headers: [
-      ['Content-Type', 'text/html; charset=utf-8'],
-      ['X-Content-Type-Options', 'nosniff'],
-      ['Cache-Control', cacheControl],
-    ],
-    body,
-  };
-}
+  | RedirectOutcome
+  | PageOutcome
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'error' };
 
 function pageOutcome(
   entry: Pick<CacheEntry, 'body' | 'etag' | 'contentLanguage'>,
   degraded: boolean,
-): Outcome {
+): PageOutcome {
   return {
-    kind: 'html',
-    status: 200,
+    kind: 'page',
     headers: [
       ['Content-Type', 'text/html; charset=utf-8'],
       ['Content-Language', entry.contentLanguage],
@@ -168,8 +167,33 @@ function pageOutcome(
   };
 }
 
-/** Turns a shared outcome into one request's own response. */
-function toResponse(outcome: Outcome, search: string): Response {
+function defaultErrorResponse(status: 404 | 500): Response {
+  return new Response(status === 404 ? NOT_FOUND_BODY : SERVER_ERROR_BODY, {
+    status,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': NO_STORE,
+    },
+  });
+}
+
+/**
+ * Re-wraps a host response as a 404 or 500 that no cache may keep. A copy is
+ * required: a host response's headers can be immutable, and its status and
+ * `Cache-Control` are exactly what must not survive.
+ */
+function sealedHostResponse(host: Response, status: 404 | 500): Response {
+  const headers = new Headers(host.headers);
+  headers.set('Cache-Control', NO_STORE);
+  return new Response(host.body, { status, headers });
+}
+
+/** Turns a shared page or redirect outcome into one request's own response. */
+function toResponse(
+  outcome: RedirectOutcome | PageOutcome,
+  search: string,
+): Response {
   if (outcome.kind === 'redirect') {
     return new Response(null, {
       status: 308,
@@ -180,7 +204,7 @@ function toResponse(outcome: Outcome, search: string): Response {
     });
   }
   return new Response(outcome.body, {
-    status: outcome.status,
+    status: 200,
     headers: new Headers(outcome.headers.map(([name, value]) => [name, value])),
   });
 }
@@ -189,6 +213,7 @@ function toResponse(outcome: Outcome, search: string): Response {
 export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
   validate(deps);
   const { db, config, cache, hooks, siteUrl, resolveAssetUrl } = deps;
+  const { notFound, renderError } = deps;
   const renderDocument = deps.renderDocument ?? renderDefaultDocument;
   const homeSlug = deps.homeSlug ?? DEFAULT_HOME_SLUG;
   const components = createComponentMap(config.blocks, hooks);
@@ -231,7 +256,7 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
         return { kind: 'redirect', location: resolution.location };
       }
       if (resolution.kind === 'not-found') {
-        return htmlOutcome(404, NOT_FOUND_BODY, NO_STORE);
+        return { kind: 'not-found' };
       }
       // Defensive: HTML is only ever stored under the canonical key (D-16),
       // so a page that resolved under another spelling is redirected instead.
@@ -274,17 +299,57 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
         pageId: seen.pageId,
         error,
       });
-      return htmlOutcome(500, SERVER_ERROR_BODY, NO_STORE);
+      return { kind: 'error' };
+    }
+  }
+
+  /**
+   * The response for a not-found or an error: the host's page when it set one
+   * and it behaved, otherwise the default. Called once per request, never once
+   * per flight, because every request needs its own body.
+   */
+  async function errorResponse(
+    request: Request,
+    status: 404 | 500,
+    publicPath: string,
+  ): Promise<Response> {
+    const hook = status === 404 ? notFound : renderError;
+    if (hook === undefined) return defaultErrorResponse(status);
+    try {
+      const host: unknown = await hook(request);
+      if (!(host instanceof Response)) {
+        throw new TypeError('the hook must return a Response');
+      }
+      return sealedHostResponse(host, status);
+    } catch (error) {
+      reportRenderEvent('onRenderError', hooks?.onRenderError, {
+        publicPath,
+        pageId: null,
+        error,
+      });
+      return defaultErrorResponse(status);
     }
   }
 
   return async (request) => {
+    // Only a read is answered: anything else never reaches the cache or the
+    // database, and a 405 is never stored by anything downstream.
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      return new Response(null, {
+        status: 405,
+        headers: { Allow: 'GET, HEAD', 'Cache-Control': NO_STORE },
+      });
+    }
     const url = new URL(request.url);
 
     // Canonicalise before the cache and before any database statement.
     const normalized = normalizeVisitorPath(url.pathname);
     if (normalized.kind === 'not-found') {
-      return toResponse(htmlOutcome(404, NOT_FOUND_BODY, NO_STORE), '');
+      return await errorResponse(
+        request,
+        404,
+        url.pathname.slice(0, MAX_VISITOR_PATH_LENGTH),
+      );
     }
     if (normalized.kind === 'redirect') {
       return toResponse(
@@ -315,6 +380,12 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
         : await flights.run(`${String(ticket)}\u0000${key}`, () =>
             produce(key, ticket),
           );
+    if (outcome.kind === 'not-found') {
+      return await errorResponse(request, 404, key);
+    }
+    if (outcome.kind === 'error') {
+      return await errorResponse(request, 500, key);
+    }
     return toResponse(outcome, url.search);
   };
 }
