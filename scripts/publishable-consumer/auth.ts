@@ -1,6 +1,8 @@
 import {
   AUDIT_RETENTION_DAYS,
   AUTH_EMAIL_KINDS,
+  AfterCommitRegistrationError,
+  AfterCommitTimeoutError,
   AuditWriteError,
   AuthConfigError,
   CREDENTIAL_SET_ACTION,
@@ -58,11 +60,15 @@ import {
   runAuditedMutation,
   startImpersonation,
   stopImpersonation,
+  type AfterCommitCallback,
+  type AfterCommitFailure,
+  type AfterCommitFailureHook,
   type AuditActor,
   type AuditDatabase,
   type AuditDeps,
   type AuditEntryInput,
   type AuditFailureHook,
+  type AuditMutationContext,
   type AuditRecorder,
   type AuditTransaction,
   type AuditWriteFailure,
@@ -149,6 +155,8 @@ const functions: Record<string, unknown> = {
 };
 
 const errorClasses: Record<string, unknown> = {
+  AfterCommitRegistrationError,
+  AfterCommitTimeoutError,
   AuditWriteError,
   AuthConfigError,
   CredentialWriteError,
@@ -241,6 +249,27 @@ for (const [name, value] of Object.entries(frozenObjects)) {
   if (typeof value !== 'object' || value === null || !Object.isFrozen(value)) {
     fail(`${name} is not a frozen object`);
   }
+}
+
+const registrationError = new AfterCommitRegistrationError(
+  'nested-transaction',
+  'page.publish',
+);
+if (
+  !(registrationError instanceof Error) ||
+  registrationError.name !== 'AfterCommitRegistrationError' ||
+  registrationError.reason !== 'nested-transaction'
+) {
+  fail('AfterCommitRegistrationError does not construct as documented');
+}
+
+const timeoutError = new AfterCommitTimeoutError('page.publish', 10_000);
+if (
+  !(timeoutError instanceof Error) ||
+  timeoutError.name !== 'AfterCommitTimeoutError' ||
+  timeoutError.timeoutMs !== 10_000
+) {
+  fail('AfterCommitTimeoutError does not construct as documented');
 }
 
 const documentedValueCount =
@@ -369,6 +398,21 @@ const resendInput: ResendSetPasswordLinkInput = {
 };
 const probe: PasswordLinkProbe = {};
 const failureHook: AuditFailureHook = () => undefined;
+const afterCommitCallback: AfterCommitCallback = () => undefined;
+const afterCommitFailure: AfterCommitFailure = {
+  permission: 'pages:publish',
+  action: 'page.publish',
+  entityType: 'page',
+  actorUserId: 'user-id',
+  occurredAt: new Date(0),
+  error: new Error('purge failed'),
+};
+const afterCommitFailureHook: AfterCommitFailureHook = () => undefined;
+const mutationContext: AuditMutationContext = {
+  afterCommit: (callback) => {
+    void callback;
+  },
+};
 const mailSender: MailSender = { send: () => Promise.resolve() };
 const renderEmail: RenderAuthEmail = renderAuthEmail;
 const consoleOptions: CreateConsoleSenderOptions = {
@@ -454,6 +498,10 @@ const typeProofs: unknown[] = [
   resendInput,
   probe,
   failureHook,
+  afterCommitCallback,
+  afterCommitFailure,
+  afterCommitFailureHook,
+  mutationContext,
   mailSender,
   renderEmail,
   consoleOptions,

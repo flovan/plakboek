@@ -1,0 +1,74 @@
+{
+  "name": "@plakboek/render",
+  "version": "0.1.0",
+  "description": "Server-only rendering of published Plakboek pages and the visitor request handler",
+  "homepage": "https://github.com/flovan/plakboek/tree/main/packages/render#readme",
+  "bugs": {
+    "url": "https://github.com/flovan/plakboek/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flovan/plakboek.git",
+    "directory": "packages/render"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "publint --strict && attw --pack . --profile esm-only"
+  },
+  "dependencies": {
+    "@plakboek/cache": "workspace:*",
+    "@plakboek/pages": "workspace:*"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "catalog:",
+    "@plakboek/auth": "workspace:*",
+    "@plakboek/content": "workspace:*",
+    "@plakboek/db": "workspace:*",
+    "@plakboek/permissions": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "drizzle-orm": "catalog:",
+    "es-module-lexer": "catalog:",
+    "pg": "catalog:",
+    "postgres": "catalog:",
+    "publint": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

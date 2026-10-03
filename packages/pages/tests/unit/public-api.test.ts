@@ -97,6 +97,7 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   // page-routing
   computePageResolvedPath: 'function',
   computeUrlPatternChangeImpact: 'function',
+  PageAddressUnreachableError: 'class',
   PageUrlCollisionError: 'class',
   PageUrlPatternCollisionError: 'class',
   setPageUrlPattern: 'function',
@@ -174,6 +175,12 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   releasePageLock: 'function',
   renewPageLock: 'function',
   takeOverPageLock: 'function',
+  // visitor
+  DEFAULT_HOME_SLUG: 'constant',
+  matchPublicPagePath: 'function',
+  resolvePublishedPage: 'function',
+  resolveVisitorPage: 'function',
+  toPublicPagePath: 'function',
 });
 
 /** Every type the entry point exports. Types leave no runtime trace, so this
@@ -305,6 +312,15 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'ReleasePageLockInput',
   'RenewPageLockInput',
   'TakeOverPageLockInput',
+  // visitor
+  'MatchPublicPagePathInput',
+  'PublicPagePathMatch',
+  'PublishedPageSeo',
+  'PublishedPageView',
+  'ResolvePublishedPageInput',
+  'ResolveVisitorPageInput',
+  'ToPublicPagePathInput',
+  'VisitorPageResolution',
 ]);
 
 /**
@@ -314,6 +330,9 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
  * `index.ts`'s own header comment for the full rationale behind each).
  */
 const WITHHELD: readonly string[] = Object.freeze([
+  // purge.ts
+  'registerPagePurge',
+  'registerGlobalPurge',
   // revisions.ts
   'recordBlockRevision',
   'pruneBlockRevisions',
@@ -353,6 +372,7 @@ const WITHHELD: readonly string[] = Object.freeze([
   'buildSnapshotTree',
   'buildPageSnapshot',
   'computeManifestHash',
+  'asPageSnapshot',
   // schema.ts -- every table
   'pages',
   'pageBlocks',
@@ -400,6 +420,13 @@ const ERROR_FACTORIES: Readonly<
     ),
   PageUrlPatternError: (K) => new (K as new (i: unknown[]) => unknown)([]),
   PageEngineSettingsMissingError: (K) => new (K as new () => unknown)(),
+  PageAddressUnreachableError: (K) =>
+    new (K as new (l: string, p: string, u: string, o: string) => unknown)(
+      'en',
+      'nl/about',
+      '/nl/about',
+      'other-address',
+    ),
   PageUrlCollisionError: (K) =>
     new (K as new (l: string, p: string, e: string | null) => unknown)(
       'en',

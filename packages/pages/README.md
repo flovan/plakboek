@@ -142,20 +142,20 @@ point, so an export cannot be added or removed without updating them.
 
 ### Host config
 
-| Export                          | Kind     | Purpose                                                                                                         |
-| ------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
-| `definePagesConfig`             | function | Validates and freezes a host's blocks/field types/widgets/constraints, registering all of them                  |
-| `PagesConfigError`              | class    | Thrown by `definePagesConfig` with every problem found                                                          |
-| `reportPagesWarning`            | function | Calls a host-supplied hook so it can never throw or reject into the caller                                      |
-| `DEFAULT_SECTION_NESTING_DEPTH` | constant | `2`: the default section-nesting cap (D-18)                                                                     |
-| `DEFAULT_BLOCK_DEPTH_CEILING`   | constant | `12`: the default coarse block-depth ceiling                                                                    |
-| `LocaleRemovedEvent`            | type     | What `onLocaleRemoved` receives when a removed locale still holds pages                                         |
-| `PagesConfig`                   | type     | The frozen, validated result of `definePagesConfig`                                                             |
-| `PagesConfigInput`              | type     | Input to `definePagesConfig`                                                                                    |
-| `PagesConfigIssue`              | type     | One `definePagesConfig` problem                                                                                 |
-| `PagesConfigIssueCode`          | type     | `NO_BLOCKS`, `INVALID_SECTION_NESTING_DEPTH`, `INVALID_BLOCK_DEPTH_CEILING`                                     |
-| `PagesDeps`                     | type     | The dependency bag every engine operation takes: `db`, `recorder`, `resolver`, `config`, optional `hooks`/`now` |
-| `PagesHooks`                    | type     | Optional warning hooks a host passes on `PagesDeps`                                                             |
+| Export                          | Kind     | Purpose                                                                                                                       |
+| ------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `definePagesConfig`             | function | Validates and freezes a host's blocks/field types/widgets/constraints, registering all of them                                |
+| `PagesConfigError`              | class    | Thrown by `definePagesConfig` with every problem found                                                                        |
+| `reportPagesWarning`            | function | Calls a host-supplied hook so it can never throw or reject into the caller                                                    |
+| `DEFAULT_SECTION_NESTING_DEPTH` | constant | `2`: the default section-nesting cap (D-18)                                                                                   |
+| `DEFAULT_BLOCK_DEPTH_CEILING`   | constant | `12`: the default coarse block-depth ceiling                                                                                  |
+| `LocaleRemovedEvent`            | type     | What `onLocaleRemoved` receives when a removed locale still holds pages                                                       |
+| `PagesConfig`                   | type     | The frozen, validated result of `definePagesConfig`                                                                           |
+| `PagesConfigInput`              | type     | Input to `definePagesConfig`                                                                                                  |
+| `PagesConfigIssue`              | type     | One `definePagesConfig` problem                                                                                               |
+| `PagesConfigIssueCode`          | type     | `NO_BLOCKS`, `INVALID_SECTION_NESTING_DEPTH`, `INVALID_BLOCK_DEPTH_CEILING`                                                   |
+| `PagesDeps`                     | type     | The dependency bag every engine operation takes: `db`, `recorder`, `resolver`, `config`, optional `hooks`/`invalidator`/`now` |
+| `PagesHooks`                    | type     | Optional warning hooks a host passes on `PagesDeps`                                                                           |
 
 ### Status and kind catalogues
 
@@ -291,6 +291,8 @@ point, so an export cannot be added or removed without updating them.
 
 ### Page URL patterns (D-22)
 
+A pattern's literal text may contain only lowercase letters, digits, hyphens and `/` (anything else is an `INVALID_LITERAL` issue), so every public page URL is lowercase and free of percent-encoding, which lets the visitor handler reject junk paths before any database access without ever losing a real page.
+
 | Export                        | Kind     | Purpose                                                       |
 | ----------------------------- | -------- | ------------------------------------------------------------- |
 | `DEFAULT_PAGE_URL_PATTERN`    | constant | `'{locale}/{path}'`: the seeded project-wide pattern          |
@@ -324,6 +326,7 @@ point, so an export cannot be added or removed without updating them.
 | ------------------------------------ | -------- | ------------------------------------------------------------------------------------- |
 | `computePageResolvedPath`            | function | Computes a page's resolved address from the pattern and its own locale/path           |
 | `computeUrlPatternChangeImpact`      | function | Previews what changing the project-wide pattern would move or collide                 |
+| `PageAddressUnreachableError`        | class    | `publishPage` refused: the page's public path would not lead back to the page         |
 | `PageUrlCollisionError`              | class    | A page's resolved address is already held by another page in the same locale          |
 | `PageUrlPatternCollisionError`       | class    | A pattern change would give two published pages the same resolved address             |
 | `setPageUrlPattern`                  | function | Changes the project-wide page URL pattern, recomputing every published page's address |
@@ -419,6 +422,17 @@ whichever later phase builds the history/restore UI.
 
 ### Publish and draft snapshots (D-30..D-33)
 
+When `PagesDeps.invalidator` is set, `publishPage` purges the page's cache tag
+after its transaction commits; a refused publish purges nothing and a failing
+purge never fails the committed publish.
+
+A publication freezes the page's `title` and head SEO set next to its block
+tree, so retitling a page or editing its SEO reaches visitors only through the
+next publish, exactly like a block edit. A snapshot published before these were
+frozen carries neither: it serves an empty title and the default SEO set
+(indexable, no overrides) until the page is republished, and the visitor path
+never falls back to the live `pages` row for them.
+
 | Export                      | Kind     | Purpose                                                                                        |
 | --------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
 | `createDraftSnapshot`       | function | Builds a draft snapshot from a page's current tree, identical to what publishing would produce |
@@ -429,9 +443,33 @@ whichever later phase builds the history/restore UI.
 | `CreateDraftSnapshotInput`  | type     | Input to `createDraftSnapshot`                                                                 |
 | `DegradedSnapshotBlock`     | type     | One block that stopped a publish or draft from being built                                     |
 | `PagePublicationRecord`     | type     | A stored publication row: snapshot, revision manifest, hash, `isDraft`                         |
-| `PageSnapshot`              | type     | The materialised, nested snapshot tree                                                         |
+| `PageSnapshot`              | type     | The materialised snapshot: block tree plus the frozen title and head SEO set                   |
 | `PublishPageInput`          | type     | Input to `publishPage`                                                                         |
 | `SnapshotBlock`             | type     | One block in the materialised snapshot tree                                                    |
+
+### Cache invalidation (D-18, D-19)
+
+Every write that changes what a visitor can see purges the affected cache tags
+after its transaction commits, through `PagesDeps.invalidator`. A refused,
+denied or rolled-back write purges nothing, and a failing purge never fails the
+write: the failure reaches the recorder's `onAfterCommitFailed` hook instead.
+
+| Write path                                                                           | Purges                                         |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| publish                                                                              | `page:<id>`                                    |
+| unpublish                                                                            | `page:<id>`                                    |
+| trash, permanent delete                                                              | `page:<id>` of every page in the subtree       |
+| restore                                                                              | `page:<id>` of every restored page             |
+| move, rename with a new slug                                                         | `page:<id>` of every page in the subtree       |
+| rename with only a new title                                                         | `page:<id>` of the renamed page                |
+| URL-pattern change (only when the stored value changes)                              | `global`                                       |
+| locale purge                                                                         | `global`                                       |
+| schedule, unschedule                                                                 | none (the Phase 13 job calls `purgePageTags`)  |
+| block writes, revision restore, compaction, locks, create, translate, draft snapshot | none (live side only, never visitor-reachable) |
+
+A moved or renamed published page is unaddressed until it is republished: its
+old and new URLs both answer 404, and each descendant stays unaddressed until
+it is republished too (redirects over `page_url_history` arrive in Phase 16).
 
 ### Page status transitions (D-20)
 
@@ -501,6 +539,52 @@ lock blocking one would be impractical. Each is gated by its own permission
 (`pages:edit`, `pages:publish`, and the dual `pages:delete-permanent` +
 `entries:delete-permanent` check respectively) and recorded through
 `deps.recorder.run` instead.
+
+### Visitor resolution (D-20..D-26)
+
+| Export                      | Kind     | Purpose                                                                                    |
+| --------------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `DEFAULT_HOME_SLUG`         | constant | The hierarchy path (`home`) of the page served at a locale's root                          |
+| `matchPublicPagePath`       | function | Maps a public URL path to a stored `(locale, path, resolvedPath)`, a redirect, or `none`   |
+| `resolvePublishedPage`      | function | One joined read of the published, non-draft page at `(locale, resolvedPath)`, or `null`    |
+| `resolveVisitorPage`        | function | The composite the render handler calls: pattern read, path mapping, published read         |
+| `toPublicPagePath`          | function | The public URL path of a stored `(locale, path)` address -- the inverse of the matcher     |
+| `MatchPublicPagePathInput`  | type     | Input to `matchPublicPagePath`                                                             |
+| `PublicPagePathMatch`       | type     | The matcher's result: `match`, `redirect` or `none`                                        |
+| `PublishedPageSeo`          | type     | The head-relevant subset of a page's SEO set, as frozen into its publication               |
+| `PublishedPageView`         | type     | The narrow published view: page id, locale, title, address, SEO, plus the live publication |
+| `ResolvePublishedPageInput` | type     | Input to `resolvePublishedPage`                                                            |
+| `ResolveVisitorPageInput`   | type     | Input to `resolveVisitorPage`                                                              |
+| `ToPublicPagePathInput`     | type     | Input to `toPublicPagePath`                                                                |
+| `VisitorPageResolution`     | type     | The composite's result: `page`, `redirect`, `not-found` or `invalid-pattern`               |
+
+`resolved_path` is read exactly as it is stored (`en/about-us` under the
+default pattern) and is the only working-side value the resolver reads; the
+view's title and SEO come out of the published snapshot. Only the resolver maps
+that stored form to the public path, so there is no migration. The default locale is served without a locale prefix
+(`/about-us` is English, `/nl/over-ons` is Dutch) and its prefixed spelling
+(`/en/about-us`) resolves to a redirect whose target is the bare form, which a
+render handler answers with a 308. A locale root (`/`, `/nl`) is the published
+page whose hierarchy path is the home slug, and the explicit `/home` spelling
+redirects to the root. The locale prefix wins over a default-locale page whose
+first segment equals an enabled locale code, so `publishPage` refuses an English
+page whose path starts with `nl` or `en` (`PageAddressUnreachableError`) rather
+than publishing a page nobody can reach; preview snapshots are not affected.
+The check runs at publish time only, so enabling a locale later does not
+re-check pages that are already published. Under a pattern without `{locale}` only the
+default locale is addressable. Only the enabled locales passed in are
+candidates, so a removed locale (its rows are kept) can never be reached by
+URL. A resolution reads at most two statements -- the URL pattern, then the
+joined select -- and a redirect or an unshaped path stops after the first.
+A stored URL pattern that no longer parses (one written before pattern literals
+were restricted to lowercase letters, digits and hyphens) resolves to
+`invalid-pattern` rather than throwing, so a single bad setting fails closed
+instead of failing every request; the render handler answers it with a reported 404. Publishing still refuses with a `PageUrlPatternError` until the pattern is
+replaced through `setPageUrlPattern`.
+Draft, scheduled, trashed and unpublished pages and draft snapshots never
+resolve, and the view never carries the revision manifest, the publisher, the
+working block tree or any lock or version column. Only pages resolve; entry
+URLs and the previous-address history are not consulted.
 
 Nothing else is reachable from the entry point. In particular the block-
 revision writer and its cap-pruning sweep, the row-locking page read and the

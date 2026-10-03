@@ -178,9 +178,17 @@ function fakeRecorder(
         events.push('denied');
         throw new PermissionDeniedError(entry.permission, actor.roleKey);
       }
-      const { result, after } = await mutation(tx);
+      const callbacks: (() => void | Promise<void>)[] = [];
+      const { result, after } = await mutation(tx, {
+        afterCommit(callback) {
+          callbacks.push(callback);
+        },
+      });
       allowed.push({ actor, entry, after: after ?? entry.after });
       events.push('committed');
+      for (const callback of callbacks) {
+        await callback();
+      }
       return result;
     },
     recordDenied(actor, entry) {
