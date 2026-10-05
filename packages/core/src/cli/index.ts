@@ -20,7 +20,9 @@ import {
 const USAGE = `Usage: plakboek <command> [options]
 
 Commands:
-  migrate    Apply the core database migrations
+  migrate     Apply the core database migrations
+  bootstrap   Create the first superadmin and publish the seed home page
+  mail:test   Send a test email to check mail delivery
 
 Run plakboek <command> --help for a command's options.
 Run plakboek --version to print the installed version.`;
@@ -29,6 +31,8 @@ type Command = (argv: readonly string[]) => Promise<number>;
 
 const COMMANDS: Readonly<Record<string, () => Promise<Command>>> = {
   migrate: async () => (await import('./migrate.js')).runMigrateCommand,
+  bootstrap: async () => (await import('./bootstrap.js')).runBootstrapCommand,
+  'mail:test': async () => (await import('./mail-test.js')).runMailTestCommand,
 };
 
 function packageVersion(): string {
@@ -81,4 +85,13 @@ async function main(argv: readonly string[]): Promise<number> {
   }
 }
 
-process.exitCode = await main(process.argv.slice(2));
+/** Resolves once everything written to `stream` has been flushed. */
+function flushed(stream: NodeJS.WriteStream): Promise<void> {
+  return new Promise((resolve) => stream.write('', () => resolve()));
+}
+
+const code = await main(process.argv.slice(2));
+// A pooled mail transport or database socket must never keep a finished
+// command alive, so exit explicitly once the output is out.
+await Promise.all([flushed(process.stdout), flushed(process.stderr)]);
+process.exit(code);

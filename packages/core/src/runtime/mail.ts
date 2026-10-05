@@ -6,6 +6,7 @@
  */
 import {
   createMailSender,
+  renderAuthEmail,
   type CreateMailSenderOptions,
   type MailMessage,
   type MailSender,
@@ -77,4 +78,25 @@ export function createLazyMailSender(
       return env.production ? 'unconfigured' : 'console';
     },
   };
+}
+
+/** Prefix that marks a message as a delivery check in the recipient's inbox. */
+const TEST_SUBJECT_PREFIX = 'Plakboek delivery test: ';
+
+/**
+ * The message `plakboek mail:test` and the setup screen send: the real
+ * sign-in template, so a pass proves the same rendering path real mail takes,
+ * with the subject marked as a test. The link is the site origin, never a
+ * live token.
+ */
+export function buildTestEmail(options: {
+  readonly to: string;
+  readonly siteUrl: string;
+}): MailMessage {
+  const message = renderAuthEmail('magic-link', {
+    to: options.to,
+    url: options.siteUrl,
+    expiresInMinutes: '15',
+  });
+  return { ...message, subject: `${TEST_SUBJECT_PREFIX}${message.subject}` };
 }

@@ -257,3 +257,32 @@ export function readRuntimeEnv(source: EnvSource = process.env): RuntimeEnv {
     production: source.NODE_ENV === 'production',
   };
 }
+
+/** What `plakboek mail:test` needs: the origin and the mail transport. */
+export type MailEnv = Pick<
+  RuntimeEnv,
+  'siteUrl' | 'smtp' | 'mailFrom' | 'production'
+>;
+
+/**
+ * Reads only the mail variables (`PLAKBOEK_URL` plus the SMTP group and
+ * `PLAKBOEK_MAIL_FROM`), so a headless delivery check needs no database and
+ * no secret. Throws `PlakboekEnvError` with every problem found.
+ */
+export function readMailEnv(source: EnvSource = process.env): MailEnv {
+  const issues: EnvIssue[] = [];
+  const siteUrl = readSiteUrl(source, issues);
+  const smtp = readSmtp(source, issues);
+  const mailFrom = present(source, 'PLAKBOEK_MAIL_FROM')?.trim();
+
+  if (issues.length > 0 || siteUrl === undefined) {
+    throw new PlakboekEnvError(issues);
+  }
+
+  return {
+    siteUrl,
+    ...(smtp === undefined ? {} : { smtp }),
+    ...(mailFrom === undefined ? {} : { mailFrom }),
+    production: source.NODE_ENV === 'production',
+  };
+}

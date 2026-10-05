@@ -115,7 +115,7 @@ describe('plakboek bootstrap', () => {
     expect(pages).toEqual([{ status: 'published', title: 'Home' }]);
     const blocks = await query<{ block_type: string }>(
       database.connectionString,
-      'SELECT block_type FROM blocks ORDER BY block_type',
+      'SELECT block_type FROM page_blocks ORDER BY block_type',
     );
     expect(blocks.map((row) => row.block_type)).toEqual(['heading', 'section']);
   });
