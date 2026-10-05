@@ -47,7 +47,9 @@ function scratchDirectory(): string {
   return directory;
 }
 
+/** Rows in the bookkeeping table; zero when nothing ever created it. */
 async function appliedRows(connectionString: string): Promise<number> {
+  if (!(await migrationsTableExists(connectionString))) return 0;
   const client = new Client({ connectionString });
   await client.connect();
   try {
