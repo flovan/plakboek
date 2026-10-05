@@ -111,17 +111,23 @@ export type SiteContext = {
   getMenu(name: string): Promise<readonly ResolvedMenuItem[]>;
 };
 
-/** The host's site chrome: the document around every page. */
+/**
+ * The host's site chrome: the document around every page. The hooks are
+ * plain functions (a module's named exports), never called with a `this`.
+ */
 export type SiteModule = {
-  renderDocument(
+  readonly renderDocument: (
     input: DocumentInput,
     site: SiteContext,
-  ): string | Promise<string>;
-  renderNotFound?(
+  ) => string | Promise<string>;
+  readonly renderNotFound?: (
     request: Request,
     site: SiteContext,
-  ): string | Promise<string>;
-  renderError?(request: Request, site: SiteContext): string | Promise<string>;
+  ) => string | Promise<string>;
+  readonly renderError?: (
+    request: Request,
+    site: SiteContext,
+  ) => string | Promise<string>;
 };
 
 /** What the virtual host module resolves to. */

@@ -28,12 +28,12 @@ import {
   createPermissionResolver,
   type PermissionResolver,
 } from '@plakboek/permissions';
-import type { DocumentInput } from '@plakboek/render';
 import {
   createVisitorHandler,
   type VisitorHandler,
 } from '@plakboek/render/server';
-import type { HostModule, PlakboekConfig, SiteContext } from '../types.js';
+import { createSiteHooks, sealedNotFoundResponse } from '../site.js';
+import type { HostModule, PlakboekConfig } from '../types.js';
 import { getDb } from './db.js';
 import { readRuntimeEnv, type RuntimeEnv } from './env.js';
 import { createLazyMailSender, type LazyMailSender } from './mail.js';
@@ -50,6 +50,11 @@ export type Runtime = {
   readonly cache: CacheBackend | undefined;
   readonly pages: PagesDeps;
   readonly visitor: VisitorHandler;
+  /**
+   * The visitor handler's sealed 404 (host page or default, status 404,
+   * `no-store`) for routes outside the handler, such as the setup page.
+   */
+  notFoundResponse(request: Request): Promise<Response>;
 };
 
 export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
@@ -78,13 +83,8 @@ export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
     ...(cache === undefined ? {} : { invalidator: cache }),
   };
 
-  const siteContext = (input: DocumentInput): SiteContext => ({
-    siteName: config.siteName,
-    locale: input.head.lang,
-    defaultLocale: config.content.defaultLocale,
-    publicPath: input.publicPath,
-    getMenu: () => Promise.resolve([]),
-  });
+  const siteHooks =
+    site === undefined ? undefined : createSiteHooks({ config, site });
 
   const visitor = createVisitorHandler({
     db: db.db,
@@ -93,12 +93,8 @@ export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
     siteUrl: env.siteUrl,
     ...(cache === undefined ? {} : { cache }),
     ...(env.buildId === undefined ? {} : { buildId: env.buildId }),
-    ...(site === undefined
-      ? {}
-      : {
-          renderDocument: (input: DocumentInput) =>
-            site.renderDocument(input, siteContext(input)),
-        }),
+    ...siteHooks,
+    ...(host.edit === undefined ? {} : { edit: host.edit }),
   });
 
   return {
@@ -112,6 +108,7 @@ export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
     cache,
     pages,
     visitor,
+    notFoundResponse: (request) => sealedNotFoundResponse(siteHooks, request),
   };
 }
 

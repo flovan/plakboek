@@ -19,6 +19,12 @@ export const FIXTURE_SERVER_ENTRY = join(
 );
 export const FIXTURE_CLIENT_DIR = join(FIXTURE_BUILD_DIR, 'client');
 
+/** The variant whose host route table has its own index route. */
+export const FIXTURE_HOST_INDEX_BUILD_DIR = join(
+  FIXTURE_DIR,
+  'build-host-index',
+);
+
 /** Links `@plakboek/core` inside the fixture to the package directory. */
 export function linkCoreIntoFixture(): void {
   if (!existsSync(join(PACKAGE_DIR, 'dist', 'routes.js'))) {
@@ -33,12 +39,23 @@ export function linkCoreIntoFixture(): void {
   symlinkSync(PACKAGE_DIR, link, 'dir');
 }
 
-/** Runs `react-router build` in the fixture; throws with its output on failure. */
-export function buildFixtureHost(): void {
+/**
+ * Runs `react-router build` in the fixture; throws with its output on
+ * failure. `variant` is the environment the fixture's own config files read:
+ * `FIXTURE_BUILD_DIR` (a directory name under the fixture) and
+ * `FIXTURE_HOST_INDEX` (`1` adds a host index route).
+ */
+export function buildFixtureHost(
+  variant: Readonly<Record<string, string>> = {},
+): void {
   const result = spawnSync(
     join(PACKAGE_DIR, 'node_modules', '.bin', 'react-router'),
     ['build'],
-    { cwd: FIXTURE_DIR, encoding: 'utf8', env: { ...process.env, CI: '1' } },
+    {
+      cwd: FIXTURE_DIR,
+      encoding: 'utf8',
+      env: { ...process.env, CI: '1', ...variant },
+    },
   );
   if (result.status !== 0) {
     throw new Error(

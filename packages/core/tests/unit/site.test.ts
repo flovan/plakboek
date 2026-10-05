@@ -1,6 +1,10 @@
 import type { DocumentInput } from '@plakboek/render';
 import { describe, expect, it, vi } from 'vitest';
-import { createSiteHooks, type SiteHooksConfig } from '../../src/site.js';
+import {
+  createSiteHooks,
+  sealedNotFoundResponse,
+  type SiteHooksConfig,
+} from '../../src/site.js';
 import type { SiteContext, SiteModule } from '../../src/types.js';
 
 const config: SiteHooksConfig = {
@@ -186,5 +190,59 @@ describe('createSiteHooks renderError', () => {
       'text/html; charset=utf-8',
     );
     expect(await response?.text()).toBe('<p>nl</p>');
+  });
+});
+
+describe('sealedNotFoundResponse', () => {
+  it('serves the host page as an uncacheable 404', async () => {
+    const { site } = recordingSite();
+    const hooks = createSiteHooks({ config, site });
+
+    const response = await sealedNotFoundResponse(
+      hooks,
+      new Request('http://localhost/nl/weg'),
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(response.headers.get('Content-Type')).toBe(
+      'text/html; charset=utf-8',
+    );
+    expect(await response.text()).toBe('<html>missing</html>');
+  });
+
+  it('serves the default body when there is no host page', async () => {
+    const response = await sealedNotFoundResponse(
+      createSiteHooks({ config, site: { renderDocument: () => '' } }),
+      new Request('http://localhost/x'),
+    );
+    expect(response.status).toBe(404);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(await response.text()).toContain('Not found');
+  });
+
+  it('serves the default body when the host page throws', async () => {
+    const response = await sealedNotFoundResponse(
+      createSiteHooks({
+        config,
+        site: {
+          renderDocument: () => '',
+          renderNotFound: () => {
+            throw new Error('boom');
+          },
+        },
+      }),
+      new Request('http://localhost/x'),
+    );
+    expect(response.status).toBe(404);
+    expect(await response.text()).not.toContain('boom');
+  });
+
+  it('serves the default body for hooks that are undefined', async () => {
+    const response = await sealedNotFoundResponse(
+      undefined,
+      new Request('http://localhost/x'),
+    );
+    expect(response.status).toBe(404);
   });
 });
