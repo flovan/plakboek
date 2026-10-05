@@ -4,7 +4,11 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [
-    plakboek({ config: './plakboek.config.ts', site: './app/site.ts' }),
+    plakboek({
+      config: './plakboek.config.ts',
+      site: './app/site.ts',
+      edit: './app/edit.ts',
+    }),
     reactRouter(),
   ],
 });

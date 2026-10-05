@@ -1,8 +1,11 @@
 /**
  * The route table through real builds: the CMS serves `/` and unclaimed
  * paths, a host route listed first always wins (including a host index route
- * in a second build), and the health route answers.
+ * in a second build), the health route answers and the `_edit` seam reaches the
+ * entrypoint the plugin wired in.
  */
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { createPage, getPage, insertBlock, publishPage } from '@plakboek/pages';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -12,7 +15,6 @@ import {
   buildFixtureHost,
 } from './fixture-host.js';
 import { createInstallation, type Installation } from './installation.js';
-import { join } from 'node:path';
 
 type Served = { url: (path: string) => string };
 
@@ -103,6 +105,43 @@ describe('the CMS route table inside a host app', () => {
       );
       expect(response.headers.get('Cache-Control')).toBe('no-store');
       expect(await response.json()).toEqual({ status: 'ok' });
+    });
+  });
+
+  describe('the _edit seam', () => {
+    it('reaches the entrypoint the plugin wired in, uncacheable', async () => {
+      const response = await fetch(defaultBuild.url('/?_edit=1'), {
+        redirect: 'manual',
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('edit seam reached');
+      expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    });
+
+    it('keeps the entrypoint out of every client asset', () => {
+      const assets = join(FIXTURE_CLIENT_DIR, 'assets');
+      for (const name of readdirSync(assets)) {
+        expect(readFileSync(join(assets, name), 'utf8')).not.toContain(
+          'edit seam reached',
+        );
+      }
+    });
+
+    it('leaves the plain visitor page free of editor content', async () => {
+      const response = await fetch(defaultBuild.url('/'));
+      const body = await response.text();
+      expect(body).toContain('Hello world');
+      expect(body).not.toContain('edit seam reached');
+    });
+
+    it('bounces every _edit request when no entrypoint is wired in', async () => {
+      // The installation's own runtime is built from the configuration alone.
+      const response = await installation.runtime.visitor(
+        new Request('http://localhost:3000/about-cms-page?_edit=1'),
+      );
+      expect(response.status).toBe(302);
+      expect(response.headers.get('Location')).toBe('/about-cms-page');
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
     });
   });
 

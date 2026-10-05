@@ -51,7 +51,9 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
       return [
         `export { default as config } from ${configPath};`,
         `export * as site from ${sitePath};`,
-        'export const edit = undefined;',
+        options.edit === undefined
+          ? 'export const edit = undefined;'
+          : `export { edit } from ${JSON.stringify(resolve(root, options.edit))};`,
       ].join('\n');
     },
   };
