@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PlakboekEnvError,
   SECRET_GENERATION_COMMAND,
+  readMailEnv,
   readRuntimeEnv,
 } from '../../src/runtime/env.js';
 
@@ -196,5 +197,61 @@ describe('readRuntimeEnv', () => {
         ['PLAKBOEK_SMTP_USER'],
       );
     });
+  });
+});
+
+describe('readMailEnv', () => {
+  it('needs only the public url: no database url and no secret', () => {
+    const env = readMailEnv({
+      PLAKBOEK_URL: 'https://example.com/',
+      PLAKBOEK_MAIL_FROM: ' no-reply@example.com ',
+      NODE_ENV: 'production',
+    });
+    expect(env).toEqual({
+      siteUrl: 'https://example.com',
+      mailFrom: 'no-reply@example.com',
+      production: true,
+    });
+  });
+
+  it('reads the SMTP group the same way the runtime does', () => {
+    const env = readMailEnv({
+      PLAKBOEK_URL: 'https://example.com',
+      PLAKBOEK_SMTP_HOST: 'smtp.example.com',
+      PLAKBOEK_SMTP_PORT: '465',
+      PLAKBOEK_SMTP_SECURE: 'true',
+      PLAKBOEK_SMTP_USER: 'mailer',
+      PLAKBOEK_SMTP_PASS: 'pw',
+    });
+    expect(env.smtp).toEqual({
+      host: 'smtp.example.com',
+      port: 465,
+      secure: true,
+      user: 'mailer',
+      pass: 'pw',
+    });
+    expect(env.production).toBe(false);
+  });
+
+  it('collects every problem in the variables it reads, never a value', () => {
+    let caught: unknown;
+    try {
+      readMailEnv({
+        PLAKBOEK_SMTP_HOST: 'smtp.example.com',
+        PLAKBOEK_SMTP_PORT: 'nope',
+        PLAKBOEK_SMTP_USER: 'mailer',
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(PlakboekEnvError);
+    expect(variables(caught as PlakboekEnvError)).toEqual(
+      expect.arrayContaining([
+        'PLAKBOEK_URL',
+        'PLAKBOEK_SMTP_PORT',
+        'PLAKBOEK_SMTP_PASS',
+      ]),
+    );
+    expect((caught as PlakboekEnvError).message).not.toContain('mailer');
   });
 });

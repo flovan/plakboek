@@ -2,6 +2,7 @@ import type { MailMessage, MailSender, MailSenderKind } from '@plakboek/auth';
 import { describe, expect, it, vi } from 'vitest';
 import {
   MailNotConfiguredError,
+  buildTestEmail,
   createLazyMailSender,
 } from '../../src/runtime/mail.js';
 
@@ -111,5 +112,18 @@ describe('createLazyMailSender', () => {
     await expect(mail.send(message)).rejects.toThrow('bad config');
     await mail.send(message);
     expect(create).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('buildTestEmail', () => {
+  it('renders the real sign-in template marked as a delivery test', () => {
+    const mail = buildTestEmail({
+      to: 'ops@example.com',
+      siteUrl: 'https://example.com',
+    });
+    expect(mail.to).toBe('ops@example.com');
+    expect(mail.subject).toBe('Plakboek delivery test: Your sign-in link');
+    expect(mail.html).toContain('https://example.com');
+    expect(mail.text).toContain('https://example.com');
   });
 });
