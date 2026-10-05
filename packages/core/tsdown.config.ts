@@ -19,6 +19,7 @@ export default defineConfig({
     routes: 'src/routes.ts',
     vite: 'src/vite.ts',
     server: 'src/server.ts',
+    cli: 'src/cli/index.ts',
     ...routeModules,
   },
   format: 'esm',

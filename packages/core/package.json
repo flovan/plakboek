@@ -12,6 +12,9 @@
     "url": "git+https://github.com/flovan/plakboek.git",
     "directory": "packages/core"
   },
+  "bin": {
+    "plakboek": "./dist/cli.js"
+  },
   "files": [
     "dist"
   ],
