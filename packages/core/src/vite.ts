@@ -15,6 +15,12 @@ export type PlakboekPluginOptions = {
   readonly config: string;
   /** Path to the host's site module. */
   readonly site: string;
+  /**
+   * Path to a module exporting `edit`, the editor's entrypoint. Requests
+   * carrying `_edit` are dispatched to it by the visitor handler; without it
+   * every `_edit` request is bounced to the plain page.
+   */
+  readonly edit?: string;
 };
 
 export function plakboek(options: PlakboekPluginOptions): Plugin {
