@@ -116,6 +116,13 @@ export type RunMigrationsOptions = {
   readonly connectionString: string;
   readonly lockWaitMs?: number;
   readonly lockPollIntervalMs?: number;
+  /** Called once, the first time the migration lock is held by another
+   * migrator. A hook that throws is ignored: it never aborts the run. */
+  readonly onLockWait?: () => void;
+  /** Called with a pending migration's name just before it applies; never for
+   * an already-applied migration. A hook that throws is ignored: it never
+   * aborts, rolls back or reorders the run. */
+  readonly onMigrationStart?: (name: string) => void;
 };
 
 export type RunMigrationsResult = {
@@ -278,6 +285,7 @@ async function applyNonTransactional(
 export async function applyPendingMigrations(
   client: Client,
   migrations: readonly Migration[],
+  onMigrationStart?: (name: string) => void,
 ): Promise<RunMigrationsResult> {
   await ensureBookkeepingTable(client);
 
@@ -292,6 +300,11 @@ export async function applyPendingMigrations(
 
   const applied: string[] = [];
   for (const migration of pending) {
+    try {
+      onMigrationStart?.(migration.name);
+    } catch {
+      // A progress hook never crashes the run it reports on.
+    }
     if (migration.transactional) {
       await applyTransactional(client, migration);
     } else {
@@ -316,10 +329,16 @@ export async function migrateWithRegistry(
   try {
     return await withMigrationLock(
       client,
-      () => applyPendingMigrations(client, options.migrations),
+      () =>
+        applyPendingMigrations(
+          client,
+          options.migrations,
+          options.onMigrationStart,
+        ),
       {
         waitMs: options.lockWaitMs,
         pollIntervalMs: options.lockPollIntervalMs,
+        onWait: options.onLockWait,
       },
     );
   } finally {
