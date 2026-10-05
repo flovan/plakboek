@@ -5,7 +5,9 @@
     "**/node_modules/**",
     ".planning/**",
     "packages/core/tests/fixture-host/build*/**",
-    "packages/core/tests/fixture-host/.react-router/**"
+    "packages/core/tests/fixture-host/.react-router/**",
+    "packages/create-plakboek/template/**",
+    "packages/create-plakboek/tests/fixtures/template/**"
   ],
   "plugins": ["typescript", "unicorn", "vitest"],
   "env": {
