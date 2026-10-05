@@ -7,4 +7,14 @@ export default defineConfig({
   defaultLocale: 'en',
   timezone: 'Europe/Brussels',
   blocks: [section, heading],
+  menus: { main: [{ label: 'Home', href: '/' }] },
+  seed: {
+    title: 'Home',
+    blocks: [
+      {
+        type: 'section',
+        children: [{ type: 'heading', props: { text: 'Hello world' } }],
+      },
+    ],
+  },
 });
