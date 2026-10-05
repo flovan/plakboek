@@ -7,8 +7,9 @@
  * `./config`, `./routes`, `./vite` and `./server` subpaths.
  */
 
-// blocks
+// blocks and modules
 export { defineBlock } from './blocks.js';
+export { defineModule } from './modules.js';
 
 // types
 export type {
