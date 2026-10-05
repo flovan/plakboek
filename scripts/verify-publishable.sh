@@ -36,6 +36,17 @@ for tarball in "$TARBALL_DIR"/*.tgz; do
   while IFS= read -r entry; do
     case "$entry" in
       package/package.json | package/README.md | package/LICENSE | package/dist/*) ;;
+      # create-plakboek bundles its starter template (D-18); no other package
+      # may ship a template tree.
+      package/template/*)
+        case "$tarball_name" in
+          create-plakboek-*.tgz) ;;
+          *)
+            echo "FATAL: unexpected tarball entry '$entry' in $tarball_name" >&2
+            exit 1
+            ;;
+        esac
+        ;;
       *)
         echo "FATAL: unexpected tarball entry '$entry' in $tarball_name" >&2
         exit 1

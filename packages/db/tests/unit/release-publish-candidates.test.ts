@@ -69,6 +69,7 @@ describe('release publish candidates', () => {
       '@plakboek/pages',
       '@plakboek/permissions',
       '@plakboek/render',
+      'create-plakboek',
     ]);
   });
 
