@@ -19,6 +19,7 @@ describe('renderDefaultDocument', () => {
     const html = renderDefaultDocument({
       head: HEAD,
       body: '<main>x</main>',
+      publicPath: '/about-us',
     });
     expect(html.startsWith('<!DOCTYPE html>')).toBe(true);
     expect(html).toContain('<html lang="en">');
@@ -33,14 +34,22 @@ describe('renderDefaultDocument', () => {
   });
 
   it('places the head markup inside <head> and the body inside <body>', () => {
-    const html = renderDefaultDocument({ head: HEAD, body: '<p>hi</p>' });
+    const html = renderDefaultDocument({
+      head: HEAD,
+      body: '<p>hi</p>',
+      publicPath: '/about-us',
+    });
     expect(html.indexOf('<head>')).toBeLessThan(html.indexOf('<title>'));
     expect(html.indexOf('<title>')).toBeLessThan(html.indexOf('</head>'));
     expect(html.indexOf('</head>')).toBeLessThan(html.indexOf('<body>'));
   });
 
   it('adds no script element: zero client JS by default', () => {
-    const html = renderDefaultDocument({ head: HEAD, body: '<main>x</main>' });
+    const html = renderDefaultDocument({
+      head: HEAD,
+      body: '<main>x</main>',
+      publicPath: '/about-us',
+    });
     expect(html).not.toContain('<script');
   });
 
@@ -48,6 +57,7 @@ describe('renderDefaultDocument', () => {
     const html = renderDefaultDocument({
       head: { ...HEAD, lang: 'en" onload="alert(1)' },
       body: '',
+      publicPath: '/about-us',
     });
     expect(html).toContain('<html lang="en&quot; onload=&quot;alert(1)">');
     expect(html).not.toContain('<html lang="en" onload');
@@ -57,6 +67,7 @@ describe('renderDefaultDocument', () => {
     const html = renderDefaultDocument({
       head: { ...HEAD, title: '</title><script>alert(1)</script>' },
       body: '',
+      publicPath: '/about-us',
     });
     expect(html).not.toContain('<script');
   });

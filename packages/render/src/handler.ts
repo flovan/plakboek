@@ -384,9 +384,10 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
         resolveAssetUrl,
       });
       // The one script a visitor page carries is part of the cached bytes.
-      const html = renderDocument({
+      const html = await renderDocument({
         head: rendered.head,
         body: `${rendered.body}${renderToolbarBootstrap()}`,
+        publicPath: key,
       });
       const body = encoder.encode(html);
       const entry = {
