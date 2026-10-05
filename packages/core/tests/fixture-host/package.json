@@ -1,0 +1,8 @@
+{
+  "name": "plakboek-fixture-host",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "isbot": "^5"
+  }
+}

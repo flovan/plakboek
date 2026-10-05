@@ -3,6 +3,9 @@ minimumReleaseAge: 1440
 trustPolicy: no-downgrade
 strictDepBuilds: true
 dangerouslyAllowAllBuilds: false
+# Reviewed: esbuild's postinstall only verifies a native binary; tsx works without it (reviewed in the host dependency approval).
+allowBuilds:
+  esbuild: false
 blockExoticSubdeps: true
 verifyStoreIntegrity: true
 strictStorePkgContentCheck: true
@@ -10,6 +13,7 @@ verifyDepsBeforeRun: error
 # Reviewed benign trust downgrades (publish-method changes, not takeovers).
 trustPolicyExclude:
   - 'undici-types@6.21.0' # provenance -> none; @types/node's pinned transitive dep, published 2023 (pre-provenance rollout), repo is nodejs/undici
+  - 'semver@6.3.1' # provenance -> none; transitive of @react-router/dev, published 2022 (pre-provenance rollout), repo is npm/node-semver
 
 packages:
   - packages/*
@@ -34,9 +38,17 @@ catalog:
   nodemailer: ^10.0.9
   html-to-text: ^10.0.1
   '@types/html-to-text': ^9.0.4
-  react: ^19.2.0
-  react-dom: ^19.2.0
+  react: ^19.2.7
+  react-dom: ^19.2.7
   '@types/react': ^19.2.0
   '@types/react-dom': ^19.2.0
   zod: ^4.6.5
   es-module-lexer: ^2.3.2
+  react-router: ^8.4.0
+  '@react-router/dev': ^8.4.0
+  '@react-router/node': ^8.4.0
+  isbot: ^5.1.0
+  vite: ^8.3.0
+  hono: ^4.13.0
+  '@hono/node-server': ^2.1.0
+  tsx: ^4.23.0

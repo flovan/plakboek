@@ -1,6 +1,12 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "ignorePatterns": ["**/dist/**", "**/node_modules/**", ".planning/**"],
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    ".planning/**",
+    "packages/core/tests/fixture-host/build*/**",
+    "packages/core/tests/fixture-host/.react-router/**"
+  ],
   "plugins": ["typescript", "unicorn", "vitest"],
   "env": {
     "builtin": true

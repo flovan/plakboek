@@ -4,3 +4,5 @@ dist/
 .env
 coverage/
 .release-bootstrap/
+packages/core/tests/fixture-host/build*/
+packages/core/tests/fixture-host/.react-router/
