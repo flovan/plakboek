@@ -13,6 +13,33 @@ import {
 } from '@plakboek/pages';
 import type { PlakboekConfig, PlakboekConfigInput } from './types.js';
 
+export type PlakboekConfigIssueCode =
+  | 'INVALID_SITE_NAME'
+  | 'INVALID_MENU'
+  | 'INVALID_MENU_ITEM'
+  | 'INVALID_MODULE'
+  | 'DUPLICATE_MODULE'
+  | 'INVALID_SEED'
+  | 'UNKNOWN_SEED_BLOCK'
+  | 'SEED_ROOT_NOT_SECTION';
+
+export type PlakboekConfigIssue = {
+  readonly code: PlakboekConfigIssueCode;
+  readonly message: string;
+};
+
+export class PlakboekConfigError extends Error {
+  readonly issues: readonly PlakboekConfigIssue[];
+
+  constructor(issues: readonly PlakboekConfigIssue[]) {
+    super('[@plakboek/core] invalid config:');
+    this.name = 'PlakboekConfigError';
+    this.issues = issues;
+  }
+}
+
+export { defaultRoles };
+
 export function defineConfig(input: PlakboekConfigInput): PlakboekConfig {
   const content = defineContentConfig({
     locales: input.locales,
