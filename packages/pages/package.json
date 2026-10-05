@@ -1,6 +1,6 @@
 {
   "name": "@plakboek/pages",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Headless pages, block trees, block registry and publish snapshots for Plakboek CMS installations",
   "homepage": "https://github.com/flovan/plakboek/tree/main/packages/pages#readme",
   "bugs": {
