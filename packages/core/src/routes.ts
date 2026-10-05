@@ -2,6 +2,20 @@
  * The CMS's route table. A host spreads `cmsRoutes()` into its own
  * `app/routes.ts`; every `file` is an absolute path to a built route module
  * inside this package.
+ *
+ * Precedence: React Router matches by specificity and, between equally
+ * specific routes, the earlier entry wins. The visitor splat does not match
+ * `/`, so the visitor route also has an index entry. A host therefore writes
+ *
+ *   export default [...hostRoutes, ...cmsRoutes()] satisfies RouteConfig;
+ *
+ * with its own routes first: they win every tie, including a host index route
+ * at `/`, and every path the host does not claim falls through to the CMS.
+ *
+ * Reserved paths: `/cms/*` (health now, the editor and setup later) and
+ * `/api/auth/*` belong to the CMS. A page whose first slug segment is `cms`
+ * or `api` is shadowed by them and unreachable; reserved-slug enforcement is
+ * carried to Phase 7.
  */
 import { fileURLToPath } from 'node:url';
 import { index, route, type RouteConfigEntry } from '@react-router/dev/routes';
@@ -13,7 +27,9 @@ function file(name: string): string {
 
 export function cmsRoutes(): RouteConfigEntry[] {
   return [
-    // A splat does not match "/", so the visitor route needs both entries.
+    route('cms/health', file('health'), { id: 'plakboek-health' }),
+    // The visitor entries stay last: a splat does not match "/", so the
+    // visitor route needs both an index and a splat entry.
     index(file('visitor'), { id: 'plakboek-visitor-index' }),
     route('*', file('visitor'), { id: 'plakboek-visitor' }),
   ];
