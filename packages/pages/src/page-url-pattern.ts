@@ -42,6 +42,7 @@ export type PageUrlPatternIssueCode =
   | 'LEADING_SLASH'
   | 'TRAILING_SLASH'
   | 'EMPTY_SEGMENT'
+  | 'INVALID_LITERAL'
   | 'PATTERN_TOO_LONG'
   | 'EMPTY_PATTERN';
 
@@ -76,6 +77,18 @@ export type ParsedPageUrlPattern = {
   readonly source: string;
   readonly parts: readonly PatternPart[];
 };
+
+/**
+ * What a literal of a page URL pattern may contain besides `/`. A stored
+ * address is literals plus a locale code plus slugs, and slugs and locale
+ * codes are already lowercase letters, digits and hyphens. Restricting the
+ * literals to the same alphabet makes every public page URL lowercase,
+ * slash-separated and free of percent-encoding, which is what lets the
+ * visitor handler lowercase, redirect and reject junk paths before touching
+ * the database without ever losing a real page. Legacy styles such as
+ * `{path}.html` are out of scope; redirects can map old URLs later.
+ */
+const LITERAL_FORBIDDEN_PATTERN = /[^a-z0-9-]/;
 
 function isPageUrlPatternToken(value: string): value is PageUrlPatternToken {
   return PAGE_URL_PATTERN_TOKENS.some((token) => token === value);
@@ -202,7 +215,8 @@ function scanPageUrlPatternParts(
  * page pattern never starts or ends with `/` and must always include
  * `{path}` (D-22: without it every page would share the same address).
  * `{path}` alone is valid for a single-locale installation that doesn't
- * need the locale segment.
+ * need the locale segment. Literal text is limited to lowercase letters,
+ * digits, hyphens and `/` (`INVALID_LITERAL`), see `LITERAL_FORBIDDEN_PATTERN`.
  */
 export function parsePageUrlPattern(pattern: string): ParsedPageUrlPattern {
   const issues: PageUrlPatternIssue[] = [];
@@ -235,6 +249,19 @@ export function parsePageUrlPattern(pattern: string): ParsedPageUrlPattern {
   }
 
   const { parts, tokens } = scanPageUrlPatternParts(pattern, issues);
+
+  for (const part of parts) {
+    if (
+      part.kind === 'literal' &&
+      LITERAL_FORBIDDEN_PATTERN.test(part.value.replaceAll('/', ''))
+    ) {
+      issues.push({
+        code: 'INVALID_LITERAL',
+        value: part.value,
+        message: `the literal "${part.value}" is not allowed: a page URL pattern literal may contain only lowercase letters, digits, hyphens and "/"`,
+      });
+    }
+  }
 
   if (!tokens.has('path')) {
     issues.push({

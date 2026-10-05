@@ -67,6 +67,7 @@ import {
   createUpcastSession,
   DEFAULT_BLOCK_DEPTH_CEILING,
   DEFAULT_PAGE_URL_PATTERN,
+  DEFAULT_HOME_SLUG,
   DEFAULT_SECTION_NESTING_DEPTH,
   DEGRADED_REASONS,
   DegradedBlockPublishError,
@@ -107,6 +108,8 @@ import {
   LocaleNotEnabledError,
   type LocalePurgeReport,
   LocaleStillEnabledError,
+  matchPublicPagePath,
+  type MatchPublicPagePathInput,
   moveBlock,
   type MoveBlockInput,
   movePage,
@@ -138,9 +141,13 @@ import {
   type PageSnapshot,
   type PageStatus,
   PageStatusError,
+  type PublicPagePathMatch,
+  type PublishedPageSeo,
+  type PublishedPageView,
   PageSlugConflictError,
   PageTranslationExistsError,
   type PageTrashImpact,
+  PageAddressUnreachableError,
   PageUrlCollisionError,
   type PageUrlPatternChangeImpact,
   type PageUrlPatternCollision,
@@ -181,6 +188,10 @@ import {
   type ResolvePageUrlPathInput,
   resolveBlockProperties,
   resolvePageUrlPath,
+  resolvePublishedPage,
+  type ResolvePublishedPageInput,
+  resolveVisitorPage,
+  type ResolveVisitorPageInput,
   restorePageFromTrash,
   restoreRevisionBatch,
   type RestoreBatchPreview,
@@ -214,6 +225,8 @@ import {
   StalePageVersionError,
   takeOverPageLock,
   type TakeOverPageLockInput,
+  toPublicPagePath,
+  type ToPublicPagePathInput,
   trashPage,
   type TrashPageInput,
   type UnpublishPageInput,
@@ -226,6 +239,7 @@ import {
   type UpcastOutcome,
   type UpcastSession,
   upcastOnRead,
+  type VisitorPageResolution,
 } from '@plakboek/pages';
 import * as pages from '@plakboek/pages';
 
@@ -269,6 +283,7 @@ const functions: Record<string, unknown> = {
   listChildPages,
   listPageRevisionBatches,
   listPageTranslations,
+  matchPublicPagePath,
   moveBlock,
   movePage,
   needsRebalance,
@@ -288,6 +303,8 @@ const functions: Record<string, unknown> = {
   reportPagesWarning,
   resolveBlockProperties,
   resolvePageUrlPath,
+  resolvePublishedPage,
+  resolveVisitorPage,
   restorePageFromTrash,
   restoreRevisionBatch,
   schedulePage,
@@ -295,6 +312,7 @@ const functions: Record<string, unknown> = {
   setPageUrlPattern,
   sortOrderBetween,
   takeOverPageLock,
+  toPublicPagePath,
   trashPage,
   unpublishPage,
   unschedulePage,
@@ -333,6 +351,7 @@ const errorClasses: Record<string, unknown> = {
   PagesConfigError,
   PageStatusError,
   PageTranslationExistsError,
+  PageAddressUnreachableError,
   PageUrlCollisionError,
   PageUrlPatternCollisionError,
   PageUrlPatternError,
@@ -362,6 +381,7 @@ const regexPatterns: Record<string, unknown> = {
 };
 
 const strings: Record<string, unknown> = {
+  DEFAULT_HOME_SLUG,
   DEFAULT_PAGE_URL_PATTERN,
   ROOT_PARENT_SENTINEL,
 };
@@ -543,6 +563,29 @@ if (resolvedPath !== 'en/about') {
   fail(
     'parsePageUrlPattern/resolvePageUrlPath did not render the expected path',
   );
+}
+
+const publicMatch: PublicPagePathMatch = matchPublicPagePath(
+  '{locale}/{path}',
+  {
+    publicPath: '/nl/x',
+    locales: ['en', 'nl'],
+    defaultLocale: 'en',
+    homeSlug: DEFAULT_HOME_SLUG,
+  },
+);
+if (publicMatch.kind !== 'match' || publicMatch.locale !== 'nl') {
+  fail('matchPublicPagePath did not match /nl/x to the nl locale');
+}
+if (
+  toPublicPagePath('{locale}/{path}', {
+    locale: 'nl',
+    path: 'x',
+    defaultLocale: 'en',
+    homeSlug: DEFAULT_HOME_SLUG,
+  }) !== '/nl/x'
+) {
+  fail('toPublicPagePath did not invert the matched address');
 }
 
 const lockedAt = new Date(0);
@@ -1027,6 +1070,53 @@ const releasePageLockInput: ReleasePageLockInput = { pageId: 'page-id' };
 const renewPageLockInput: RenewPageLockInput = { pageId: 'page-id' };
 const takeOverPageLockInput: TakeOverPageLockInput = { pageId: 'page-id' };
 
+const matchPublicPagePathInput: MatchPublicPagePathInput = {
+  publicPath: '/',
+  locales: ['en'],
+  defaultLocale: 'en',
+  homeSlug: DEFAULT_HOME_SLUG,
+};
+const toPublicPagePathInput: ToPublicPagePathInput = {
+  locale: 'en',
+  path: 'home',
+  defaultLocale: 'en',
+  homeSlug: DEFAULT_HOME_SLUG,
+};
+const publishedPageSeo: PublishedPageSeo = {
+  title: null,
+  description: null,
+  imageAssetId: null,
+  canonicalUrl: null,
+  noindex: false,
+  nofollow: false,
+};
+const publishedPageView: PublishedPageView = {
+  page: {
+    id: 'page-id',
+    locale: 'en',
+    title: 'Home',
+    resolvedPath: 'en/home',
+    seo: publishedPageSeo,
+  },
+  publication: {
+    id: 'publication-id',
+    manifestHash: 'hash',
+    publishedAt: new Date(0),
+    snapshot: pageSnapshot,
+  },
+};
+const resolvePublishedPageInput: ResolvePublishedPageInput = {
+  locale: 'en',
+  resolvedPath: 'en/home',
+};
+const resolveVisitorPageInput: ResolveVisitorPageInput =
+  matchPublicPagePathInput;
+const visitorPageResolution: VisitorPageResolution = {
+  kind: 'page',
+  publicPath: '/',
+  view: publishedPageView,
+};
+
 // PagesDeps needs live db/recorder/resolver handles this probe never opens
 // -- proven only as a parameter type of a never-called function, the same
 // technique plan 03-14 used for @plakboek/content's `ContentDeps`.
@@ -1131,6 +1221,14 @@ const typeProofs: unknown[] = [
   releasePageLockInput,
   renewPageLockInput,
   takeOverPageLockInput,
+  matchPublicPagePathInput,
+  toPublicPagePathInput,
+  publishedPageSeo,
+  publishedPageView,
+  resolvePublishedPageInput,
+  resolveVisitorPageInput,
+  visitorPageResolution,
+  publicMatch,
   config,
 ];
 

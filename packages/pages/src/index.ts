@@ -39,6 +39,10 @@
  *   `constraints.ts`) -- reachable only through `resolveBlockProperties` and
  *   the write paths; a caller validating props outside a real write could
  *   diverge from what the write path actually persists.
+ * - The after-commit purge registration helpers (`purge.ts`) -- the single
+ *   place every write path registers its cache purge; a caller reaching
+ *   them could purge (or skip purging) for a write this package did not
+ *   perform, out of step with the commit it follows.
  * - Every Drizzle schema table -- a consumer able to read or write these
  *   directly could bypass every guarantee above.
  *
@@ -55,7 +59,9 @@
  * `buildPageSnapshot`, `computeManifestHash`, `publish.ts`) -- a host reads
  * the finished record through `publishPage`/`createDraftSnapshot`/
  * `readPublishedSnapshot`/`readLatestDraftSnapshot`, never assembles one
- * itself; the revision-batch id minter (`newRevisionBatchId`, `revisions.ts`)
+ * itself; the stored-snapshot narrowing cast (`asPageSnapshot`, `publish.ts`),
+ * internal wiring `visitor.ts` shares with the publication mapper; the
+ * revision-batch id minter (`newRevisionBatchId`, `revisions.ts`)
  * and the row-to-record mapper (`toPageRecord`, `pages.ts`), both internal
  * wiring with no reason for a caller to invoke directly; and the two
  * unique-violation-to-domain-error mappers (`pageSlugConflictFromUniqueViolation`,
@@ -253,6 +259,7 @@ export type {
 export {
   computePageResolvedPath,
   computeUrlPatternChangeImpact,
+  PageAddressUnreachableError,
   PageUrlCollisionError,
   PageUrlPatternCollisionError,
   setPageUrlPattern,
@@ -422,3 +429,22 @@ export type {
   RenewPageLockInput,
   TakeOverPageLockInput,
 } from './locks.js';
+
+// visitor.ts
+export {
+  DEFAULT_HOME_SLUG,
+  matchPublicPagePath,
+  resolvePublishedPage,
+  resolveVisitorPage,
+  toPublicPagePath,
+} from './visitor.js';
+export type {
+  MatchPublicPagePathInput,
+  PublicPagePathMatch,
+  PublishedPageSeo,
+  PublishedPageView,
+  ResolvePublishedPageInput,
+  ResolveVisitorPageInput,
+  ToPublicPagePathInput,
+  VisitorPageResolution,
+} from './visitor.js';

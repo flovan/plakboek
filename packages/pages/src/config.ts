@@ -22,6 +22,7 @@
  * the one this function returns as `PagesConfig.blocks`.
  */
 import type { AuditDatabase, AuditRecorder } from '@plakboek/auth';
+import type { CacheInvalidator } from '@plakboek/cache';
 import {
   registerHostWidget,
   registerHostFieldType,
@@ -234,13 +235,18 @@ export type PagesHooks = {
 
 /** Every engine operation's dependency bag: the database handle, the
  * audited-mutation recorder, the permission resolver, the validated pages
- * config, optional warning hooks, and an injectable clock (defaults to
- * `() => new Date()`). */
+ * config, optional warning hooks, an optional cache invalidator, and an
+ * injectable clock (defaults to `() => new Date()`). */
 export type PagesDeps = {
   readonly db: AuditDatabase;
   readonly recorder: AuditRecorder;
   readonly resolver: PermissionResolver;
   readonly config: PagesConfig;
   readonly hooks?: PagesHooks;
+  /** Optional. When set, every write path that changes what a visitor can
+   * see purges the affected tags after its transaction commits (D-18,
+   * D-19). A host passes the same cache object it gives the visitor
+   * handler, or a `composeInvalidators` of several layers. */
+  readonly invalidator?: CacheInvalidator;
   readonly now?: () => Date;
 };

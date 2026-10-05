@@ -18,12 +18,14 @@ import type {
   AuditDatabase,
   AuditTransaction,
 } from '@plakboek/auth';
+import { normalizeEntrySeo } from '@plakboek/content';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PagesDeps, PagesHooks } from './config.js';
 import { assertPageWritable } from './locks.js';
 import { getPage, loadPageForUpdate, PageNotFoundError } from './pages.js';
 import {
   assertPageAddressAvailable,
+  assertPageAddressReachable,
   computePageResolvedPath,
   pageUrlCollisionFromUniqueViolation,
 } from './page-routing.js';
@@ -33,6 +35,7 @@ import {
   resolveBlockProperties,
   validateBlockProps,
 } from './registry.js';
+import { registerPagePurge } from './purge.js';
 import { newRevisionBatchId, recordBlockRevision } from './revisions.js';
 import { pagePublications, pages } from './schema.js';
 import { getPageEditLocking, getPageUrlPattern } from './settings.js';
@@ -55,7 +58,64 @@ export type SnapshotBlock = {
   readonly children: readonly SnapshotBlock[];
 };
 
-export type PageSnapshot = { readonly blocks: readonly SnapshotBlock[] };
+/** The head-relevant subset of a page's SEO set, as frozen into a published
+ * snapshot (D-13). Structurally assignable to `@plakboek/render`'s
+ * `PageSeoInput`. `sitemapInclude` is a sitemap concern, not a head one. */
+export type PublishedPageSeo = {
+  readonly title: string | null;
+  readonly description: string | null;
+  readonly imageAssetId: string | null;
+  readonly canonicalUrl: string | null;
+  readonly noindex: boolean;
+  readonly nofollow: boolean;
+};
+
+/**
+ * What a publication freezes: the block tree plus the page's `title` and head
+ * SEO set as they were when it was published, so a retitle or an SEO edit only
+ * reaches visitors through a publish, exactly like a block edit.
+ *
+ * `title` and `seo` are optional only because a snapshot written before they
+ * were materialised carries neither; `readSnapshotPageMeta` is the one reader
+ * and decides what such a snapshot serves. Every snapshot written now has both.
+ */
+export type PageSnapshot = {
+  readonly blocks: readonly SnapshotBlock[];
+  readonly title?: string;
+  readonly seo?: PublishedPageSeo;
+};
+
+/** Picks the head fields out of a stored SEO value; never throws. */
+function toPublishedPageSeo(value: unknown): PublishedPageSeo {
+  const seo = normalizeEntrySeo(value);
+  return {
+    title: seo.title,
+    description: seo.description,
+    imageAssetId: seo.imageAssetId,
+    canonicalUrl: seo.canonicalUrl,
+    noindex: seo.noindex,
+    nofollow: seo.nofollow,
+  };
+}
+
+/**
+ * The title and head SEO set a published snapshot carries. A snapshot
+ * published before these were materialised (no `title`, no `seo`) serves an
+ * empty title and the default SEO set (indexable, no overrides) until the page
+ * is republished: reading the live `pages` row instead would put working data
+ * back on the visitor path. The default SEO set is also what such a page
+ * served before, because no writer for a page's SEO exists yet; only the
+ * title is lost, and republishing restores it.
+ */
+export function readSnapshotPageMeta(snapshot: PageSnapshot): {
+  readonly title: string;
+  readonly seo: PublishedPageSeo;
+} {
+  return {
+    title: typeof snapshot.title === 'string' ? snapshot.title : '',
+    seo: toPublishedPageSeo(snapshot.seo),
+  };
+}
 
 /**
  * Materialises the nested shape the renderer consumes, built in memory in
@@ -217,7 +277,7 @@ export class DegradedBlockPublishError extends Error {
   }
 }
 
-function asPageSnapshot(value: Record<string, unknown>): PageSnapshot {
+export function asPageSnapshot(value: Record<string, unknown>): PageSnapshot {
   return value as unknown as PageSnapshot;
 }
 
@@ -281,7 +341,8 @@ type MaterialisePublicationResult = {
  * materialises the page's address (D-22): reads the project-wide pattern
  * (`getPageUrlPattern`), computes `resolved_path` from this page's own
  * `locale`/`path` (`computePageResolvedPath`), and checks it is free
- * (`assertPageAddressAvailable`) before writing it -- a 23505 on
+ * (`assertPageAddressAvailable`) and that its public path leads back to the
+ * page (`assertPageAddressReachable`) before writing it -- a 23505 on
  * `pages_locale_resolved_path_unique` from a concurrent publish racing
  * past that check is mapped through `pageUrlCollisionFromUniqueViolation`
  * into the same domain error, never a bare driver error. It then moves the
@@ -296,7 +357,11 @@ async function materialisePublication(
   actor: AuditActor,
   now: () => Date,
   hooks: PagesHooks | undefined,
-  options: { readonly isDraft: boolean },
+  options: {
+    readonly isDraft: boolean;
+    /** The locale set the page's public path is checked against. */
+    readonly content: { locales: readonly string[]; defaultLocale: string };
+  },
 ): Promise<MaterialisePublicationResult> {
   // The one guard call this whole module needs: covers `publishPage` (a
   // real edit, version-checked by its own caller before this helper ever
@@ -358,7 +423,11 @@ async function materialisePublication(
       pageId: page.id,
       locale: page.locale,
       isDraft: options.isDraft,
-      snapshot: buildResult.snapshot,
+      snapshot: {
+        ...buildResult.snapshot,
+        title: page.title,
+        seo: toPublishedPageSeo(page.seo),
+      },
       revisionManifest: manifest,
       manifestHash,
       publishedBy: actor.userId,
@@ -380,6 +449,13 @@ async function materialisePublication(
       locale: page.locale,
       resolvedPath,
       excludePageId: page.id,
+    });
+    assertPageAddressReachable({
+      pattern,
+      locale: page.locale,
+      path: page.path,
+      locales: options.content.locales,
+      defaultLocale: options.content.defaultLocale,
     });
 
     try {
@@ -436,7 +512,7 @@ export async function publishPage(
       entityType: 'page',
       entityId: input.pageId,
     },
-    async (tx) => {
+    async (tx, context) => {
       const page = await loadPageForUpdate(tx, input.pageId);
       if (page.version !== input.baseVersion) {
         throw new StalePageVersionError(
@@ -452,8 +528,11 @@ export async function publishPage(
         actor,
         now,
         deps.hooks,
-        { isDraft: false },
+        { isDraft: false, content: deps.config.content },
       );
+
+      // Purges after this transaction commits (D-18, purge.ts).
+      registerPagePurge(deps, context, [page.id]);
 
       return {
         result: record,
@@ -495,6 +574,7 @@ export async function createDraftSnapshot(
       entityId: input.pageId,
     },
     async (tx) => {
+      // A draft snapshot is never visitor-reachable, so it purges nothing.
       const page = await getPage(tx, input.pageId);
       if (page === null) {
         throw new PageNotFoundError(input.pageId);
@@ -506,7 +586,7 @@ export async function createDraftSnapshot(
         actor,
         now,
         deps.hooks,
-        { isDraft: true },
+        { isDraft: true, content: deps.config.content },
       );
 
       return {

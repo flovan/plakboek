@@ -45,6 +45,7 @@ import {
   toPageRecord,
   StalePageVersionError,
 } from './pages.js';
+import { registerPagePurge } from './purge.js';
 import {
   blockRevisions,
   pageBlocks,
@@ -242,7 +243,7 @@ export async function unpublishPage(
       entityId: input.pageId,
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
-    async (tx) => {
+    async (tx, context) => {
       const current = await loadPageForUpdate(tx, input.pageId);
       if (current.version !== input.baseVersion) {
         throw new StalePageVersionError(
@@ -296,6 +297,7 @@ export async function unpublishPage(
         );
       }
       const record = toPageRecord(row);
+      registerPagePurge(deps, context, [current.id]);
       return { result: record, after: lifecycleSnapshot(record) };
     },
   );
@@ -546,7 +548,7 @@ export async function trashPage(
       entityId: input.pageId,
       before: impactCounts,
     },
-    async (tx) => {
+    async (tx, context) => {
       const current = await loadPageForUpdate(tx, input.pageId);
       if (current.version !== input.baseVersion) {
         throw new StalePageVersionError(
@@ -625,6 +627,14 @@ export async function trashPage(
         })
         .where(inArray(pages.id, ids));
 
+      // The whole locked subtree: a descendant trashed earlier already lost
+      // its address, so purging it again is a harmless extra.
+      registerPagePurge(
+        deps,
+        context,
+        subtree.map((row) => row.id),
+      );
+
       const record = await loadPageRow(tx, input.pageId);
       return {
         result: record,
@@ -670,7 +680,7 @@ export async function restorePageFromTrash(
       entityId: input.pageId,
       ...(before === null ? {} : { before: lifecycleSnapshot(before) }),
     },
-    async (tx) => {
+    async (tx, context) => {
       const current = await loadPageForUpdate(tx, input.pageId);
       if (current.version !== input.baseVersion) {
         throw new StalePageVersionError(
@@ -754,6 +764,9 @@ export async function restorePageFromTrash(
           updatedBy: actor.userId,
         })
         .where(inArray(pages.id, ids));
+
+      // Defensive: a restored page returns to draft and nothing served it.
+      registerPagePurge(deps, context, ids);
 
       const record = await loadPageRow(tx, input.pageId);
       return {
@@ -882,7 +895,7 @@ export async function deletePagePermanently(
       entityId: input.pageId,
       before: impactCounts,
     },
-    async (tx) => {
+    async (tx, context) => {
       const current = await loadPageForUpdate(tx, input.pageId);
       if (current.version !== input.baseVersion) {
         throw new StalePageVersionError(
@@ -957,6 +970,8 @@ export async function deletePagePermanently(
       for (const row of deepestFirst) {
         await tx.delete(pages).where(eq(pages.id, row.id));
       }
+
+      registerPagePurge(deps, context, ids);
 
       return { result: impact, after: impact };
     },
