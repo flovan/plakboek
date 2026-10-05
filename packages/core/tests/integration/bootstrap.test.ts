@@ -71,7 +71,8 @@ describe('bootstrapInstallation', () => {
     expect(result.homePublished).toBe(true);
     expect(result.homePath).toBe('/');
 
-    const users = await runtime.db.sql`SELECT id, role, name FROM "user"`;
+    const users = await runtime.db
+      .sql`SELECT id, role_key AS role, name FROM "user"`;
     expect(users).toHaveLength(1);
     expect(users[0]).toMatchObject({
       id: result.userId,
@@ -159,9 +160,9 @@ describe('bootstrapInstallation', () => {
 
       expect(await count(runtime, '"user"')).toBe(1);
       expect(await count(runtime, 'pages')).toBe(1);
-      const roles = await runtime.db.sql`SELECT role FROM "user"`;
+      const roles = await runtime.db.sql`SELECT role_key AS role FROM "user"`;
       expect(roles.map((row) => row.role)).toEqual(['superadmin']);
-      expect(await count(runtime, `"user" WHERE role = 'editor'`)).toBe(0);
+      expect(await count(runtime, `"user" WHERE role_key = 'editor'`)).toBe(0);
     },
   );
 
