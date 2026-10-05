@@ -17,10 +17,17 @@ function fail<T>(message: string): Result<T> {
   return { ok: false, message };
 }
 
-/** A directory is usable when it does not exist or is an empty directory. */
-export function validateDirectory(dir: string): Result<string> {
+/**
+ * A directory is usable when it does not exist or is an empty directory.
+ * `label` is how the directory is named in the message (what the developer
+ * typed), while `dir` is the path that is checked on disk.
+ */
+export function validateDirectory(
+  dir: string,
+  label: string = dir,
+): Result<string> {
   const refusal = fail<string>(
-    `"${dir}" is not empty. Choose another directory or empty this one.`,
+    `"${label}" is not empty. Choose another directory or empty this one.`,
   );
   if (!existsSync(dir)) return { ok: true, value: dir };
   try {
