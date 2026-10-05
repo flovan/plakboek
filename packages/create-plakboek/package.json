@@ -1,0 +1,42 @@
+{
+  "name": "create-plakboek",
+  "version": "0.0.0",
+  "description": "Scaffold a Plakboek host project with npx create-plakboek",
+  "homepage": "https://github.com/flovan/plakboek/tree/main/packages/create-plakboek#readme",
+  "bugs": {
+    "url": "https://github.com/flovan/plakboek/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flovan/plakboek.git",
+    "directory": "packages/create-plakboek"
+  },
+  "bin": {
+    "create-plakboek": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "publint --strict"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "publint": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.22"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "__PACKAGE_NAME__",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@plakboek/core": "__PLAKBOEK_VERSION__",
+    "@plakboek/render": "__PLAKBOEK_VERSION__"
+  }
+}
