@@ -6,6 +6,7 @@ import {
   readFile,
   realpath,
   rm,
+  stat,
   writeFile,
 } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -43,6 +44,18 @@ type Harness = {
 
 let harness: Harness;
 
+// A server's .env as the deploy sees it: compose's `env_file: .env` makes the
+// file mandatory, and a previous deploy left an image line in the middle.
+const SERVER_ENV = [
+  'POSTGRES_USER=plakboek',
+  'POSTGRES_PASSWORD=s3cr3t with spaces',
+  'PLAKBOEK_IMAGE=ghcr.io/acme/site:old',
+  'DATABASE_URL=postgres://plakboek:s3cr3t@postgres:5432/plakboek',
+  'SITE_ADDRESS=example.com',
+  '',
+].join('\n');
+const NEW_IMAGE = 'ghcr.io/acme/site:abc123';
+
 beforeEach(async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'deploy-script-')));
   const bin = join(root, 'bin');
@@ -56,6 +69,8 @@ beforeEach(async () => {
   const sshLog = join(root, 'ssh.log');
   const dockerLog = join(root, 'docker.log');
   const loginStdin = join(root, 'login.stdin');
+  await writeFile(join(deployDir, '.env'), SERVER_ENV);
+  await chmod(join(deployDir, '.env'), 0o644);
   harness = {
     root,
     deployDir,
@@ -69,7 +84,7 @@ beforeEach(async () => {
       DEPLOY_PORT: '22',
       DEPLOY_USER: 'deploy',
       DEPLOY_PATH: deployDir,
-      PLAKBOEK_IMAGE: 'ghcr.io/acme/site:abc123',
+      PLAKBOEK_IMAGE: NEW_IMAGE,
       SSH_KEY_FILE: join(root, 'key'),
       KNOWN_HOSTS_FILE: join(root, 'known_hosts'),
       FAKE_SSH_LOG: sshLog,
@@ -197,5 +212,65 @@ describe('deploy script, ordering', () => {
     const result = deploy({ FAKE_DOCKER_FAIL_ON: 'run --rm migrate' });
     expect(result.code).not.toBe(0);
     expect(await lines(harness.dockerLog)).toEqual(COMPOSE_STEPS.slice(0, 3));
+  });
+
+  it('leaves the server .env untouched and writes no temporary file when the migration fails', async () => {
+    const envPath = join(harness.deployDir, '.env');
+    const result = deploy({ FAKE_DOCKER_FAIL_ON: 'run --rm migrate' });
+    expect(result.code).not.toBe(0);
+    expect(await readFile(envPath, 'utf8')).toBe(SERVER_ENV);
+    expect((await stat(envPath)).mode & 0o777).toBe(0o644);
+    expect(await lines(harness.dockerLog)).not.toContain(
+      'compose -f compose.yaml up -d --wait app caddy',
+    );
+    expect(existsSync(join(harness.deployDir, '.env.next'))).toBe(false);
+  });
+
+  it('leaves the server .env untouched when the app fails to start', async () => {
+    const envPath = join(harness.deployDir, '.env');
+    const result = deploy({ FAKE_DOCKER_FAIL_ON: 'up -d --wait app caddy' });
+    expect(result.code).not.toBe(0);
+    expect(await readFile(envPath, 'utf8')).toBe(SERVER_ENV);
+    expect(existsSync(join(harness.deployDir, '.env.next'))).toBe(false);
+  });
+});
+
+describe('deploy script, recording the deployed image', () => {
+  it('keeps exactly one image line, at the end, and every other line as it was', async () => {
+    const envPath = join(harness.deployDir, '.env');
+    const result = deploy();
+    expect(result.code).toBe(0);
+
+    const after = await readFile(envPath, 'utf8');
+    const kept = SERVER_ENV.split('\n')
+      .filter((line) => !line.startsWith('PLAKBOEK_IMAGE='))
+      .join('\n');
+    expect(after).toBe(`${kept}PLAKBOEK_IMAGE=${NEW_IMAGE}\n`);
+    expect(after.match(/^PLAKBOEK_IMAGE=/gm)).toHaveLength(1);
+    expect((await stat(envPath)).mode & 0o777).toBe(0o600);
+    expect(existsSync(join(harness.deployDir, '.env.next'))).toBe(false);
+  });
+
+  it('puts the record on its own line after a last line without a newline', async () => {
+    const envPath = join(harness.deployDir, '.env');
+    await writeFile(
+      envPath,
+      'POSTGRES_USER=plakboek\nSITE_ADDRESS=example.com',
+    );
+    const result = deploy();
+    expect(result.code).toBe(0);
+    expect(await readFile(envPath, 'utf8')).toBe(
+      `POSTGRES_USER=plakboek\nSITE_ADDRESS=example.com\nPLAKBOEK_IMAGE=${NEW_IMAGE}\n`,
+    );
+  });
+
+  it('replaces the record again on the next deploy', async () => {
+    const envPath = join(harness.deployDir, '.env');
+    expect(deploy().code).toBe(0);
+    expect(deploy({ PLAKBOEK_IMAGE: 'ghcr.io/acme/site:next' }).code).toBe(0);
+    const after = await readFile(envPath, 'utf8');
+    expect(after.match(/^PLAKBOEK_IMAGE=.*$/gm)).toEqual([
+      'PLAKBOEK_IMAGE=ghcr.io/acme/site:next',
+    ]);
   });
 });

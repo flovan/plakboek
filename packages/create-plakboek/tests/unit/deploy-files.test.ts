@@ -468,6 +468,27 @@ describe('deploy script', () => {
     }
   });
 
+  it('records the image in .env only after the app and proxy are up, chained', async () => {
+    const lines = (await read('scripts/deploy.sh')).split('\n');
+    const steps = [
+      'docker compose -f compose.yaml up -d --wait app caddy',
+      'umask 077',
+      'rm -f .env.next',
+      'PLAKBOEK_IMAGE=',
+      'printf',
+      'mv -f .env.next .env',
+    ];
+    let previous = -1;
+    for (const step of steps) {
+      const position = lines.findIndex(
+        (line, index) => index > previous && line.includes(step),
+      );
+      expect(position, step).toBeGreaterThan(previous);
+      expect(lines[position]?.trim().startsWith('&&'), step).toBe(true);
+      previous = position;
+    }
+  });
+
   it('never runs a compose command without the production file', async () => {
     const text = await read('scripts/deploy.sh');
     for (const match of text.matchAll(/docker compose (\S+)/g)) {
