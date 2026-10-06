@@ -54,7 +54,9 @@ export function buildFixtureHost(
     {
       cwd: FIXTURE_DIR,
       encoding: 'utf8',
-      env: { ...process.env, CI: '1', ...variant },
+      // Vite derives `import.meta.env.DEV` from NODE_ENV, and vitest sets it to
+      // "test": a production build needs it to be "production".
+      env: { ...process.env, CI: '1', NODE_ENV: 'production', ...variant },
     },
   );
   if (result.status !== 0) {
