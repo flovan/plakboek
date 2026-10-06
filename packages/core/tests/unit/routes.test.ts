@@ -10,11 +10,15 @@ describe('cmsRoutes', () => {
     expect(routes.map((entry) => entry.id)).toEqual([
       'plakboek-health',
       'plakboek-setup',
+      'plakboek-setup-test-email',
+      'plakboek-auth',
       'plakboek-visitor-index',
       'plakboek-visitor',
     ]);
     expect(routes[0]?.path).toBe('cms/health');
     expect(routes[1]?.path).toBe('cms/setup');
+    expect(routes[2]?.path).toBe('cms/setup/test-email');
+    expect(routes[3]?.path).toBe('api/auth/*');
   });
 
   it('returns an index entry and a splat entry with distinct explicit ids', () => {
