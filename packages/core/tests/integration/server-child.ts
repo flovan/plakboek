@@ -23,7 +23,7 @@ function openPools(): number {
 }
 
 process.on('exit', () => {
-  console.log(`exit pools=${String(openPools())}`);
+  process.stdout.write(`exit pools=${String(openPools())}\n`);
 });
 
 const server = await createServer({
@@ -34,4 +34,6 @@ const server = await createServer({
 
 // Make sure there is a pool for the shutdown handler to close.
 getDb(process.env.DATABASE_URL ?? '');
-console.log(`ready pools=${String(openPools())} port=${String(server.port)}`);
+process.stdout.write(
+  `ready pools=${String(openPools())} port=${String(server.port)}\n`,
+);
