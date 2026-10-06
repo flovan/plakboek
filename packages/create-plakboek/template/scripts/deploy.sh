@@ -14,6 +14,15 @@
 # On the server, in this order and stopping at the first failure: pull the
 # image, start Postgres, run the one-off migration, then recreate the app and
 # the proxy. A failed migration therefore leaves the running app untouched.
+#
+# After a successful rollout the script records the image as the PLAKBOEK_IMAGE
+# line of the server's .env, the file compose reads for interpolation. Compose
+# commands run by hand in the deploy directory, for example the first-admin
+# command in DEPLOY.md, then use the image that is running. The record is the
+# last step of the chain, so a failed deploy keeps the previous line. Every
+# other line of .env is copied unchanged, the file stays readable by its owner
+# only, and the image pattern admits no quote, whitespace or newline, so the
+# value can neither break the quoting nor add a line to .env.
 set -euo pipefail
 
 : "${DEPLOY_HOST:?DEPLOY_HOST is required}"
@@ -78,6 +87,11 @@ remote "cd '$DEPLOY_PATH' \
   && docker compose -f compose.yaml pull app \
   && docker compose -f compose.yaml up -d --wait postgres \
   && docker compose -f compose.yaml run --rm migrate \
-  && docker compose -f compose.yaml up -d --wait app caddy" < /dev/null
+  && docker compose -f compose.yaml up -d --wait app caddy \
+  && umask 077 \
+  && rm -f .env.next \
+  && awk '!/^PLAKBOEK_IMAGE=/' .env > .env.next \
+  && printf 'PLAKBOEK_IMAGE=%s\n' '$PLAKBOEK_IMAGE' >> .env.next \
+  && mv -f .env.next .env" < /dev/null
 
 echo "==> Deployed $PLAKBOEK_IMAGE"

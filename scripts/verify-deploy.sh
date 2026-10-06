@@ -6,6 +6,14 @@
 #
 #   - two migrations started together both succeed and apply each migration once
 #   - the deploy brings the site up: the home page and /cms/health through Caddy
+#   - the first-run window is observed: /cms/setup answers 200 right after the
+#     first deploy and 404 once the documented bootstrap has run
+#   - the first-admin command in the scaffolded DEPLOY.md runs as written, over a
+#     fresh SSH session with nothing exported, and creates the superadmin
+#   - the server's environment file records the deployed image after a successful
+#     deploy and keeps the previous one after a failed deploy; every other line
+#     is untouched and the file stays mode 600; a plain compose command in a
+#     fresh session resolves the deployed image
 #   - a failed migration aborts the deploy and leaves the old app running
 #   - a deploy while requests arrive every 100 ms shows no error (no 502)
 #
@@ -87,10 +95,17 @@ box() {
     -o LogLevel=ERROR deploy@127.0.0.1 "$@"
 }
 
+# Compose with an exported image, for the steps before any deploy has recorded one.
 compose_on_box() {
   local image="$1"
   shift
   box "cd '$BOX_DIR' && export PLAKBOEK_IMAGE='$image' && docker compose -f compose.yaml $*"
+}
+
+# Compose in a fresh session with nothing exported, as an operator runs it: the
+# image comes from the file the deploy maintains.
+compose_fresh() {
+  box "cd '$BOX_DIR' && docker compose -f compose.yaml $*"
 }
 
 run_deploy() {
@@ -156,7 +171,7 @@ echo "==> (4) Preparing the box: deploy directory, compose file and .env"
 POSTGRES_PASSWORD="$(node -p "process.getBuiltinModule('node:crypto').randomBytes(18).toString('hex')")"
 PLAKBOEK_SECRET="$(node -p "process.getBuiltinModule('node:crypto').randomBytes(32).toString('base64url')")"
 box "mkdir -p '$BOX_DIR' && cat > '$BOX_DIR/compose.yaml'" < "$SCAFFOLD_SITE_DIR/compose.yaml"
-box "cat > '$BOX_DIR/.env' && chmod 600 '$BOX_DIR/.env'" << EOF
+cat > "$WORK_DIR/box.env" << EOF
 POSTGRES_USER=plakboek
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 POSTGRES_DB=plakboek
@@ -168,6 +183,7 @@ SITE_ADDRESS=:80
 CADDY_HTTP_PORT=$HTTP_PORT
 CADDY_HTTPS_PORT=$HTTPS_PORT
 EOF
+box "cat > '$BOX_DIR/.env' && chmod 600 '$BOX_DIR/.env'" < "$WORK_DIR/box.env"
 
 echo "==> (5) Two migrations at once apply each migration exactly once"
 compose_on_box "$IMAGE_1" "up -d --wait postgres" > /dev/null
@@ -195,16 +211,67 @@ echo "    $EXPECTED_ROWS migration(s), each applied once"
 
 echo "==> (6) deploy.sh deploys $IMAGE_1"
 run_deploy "$IMAGE_1" || fail "scripts/deploy.sh exited non-zero for a healthy release"
+SITE="http://127.0.0.1:$HTTP_PORT"
+# The first-run window (D-09, accepted): open from the end of the first deploy
+# until the first account exists.
+[ "$(http_code "$SITE/cms/setup")" = "200" ] \
+  || fail "$SITE/cms/setup is not 200 right after the first deploy"
+IMAGES_AFTER_FIRST="$(compose_fresh "config --images" | tr -d '\r')"
+printf '%s\n' "$IMAGES_AFTER_FIRST" | grep -qxF "$IMAGE_1" \
+  || fail "a fresh-session compose does not resolve $IMAGE_1 after the deploy: $IMAGES_AFTER_FIRST"
+if printf '%s\n' "$IMAGES_AFTER_FIRST" | grep -qxF "plakboek-app:local"; then
+  fail "a fresh-session compose still resolves the default image after the deploy"
+fi
 
-echo "==> (7) Bootstrap inside the image, then the site through Caddy"
+echo "==> (7) The first-admin command from DEPLOY.md, then the site through Caddy"
 PROOF_PASSWORD="$(node -p "process.getBuiltinModule('node:crypto').randomBytes(18).toString('base64url')")"
-BOOTSTRAP_OUTPUT="$(printf '%s' "$PROOF_PASSWORD" | compose_on_box "$IMAGE_1" "run --rm -T app ./node_modules/.bin/plakboek bootstrap --name 'Deploy Proof' --email proof@example.test --password-stdin")"
+box 'test -z "${PLAKBOEK_IMAGE:-}"' || fail "a fresh session on the target already has PLAKBOEK_IMAGE set"
+# The command comes from the scaffolded guide, not from this script: take the
+# one fenced sh block that holds `plakboek bootstrap`, fill in the two
+# placeholders the guide documents and run it over a fresh session.
+cat > "$WORK_DIR/guide-command.cjs" << 'NODE'
+const [file, deployPath, password] = process.argv.slice(2);
+const text = require('node:fs').readFileSync(file, 'utf8');
+const blocks = [];
+let current = null;
+for (const line of text.split('\n')) {
+  if (current === null) {
+    if (/^\s*```sh\s*$/.test(line)) current = [];
+  } else if (/^\s*```\s*$/.test(line)) {
+    blocks.push(current);
+    current = null;
+  } else {
+    current.push(line);
+  }
+}
+const hits = blocks.filter((block) => block.join('\n').includes('plakboek bootstrap'));
+if (hits.length !== 1) {
+  console.error(`DEPLOY.md holds ${hits.length} fenced sh blocks with 'plakboek bootstrap', expected exactly 1`);
+  process.exit(1);
+}
+const lines = hits[0].filter((line) => line.trim() !== '');
+const indent = Math.min(...lines.map((line) => line.length - line.trimStart().length));
+const command = lines.map((line) => line.slice(indent)).join('\n');
+if (!command.includes('cd /srv/site') || !command.includes("'the password'")) {
+  console.error("the proof follows the guide's placeholders, cd /srv/site and 'the password', and DEPLOY.md no longer has them");
+  process.exit(1);
+}
+process.stdout.write(
+  command
+    .replace('cd /srv/site', () => `cd '${deployPath}'`)
+    .replace("'the password'", () => `'${password}'`),
+);
+NODE
+BOOTSTRAP_COMMAND="$(node "$WORK_DIR/guide-command.cjs" "$SCAFFOLD_SITE_DIR/DEPLOY.md" "$BOX_DIR" "$PROOF_PASSWORD")" || fail "could not turn the DEPLOY.md first-admin block into a command"
+echo "    running the command from DEPLOY.md:"
+printf '%s\n' "${BOOTSTRAP_COMMAND//$PROOF_PASSWORD/<password>}" | sed 's/^/    | /'
+BOOTSTRAP_OUTPUT="$(box "$BOOTSTRAP_COMMAND" < /dev/null)"
 echo "$BOOTSTRAP_OUTPUT"
 case "$BOOTSTRAP_OUTPUT" in
-  *"Created superadmin proof@example.test."*) ;;
-  *) fail "bootstrap did not create the superadmin" ;;
+  *"Created superadmin "*) ;;
+  *) fail "the DEPLOY.md command did not create the superadmin" ;;
 esac
-SITE="http://127.0.0.1:$HTTP_PORT"
+[ "$(http_code "$SITE/cms/setup")" = "404" ] || fail "$SITE/cms/setup is not 404 after the bootstrap"
 [ "$(http_code "$SITE/cms/health")" = "200" ] || fail "$SITE/cms/health is not 200 through Caddy"
 HOME_PAGE="$(curl --silent --max-time 20 "$SITE/")"
 case "$HOME_PAGE" in
@@ -212,7 +279,7 @@ case "$HOME_PAGE" in
   *) fail "GET / through Caddy does not contain 'Hello world'" ;;
 esac
 [ "$(http_code "$SITE/")" = "200" ] || fail "GET / through Caddy is not 200"
-APP_BEFORE="$(compose_on_box "$IMAGE_1" "ps -q app" | tr -d '\r')"
+APP_BEFORE="$(compose_fresh "ps -q app" | tr -d '\r')"
 [ -n "$APP_BEFORE" ] || fail "no running app container after the deploy"
 BUILD_BEFORE="$(box "docker exec $APP_BEFORE printenv PLAKBOEK_BUILD_ID" | tr -d '\r')"
 [ "$BUILD_BEFORE" = "ci1" ] || fail "the app runs build id '$BUILD_BEFORE', expected ci1"
@@ -226,12 +293,21 @@ box "printf '%s\n' 'DATABASE_MIGRATION_URL=postgres://nobody:nothing@127.0.0.1:1
 if run_deploy "$IMAGE_2"; then
   fail "scripts/deploy.sh exited 0 although the migration failed"
 fi
-APP_AFTER_FAILURE="$(compose_on_box "$IMAGE_2" "ps -q app" | tr -d '\r')"
+APP_AFTER_FAILURE="$(compose_fresh "ps -q app" | tr -d '\r')"
 [ "$APP_AFTER_FAILURE" = "$APP_BEFORE" ] \
   || fail "the app container changed after a failed migration ($APP_BEFORE -> $APP_AFTER_FAILURE)"
 [ "$(box "docker inspect --format '{{.State.Running}}' $APP_BEFORE" | tr -d '\r')" = "true" ] \
   || fail "the old app container stopped after a failed migration"
 [ "$(http_code "$SITE/")" = "200" ] || fail "GET / is not 200 after a failed migration"
+RECORD_AFTER_FAILURE="$(box "grep '^PLAKBOEK_IMAGE=' '$BOX_DIR/.env'" | tr -d '\r')"
+[ "$RECORD_AFTER_FAILURE" = "PLAKBOEK_IMAGE=$IMAGE_1" ] \
+  || fail "the recorded image changed after a failed deploy: $RECORD_AFTER_FAILURE"
+IMAGES_AFTER_FAILURE="$(compose_fresh "config --images" | tr -d '\r')"
+printf '%s\n' "$IMAGES_AFTER_FAILURE" | grep -qxF "$IMAGE_1" \
+  || fail "a fresh-session compose does not resolve $IMAGE_1 after a failed deploy: $IMAGES_AFTER_FAILURE"
+if printf '%s\n' "$IMAGES_AFTER_FAILURE" | grep -qxF "$IMAGE_2"; then
+  fail "a fresh-session compose resolves $IMAGE_2 after a failed deploy"
+fi
 box "sed -i '/^DATABASE_MIGRATION_URL=/d' '$BOX_DIR/.env'"
 if box "grep -q DATABASE_MIGRATION_URL '$BOX_DIR/.env'"; then
   fail "could not remove the unreachable migration URL again"
@@ -258,11 +334,25 @@ NOT_OK="$(grep -vc '^200$' "$PROBE_LOG" || true)"
 [ "$PROBES" -gt 0 ] || fail "the probe recorded nothing"
 [ "$NOT_OK" = "0" ] \
   || fail "$NOT_OK of $PROBES probes during the deploy were not 200: $(grep -v '^200$' "$PROBE_LOG" | sort | uniq -c | tr '\n' ' ')"
-APP_AFTER="$(compose_on_box "$IMAGE_2" "ps -q app" | tr -d '\r')"
+APP_AFTER="$(compose_fresh "ps -q app" | tr -d '\r')"
 [ -n "$APP_AFTER" ] && [ "$APP_AFTER" != "$APP_BEFORE" ] || fail "the app container was not recreated"
 BUILD_AFTER="$(box "docker exec $APP_AFTER printenv PLAKBOEK_BUILD_ID" | tr -d '\r')"
 [ "$BUILD_AFTER" = "ci2" ] || fail "the app runs build id '$BUILD_AFTER' after the deploy, expected ci2"
 [ "$(http_code "$SITE/cms/health")" = "200" ] || fail "$SITE/cms/health is not 200 after the second deploy"
+RECORDS="$(box "grep '^PLAKBOEK_IMAGE=' '$BOX_DIR/.env'" | tr -d '\r')"
+[ "$RECORDS" = "PLAKBOEK_IMAGE=$IMAGE_2" ] \
+  || fail ".env does not hold exactly one PLAKBOEK_IMAGE line naming $IMAGE_2: $RECORDS"
+OTHER_LINES="$(box "grep -v '^PLAKBOEK_IMAGE=' '$BOX_DIR/.env'" | tr -d '\r')"
+[ "$OTHER_LINES" = "$(cat "$WORK_DIR/box.env")" ] \
+  || fail "the deploy changed lines of .env other than PLAKBOEK_IMAGE"
+ENV_MODE="$(box "stat -c %a '$BOX_DIR/.env'" | tr -d '\r')"
+[ "$ENV_MODE" = "600" ] || fail ".env has mode $ENV_MODE after the deploy, expected 600"
+if box "test -e '$BOX_DIR/.env.next'"; then
+  fail "the deploy left .env.next behind"
+fi
+IMAGES_AFTER_SECOND="$(compose_fresh "config --images" | tr -d '\r')"
+printf '%s\n' "$IMAGES_AFTER_SECOND" | grep -qxF "$IMAGE_2" \
+  || fail "a fresh-session compose does not resolve $IMAGE_2 after the second deploy: $IMAGES_AFTER_SECOND"
 echo "    $PROBES probes during the deploy, all 200"
 
 echo "deploy: OK"
