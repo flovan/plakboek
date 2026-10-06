@@ -483,8 +483,10 @@ describe('deploy script', () => {
       const position = lines.findIndex(
         (line, index) => index > previous && line.includes(step),
       );
-      expect(position, step).toBeGreaterThan(previous);
-      expect(lines[position]?.trim().startsWith('&&'), step).toBe(true);
+      expect(`${step}: line ${position}`).not.toContain('line -1');
+      expect(`${step}: ${lines[position]?.trim().startsWith('&&')}`).toBe(
+        `${step}: true`,
+      );
       previous = position;
     }
   });
