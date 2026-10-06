@@ -13,10 +13,8 @@ import { createTestDatabase, type TestDatabase } from './test-database.js';
 
 const ENV_KEYS = ['DATABASE_URL', 'PLAKBOEK_URL', 'PLAKBOEK_SECRET'] as const;
 
-export type Installation = {
+export type EmptyInstallation = {
   readonly runtime: Runtime;
-  /** The bootstrapped superadmin, shaped as the page engine's actor. */
-  readonly actor: { readonly userId: string; readonly roleKey: string };
   /** Starts the server of one fixture build against this installation. */
   serve(build: { serverEntry: string; clientDir: string }): Promise<{
     readonly url: (path: string) => string;
@@ -26,12 +24,16 @@ export type Installation = {
   dispose(): Promise<void>;
 };
 
+export type Installation = EmptyInstallation & {
+  /** The bootstrapped superadmin, shaped as the page engine's actor. */
+  readonly actor: { readonly userId: string; readonly roleKey: string };
+};
+
 /**
- * Creates and migrates a fresh database, bootstraps the fixture's first
- * superadmin (which publishes the seed home page) and points the process
- * environment at it.
+ * Creates and migrates a fresh database with no users and points the process
+ * environment at it: the state a first-run page starts from.
  */
-export async function createInstallation(): Promise<Installation> {
+export async function createEmptyInstallation(): Promise<EmptyInstallation> {
   const database: TestDatabase = await createTestDatabase();
   await runMigrations({ connectionString: database.connectionString });
 
@@ -43,12 +45,6 @@ export async function createInstallation(): Promise<Installation> {
     PLAKBOEK_SECRET: 'installation-test-secret-0123456789-abcdefghijk',
   };
   const runtime = createRuntime({ config }, readRuntimeEnv(environment));
-  const result = await bootstrapInstallation(runtime, {
-    name: 'Owner',
-    email: 'owner@example.com',
-    password: 'correct horse battery staple',
-  });
-
   const previous = new Map<string, string | undefined>();
   for (const key of ENV_KEYS) {
     previous.set(key, process.env[key]);
@@ -58,7 +54,6 @@ export async function createInstallation(): Promise<Installation> {
   const running: RunningServer[] = [];
   return {
     runtime,
-    actor: { userId: result.userId, roleKey: SUPERADMIN_ROLE_KEY },
     async serve(build) {
       const server = await createServer({
         buildPath: build.serverEntry,
@@ -82,4 +77,26 @@ export async function createInstallation(): Promise<Installation> {
       await database.drop();
     },
   };
+}
+
+/**
+ * Like `createEmptyInstallation`, then bootstraps the fixture's first
+ * superadmin, which publishes the seed home page.
+ */
+export async function createInstallation(): Promise<Installation> {
+  const empty = await createEmptyInstallation();
+  try {
+    const result = await bootstrapInstallation(empty.runtime, {
+      name: 'Owner',
+      email: 'owner@example.com',
+      password: 'correct horse battery staple',
+    });
+    return {
+      ...empty,
+      actor: { userId: result.userId, roleKey: SUPERADMIN_ROLE_KEY },
+    };
+  } catch (error) {
+    await empty.dispose();
+    throw error;
+  }
 }

@@ -6,13 +6,15 @@ import { cmsRoutes } from '../../dist/routes.js';
 describe('cmsRoutes', () => {
   const routes = cmsRoutes();
 
-  it('lists the health route before the visitor entries, in order', () => {
+  it('lists the CMS routes before the visitor entries, in order', () => {
     expect(routes.map((entry) => entry.id)).toEqual([
       'plakboek-health',
+      'plakboek-setup',
       'plakboek-visitor-index',
       'plakboek-visitor',
     ]);
     expect(routes[0]?.path).toBe('cms/health');
+    expect(routes[1]?.path).toBe('cms/setup');
   });
 
   it('returns an index entry and a splat entry with distinct explicit ids', () => {
