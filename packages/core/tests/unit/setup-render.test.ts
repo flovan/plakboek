@@ -8,11 +8,19 @@ import {
 } from '../../src/setup/render.js';
 import { SETUP_CSP, SETUP_STYLES } from '../../src/setup/styles.js';
 
-/** The opening tag of the input with this `name`. */
+/**
+ * The opening tag of the input with this `name`. Attribute names are
+ * lowercased because React's server renderer emits some in camelCase
+ * (`autoComplete`, `maxLength`), which HTML treats as the same attribute.
+ */
 function inputTag(html: string, name: string): string {
   const match = new RegExp(`<input[^>]*name="${name}"[^>]*>`).exec(html);
   if (match === null) throw new Error(`no input named ${name}`);
-  return match[0];
+  return match[0].replace(
+    /(\s)([A-Za-z-]+)=/g,
+    (_all, space: string, attribute: string) =>
+      `${space}${attribute.toLowerCase()}=`,
+  );
 }
 
 function count(haystack: string, needle: string): number {
