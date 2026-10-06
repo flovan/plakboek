@@ -297,7 +297,9 @@ describe('starter template host code', () => {
       expect(text).not.toContain(forbidden);
     }
     expect(text).not.toMatch(/from '\.\/app\//);
-    const imports = [...text.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
+    const imports = [...text.matchAll(/from '([^']+)'/g)].map(
+      (m) => m[1] ?? '',
+    );
     expect(imports.sort()).toEqual([
       './blocks/heading.tsx',
       './blocks/section.tsx',
@@ -345,7 +347,7 @@ describe('starter template host code', () => {
     const text = await read('blocks/section.tsx');
     expect(text).toContain("key: 'section'");
     expect(text).toContain("kind: 'section'");
-    const keys = [...text.matchAll(/^ {6}(\w+): \{$/gm)].map((m) => m[1]);
+    const keys = [...text.matchAll(/^ {4}(\w+): \{$/gm)].map((m) => m[1] ?? '');
     expect(keys.sort()).toEqual(['spacing', 'width']);
     for (const value of ['contained', 'full', 'none', 'md', 'lg']) {
       expect(text).toContain(`value: '${value}'`);
