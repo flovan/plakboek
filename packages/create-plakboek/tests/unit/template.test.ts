@@ -557,3 +557,206 @@ describe('starter theme and root template', () => {
     );
   });
 });
+
+describe('starter chrome and error pages', () => {
+  it('contains every chrome, error page, robots and README file', async () => {
+    const files = await listFiles(TEMPLATE);
+    for (const file of [
+      'app/site/header.tsx',
+      'app/site/footer.tsx',
+      'app/site/menu.tsx',
+      'app/site/errors.tsx',
+      'public/robots.txt',
+      'README.md',
+    ]) {
+      expect(files).toContain(file);
+    }
+  });
+
+  it('renders the header with the site name link and a Main nav only for a non-empty menu', async () => {
+    const text = await read('app/site/header.tsx');
+    expect(text).toContain('export function Header(');
+    expect(text).toContain('href="/"');
+    expect(text).toContain('{siteName}');
+    expect(text).toContain('aria-label="Main"');
+    expect(text).toMatch(/items\.length === 0\s*\?\s*null/);
+    expect(text).toContain('text-xl font-semibold');
+    expect(text).toContain('hover:underline');
+    expect(text).toContain('min-w-0');
+    expect(text).toContain('wrap-anywhere');
+    expect(text).toContain('flex-wrap');
+    expect(text).toContain('gap-x-6 gap-y-4');
+    expect(text).toContain('border-b border-border bg-surface-muted py-4');
+    expect(text).toContain('max-w-[1120px]');
+    expect(text).toContain('px-6');
+  });
+
+  it('renders the footer with a Footer nav only for a non-empty menu, then the copyright', async () => {
+    const text = await read('app/site/footer.tsx');
+    expect(text).toContain('export function Footer(');
+    expect(text).toContain('aria-label="Footer"');
+    expect(text).toMatch(/items\.length === 0\s*\?\s*null/);
+    expect(text).toContain('`© ${year} ${siteName}`');
+    expect(text).toContain('text-sm text-text-muted');
+    expect(text).toContain(
+      'border-t border-border bg-surface-muted pt-8 pb-16',
+    );
+    expect(text).toContain('max-w-[1120px]');
+    expect(text).toContain('px-6');
+    // The copyright line is outside the conditional, so it always renders.
+    expect(text.indexOf('`© ${year}')).toBeGreaterThan(
+      text.indexOf('aria-label="Footer"'),
+    );
+  });
+
+  it('renders both menus through one shared helper', async () => {
+    for (const file of ['app/site/header.tsx', 'app/site/footer.tsx']) {
+      const text = await read(file);
+      expect(text).toContain("from './menu.tsx'");
+      expect(text).toContain('<MenuLinks');
+    }
+    const menu = await read('app/site/menu.tsx');
+    expect(menu).toContain('export function MenuLinks(');
+    expect(menu.match(/<ul/g)).toHaveLength(1);
+  });
+
+  it('marks the current link, keeps a 44px hit area and shows focus', async () => {
+    const menu = await read('app/site/menu.tsx');
+    expect(menu).toContain("aria-current={item.current ? 'page' : undefined}");
+    expect(menu).toContain('decoration-accent');
+    expect(menu).toContain('decoration-2');
+    expect(menu).toContain('underline-offset-4');
+    expect(menu).toContain('min-h-11');
+    expect(menu).toContain('inline-flex items-center');
+    expect(menu).toContain('text-sm font-semibold');
+    expect(menu).toContain('focus-visible:outline-2');
+    expect(menu).toContain('focus-visible:outline-offset-2');
+    expect(menu).toContain('focus-visible:outline-accent');
+    expect(menu).toContain('hover:underline');
+  });
+
+  it('adds no script, hook or client-side toggle to any chrome file', async () => {
+    for (const file of [
+      'app/site/header.tsx',
+      'app/site/footer.tsx',
+      'app/site/menu.tsx',
+      'app/site/errors.tsx',
+    ]) {
+      const text = await read(file);
+      expect(text).not.toContain('<script');
+      expect(text).not.toMatch(/\buse[A-Z]\w*\(/);
+      expect(text).not.toMatch(/\bon[A-Z]\w*=/);
+      expect(text).not.toMatch(/hamburger|toggle/i);
+    }
+  });
+
+  it('exports all three site hooks from the barrel', async () => {
+    const text = await read('app/site/index.ts');
+    expect(text).toContain("export { renderDocument } from './document.tsx'");
+    expect(text).toContain(
+      "export { renderError, renderNotFound } from './errors.tsx'",
+    );
+  });
+
+  it('writes the 404 copy verbatim and a dev hint gated on NODE_ENV and the home path', async () => {
+    const text = await read('app/site/errors.tsx');
+    expect(text).toContain('export async function renderNotFound(');
+    expect(text).toContain('Page not found');
+    expect(text).toContain(
+      'The page you asked for does not exist or is not published.',
+    );
+    expect(text).toContain('Go to the home page');
+    expect(text).toContain('No home page yet.');
+    expect(text).toContain('pnpm plakboek bootstrap');
+    expect(text).toContain('/cms/setup');
+    expect(text).toContain("process.env.NODE_ENV !== 'production'");
+    expect(text).toContain("pathname === '/'");
+    expect(text).toContain("robots: 'noindex'");
+  });
+
+  it('writes the 500 copy verbatim and shows no error details', async () => {
+    const text = await read('app/site/errors.tsx');
+    expect(text).toContain('export async function renderError(');
+    expect(text).toContain('Something went wrong');
+    expect(text).toContain(
+      'The page could not be shown. Try again in a moment.',
+    );
+    expect(text).not.toMatch(/\.stack|\.message|error\.name/);
+  });
+
+  it('shows the error pages through the shared page template in a contained 64px section', async () => {
+    const text = await read('app/site/errors.tsx');
+    expect(text).toContain("from './document.tsx'");
+    expect(text.match(/renderPage\(/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(text).toContain('max-w-[1120px]');
+    expect(text).toContain('py-16');
+    expect(text).toContain('text-3xl font-semibold');
+  });
+
+  it('disallows /cms for every crawler', async () => {
+    const text = await read('public/robots.txt');
+    expect(text).toMatch(/^User-agent: \*$/m);
+    expect(text.match(/^Disallow: \/cms$/gm)).toHaveLength(1);
+  });
+});
+
+describe('starter README', () => {
+  const headings = async (): Promise<string[]> =>
+    [...(await read('README.md')).matchAll(/^#{1,3} (.+)$/gm)].map(
+      (m) => m[1] ?? '',
+    );
+
+  it('has a heading for each topic a developer needs', async () => {
+    const found = await headings();
+    for (const title of [
+      'Getting started',
+      'Adding a block',
+      'Editing the header, footer and menus',
+      'Live reload in development',
+      'Reserved paths',
+      'Linking to CMS pages from your own routes',
+      'First-run setup on a public URL',
+      'Email',
+      'Migrations',
+      'Content Security Policy',
+      'Deployment',
+    ]) {
+      expect(found).toContain(title);
+    }
+  });
+
+  it('documents the commands, variables and paths it names', async () => {
+    const text = await read('README.md');
+    for (const needle of [
+      'pnpm plakboek bootstrap',
+      'pnpm plakboek mail:test',
+      'pnpm plakboek migrate',
+      'DATABASE_MIGRATION_URL',
+      '/cms',
+      '/api/auth',
+      'reloadDocument',
+      '<a href',
+      'TOOLBAR_BOOTSTRAP_CSP_HASH',
+      '@plakboek/render/server',
+      'blocks/heading.tsx',
+      'app/site/header.tsx',
+      'DEPLOY.md',
+    ]) {
+      expect(text).toContain(needle);
+    }
+  });
+
+  it('warns that the first visitor to /cms/setup becomes superadmin', async () => {
+    const text = await read('README.md');
+    expect(text).toMatch(
+      /first (person|visitor|one)[^.]*\/cms\/setup|\/cms\/setup[^.]*first/i,
+    );
+    expect(text).toMatch(/superadmin/);
+  });
+
+  it('keeps the tone plain: no exclamation marks, no emoji', async () => {
+    const text = await read('README.md');
+    expect(text).not.toContain('!');
+    expect(text).not.toMatch(/\p{Extended_Pictographic}/u);
+  });
+});
