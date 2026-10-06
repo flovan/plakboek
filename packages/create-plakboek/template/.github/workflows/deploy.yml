@@ -1,6 +1,10 @@
 # Deploys every push to main once the CI workflow has passed on that commit:
 # build the image, push it to GitHub's container registry, then run
 # scripts/deploy.sh against your server. See DEPLOY.md for the one-time setup.
+#
+# Ordering: runs queue one at a time in push order, and a deploy only goes ahead
+# while its commit is still the tip of main, so an older commit never replaces a
+# newer one.
 name: Deploy
 
 on:
@@ -9,6 +13,12 @@ on:
 
 # Nothing is granted by default; each job asks for what it needs.
 permissions: {}
+
+# Whole runs queue in push order: a newer push replaces a run that is still
+# waiting, and a running deploy is never cancelled.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 jobs:
   ci:
@@ -63,17 +73,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
-    concurrency:
-      group: production-deploy
-      cancel-in-progress: false
     permissions:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@v7
+      - name: Skip unless this commit is still the tip of main
+        id: tip
+        shell: bash
+        run: |
+          tip="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          if [[ ! "$tip" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+            echo "::error::Could not read the tip of main, so nothing was deployed."
+            exit 1
+          fi
+          if [ "$tip" = "$GITHUB_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$GITHUB_SHA is no longer the tip of main ($tip is), so it is not deployed. The newer run deploys."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Check out the commit
+        if: steps.tip.outputs.current == 'true'
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Write the deploy key and the pinned host key
+        if: steps.tip.outputs.current == 'true'
         run: |
           umask 077
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/deploy_key"
@@ -82,6 +109,7 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
       - name: Deploy
+        if: steps.tip.outputs.current == 'true'
         run: bash scripts/deploy.sh
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}

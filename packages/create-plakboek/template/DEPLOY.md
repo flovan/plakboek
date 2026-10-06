@@ -22,7 +22,7 @@ A fourth service, `migrate`, is a one-off container that applies the CMS migrati
 
 If the migration fails, the deploy stops with a non-zero exit and the previous app container keeps running and serving. Migrations are forward-only and additive, so the old code keeps working against the new schema while the new one starts. Caddy holds incoming requests for up to 15 seconds while the app container is replaced, so visitors see no error during the restart.
 
-Two deploys never run at the same time: the workflow queues them in the `production-deploy` group, and the migration runner holds a database lock as well.
+Deploys run one at a time and in push order. The whole workflow runs in the `production-deploy` group, so a push waits for the previous deploy to finish before its own run starts, while the CI workflow still runs on every push straight away. When several pushes arrive during a deploy, only the newest one waits and the runs in between are cancelled, because the newest commit contains them. Before it touches the server, the deploy job checks that its commit is still the tip of `main` and skips the deploy otherwise, so an older commit never replaces a newer one, not even when you re-run an old run by hand. The migration runner also holds a database lock.
 
 ## Prepare the server
 
