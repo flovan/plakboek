@@ -15,11 +15,13 @@ export function Footer({ siteName, items, year }: FooterProps) {
     <footer className="border-t border-border bg-surface-muted pt-8 pb-16">
       <div className="mx-auto w-full max-w-[1120px] px-6">
         {items.length === 0 ? null : (
-          <nav aria-label="Footer" className="mb-4">
+          <nav aria-label="Footer">
             <MenuLinks items={items} gapClass="gap-x-6 gap-y-2" />
           </nav>
         )}
-        <p className="text-sm text-text-muted wrap-anywhere">
+        <p
+          className={`${items.length === 0 ? '' : 'mt-4 '}text-sm text-text-muted wrap-anywhere`}
+        >
           {`© ${year} ${siteName}`}
         </p>
       </div>
