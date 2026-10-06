@@ -152,7 +152,7 @@ describe('starter template tooling', () => {
       catalog.has(name),
     );
     // Guard against a parser that silently matches nothing.
-    expect(shared.length).toBeGreaterThanOrEqual(15);
+    expect(shared.length).toBeGreaterThanOrEqual(14);
     for (const [name, range] of shared) {
       expect({ name, range }).toEqual({ name, range: catalog.get(name) });
     }

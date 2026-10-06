@@ -9,7 +9,7 @@
     "test:integration": "pnpm -r --if-present run test:integration",
     "typecheck": "pnpm -r run typecheck",
     "check": "pnpm -r run check",
-    "lint": "oxlint --type-aware --deny-warnings",
+    "lint": "oxlint --type-aware --deny-warnings --disable-nested-config",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "verify:publishable": "bash scripts/verify-publishable.sh",
