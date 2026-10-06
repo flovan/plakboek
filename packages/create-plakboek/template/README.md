@@ -78,7 +78,7 @@ A plain `<Link to="/about">` tries a client navigation and does not find the pag
 
 ## First-run setup on a public URL
 
-Until the first account exists, anyone who reaches `/cms/setup` can create it, and that account becomes the superadmin. On a freshly deployed public address the first person to open the page wins. Run `pnpm plakboek bootstrap` on the server before you publish the address, or create the account from a private network first. Once an account exists, `/cms/setup` answers with the same 404 as any unknown page.
+Until the first account exists, anyone who reaches `/cms/setup` can create it, and that account becomes the superadmin. On a freshly deployed public address the first person to open the page wins. The page has no setup token by design and closes once an account exists. With the shipped deployment, create the account from the server right after the first deploy with the command in `DEPLOY.md`, under "The first deploy", which also says how to check that the account is yours. Once an account exists, `/cms/setup` answers with the same 404 as any unknown page.
 
 ## Email
 

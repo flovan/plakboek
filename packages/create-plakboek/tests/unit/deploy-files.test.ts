@@ -646,7 +646,7 @@ describe('deploy guide', () => {
 
   const section = (text: string, heading: string): string => {
     const start = text.indexOf(`## ${heading}\n`);
-    expect(start, heading).toBeGreaterThanOrEqual(0);
+    expect(start).toBeGreaterThanOrEqual(0);
     const rest = text.slice(start + heading.length + 4);
     const next = rest.search(/^## /m);
     return next === -1 ? rest : rest.slice(0, next);

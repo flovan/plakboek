@@ -19,6 +19,7 @@ A fourth service, `migrate`, is a one-off container that applies the CMS migrati
 3. Start Postgres and wait until it is healthy.
 4. Run the `migrate` service once.
 5. Recreate `app` and `caddy` and wait until the app reports healthy.
+6. Record the deployed image as the `PLAKBOEK_IMAGE` line of `.env`, so compose commands you run in the deploy directory use the image that is running. A failed deploy keeps the previous line.
 
 If the migration fails, the deploy stops with a non-zero exit and the previous app container keeps running and serving. Migrations are forward-only and additive, so the old code keeps working against the new schema while the new one starts. Caddy holds incoming requests for up to 15 seconds while the app container is replaced, so visitors see no error during the restart.
 
@@ -32,7 +33,7 @@ You need a Linux server with a public address and DNS for your domain pointing a
 2. Create a user for deploys and add it to the `docker` group. Give it an SSH key pair that is used for nothing else.
 3. Create the deploy directory, for example `/srv/site`, owned by that user. Use an absolute path with letters, digits, `.`, `_`, `-` and `/` only.
 4. Open ports 80 and 443.
-5. Create `.env` in the deploy directory. It is the only place the production secrets live. It is never committed and never built into the image.
+5. Create `.env` in the deploy directory. It is the only place the production secrets live. It is never committed and never built into the image. The deploy script adds and maintains a `PLAKBOEK_IMAGE` line in this file, so leave that line to the script.
 
 ```sh
 POSTGRES_USER=plakboek
@@ -85,8 +86,8 @@ The deploy script refuses to connect to a host whose key does not match `DEPLOY_
 
 ## The first deploy
 
-1. Push to `main` and wait for the workflow. The first run pulls the base images and takes a few minutes.
-2. Create the first administrator on the server before anyone can reach the setup page. Until an account exists, whoever opens `/cms/setup` first becomes the superadmin, so use the command line instead:
+1. Push to `main` and wait for the workflow. The first run pulls the base images and takes a few minutes. If the `production` environment has required reviewers, approve this first run when you can create the administrator right after it.
+2. From the moment this deploy finishes until the first account exists, `/cms/setup` is open to anyone who reaches it, and whoever submits it first becomes the superadmin. The page closes for good once an account exists. Keep that window short: as soon as the workflow run finishes, create the administrator on the server from the command line.
 
    ```sh
    cd /srv/site
@@ -95,9 +96,9 @@ The deploy script refuses to connect to a host whose key does not match `DEPLOY_
      --email you@example.com --password-stdin
    ```
 
-   This also publishes the starter home page. Once an account exists, `/cms/setup` answers with a 404 like any unknown page.
-
-3. Open your site.
+3. Check that the account is yours. The command prints `Created superadmin` followed by your address, and `/cms/setup` on your domain now answers with a 404 like any unknown page. The command also published the starter home page.
+4. If the command instead reports that the installation already has users, someone else created the first account before you. On a new installation, start over: in the deploy directory run `docker compose -f compose.yaml down --volumes`, which deletes the database and the stored certificates, then re-run the newest Deploy workflow run and repeat steps 2 and 3. Never do this on an installation that holds content.
+5. Open your site.
 
 ## Pulling the image
 
