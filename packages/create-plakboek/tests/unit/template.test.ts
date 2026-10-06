@@ -262,3 +262,156 @@ describe('starter template tooling', () => {
     expect(manifest.files).toEqual(['dist', 'template']);
   });
 });
+
+describe('starter template host code', () => {
+  it('contains every host code file', async () => {
+    const files = await listFiles(TEMPLATE);
+    for (const file of [
+      'plakboek.config.ts',
+      'seed.ts',
+      'blocks/section.tsx',
+      'blocks/heading.tsx',
+      'app/routes.ts',
+      'app/root.tsx',
+      'app/site/index.ts',
+    ]) {
+      expect(files).toContain(file);
+    }
+  });
+
+  it('holds each config placeholder exactly once', async () => {
+    const text = await read('plakboek.config.ts');
+    for (const token of [
+      "'__SITE_NAME__'",
+      "'__DEFAULT_LOCALE__'",
+      "['__LOCALES__']",
+      "'__TIMEZONE__'",
+    ]) {
+      expect(text.split(token)).toHaveLength(2);
+    }
+  });
+
+  it('keeps the config loadable by Node: no Vite-only syntax, no site imports', async () => {
+    const text = await read('plakboek.config.ts');
+    for (const forbidden of ['?url', 'import.meta.env', 'import.meta.glob']) {
+      expect(text).not.toContain(forbidden);
+    }
+    expect(text).not.toMatch(/from '\.\/app\//);
+    const imports = [...text.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
+    expect(imports.sort()).toEqual([
+      './blocks/heading.tsx',
+      './blocks/section.tsx',
+      './seed.ts',
+      '@plakboek/core/config',
+    ]);
+  });
+
+  it('registers both blocks explicitly and composes the default roles and menu', async () => {
+    const text = await read('plakboek.config.ts');
+    expect(text).toContain('blocks: [section, heading]');
+    expect(text).toContain('roles: { ...defaultRoles }');
+    expect(text).toContain("menus: { main: [{ label: 'Home', href: '/' }] }");
+    expect(text).toContain('constraints: []');
+    expect(text).toContain('modules: []');
+    expect(text).toMatch(/^ {2}seed,$/m);
+  });
+
+  it('seeds one section holding one level 1 heading, as host code', async () => {
+    const text = await read('seed.ts');
+    expect(text).toContain("import type { SeedPage } from '@plakboek/core'");
+    expect(text).toMatch(/export const seed: SeedPage/);
+    expect(text).toContain("title: 'Home'");
+    expect(text).toContain("type: 'section'");
+    expect(text).toContain("width: 'contained'");
+    expect(text).toContain("spacing: 'lg'");
+    expect(text).toContain("type: 'heading'");
+    expect(text).toContain("text: 'Hello world'");
+    expect(text).toContain("level: '1'");
+    expect(text.match(/type: '/g)).toHaveLength(2);
+  });
+
+  it('writes one defineBlock definition per block file', async () => {
+    for (const file of ['blocks/section.tsx', 'blocks/heading.tsx']) {
+      const text = await read(file);
+      expect(text.match(/defineBlock\(/g)).toHaveLength(1);
+      expect(text.match(/^export const /gm)).toHaveLength(1);
+      // Plain function components only: the visitor handler rejects wrappers.
+      expect(text).not.toMatch(/\b(memo|forwardRef)\(/);
+      expect(text).toContain('{...edit');
+    }
+  });
+
+  it('declares section as a layout-only block', async () => {
+    const text = await read('blocks/section.tsx');
+    expect(text).toContain("key: 'section'");
+    expect(text).toContain("kind: 'section'");
+    const keys = [...text.matchAll(/^ {6}(\w+): \{$/gm)].map((m) => m[1]);
+    expect(keys.sort()).toEqual(['spacing', 'width']);
+    for (const value of ['contained', 'full', 'none', 'md', 'lg']) {
+      expect(text).toContain(`value: '${value}'`);
+    }
+    expect(text).toContain("defaultValue: 'lg'");
+    expect(text).toContain('py-0');
+    expect(text).toContain('py-8');
+    expect(text).toContain('py-16');
+    expect(text).toContain('max-w-[1120px]');
+  });
+
+  it('declares heading with a required text and a level of 1 to 3', async () => {
+    const text = await read('blocks/heading.tsx');
+    expect(text).toContain("key: 'heading'");
+    expect(text).not.toContain("kind: 'section'");
+    expect(text).toMatch(/text: \{[^}]*fieldType: 'short_text'/s);
+    expect(text).toContain('required: true');
+    for (const value of ['1', '2', '3']) {
+      expect(text).toContain(`value: '${value}'`);
+    }
+    expect(text).toContain("defaultValue: '2'");
+    expect(text).toContain('text-3xl font-semibold');
+    expect(text).toContain('text-xl font-semibold');
+    expect(text).toContain('text-sm font-semibold');
+    expect(text).toContain("{...edit.field('text')}");
+  });
+
+  it('lists host routes before the CMS routes', async () => {
+    const text = await read('app/routes.ts');
+    expect(text.match(/cmsRoutes\(\)/g)).toHaveLength(1);
+    expect(text).toContain('[...hostRoutes, ...cmsRoutes()]');
+    expect(text).toMatch(/const hostRoutes: RouteConfigEntry\[\] = \[\];/);
+  });
+
+  it('composes the root route with the React Router document parts', async () => {
+    const text = await read('app/root.tsx');
+    for (const part of [
+      'Meta',
+      'Links',
+      'Scripts',
+      'ScrollRestoration',
+      'Outlet',
+    ]) {
+      expect(text).toContain(part);
+    }
+    expect(text).toContain('export function Layout');
+    expect(text).toContain('export default function Root');
+  });
+
+  it('composes a script-free document around the page head and body', async () => {
+    const text = await read('app/site/index.ts');
+    expect(text).toContain('export function renderDocument(');
+    expect(text).toContain('<!DOCTYPE html>');
+    expect(text).toContain('<html lang=');
+    expect(text).toContain('<meta charset="utf-8">');
+    expect(text).toContain('name="viewport"');
+    expect(text).toContain('renderHeadHtml(');
+    expect(text).toContain('input.body');
+    expect(text).not.toContain('<script');
+  });
+
+  it('carries no attribution and no reference-project wording anywhere', async () => {
+    for (const file of await listFiles(TEMPLATE)) {
+      expect(await read(file)).not.toMatch(
+        /co-authored|generated with|emdash/i,
+      );
+    }
+  });
+});
