@@ -168,6 +168,22 @@ describe('deploy workflow', () => {
     }
   });
 
+  it('logs in to the registry as the repository owner, never the actor', async () => {
+    const text = await read('.github/workflows/deploy.yml');
+    const all = jobs(text);
+    const owner = '${{ github.repository_owner }}';
+    expect(all.get('image') ?? '').toMatch(
+      new RegExp(`^\\s+username: ${owner.replace(/[{}$]/g, '\\$&')}\\s*$`, 'm'),
+    );
+    expect(all.get('deploy') ?? '').toMatch(
+      new RegExp(
+        `^\\s+REGISTRY_USER: ${owner.replace(/[{}$]/g, '\\$&')}\\s*$`,
+        'm',
+      ),
+    );
+    expect(text).not.toContain('github.actor');
+  });
+
   it('passes every deploy value through env', async () => {
     const text = await read('.github/workflows/deploy.yml');
     for (const name of [
@@ -263,6 +279,26 @@ describe('deploy script', () => {
     // The token is never part of a command line.
     expect(text).not.toMatch(/-p\s+"?\$\{?REGISTRY_TOKEN/);
     expect(text).not.toMatch(/--password\s/);
+  });
+
+  it('keeps the strict registry patterns and checks them before the first remote call', async () => {
+    const lines = (await read('scripts/deploy.sh')).split('\n');
+    const user = lines
+      .map((line, index) => ({ line: line.trim(), index }))
+      .filter(({ line }) => line.startsWith('validate REGISTRY_USER '));
+    const host = lines
+      .map((line, index) => ({ line: line.trim(), index }))
+      .filter(({ line }) => line.startsWith('validate REGISTRY_HOST '));
+    expect(user.map(({ line }) => line)).toEqual([
+      "validate REGISTRY_USER '^[A-Za-z0-9._-]+$'",
+    ]);
+    expect(host.map(({ line }) => line)).toEqual([
+      "validate REGISTRY_HOST '^[A-Za-z0-9.:-]+$'",
+    ]);
+    const firstRemote = lines.findIndex((line) => line.startsWith('remote '));
+    expect(firstRemote).toBeGreaterThan(0);
+    expect(user[0]?.index).toBeLessThan(firstRemote);
+    expect(host[0]?.index).toBeLessThan(firstRemote);
   });
 
   it('pulls, starts Postgres, migrates and only then recreates the app, chained', async () => {
