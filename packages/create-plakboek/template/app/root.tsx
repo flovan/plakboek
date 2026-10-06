@@ -1,8 +1,15 @@
 import type { ReactNode } from 'react';
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router';
+import appCss from './app.css?url';
+
+// In development the plain `?url` address serves JavaScript, so the dev
+// server is asked for the stylesheet itself with its direct-request suffix.
+const stylesheetHref = import.meta.env.DEV ? `${appCss}?direct` : appCss;
+
+export const links = () => [{ rel: 'stylesheet', href: stylesheetHref }];
 
 // The root of YOUR routes (see app/routes.ts). CMS pages never render
-// through it: their document comes from app/site/index.ts.
+// through it: their document comes from app/site/document.tsx.
 export function Layout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
@@ -12,7 +19,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <Meta />
         <Links />
       </head>
-      <body>
+      <body className="bg-surface font-sans text-text">
         {children}
         <ScrollRestoration />
         <Scripts />

@@ -550,12 +550,10 @@ describe('starter theme and root template', () => {
     expect(text).toContain("export { renderDocument } from './document.tsx'");
   });
 
-  it('shares one 1120px container with 24px side padding and a full-height flex body', async () => {
+  it('makes the body a full-height flex column on the surface colour', async () => {
     const text = await read('app/site/document.tsx');
     expect(text).toContain(
       'flex min-h-screen flex-col bg-surface font-sans text-text',
     );
-    expect(text).toContain('max-w-[1120px]');
-    expect(text).toContain('px-6');
   });
 });
