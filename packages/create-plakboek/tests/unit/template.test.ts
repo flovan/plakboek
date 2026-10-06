@@ -274,6 +274,8 @@ describe('starter template host code', () => {
       'app/routes.ts',
       'app/root.tsx',
       'app/site/index.ts',
+      'app/app.css',
+      'app/site/document.tsx',
     ]) {
       expect(files).toContain(file);
     }
@@ -397,23 +399,163 @@ describe('starter template host code', () => {
     expect(text).toContain('export default function Root');
   });
 
-  it('composes a script-free document around the page head and body', async () => {
-    const text = await read('app/site/index.ts');
-    expect(text).toContain('export function renderDocument(');
-    expect(text).toContain('<!DOCTYPE html>');
-    expect(text).toContain('<html lang=');
-    expect(text).toContain('<meta charset="utf-8">');
-    expect(text).toContain('name="viewport"');
-    expect(text).toContain('renderHeadHtml(');
-    expect(text).toContain('input.body');
-    expect(text).not.toContain('<script');
-  });
-
   it('carries no attribution and no reference-project wording anywhere', async () => {
     for (const file of await listFiles(TEMPLATE)) {
       expect(await read(file)).not.toMatch(
         /co-authored|generated with|emdash/i,
       );
     }
+  });
+});
+
+describe('starter theme and root template', () => {
+  /** The declarations of the single `@theme { ... }` block. */
+  async function themeBlock(): Promise<string> {
+    const css = await read('app/app.css');
+    const match = /@theme\s*\{([^}]*)\}/.exec(css);
+    expect(match?.[1]).toBeDefined();
+    return match?.[1] ?? '';
+  }
+
+  it('starts the stylesheet with the Tailwind import', async () => {
+    const css = await read('app/app.css');
+    expect(css.trimStart().startsWith("@import 'tailwindcss';")).toBe(true);
+    expect(css.match(/@theme/g)).toHaveLength(1);
+  });
+
+  it('resets the colour and text namespaces so no other value exists', async () => {
+    const theme = await themeBlock();
+    expect(theme).toMatch(/--color-\*:\s*initial;/);
+    expect(theme).toMatch(/--text-\*:\s*initial;/);
+  });
+
+  it('defines the six colour tokens with the contract values', async () => {
+    const theme = await themeBlock();
+    const expected: Record<string, string> = {
+      '--color-surface': '#ffffff',
+      '--color-surface-muted': '#f4f4f5',
+      '--color-text': '#27272a',
+      '--color-text-muted': '#52525b',
+      '--color-accent': '#1d4ed8',
+      '--color-border': '#e4e4e7',
+    };
+    for (const [token, value] of Object.entries(expected)) {
+      expect(theme).toMatch(new RegExp(`${token}:\\s*${value};`));
+    }
+    const colours = [...theme.matchAll(/^\s*(--color-[a-z-]+):/gm)]
+      .map((m) => m[1] ?? '')
+      .filter((name) => name !== '--color-*');
+    expect(colours.sort()).toEqual(Object.keys(expected).sort());
+  });
+
+  it('defines the four text sizes with their line heights, the 4px spacing unit and the system font', async () => {
+    const theme = await themeBlock();
+    const sizes: Record<string, [string, string]> = {
+      sm: ['14px', '1.5'],
+      base: ['16px', '1.5'],
+      xl: ['20px', '1.2'],
+      '3xl': ['28px', '1.2'],
+    };
+    for (const [name, [size, lineHeight]] of Object.entries(sizes)) {
+      expect(theme).toMatch(new RegExp(`--text-${name}:\\s*${size};`));
+      expect(theme).toMatch(
+        new RegExp(`--text-${name}--line-height:\\s*${lineHeight};`),
+      );
+    }
+    const sizeNames = [...theme.matchAll(/^\s*--text-([a-z0-9]+):/gm)].map(
+      (m) => m[1] ?? '',
+    );
+    expect(sizeNames.sort()).toEqual(['3xl', 'base', 'sm', 'xl']);
+    expect(theme).toMatch(/--spacing:\s*4px;/);
+    expect(theme).toMatch(/--font-sans:\s*[^;]*system-ui[^;]*;/);
+  });
+
+  it('keeps the site light-only', async () => {
+    expect(await read('app/app.css')).toMatch(/color-scheme:\s*light;/);
+  });
+
+  it('adds the Tailwind plugin before the CMS and React Router plugins', async () => {
+    const vite = await read('vite.config.ts');
+    expect(vite).toContain("from '@tailwindcss/vite'");
+    expect(vite.indexOf('tailwindcss()')).toBeGreaterThan(-1);
+    expect(vite.indexOf('tailwindcss()')).toBeLessThan(
+      vite.indexOf('plakboek({'),
+    );
+    expect(vite.indexOf('plakboek({')).toBeLessThan(
+      vite.indexOf('reactRouter()'),
+    );
+  });
+
+  it('declares Tailwind 4.3 as a development dependency', async () => {
+    const manifest = await templateManifest();
+    expect(manifest.devDependencies?.tailwindcss).toBe('^4.3.0');
+    expect(manifest.devDependencies?.['@tailwindcss/vite']).toBe('^4.3.0');
+  });
+
+  it('composes a script-free document around the page head, chrome and body', async () => {
+    const text = await read('app/site/document.tsx');
+    expect(text).toContain('export async function renderDocument(');
+    expect(text).toContain('export async function renderPage(');
+    expect(text).toContain('<!DOCTYPE html>');
+    expect(text).toContain('<html lang=');
+    expect(text).toContain('<meta charset="utf-8">');
+    expect(text).toContain('name="viewport"');
+    expect(text).toContain('name="color-scheme" content="light"');
+    expect(text).toContain('renderHeadHtml(');
+    expect(text).toContain('renderToStaticMarkup(');
+    expect(text).toContain('<main id="content"');
+    expect(text).not.toContain('<script');
+  });
+
+  it('puts the skip link first, then header, main and footer', async () => {
+    const text = await read('app/site/document.tsx');
+    expect(text).toContain('href="#content"');
+    const order = [
+      'Skip to content',
+      '${header}',
+      '<main id="content"',
+      '${footer}',
+    ].map((needle) => text.indexOf(needle));
+    expect(order.every((index) => index > -1)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('links one stylesheet, with ?direct only inside the development branch', async () => {
+    const text = await read('app/site/document.tsx');
+    expect(text).toContain("import appCss from '../app.css?url'");
+    const withDirect = text
+      .split('\n')
+      .filter((line) => line.includes('?direct'));
+    expect(withDirect).toHaveLength(1);
+    expect(withDirect[0]).toContain('import.meta.env.DEV');
+    expect(text.match(/rel="stylesheet"/g)).toHaveLength(1);
+  });
+
+  it('links the same stylesheet for host routes', async () => {
+    const text = await read('app/root.tsx');
+    expect(text).toContain("import appCss from './app.css?url'");
+    expect(text).toContain("rel: 'stylesheet'");
+    expect(text).toContain('export const links');
+    expect(text).toContain('import.meta.env.DEV');
+  });
+
+  it('keeps the site module and the stylesheet out of the Node-loaded config', async () => {
+    const config = await read('plakboek.config.ts');
+    expect(config).not.toContain('app.css');
+    expect(config).not.toContain('document.tsx');
+  });
+
+  it('exports the document hook from the site barrel', async () => {
+    const text = await read('app/site/index.ts');
+    expect(text).toContain("export { renderDocument } from './document.tsx'");
+  });
+
+  it('shares one 1120px container with 24px side padding and a full-height flex body', async () => {
+    const text = await read('app/site/document.tsx');
+    expect(text).toContain(
+      'flex min-h-screen flex-col bg-surface font-sans text-text',
+    );
+    expect(text).toContain('max-w-[1120px]');
+    expect(text).toContain('px-6');
   });
 });
