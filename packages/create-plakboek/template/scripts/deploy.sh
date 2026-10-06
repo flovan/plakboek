@@ -25,7 +25,8 @@ set -euo pipefail
 DEPLOY_PORT="${DEPLOY_PORT:-22}"
 
 # Values end up inside a command that the server's shell parses, so each one
-# must match a conservative pattern before it is used.
+# must match a conservative pattern before the first connection is made. A
+# rejected value therefore never reaches the server.
 validate() {
   local name="$1" pattern="$2" value="${!1}"
   if [[ ! "$value" =~ $pattern ]]; then
@@ -38,6 +39,12 @@ validate DEPLOY_PORT '^[0-9]{1,5}$'
 validate DEPLOY_USER '^[A-Za-z_][A-Za-z0-9_-]*$'
 validate DEPLOY_PATH '^/[A-Za-z0-9._/-]+$'
 validate PLAKBOEK_IMAGE '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$'
+if [ -n "${REGISTRY_TOKEN:-}" ]; then
+  : "${REGISTRY_HOST:?REGISTRY_HOST is required with REGISTRY_TOKEN}"
+  : "${REGISTRY_USER:?REGISTRY_USER is required with REGISTRY_TOKEN}"
+  validate REGISTRY_HOST '^[A-Za-z0-9.:-]+$'
+  validate REGISTRY_USER '^[A-Za-z0-9._-]+$'
+fi
 
 SSH_OPTIONS=(
   -i "$SSH_KEY_FILE"
@@ -59,10 +66,6 @@ echo "==> Copying compose.yaml to $DEPLOY_HOST:$DEPLOY_PATH"
 remote "cat > '$DEPLOY_PATH/compose.yaml'" < "$COMPOSE_FILE_LOCAL"
 
 if [ -n "${REGISTRY_TOKEN:-}" ]; then
-  : "${REGISTRY_HOST:?REGISTRY_HOST is required with REGISTRY_TOKEN}"
-  : "${REGISTRY_USER:?REGISTRY_USER is required with REGISTRY_TOKEN}"
-  validate REGISTRY_HOST '^[A-Za-z0-9.:-]+$'
-  validate REGISTRY_USER '^[A-Za-z0-9._-]+$'
   echo "==> Logging $DEPLOY_HOST in to $REGISTRY_HOST"
   # The token travels on stdin, never on a command line.
   printf '%s' "$REGISTRY_TOKEN" \
