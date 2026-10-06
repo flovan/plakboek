@@ -12,7 +12,7 @@
  * with its own routes first: they win every tie, including a host index route
  * at `/`, and every path the host does not claim falls through to the CMS.
  *
- * Reserved paths: `/cms/*` (health now, the editor and setup later) and
+ * Reserved paths: `/cms/*` (health and first-run setup now, the editor later) and
  * `/api/auth/*` belong to the CMS. A page whose first slug segment is `cms`
  * or `api` is shadowed by them and unreachable; reserved-slug enforcement is
  * carried to Phase 7.
@@ -28,6 +28,7 @@ function file(name: string): string {
 export function cmsRoutes(): RouteConfigEntry[] {
   return [
     route('cms/health', file('health'), { id: 'plakboek-health' }),
+    route('cms/setup', file('setup'), { id: 'plakboek-setup' }),
     // The visitor entries stay last: a splat does not match "/", so the
     // visitor route needs both an index and a splat entry.
     index(file('visitor'), { id: 'plakboek-visitor-index' }),

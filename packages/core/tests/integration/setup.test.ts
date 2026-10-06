@@ -124,9 +124,9 @@ describe('the setup handlers', () => {
       { userId: users[0]?.id, homePublished: true },
     );
 
-    const pages = await runtime.db
-      .sql`SELECT count(*)::int AS n FROM page WHERE status = 'published'`;
-    expect(pages[0]?.n).toBe(1);
+    const visitor = await runtime.visitor(new Request(`${ORIGIN}/`));
+    expect(visitor.status).toBe(200);
+    expect(await visitor.text()).toContain('Hello world');
   });
 
   it('answers the host 404 to a GET once a user exists, without naming setup', async () => {
@@ -220,9 +220,8 @@ describe('the setup handlers', () => {
       ),
     ]);
 
-    expect(responses.map((response) => response.status).sort()).toEqual([
-      200, 409,
-    ]);
+    const statuses = responses.map((response) => response.status);
+    expect(statuses.toSorted((a, b) => a - b)).toEqual([200, 409]);
     expect(await userCount(runtime)).toBe(1);
   });
 
