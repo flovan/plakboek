@@ -754,6 +754,19 @@ describe('starter README', () => {
     expect(text).toMatch(/superadmin/);
   });
 
+  it('points the first-run window at the deploy guide and tells the truth about timing', async () => {
+    const text = await read('README.md');
+    const start = text.indexOf('## First-run setup on a public URL');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const rest = text.slice(start + 3);
+    const next = rest.search(/^## /m);
+    const section = next === -1 ? rest : rest.slice(0, next);
+    expect(section).toContain('DEPLOY.md');
+    expect(section).not.toMatch(/before you publish/i);
+    expect(section).not.toContain('pnpm plakboek bootstrap');
+    expect(section).toMatch(/superadmin/);
+  });
+
   it('keeps the tone plain: no exclamation marks, no emoji', async () => {
     const text = await read('README.md');
     expect(text).not.toContain('!');

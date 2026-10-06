@@ -643,4 +643,49 @@ describe('deploy guide', () => {
       expect(text.toLowerCase()).toContain(part.toLowerCase());
     }
   });
+
+  const section = (text: string, heading: string): string => {
+    const start = text.indexOf(`## ${heading}\n`);
+    expect(start, heading).toBeGreaterThanOrEqual(0);
+    const rest = text.slice(start + heading.length + 4);
+    const next = rest.search(/^## /m);
+    return next === -1 ? rest : rest.slice(0, next);
+  };
+
+  it('describes the first-run window as it is and gives confirmation and recovery', async () => {
+    const first = section(await read('DEPLOY.md'), 'The first deploy');
+    expect(first).toMatch(/until the first account exists/i);
+    expect(first).toMatch(/\/cms\/setup[^.]*open to anyone/i);
+    for (const line of [
+      'cd /srv/site',
+      "printf '%s' 'the password' | docker compose -f compose.yaml run --rm -T app \\",
+      '--password-stdin',
+    ]) {
+      expect(first).toContain(line);
+    }
+    expect(first).toContain('Created superadmin');
+    expect(first).toMatch(/404/);
+    expect(first).toContain('already has users');
+    expect(first).toContain('docker compose -f compose.yaml down --volumes');
+    expect(first).not.toMatch(
+      /before (anyone|anybody|someone) (else )?can (reach|open)/i,
+    );
+    expect(first).not.toContain('!');
+  });
+
+  it('keeps one fenced command block that holds the bootstrap', async () => {
+    const text = await read('DEPLOY.md');
+    const blocks = [...text.matchAll(/^\s*```sh\n([\s\S]*?)^\s*```$/gm)].filter(
+      (match) => (match[1] ?? '').includes('plakboek bootstrap'),
+    );
+    expect(blocks).toHaveLength(1);
+  });
+
+  it('lists recording the image among the deploy steps and says the script owns that line', async () => {
+    const text = await read('DEPLOY.md');
+    const steps = section(text, 'What a deploy does');
+    expect(steps).toMatch(/^6\. .*PLAKBOEK_IMAGE.*\.env/m);
+    const prepare = section(text, 'Prepare the server');
+    expect(prepare).toMatch(/deploy script[^.]*PLAKBOEK_IMAGE/i);
+  });
 });
