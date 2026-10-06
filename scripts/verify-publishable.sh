@@ -80,7 +80,9 @@ echo "==> Installing packed tarballs into the consumer"
   # @types/node: the probes call process.exit() for their runtime assertions,
   # which needs Node's ambient types to type-check here -- it is not part of
   # either published package's own type surface.
-  npm install --no-audit --no-fund --ignore-scripts "$TARBALL_DIR"/*.tgz @types/node
+  # react-router, @react-router/dev and vite: @plakboek/core's routes and vite
+  # entries import them, and a real host always has them (optional peers).
+  npm install --no-audit --no-fund --ignore-scripts "$TARBALL_DIR"/*.tgz @types/node react-router @react-router/dev vite
 )
 
 echo "==> Copying consumer probes"
