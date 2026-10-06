@@ -1,6 +1,15 @@
-import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // The deploy files of the bundled starter, read from disk as they are shipped.
 const TEMPLATE = join(import.meta.dirname, '..', '..', 'template');
@@ -57,6 +66,19 @@ function jobs(text: string): Map<string, string> {
     }
   }
   return new Map([...found].map(([id, body]) => [id, body.join('\n')]));
+}
+
+/** The steps of one job body, each as its own text block. */
+function stepsOf(jobBody: string): string[] {
+  const lines = jobBody.split('\n');
+  const start = lines.findIndex((line) => /^ {4}steps:\s*$/.test(line));
+  expect(start).toBeGreaterThanOrEqual(0);
+  const steps: string[][] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^ {6}- /.test(line)) steps.push([line]);
+    else steps.at(-1)?.push(line);
+  }
+  return steps.map((step) => step.join('\n'));
 }
 
 /** The top-level key names of a workflow file. */
@@ -140,13 +162,11 @@ describe('deploy workflow', () => {
     expect(deploy).toMatch(/scripts\/deploy\.sh/);
   });
 
-  it('puts the production environment, the key and the lock on the deploy job only', async () => {
+  it('puts the production environment and the key on the deploy job only', async () => {
     const text = await read('.github/workflows/deploy.yml');
     const all = jobs(text);
     const deploy = all.get('deploy') ?? '';
     expect(deploy).toMatch(/environment:\s*production\s*$/m);
-    expect(deploy).toMatch(/group:\s*production-deploy\s*$/m);
-    expect(deploy).toMatch(/cancel-in-progress:\s*false\s*$/m);
     for (const id of ['ci', 'image']) {
       const body = all.get(id) ?? '';
       expect(body).not.toContain('environment:');
@@ -155,6 +175,42 @@ describe('deploy workflow', () => {
     }
     expect(text.match(/environment:/g)).toHaveLength(1);
     expect(text.match(/secrets\.DEPLOY_SSH_KEY/g)).toHaveLength(1);
+  });
+
+  it('queues whole runs in one non-cancelling group declared at the workflow level', async () => {
+    const text = await read('.github/workflows/deploy.yml');
+    expect(topLevelKeys(text)).toContain('concurrency');
+    const block = topLevelBlock(text, 'concurrency');
+    expect(block).toMatch(/^\s+group:\s*production-deploy\s*$/m);
+    expect(block).toMatch(/^\s+cancel-in-progress:\s*false\s*$/m);
+    // A job-level group with the same name would deadlock the run on itself.
+    for (const body of jobs(text).values()) {
+      expect(body).not.toMatch(/^\s+concurrency:/m);
+    }
+  });
+
+  it('reads the tip of main first and gates every later deploy step on it', async () => {
+    const deploy = jobs(await read('.github/workflows/deploy.yml')).get(
+      'deploy',
+    );
+    const steps = stepsOf(deploy ?? '');
+    expect(steps.length).toBeGreaterThanOrEqual(4);
+    const [tip, ...later] = steps as [string, ...string[]];
+    expect(tip).toMatch(/^\s+id:\s*tip\s*$/m);
+    expect(tip).toMatch(/^\s+shell:\s*bash\s*$/m);
+    expect(tip).toMatch(/^\s+GH_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}\s*$/m);
+    expect(tip).not.toContain('secrets.');
+    expect(tip).toContain('git/ref/heads/main');
+    for (const step of later) {
+      expect(step.match(/^\s+if:.*$/gm)).toEqual([
+        expect.stringMatching(
+          /^\s+if: steps\.tip\.outputs\.current == 'true'$/,
+        ),
+      ]);
+    }
+    expect(later.some((step) => step.includes('DEPLOY_SSH_KEY'))).toBe(true);
+    expect(later.some((step) => step.includes('scripts/deploy.sh'))).toBe(true);
+    expect(later.some((step) => step.includes('actions/checkout@'))).toBe(true);
   });
 
   it('never puts an expression inside a run script', async () => {
@@ -201,6 +257,98 @@ describe('deploy workflow', () => {
       expect(text).toMatch(new RegExp(`^\\s+${name}:`, 'm'));
     }
     expect(text).toMatch(/vars\.DEPLOY_HOST/);
+  });
+});
+
+describe('deploy workflow tip guard script', () => {
+  const SHA = 'a'.repeat(40);
+  const NEWER = 'b'.repeat(40);
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'tip-guard-'));
+    await mkdir(join(root, 'bin'));
+    await writeFile(
+      join(root, 'bin', 'gh'),
+      `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_GH_LOG"
+if [ -n "\${FAKE_GH_FAIL:-}" ]; then exit 1; fi
+printf '%s\\n' "$FAKE_TIP"
+`,
+    );
+    await chmod(join(root, 'bin', 'gh'), 0o755);
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  async function runTip(extra: Record<string, string>) {
+    const deploy = jobs(await read('.github/workflows/deploy.yml')).get(
+      'deploy',
+    );
+    const tip = stepsOf(deploy ?? '')[0] ?? '';
+    const script = runScripts(tip)[0] ?? '';
+    expect(script).not.toBe('');
+    const file = join(root, 'tip.sh');
+    const output = join(root, 'output');
+    await writeFile(file, script);
+    await writeFile(output, '');
+    const result = spawnSync(
+      'bash',
+      ['--noprofile', '--norc', '-eo', 'pipefail', file],
+      {
+        env: {
+          PATH: `${join(root, 'bin')}:/usr/bin:/bin`,
+          HOME: root,
+          GITHUB_SHA: SHA,
+          GITHUB_REPOSITORY: 'acme/site',
+          GITHUB_OUTPUT: output,
+          FAKE_GH_LOG: join(root, 'gh.log'),
+          ...extra,
+        },
+        encoding: 'utf8',
+      },
+    );
+    return {
+      code: result.status,
+      stdout: result.stdout,
+      output: await readFile(output, 'utf8'),
+      ghLog: await readFile(join(root, 'gh.log'), 'utf8').catch(() => ''),
+    };
+  }
+
+  it('marks the run current when its commit is the tip', async () => {
+    const result = await runTip({ FAKE_TIP: SHA });
+    expect(result.code).toBe(0);
+    expect(result.output).toContain('current=true');
+    expect(result.ghLog.trim()).toBe(
+      'api repos/acme/site/git/ref/heads/main --jq .object.sha',
+    );
+  });
+
+  it('ends green with a notice naming both commits when a newer commit is the tip', async () => {
+    const result = await runTip({ FAKE_TIP: NEWER });
+    expect(result.code).toBe(0);
+    expect(result.output).toContain('current=false');
+    expect(result.output).not.toContain('current=true');
+    const notice = result.stdout
+      .split('\n')
+      .find((line) => line.startsWith('::notice::'));
+    expect(notice).toContain(SHA);
+    expect(notice).toContain(NEWER);
+  });
+
+  it('fails without deploying when the lookup fails', async () => {
+    const result = await runTip({ FAKE_TIP: SHA, FAKE_GH_FAIL: '1' });
+    expect(result.code).not.toBe(0);
+    expect(result.output).not.toContain('current=true');
+  });
+
+  it('fails without deploying when the lookup is not a commit id', async () => {
+    const result = await runTip({ FAKE_TIP: 'not-a-sha' });
+    expect(result.code).not.toBe(0);
+    expect(result.output).not.toContain('current=true');
   });
 });
 
@@ -466,6 +614,8 @@ describe('deploy guide', () => {
       'DATABASE_MIGRATION_URL',
       'read:packages',
       'no backup',
+      'tip of',
+      'production-deploy',
     ]) {
       expect(text.toLowerCase()).toContain(part.toLowerCase());
     }
