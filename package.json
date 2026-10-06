@@ -14,16 +14,19 @@
     "format:check": "oxfmt --check",
     "verify:publishable": "bash scripts/verify-publishable.sh",
     "changeset": "changeset",
-    "release:version": "changeset version && pnpm install --no-frozen-lockfile"
+    "release:version": "changeset version && pnpm install --no-frozen-lockfile",
+    "verify:scaffold": "bash scripts/verify-scaffold.sh"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "catalog:",
     "@changesets/changelog-github": "catalog:",
     "@changesets/cli": "catalog:",
     "@types/node": "catalog:",
+    "@types/pg": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "pg": "catalog:",
     "publint": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",

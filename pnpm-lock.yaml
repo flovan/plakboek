@@ -280,6 +280,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.2
+      '@types/pg':
+        specifier: 'catalog:'
+        version: 8.23.1
       oxfmt:
         specifier: 'catalog:'
         version: 0.67.0
@@ -289,6 +292,9 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 7.0.2001
+      pg:
+        specifier: 'catalog:'
+        version: 8.23.0
       publint:
         specifier: 'catalog:'
         version: 0.3.24
