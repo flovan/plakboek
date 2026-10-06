@@ -29,6 +29,10 @@ export function cmsRoutes(): RouteConfigEntry[] {
   return [
     route('cms/health', file('health'), { id: 'plakboek-health' }),
     route('cms/setup', file('setup'), { id: 'plakboek-setup' }),
+    route('cms/setup/test-email', file('test-email'), {
+      id: 'plakboek-setup-test-email',
+    }),
+    route('api/auth/*', file('auth-api'), { id: 'plakboek-auth' }),
     // The visitor entries stay last: a splat does not match "/", so the
     // visitor route needs both an index and a splat entry.
     index(file('visitor'), { id: 'plakboek-visitor-index' }),

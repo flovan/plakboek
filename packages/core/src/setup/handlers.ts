@@ -8,6 +8,8 @@
  * submitters is closed by the first-user lock inside `bootstrapInstallation`,
  * and the window closes with the first user.
  */
+import { MailSendError } from '@plakboek/auth';
+import { messageOf, oneLine } from '../cli/output.js';
 import {
   DatabaseNotReadyError,
   InstallationNotEmptyError,
@@ -16,14 +18,20 @@ import {
   type BootstrapField,
 } from '../runtime/bootstrap.js';
 import { isDatabaseNotReady } from '../runtime/db.js';
+import { MailNotConfiguredError, buildTestEmail } from '../runtime/mail.js';
 import type { Runtime } from '../runtime/runtime.js';
 import {
   renderSetupComplete,
   renderSetupForm,
   renderSetupUnavailable,
+  type TestEmailResult,
 } from './render.js';
 import { SETUP_CSP } from './styles.js';
-import { createTestEmailToken } from './token.js';
+import {
+  createTestEmailToken,
+  verifyTestEmailToken,
+  type SendLimiter,
+} from './token.js';
 
 /** Headers on every setup response: uncacheable, unindexable, locked down. */
 export function setupHeaders(): Record<string, string> {
@@ -171,5 +179,70 @@ function unprocessable(
       issues,
     }),
     422,
+  );
+}
+
+/** The transport's own error text, on one line, with SMTP credentials removed. */
+function transportDetail(error: unknown, secrets: readonly string[]): string {
+  const detail =
+    error instanceof MailSendError && error.cause !== undefined
+      ? messageOf(error.cause)
+      : messageOf(error);
+  return oneLine(detail, secrets).replace(/\.+$/, '');
+}
+
+/**
+ * "Send test email" (D-10). The signed token is the only authority: it names
+ * a user, the address is read from that user's row, and a request-supplied
+ * address is never looked at, so this cannot be used as an open mail relay
+ * (T-06-37). Anything unproven, expired, exhausted or stale is the host 404.
+ * Whatever the transport does, the response is the done screen, so a failed
+ * test never blocks setup.
+ */
+export async function handleTestEmailPost(
+  request: Request,
+  runtime: Runtime,
+  limiter: SendLimiter,
+): Promise<Response> {
+  if (!isSameOrigin(request, runtime)) return forbidden();
+
+  const { token = '' } = await readFormFields(request, ['token']);
+  const verified = verifyTestEmailToken(token, { secret: runtime.env.secret });
+  if (verified === null) return await runtime.notFoundResponse(request);
+  if (!limiter.consume(verified.tokenId)) {
+    return await runtime.notFoundResponse(request);
+  }
+
+  const [row] = await runtime.db.sql<
+    { email: string }[]
+  >`SELECT email FROM "user" WHERE id = ${verified.userId}`;
+  if (row === undefined) return await runtime.notFoundResponse(request);
+
+  const secrets = [runtime.env.smtp?.user ?? '', runtime.env.smtp?.pass ?? ''];
+  let result: TestEmailResult;
+  try {
+    await runtime.mail.send(
+      buildTestEmail({ to: row.email, siteUrl: runtime.env.siteUrl }),
+    );
+    result =
+      runtime.mail.describe() === 'console'
+        ? { kind: 'console' }
+        : { kind: 'sent' };
+  } catch (error) {
+    if (error instanceof MailNotConfiguredError && error.reason === 'smtp') {
+      result = { kind: 'unconfigured' };
+    } else {
+      result = { kind: 'failed', detail: transportDetail(error, secrets) };
+    }
+  }
+
+  return setupResponse(
+    renderSetupComplete({
+      email: row.email,
+      token,
+      homePublished: verified.homePublished,
+      result,
+    }),
+    200,
   );
 }

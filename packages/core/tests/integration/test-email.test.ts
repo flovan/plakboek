@@ -13,6 +13,7 @@ import {
   expect,
   it,
   vi,
+  type MockInstance,
 } from 'vitest';
 import { bootstrapInstallation } from '../../src/runtime/bootstrap.js';
 import { closeAllDbs } from '../../src/runtime/db.js';
@@ -61,7 +62,7 @@ describe('handleTestEmailPost', () => {
   let config: PlakboekConfig;
   let database: TestDatabase;
   let userId: string;
-  let info: ReturnType<typeof vi.spyOn>;
+  let info: MockInstance<typeof console.info>;
 
   beforeAll(async () => {
     ({ default: config } = await import('../fixture-host/plakboek.config.ts'));
@@ -182,7 +183,12 @@ describe('handleTestEmailPost', () => {
     });
     const forged = `${token().split('.')[0] ?? ''}.AAAA`;
 
-    for (const fields of [{}, { token: forged }, { token: expired }]) {
+    const attempts: Record<string, string>[] = [
+      {},
+      { token: forged },
+      { token: expired },
+    ];
+    for (const fields of attempts) {
       const response = await handleTestEmailPost(
         post(fields),
         runtime,
