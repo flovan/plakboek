@@ -225,6 +225,127 @@ describe('the setup handlers', () => {
     expect(await userCount(runtime)).toBe(1);
   });
 
+  describe('with a body over 16 KiB', () => {
+    const CAP = 16 * 1024;
+
+    function paddedFields(size: number): string {
+      return new URLSearchParams({
+        ...valid,
+        pad: 'x'.repeat(size),
+      }).toString();
+    }
+
+    function post(
+      body: BodyInit,
+      headers: Record<string, string> = {},
+    ): Request {
+      return new Request(`${ORIGIN}/cms/setup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Origin: ORIGIN,
+          ...headers,
+        },
+        body,
+        ...(typeof body === 'string' ? {} : { duplex: 'half' }),
+      } as RequestInit);
+    }
+
+    function streamOf(
+      text: string,
+      onPull: () => void = () => undefined,
+    ): ReadableStream<Uint8Array> {
+      const bytes = new TextEncoder().encode(text);
+      let offset = 0;
+      return new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            onPull();
+            if (offset >= bytes.byteLength) {
+              controller.close();
+              return;
+            }
+            controller.enqueue(bytes.slice(offset, offset + 2048));
+            offset += 2048;
+          },
+        },
+        { highWaterMark: 0 },
+      );
+    }
+
+    it('answers 413 to a declared Content-Length over the cap', async () => {
+      const { runtime } = await freshRuntime();
+      const text = paddedFields(CAP);
+      const response = await handleSetupPost(
+        post(text, {
+          'Content-Length': String(new TextEncoder().encode(text).byteLength),
+        }),
+        runtime,
+      );
+      expect(response.status).toBe(413);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(await userCount(runtime)).toBe(0);
+    });
+
+    it('answers 413 to a chunked body without Content-Length', async () => {
+      const { runtime } = await freshRuntime();
+      const response = await handleSetupPost(
+        post(streamOf(paddedFields(CAP))),
+        runtime,
+      );
+      expect(response.status).toBe(413);
+      expect(await userCount(runtime)).toBe(0);
+    });
+
+    it('answers 413 when Content-Length understates the real body', async () => {
+      const { runtime } = await freshRuntime();
+      const response = await handleSetupPost(
+        post(paddedFields(CAP), { 'Content-Length': '64' }),
+        runtime,
+      );
+      expect(response.status).toBe(413);
+      expect(await userCount(runtime)).toBe(0);
+    });
+
+    it('rejects a declared size without reading the body', async () => {
+      const { runtime } = await freshRuntime();
+      let pulled = false;
+      const response = await handleSetupPost(
+        post(
+          streamOf(paddedFields(CAP), () => {
+            pulled = true;
+          }),
+          { 'Content-Length': '32768' },
+        ),
+        runtime,
+      );
+      expect(response.status).toBe(413);
+      expect(pulled).toBe(false);
+    });
+
+    it('fails closed on a non-numeric Content-Length', async () => {
+      const { runtime } = await freshRuntime();
+      const response = await handleSetupPost(
+        post(new URLSearchParams(valid).toString(), {
+          'Content-Length': 'abc',
+        }),
+        runtime,
+      );
+      expect(response.status).toBe(413);
+      expect(await userCount(runtime)).toBe(0);
+    });
+
+    it('still accepts a body of about 15 KiB', async () => {
+      const { runtime } = await freshRuntime();
+      const response = await handleSetupPost(
+        post(paddedFields(15 * 1024 - 200)),
+        runtime,
+      );
+      expect(response.status).toBe(200);
+      expect(await userCount(runtime)).toBe(1);
+    });
+  });
+
   it('answers 503 on an unmigrated database without connection details', async () => {
     const { runtime, database } = await freshRuntime({ migrate: false });
     const response = await handleSetupGet(

@@ -118,6 +118,30 @@ describe('react-router dev on the fixture host', () => {
     expect(body).toContain('/@vite/client');
     expect(body).toContain('</head>');
   });
+
+  it('refuses an oversized chunked setup post with 413', async () => {
+    let sent = 0;
+    const response = await fetch(
+      `http://127.0.0.1:${port}/cms/setup/test-email`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (sent >= 32 * 1024) {
+              controller.close();
+              return;
+            }
+            controller.enqueue(new Uint8Array(4096).fill(120));
+            sent += 4096;
+          },
+        }),
+        duplex: 'half',
+      } as RequestInit,
+    );
+    expect(response.status).toBe(413);
+    await response.text();
+  });
 });
 
 describe('react-router dev without a secret', () => {

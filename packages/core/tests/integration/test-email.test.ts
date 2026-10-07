@@ -234,6 +234,57 @@ describe('handleTestEmailPost', () => {
     expect(info).not.toHaveBeenCalled();
   });
 
+  it('answers 413 to oversized bodies before parsing and keeps the send unspent', async () => {
+    const runtime = runtimeWith({});
+    const limiter = createSendLimiter({ max: 1 });
+    const one = token();
+    const text = new URLSearchParams({
+      token: one,
+      pad: 'x'.repeat(16 * 1024),
+    }).toString();
+    const bytes = new TextEncoder().encode(text);
+    const headers = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Origin: ORIGIN,
+    };
+    const url = `${ORIGIN}/cms/setup/test-email`;
+
+    const declared = new Request(url, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Length': String(bytes.byteLength) },
+      body: text,
+    });
+    const chunked = new Request(url, {
+      method: 'POST',
+      headers,
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      }),
+      duplex: 'half',
+    } as RequestInit);
+    const lying = new Request(url, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Length': '64' },
+      body: text,
+    });
+
+    for (const request of [declared, chunked, lying]) {
+      const response = await handleTestEmailPost(request, runtime, limiter);
+      expect(response.status).toBe(413);
+    }
+    expect(info).not.toHaveBeenCalled();
+
+    const normal = await handleTestEmailPost(
+      post({ token: one }),
+      runtime,
+      limiter,
+    );
+    expect(normal.status).toBe(200);
+  });
+
   it('refuses a foreign origin with 403 before any work', async () => {
     const runtime = runtimeWith({});
     const response = await handleTestEmailPost(
