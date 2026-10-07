@@ -2,7 +2,19 @@
   "$schema": "https://unpkg.com/@changesets/config@3.0.2/schema.json",
   "changelog": ["@changesets/changelog-github", { "repo": "flovan/plakboek" }],
   "commit": false,
-  "fixed": [["@plakboek/permissions", "@plakboek/db"]],
+  "fixed": [
+    [
+      "@plakboek/auth",
+      "@plakboek/cache",
+      "@plakboek/content",
+      "@plakboek/core",
+      "@plakboek/db",
+      "@plakboek/pages",
+      "@plakboek/permissions",
+      "@plakboek/render",
+      "create-plakboek"
+    ]
+  ],
   "linked": [],
   "access": "public",
   "baseBranch": "main",

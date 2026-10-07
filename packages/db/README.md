@@ -54,11 +54,19 @@ const result = await runMigrations({
   connectionString: process.env.DATABASE_URL!,
   lockWaitMs: 60_000, // optional, default 60000
   lockPollIntervalMs: 250, // optional, default 250
+  onLockWait: () => console.log('Waiting for the migration lock'), // optional
+  onMigrationStart: (name) => console.log(`Applying ${name}`), // optional
 });
 
 // result.applied: names of migrations applied by this call
 // result.alreadyApplied: names that were already applied before this call
 ```
+
+`onLockWait` fires once, the first time another migrator holds the lock, however
+long the wait lasts. `onMigrationStart(name)` fires once per pending migration,
+just before it applies, and never for an already-applied one. Hooks receive
+migration names only. A hook that throws is ignored: it never aborts, rolls back
+or reorders the run.
 
 `runMigrations` is safe to call from every instance of a rolling deploy: it
 opens its own connection, holds the advisory lock for the duration of the

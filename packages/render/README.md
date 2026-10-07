@@ -168,6 +168,12 @@ One bad block never takes a page down.
 - An error outside every block (the head, the document composer) fails the
   whole render. The handler reports `onRenderError` and answers a 500 with
   `Cache-Control: no-store`, no error text in the body, and nothing cached.
+  A composer may be async: the handler awaits it inside the same guard, so a
+  rejecting composer is that same uncached 500.
+- A document composer receives `publicPath`, the canonical visitor path the
+  page is served at (`/`, `/about`, `/nl`), the same value the page is cached
+  under. A header or footer template can compare it with its links to mark the
+  current one.
 - A block declared with a `component` that is not a plain function (a `memo` or
   `forwardRef` object, a class component, any other value) is refused when the
   handler is created: `createVisitorHandler` throws one
@@ -242,8 +248,8 @@ updating them.
 | `EditAttributes`        | type     | `data-` attributes the editor binds to                                 |
 | `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes     |
 | `PageHead`              | type     | What a document composer needs to write a page's `<head>`              |
-| `DocumentInput`         | type     | `{ head, body }`: what a document composer receives                    |
-| `RenderDocument`        | type     | A host's document composer: `(input) => string`                        |
+| `DocumentInput`         | type     | `{ head, body, publicPath }`: what a document composer receives        |
+| `RenderDocument`        | type     | A host's document composer: `(input) => string \| Promise<string>`     |
 
 ### Server entry: `@plakboek/render/server`
 

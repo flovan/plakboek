@@ -1,13 +1,16 @@
 # Releasing `@plakboek/*`
 
-This document describes how the `@plakboek/*` packages reach the public
-npm registry. The publish list is every non-private package under
-`packages/`, derived from the workspace by
-`scripts/release/publish-unpublished.ts` -- currently `auth`, `content`,
-`db`, and `permissions`. `@plakboek/permissions` and `@plakboek/db` are
-additionally versioned together as one Changesets `fixed` group
-(`.changeset/config.json`), so those two always ship at the same version
-while the others version independently.
+This document describes how the `@plakboek/*` packages and the
+`create-plakboek` scaffolder reach the public npm registry. The publish
+list is every non-private package under `packages/`, derived from the
+workspace by `scripts/release/publish-unpublished.ts` -- currently
+`@plakboek/auth`, `@plakboek/cache`, `@plakboek/content`,
+`@plakboek/core`, `@plakboek/db`, `@plakboek/pages`,
+`@plakboek/permissions`, `@plakboek/render` and the unscoped
+`create-plakboek`. All nine are one Changesets `fixed` group
+(`.changeset/config.json`), so they always ship at the same version. That
+guarantee is what lets the scaffolded starter pin `@plakboek/core` and
+`@plakboek/render` to the scaffolder's own version.
 
 ## Steady state
 
@@ -46,7 +49,7 @@ scripts/release/publish-unpublished.ts`, which packs each package with
 npm's trusted-publisher configuration can only be attached to a package
 that already exists on the registry -- there is no way to configure OIDC
 trust for a name that has never been published. The very first publish of
-any `@plakboek/*` package is therefore a one-time, human-performed,
+any package is therefore a one-time, human-performed,
 classic-auth action, done once per package, before the automated pipeline
 above can take over for it.
 
@@ -55,6 +58,15 @@ a package with no version on npm at all, it prints a `::warning::`
 annotation pointing back at this document and reports the package as
 `bootstrap-required` in its summary line -- it never attempts to publish
 that package itself.
+
+`@plakboek/core` and `create-plakboek` are the two names not yet on the
+registry. The seven other packages are already published. Bootstrap order:
+`@plakboek/core` first, then `create-plakboek` (it has no runtime
+dependency on the others; the starter it writes pins `@plakboek/*` to its own
+version). Pack the pre-version-bump versions from the merge commit of the
+pull request that introduces them, into `.release-bootstrap/`, and publish
+each tarball as shown below. For the unscoped name the tarball file is
+`create-plakboek-<version>.tgz`.
 
 To bootstrap a package (maintainer only, requires account-level 2FA on the
 npm account -- classic auth, not a token), run these commands from the
@@ -104,6 +116,12 @@ so invoke a current npm via `npx`:
 npx -y npm@11.19.1 trust github @plakboek/<name> --file release.yml --repository flovan/plakboek --allow-publish --yes
 ```
 
+For the unscoped scaffolder the name has no scope:
+
+```sh
+npx -y npm@11.19.1 trust github create-plakboek --file release.yml --repository flovan/plakboek --allow-publish --yes
+```
+
 Verify the binding (also requires npm `>=11.15.0`):
 
 ```sh
@@ -123,6 +141,13 @@ relationship from the npm website instead: open the package on npmjs.com,
 - **Repository:** `plakboek`
 - **Workflow filename:** `release.yml`
 - **Environment:** (leave empty)
+
+Until both `@plakboek/core` and `create-plakboek` are bootstrapped and
+trusted, the release workflow reports them as `bootstrap-required` and its
+post-release `smoke` job (`verify-scaffold.sh --registry`, which scaffolds a
+host from the registry) fails: it installs names that do not exist yet.
+After bootstrapping, rerun the workflow with
+`gh workflow run release.yml --ref main` and the `smoke` job passes.
 
 Once every publishable package has been bootstrapped and trusted, remove
 the `.release-bootstrap/` directory -- it is a scratch location, not a

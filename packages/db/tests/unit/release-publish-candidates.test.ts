@@ -64,28 +64,32 @@ describe('release publish candidates', () => {
       '@plakboek/auth',
       '@plakboek/cache',
       '@plakboek/content',
+      '@plakboek/core',
       '@plakboek/db',
       '@plakboek/pages',
       '@plakboek/permissions',
       '@plakboek/render',
+      'create-plakboek',
     ]);
   });
 
-  it('the Changesets fixed group is a version-sharing group, not the publish list', () => {
+  it('the Changesets fixed group is exactly the publishable set', () => {
     const config = JSON.parse(
       readFileSync(join(REPO_ROOT, '.changeset', 'config.json'), 'utf8'),
     ) as { fixed: string[][] };
-    const fixed = config.fixed[0] ?? [];
     const publishable = workspacePackages()
       .filter((entry) => !entry.private)
-      .map((entry) => entry.name);
+      .map((entry) => entry.name)
+      .sort();
 
-    // Every fixed-group member must be a real publishable package...
-    for (const name of fixed) {
-      expect(publishable).toContain(name);
-    }
-    // ...but the publish list is expected to be strictly larger. If these
-    // ever match, the distinction has collapsed and the old bug can return.
-    expect(publishable.length).toBeGreaterThan(fixed.length);
+    // Every publishable package versions together as one group, so the
+    // starter's `@plakboek/core` / `@plakboek/render` pins can equal the CLI's
+    // own version (01 D-17, D-18). A package missing from the group would
+    // drift to its own version line and break that pin; a name in the group
+    // that is not publishable would make Changesets fail on an unknown
+    // package. The first test above is what still stops the publish loop
+    // from walking this group instead of the workspace.
+    expect(config.fixed).toHaveLength(1);
+    expect([...(config.fixed[0] ?? [])].sort()).toEqual(publishable);
   });
 });

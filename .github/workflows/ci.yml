@@ -106,6 +106,55 @@ jobs:
       - run: pnpm run check
       - run: bash scripts/verify-publishable.sh
 
+  scaffold:
+    name: Scaffold
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Only an admin connection: the proof creates and drops its own database.
+      SCAFFOLD_DATABASE_URL: postgres://postgres:test@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/verify-scaffold.sh
+
+  deploy-proof:
+    name: Deploy proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/verify-deploy.sh
+
   changesets:
     name: Changesets
     runs-on: ubuntu-latest

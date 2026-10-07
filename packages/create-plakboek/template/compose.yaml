@@ -1,0 +1,104 @@
+# The production stack: the app, its database and the reverse proxy that
+# terminates TLS. The deploy script always passes `-f compose.yaml`, so
+# compose.override.yaml (development only) is never part of a deploy.
+#
+# Settings come from a `.env` file next to this file. See DEPLOY.md.
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-plakboek}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-plakboek}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # One-off: `docker compose -f compose.yaml run --rm migrate`. The app never
+  # migrates on boot; a deploy runs this first and only restarts the app when
+  # it succeeds.
+  migrate:
+    image: ${PLAKBOEK_IMAGE:-plakboek-app:local}
+    profiles: ['tools']
+    restart: 'no'
+    command: ['./node_modules/.bin/plakboek', 'migrate']
+    env_file: .env
+    environment:
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    image: ${PLAKBOEK_IMAGE:-plakboek-app:local}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/cms/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '${CADDY_HTTP_PORT:-80}:80'
+      - '${CADDY_HTTPS_PORT:-443}:443'
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+
+# The proxy only forwards: the app sets Cache-Control and ETag, and Caddy keeps
+# them. The retry window below holds a request for up to 15 seconds while the
+# app container is replaced, so a deploy shows no 502.
+# The setup form is refused past 16 KiB here, as in the app, so oversized setup
+# bodies never reach the app container. Every other request body is capped at
+# 64 MB, which leaves room for file uploads; raise that ceiling if the site
+# needs larger uploads.
+configs:
+  caddyfile:
+    content: |
+      ${SITE_ADDRESS:?Set SITE_ADDRESS in .env} {
+        encode zstd gzip
+        request_body /cms/setup* {
+          max_size 16KiB
+        }
+        request_body {
+          max_size 64MB
+        }
+        header Strict-Transport-Security "max-age=31536000"
+        reverse_proxy app:3000 {
+          lb_try_duration 15s
+          lb_try_interval 250ms
+        }
+      }
+
+volumes:
+  pgdata:
+  caddy-data:
+  caddy-config:

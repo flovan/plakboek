@@ -69,11 +69,15 @@ const headInput: PageHeadInput = {
   siteUrl: 'https://example.test',
 };
 const head: PageHead = buildPageHead(headInput);
-const input: DocumentInput = { head, body: '<main>probe</main>' };
+const input: DocumentInput = {
+  head,
+  body: '<main>probe</main>',
+  publicPath: '/en/about',
+};
 const composer: RenderDocument = renderDefaultDocument;
 
 const headMarkup = renderHeadHtml(head);
-const html = composer(input);
+const html = await composer(input);
 
 expectEqual(
   'canonical from siteUrl',

@@ -8,7 +8,8 @@ installation that depends on them.
 
 Requirements: Node `>=22.18` and pnpm (the exact version is pinned via the
 `packageManager` field in the root `package.json`; `corepack enable` will
-pick it up automatically).
+pick it up automatically). This repository itself needs `>=22.18`; hosts
+scaffolded by `create-plakboek` need Node `>=22.22`.
 
 ```sh
 docker compose up -d --wait postgres   # local Postgres, used by @plakboek/db's integration tests
@@ -23,19 +24,24 @@ pnpm run build             # tsdown build for every package
 pnpm run test              # unit tests
 pnpm run test:integration  # integration tests against real Postgres (needs the container above)
 pnpm run typecheck         # tsc --noEmit for every package
-pnpm run lint              # type-aware oxlint (--type-aware --deny-warnings)
+pnpm run lint              # type-aware oxlint (--type-aware --deny-warnings --disable-nested-config)
 pnpm run format             # oxfmt, writes changes
 pnpm run format:check       # oxfmt, checks only
 pnpm run check               # publint + attw per package
 pnpm run verify:publishable  # pack every package, install into a throwaway non-workspace consumer, type-check and import it at runtime
+bash scripts/verify-scaffold.sh  # scaffold a host from packed tarballs, install, build, boot and probe it
+bash scripts/verify-deploy.sh    # build the host image and prove its deploy flow
 ```
+
+The last two are the end-to-end proofs CI runs on top of the unit and
+integration suites.
 
 ## Code style
 
 Formatting is enforced by `oxfmt` (`.oxfmtrc.json`): 2-space indentation, no
 tabs, single quotes, trailing commas everywhere, 80-column print width.
 `pnpm run format:check` runs in CI; `pnpm run format` writes the fix. Linting
-is `oxlint --type-aware --deny-warnings` (`.oxlintrc.json`), including
+is `oxlint --type-aware --deny-warnings --disable-nested-config` (`.oxlintrc.json`), including
 type-aware TypeScript rules -- `type` aliases over `interface`, `Record<>`
 over index signatures, no floating/misused promises, and vitest-authoring
 rules for the test suites. A rule violation you genuinely need to keep needs
@@ -50,9 +56,11 @@ Every change under `packages/` must carry a changeset:
 pnpm changeset
 ```
 
-All `@plakboek/*` packages are versioned together as one **fixed** group
-(Changesets `fixed`) -- a change to one bumps the version of all of them
-together, so they never drift apart. While the packages are below `1.0.0`,
+Every publishable package (the `@plakboek/*` packages and
+`create-plakboek`) is versioned together as one **fixed** group (Changesets
+`fixed`) -- a change to one bumps the version of all of them together, so
+they never drift apart and the starter's `@plakboek/*` pins always equal the
+scaffolder's version. While the packages are below `1.0.0`,
 a minor version bump may include breaking changes; pin an exact version if
 you need stability.
 

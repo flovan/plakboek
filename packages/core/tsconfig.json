@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client"],
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    // The fixture under tests/fixture-host is its own package, so it cannot
+    // import `@plakboek/core` by self-reference. The integration suite links
+    // the package into the fixture, but that symlink is absent when typecheck
+    // runs alone, as in CI's Quality job. Mapping the package name to src
+    // makes typecheck independent of that symlink and of a prior build.
+    "paths": {
+      "@plakboek/core": ["./src/index.ts"],
+      "@plakboek/core/*": ["./src/*.ts"]
+    }
+  },
+  "include": [
+    "src",
+    "tests",
+    "tsdown.config.ts",
+    "vitest.config.ts",
+    "vitest.integration.config.ts"
+  ],
+  "exclude": ["tests/fixture-host"]
+}

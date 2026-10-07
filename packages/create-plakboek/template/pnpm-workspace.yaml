@@ -1,0 +1,22 @@
+# Supply-chain hardening. It mirrors the settings of the CMS monorepo; keep it
+# when you edit this file.
+minimumReleaseAge: 1440
+# First-party packages are published with provenance by the CMS release
+# pipeline, so a freshly released version must stay installable.
+minimumReleaseAgeExclude:
+  - '@plakboek/*'
+  - 'create-plakboek'
+trustPolicy: no-downgrade
+strictDepBuilds: true
+dangerouslyAllowAllBuilds: false
+# Reviewed: esbuild's postinstall only verifies a native binary; tsx works without it.
+allowBuilds:
+  esbuild: false
+blockExoticSubdeps: true
+verifyStoreIntegrity: true
+strictStorePkgContentCheck: true
+verifyDepsBeforeRun: error
+# Reviewed benign trust downgrades (publish-method changes, not takeovers).
+trustPolicyExclude:
+  - 'undici-types@6.21.0' # provenance -> none; @types/node's pinned transitive dependency
+  - 'semver@6.3.1' # provenance -> none; transitive dependency of @react-router/dev

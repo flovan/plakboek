@@ -36,6 +36,17 @@ for tarball in "$TARBALL_DIR"/*.tgz; do
   while IFS= read -r entry; do
     case "$entry" in
       package/package.json | package/README.md | package/LICENSE | package/dist/*) ;;
+      # create-plakboek bundles its starter template (D-18); no other package
+      # may ship a template tree.
+      package/template/*)
+        case "$tarball_name" in
+          create-plakboek-*.tgz) ;;
+          *)
+            echo "FATAL: unexpected tarball entry '$entry' in $tarball_name" >&2
+            exit 1
+            ;;
+        esac
+        ;;
       *)
         echo "FATAL: unexpected tarball entry '$entry' in $tarball_name" >&2
         exit 1
@@ -69,7 +80,9 @@ echo "==> Installing packed tarballs into the consumer"
   # @types/node: the probes call process.exit() for their runtime assertions,
   # which needs Node's ambient types to type-check here -- it is not part of
   # either published package's own type surface.
-  npm install --no-audit --no-fund --ignore-scripts "$TARBALL_DIR"/*.tgz @types/node
+  # react-router, @react-router/dev and vite: @plakboek/core's routes and vite
+  # entries import them, and a real host always has them (optional peers).
+  npm install --no-audit --no-fund --ignore-scripts "$TARBALL_DIR"/*.tgz @types/node react-router @react-router/dev vite
 )
 
 echo "==> Copying consumer probes"

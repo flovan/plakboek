@@ -23,6 +23,9 @@ export class MigrationLockTimeoutError extends Error {
 export type LockOptions = {
   readonly waitMs?: number;
   readonly pollIntervalMs?: number;
+  /** Called once, the first time the lock is not immediately available. A
+   * hook that throws is ignored: it never aborts the wait. */
+  readonly onWait?: () => void;
 };
 
 const DEFAULT_WAIT_MS = 60_000;
@@ -51,10 +54,20 @@ async function acquire(
   client: Client,
   waitMs: number,
   pollIntervalMs: number,
+  onWait: (() => void) | undefined,
 ): Promise<void> {
   const start = Date.now();
+  let reported = false;
   for (;;) {
     if (await tryAcquire(client)) return;
+    if (!reported) {
+      reported = true;
+      try {
+        onWait?.();
+      } catch {
+        // A progress hook never crashes the lock it reports on.
+      }
+    }
     const elapsedMs = Date.now() - start;
     if (elapsedMs >= waitMs) {
       throw new MigrationLockTimeoutError(elapsedMs);
@@ -109,7 +122,7 @@ export async function withMigrationLock<T>(
   const waitMs = options?.waitMs ?? DEFAULT_WAIT_MS;
   const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 
-  await acquire(client, waitMs, pollIntervalMs);
+  await acquire(client, waitMs, pollIntervalMs, options?.onWait);
 
   const outcome = await runGuarded(fn);
 

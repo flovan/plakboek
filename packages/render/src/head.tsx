@@ -23,10 +23,21 @@ export type PageHead = {
 export type DocumentInput = {
   readonly head: PageHead;
   readonly body: string;
+  /**
+   * The canonical visitor path the page is served at: the cache key, so
+   * lower-case, no trailing slash except the root, default locale unprefixed
+   * (`/`, `/about`, `/nl`). Never derived from the request host. A template
+   * uses it to mark the current link.
+   */
+  readonly publicPath: string;
 };
 
-/** A host's document composer: the whole HTML document as a string. */
-export type RenderDocument = (input: DocumentInput) => string;
+/**
+ * A host's document composer: the whole HTML document as a string. It may be
+ * async so a composer can read data first (a menu, say); a rejection becomes
+ * the host's 500 page and is never cached.
+ */
+export type RenderDocument = (input: DocumentInput) => string | Promise<string>;
 
 /** The stored SEO set, as a structural type so this package needs no
  * `@plakboek/content` dependency. `sitemapInclude` is a sitemap concern,

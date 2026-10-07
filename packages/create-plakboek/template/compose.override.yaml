@@ -1,0 +1,8 @@
+# Development only. Docker Compose merges this file when you run it without
+# `-f`, for example `docker compose up -d postgres`. It publishes the database
+# on the loopback interface so `pnpm dev` and `pnpm plakboek migrate` can reach
+# it. The production deploy uses `-f compose.yaml` and never reads this file.
+services:
+  postgres:
+    ports:
+      - '127.0.0.1:5432:5432'
