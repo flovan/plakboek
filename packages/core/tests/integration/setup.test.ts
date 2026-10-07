@@ -236,7 +236,7 @@ describe('the setup handlers', () => {
     }
 
     function post(
-      body: BodyInit,
+      body: string | ReadableStream<Uint8Array>,
       headers: Record<string, string> = {},
     ): Request {
       return new Request(`${ORIGIN}/cms/setup`, {

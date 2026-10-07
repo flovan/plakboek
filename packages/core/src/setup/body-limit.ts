@@ -39,3 +39,56 @@ export function payloadTooLarge(): Response {
     },
   });
 }
+
+/** The outcome of a capped read: the bytes, or a body over the cap. */
+export type BodyRead =
+  | { readonly kind: 'bytes'; readonly bytes: Uint8Array }
+  | { readonly kind: 'too-large' }
+  | { readonly kind: 'unreadable' };
+
+/**
+ * Reads a request body of at most `maxBytes`, in every runtime. A declared
+ * Content-Length over the cap, or one that is not a plain integer, is refused
+ * without touching the body. It is never trusted as an upper bound, though:
+ * the bytes are counted as they arrive and the stream is cancelled the moment
+ * the count passes the cap, so a header that understates the body gains
+ * nothing.
+ */
+export async function readBodyWithinLimit(
+  request: Request,
+  maxBytes: number,
+): Promise<BodyRead> {
+  const declared = request.headers.get('content-length')?.trim();
+  if (declared !== undefined) {
+    if (!/^\d+$/.test(declared) || Number(declared) > maxBytes) {
+      return { kind: 'too-large' };
+    }
+  }
+  if (request.body === null) return { kind: 'bytes', bytes: new Uint8Array(0) };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return { kind: 'too-large' };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { kind: 'unreadable' };
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { kind: 'bytes', bytes };
+}

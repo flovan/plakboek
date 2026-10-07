@@ -6,7 +6,8 @@
  * Setup exists only while the installation has zero users (D-08). It is
  * deliberately open to anyone who can reach it (D-09); the race between two
  * submitters is closed by the first-user lock inside `bootstrapInstallation`,
- * and the window closes with the first user.
+ * and the window closes with the first user. Both POST bodies are capped at
+ * 16 KiB before parsing (T-06-86), whatever server or dev adapter delivers them.
  */
 import { MailSendError } from '@plakboek/auth';
 import { messageOf, oneLine } from '../cli/output.js';
@@ -26,6 +27,11 @@ import {
   renderSetupUnavailable,
   type TestEmailResult,
 } from './render.js';
+import {
+  SETUP_BODY_LIMIT_BYTES,
+  payloadTooLarge,
+  readBodyWithinLimit,
+} from './body-limit.js';
 import { SETUP_CSP } from './styles.js';
 import {
   createTestEmailToken,
@@ -84,16 +90,28 @@ async function hasUsers(runtime: Runtime): Promise<boolean> {
   return row?.populated === true;
 }
 
-/** Form fields as strings; a missing or non-text value is an empty string. */
+/**
+ * Form fields as strings; a missing or non-text value is an empty string.
+ * The body is read through a 16 KiB cap before anything is parsed (T-06-86),
+ * so an oversized post never reaches `FormData`. Returns `null` when the body
+ * is over the cap.
+ */
 export async function readFormFields(
   request: Request,
   names: readonly string[],
-): Promise<Record<string, string>> {
+): Promise<Record<string, string> | null> {
+  const read = await readBodyWithinLimit(request, SETUP_BODY_LIMIT_BYTES);
+  if (read.kind === 'too-large') return null;
+
   let form: FormData | undefined;
-  try {
-    form = await request.formData();
-  } catch {
-    form = undefined;
+  if (read.kind === 'bytes') {
+    try {
+      form = await new Response(read.bytes, {
+        headers: { 'Content-Type': request.headers.get('Content-Type') ?? '' },
+      }).formData();
+    } catch {
+      form = undefined;
+    }
   }
   const fields: Record<string, string> = {};
   for (const name of names) {
@@ -132,6 +150,7 @@ export async function handleSetupPost(
     }
 
     const fields = await readFormFields(request, SETUP_FIELDS);
+    if (fields === null) return payloadTooLarge();
     const input = {
       name: fields.name ?? '',
       email: fields.email ?? '',
@@ -206,7 +225,9 @@ export async function handleTestEmailPost(
 ): Promise<Response> {
   if (!isSameOrigin(request, runtime)) return forbidden();
 
-  const { token = '' } = await readFormFields(request, ['token']);
+  const fields = await readFormFields(request, ['token']);
+  if (fields === null) return payloadTooLarge();
+  const { token = '' } = fields;
   const verified = verifyTestEmailToken(token, { secret: runtime.env.secret });
   if (verified === null) return await runtime.notFoundResponse(request);
   if (!limiter.consume(verified.tokenId)) {
