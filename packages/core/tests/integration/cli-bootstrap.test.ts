@@ -63,7 +63,14 @@ async function bootstrap(
   });
   const secrets = [PASSWORD, '12345678901'];
   const url = options.env.DATABASE_URL;
-  if (url !== undefined) secrets.push(url, new URL(url).password);
+  if (url !== undefined) {
+    secrets.push(url);
+    // The database password comes from the environment and can be a common
+    // word (CI uses `test`, which the usage text's `mail:test` contains), so
+    // it is only checked on its own when it is long enough to be distinctive.
+    const { password } = new URL(url);
+    if (password.length >= 8) secrets.push(password);
+  }
   // Whatever a run printed, neither the password nor the database URL may be
   // in it.
   for (const secret of secrets.filter((value) => value.length > 0)) {
