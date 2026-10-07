@@ -236,9 +236,16 @@ describe('D-38 dual-scope version contract, raced against real Postgres', () => 
       'Two structural changes, same base page version',
     );
     const [moving] = siblings;
-    if (moving === undefined) throw new Error('fixture missing a sibling');
+    const last = siblings[siblings.length - 1];
+    if (moving === undefined || last === undefined) {
+      throw new Error('fixture missing a sibling');
+    }
     const basePageVersion = page.version;
 
+    // Both racers must be valid on their own: the page version is checked under
+    // the page lock before any placement check, so only the second racer fails
+    // on the stale version. A move to an invalid destination fails on placement
+    // when it wins the lock and lets the insert through.
     const results = await Promise.allSettled([
       insertBlock(deps, actor, {
         owner,
@@ -252,7 +259,8 @@ describe('D-38 dual-scope version contract, raced against real Postgres', () => 
         baseVersion: moving.version,
         pageId: page.id,
         basePageVersion,
-        newParentBlockId: null,
+        newParentBlockId: section.id,
+        beforeSiblingId: last.id,
       }),
     ]);
 
