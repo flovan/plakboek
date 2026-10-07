@@ -6,7 +6,7 @@ The server runs Docker Compose with three services:
 
 - `app`, this site, built from the `Dockerfile`.
 - `postgres`, version 17, with its data in a named volume and no published port.
-- `caddy`, which gets and renews the TLS certificate, compresses responses and forwards requests to the app. It keeps the `Cache-Control` and `ETag` headers the app sets and caches nothing itself.
+- `caddy`, which gets and renews the TLS certificate, compresses responses, refuses oversized request bodies (setup form posts over 16 KiB and anything over 64 MB) and forwards requests to the app. It keeps the `Cache-Control` and `ETag` headers the app sets and caches nothing itself.
 
 A fourth service, `migrate`, is a one-off container that applies the CMS migrations. The app never migrates when it starts.
 

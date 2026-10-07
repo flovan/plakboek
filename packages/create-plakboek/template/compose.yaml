@@ -76,11 +76,21 @@ services:
 # The proxy only forwards: the app sets Cache-Control and ETag, and Caddy keeps
 # them. The retry window below holds a request for up to 15 seconds while the
 # app container is replaced, so a deploy shows no 502.
+# The setup form is refused past 16 KiB here, as in the app, so oversized setup
+# bodies never reach the app container. Every other request body is capped at
+# 64 MB, which leaves room for file uploads; raise that ceiling if the site
+# needs larger uploads.
 configs:
   caddyfile:
     content: |
       ${SITE_ADDRESS:?Set SITE_ADDRESS in .env} {
         encode zstd gzip
+        request_body /cms/setup* {
+          max_size 16KiB
+        }
+        request_body {
+          max_size 64MB
+        }
         header Strict-Transport-Security "max-age=31536000"
         reverse_proxy app:3000 {
           lb_try_duration 15s
