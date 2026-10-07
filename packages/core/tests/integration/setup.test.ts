@@ -262,6 +262,44 @@ describe('the setup page through the built fixture app', () => {
     await installation?.dispose();
   });
 
+  function chunkedBody(size: number): ReadableStream<Uint8Array> {
+    let sent = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= size) {
+          controller.close();
+          return;
+        }
+        const length = Math.min(4096, size - sent);
+        controller.enqueue(new Uint8Array(length).fill(120));
+        sent += length;
+      },
+    });
+  }
+
+  it('refuses oversized bodies with 413 and creates nothing', async () => {
+    const padded = await fetch(url('/cms/setup'), {
+      method: 'POST',
+      headers: { Origin: ORIGIN },
+      body: new URLSearchParams({ ...valid, pad: 'x'.repeat(32 * 1024) }),
+    });
+    expect(padded.status).toBe(413);
+    await padded.text();
+
+    const streamed = await fetch(url('/cms/setup/test-email'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: chunkedBody(32 * 1024),
+      duplex: 'half',
+    } as RequestInit);
+    expect(streamed.status).toBe(413);
+    await streamed.text();
+
+    const form = await fetch(url('/cms/setup'));
+    expect(form.status).toBe(200);
+    expect(await form.text()).toContain('Set up Plakboek');
+  });
+
   it('serves the form, creates the account, then answers the host 404', async () => {
     const form = await fetch(url('/cms/setup'));
     expect(form.status).toBe(200);
