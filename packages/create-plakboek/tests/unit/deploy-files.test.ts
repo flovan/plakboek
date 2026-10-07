@@ -545,6 +545,18 @@ describe('compose stack', () => {
     expect(text).toContain('Strict-Transport-Security');
   });
 
+  it('caps request bodies at the edge, tight on the setup paths', async () => {
+    const text = await read('compose.yaml');
+    expect(text.match(/request_body/g)).toHaveLength(2);
+    expect(text).toMatch(
+      /request_body \/cms\/setup\* \{\s*\n\s*max_size 16KiB\s*\n\s*\}/,
+    );
+    expect(text).toMatch(/request_body \{\s*\n\s*max_size 64MB\s*\n\s*\}/);
+    const proxy = text.indexOf('reverse_proxy app:3000');
+    expect(text.indexOf('request_body /cms/setup*')).toBeLessThan(proxy);
+    expect(text.indexOf('request_body {')).toBeLessThan(proxy);
+  });
+
   it('publishes Postgres on loopback only in the development override', async () => {
     const text = await read('compose.override.yaml');
     expect(text).toContain('127.0.0.1:5432:5432');
