@@ -1,8 +1,8 @@
 /**
  * Builds the fixture host with the real `react-router build`. The fixture has
- * no package.json of its own: it resolves everything through the package's
- * own node_modules, plus one symlink so `@plakboek/core` resolves to the
- * package under test (its built `dist`).
+ * its own package.json (for its `isbot` dependency) and resolves everything
+ * else through the package's own node_modules, plus one `@plakboek/core`
+ * symlink to the package under test (its built `dist`).
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
