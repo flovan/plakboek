@@ -13,9 +13,15 @@ import { pathToFileURL } from 'node:url';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { createRequestHandler, type ServerBuild } from 'react-router';
 import { closeAllDbs } from './runtime/db.js';
 import { readRuntimeEnv } from './runtime/env.js';
+import {
+  SETUP_BODY_LIMIT_BYTES,
+  isSetupPath,
+  payloadTooLarge,
+} from './setup/body-limit.js';
 
 /** How long in-flight requests may take once a shutdown starts. */
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -94,6 +100,23 @@ export function createServer(
   const shutdownTimeoutMs =
     options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
   const app = new Hono();
+
+  // First middleware, so nothing touches a setup body ahead of it. A declared
+  // Content-Length is trusted: Node's HTTP parser never delivers more body
+  // bytes than declared. A chunked body is counted as it streams. The setup
+  // handlers carry their own cap for runtimes that skip this server. The path
+  // is checked by predicate, not pattern: Hono matches case-sensitively but
+  // React Router does not.
+  const setupBodyLimit = bodyLimit({
+    maxSize: SETUP_BODY_LIMIT_BYTES,
+    onError: () => payloadTooLarge(),
+  });
+  app.use('*', async (context, next) => {
+    if (isSetupPath(context.req.path)) {
+      return await setupBodyLimit(context, next);
+    }
+    return await next();
+  });
 
   // Only files actually served from the build get a static policy: hashed
   // filenames never change, everything else is short-lived. A miss falls
