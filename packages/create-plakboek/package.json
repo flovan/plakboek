@@ -1,6 +1,6 @@
 {
   "name": "create-plakboek",
-  "version": "0.0.0",
+  "version": "0.5.0",
   "description": "Scaffold a Plakboek host project with npx create-plakboek",
   "homepage": "https://github.com/flovan/plakboek/tree/main/packages/create-plakboek#readme",
   "bugs": {

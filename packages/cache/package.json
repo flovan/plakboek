@@ -1,6 +1,6 @@
 {
   "name": "@plakboek/cache",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "description": "Cache tags, the cache backend contract and a bounded in-process cache for Plakboek CMS installations",
   "homepage": "https://github.com/flovan/plakboek/tree/main/packages/cache#readme",
   "bugs": {

@@ -1,5 +1,11 @@
 # @plakboek/db
 
+## 0.5.0
+
+### Minor Changes
+
+- [#15](https://github.com/flovan/plakboek/pull/15) [`82a38b2`](https://github.com/flovan/plakboek/commit/82a38b24f8e5ccc59650b6986704d30d654c795a) Thanks [@flovan](https://github.com/flovan)! - `runMigrations` accepts optional `onLockWait` and `onMigrationStart` progress hooks. `onLockWait` fires once, the first time another migrator holds the migration lock; `onMigrationStart(name)` fires once per pending migration just before it applies, and never for an already-applied one. A hook that throws is ignored and never aborts, rolls back or reorders the run.
+
 ## 0.4.0
 
 ### Minor Changes
