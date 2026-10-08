@@ -1,5 +1,18 @@
 # @plakboek/core
 
+## 0.5.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @plakboek/auth@0.5.1
+  - @plakboek/cache@0.5.1
+  - @plakboek/content@0.5.1
+  - @plakboek/db@0.5.1
+  - @plakboek/pages@0.5.1
+  - @plakboek/permissions@0.5.1
+  - @plakboek/render@0.5.1
+
 ## 0.5.0
 
 ### Minor Changes
