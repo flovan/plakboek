@@ -700,4 +700,50 @@ describe('deploy guide', () => {
     const prepare = section(text, 'Prepare the server');
     expect(prepare).toMatch(/deploy script[^.]*PLAKBOEK_IMAGE/i);
   });
+
+  it('says the deploy user owns .env and names the fix the script prints', async () => {
+    const prepare = section(await read('DEPLOY.md'), 'Prepare the server');
+    expect(prepare).toContain(
+      'chown deploy: /srv/site/.env && chmod 600 /srv/site/.env',
+    );
+    const script = await read('scripts/deploy.sh');
+    expect(script).toContain(
+      'chown $DEPLOY_USER: $DEPLOY_PATH/.env && chmod 600 $DEPLOY_PATH/.env',
+    );
+  });
+
+  it('says a push made with the workflow token starts no deploy', async () => {
+    const steps = section(await read('DEPLOY.md'), 'What a deploy does');
+    expect(steps).toContain('GITHUB_TOKEN');
+    expect(steps).toMatch(/GitHub Apps?/);
+  });
+
+  it('says the scanned host must be the DEPLOY_HOST value', async () => {
+    const configure = section(await read('DEPLOY.md'), 'Configure GitHub');
+    const scan = configure.slice(
+      configure.indexOf('ssh-keyscan -t ed25519'),
+      configure.indexOf('3. Add these variables'),
+    );
+    expect(scan).toContain('`DEPLOY_HOST`');
+  });
+
+  it('explains how to find out why the site has no certificate', async () => {
+    const text = await read('DEPLOY.md');
+    const trouble = section(text, 'Troubleshooting');
+    for (const part of [
+      'tlsv1 alert internal error',
+      'docker compose -f compose.yaml logs caddy',
+      'identifier',
+      'SITE_ADDRESS',
+      'AAAA',
+      '::1',
+      '/64',
+      '80',
+      '443',
+      'docker compose -f compose.yaml up -d --force-recreate app caddy',
+    ]) {
+      expect(trouble).toContain(part);
+    }
+    expect(section(text, 'The first deploy')).toContain('(#troubleshooting)');
+  });
 });

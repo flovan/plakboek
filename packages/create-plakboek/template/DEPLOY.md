@@ -25,15 +25,17 @@ If the migration fails, the deploy stops with a non-zero exit and the previous a
 
 Deploys run one at a time and in push order. The whole workflow runs in the `production-deploy` group, so a push waits for the previous deploy to finish before its own run starts, while the CI workflow still runs on every push straight away. When several pushes arrive during a deploy, only the newest one waits and the runs in between are cancelled, because the newest commit contains them. Before it touches the server, the deploy job checks that its commit is still the tip of `main` and skips the deploy otherwise, so an older commit never replaces a newer one, not even when you re-run an old run by hand. The migration runner also holds a database lock.
 
+A commit that another workflow pushes with its `GITHUB_TOKEN` does not start the Deploy workflow, because GitHub starts no workflow for a push made with that token. Pushes by people and by GitHub Apps, such as a dependency bot, do.
+
 ## Prepare the server
 
 You need a Linux server with a public address and DNS for your domain pointing at it.
 
 1. Install Docker Engine with the Compose plugin (Compose 2.24 or newer).
-2. Create a user for deploys and add it to the `docker` group. Give it an SSH key pair that is used for nothing else.
+2. Create a user for deploys, for example `deploy`, and add it to the `docker` group. Give it an SSH key pair that is used for nothing else.
 3. Create the deploy directory, for example `/srv/site`, owned by that user. Use an absolute path with letters, digits, `.`, `_`, `-` and `/` only.
 4. Open ports 80 and 443.
-5. Create `.env` in the deploy directory. It is the only place the production secrets live. It is never committed and never built into the image. The deploy script adds and maintains a `PLAKBOEK_IMAGE` line in this file, so leave that line to the script.
+5. Create `.env` in the deploy directory. It is the only place the production secrets live. It is never committed and never built into the image. The deploy script adds and maintains a `PLAKBOEK_IMAGE` line in this file, so leave that line to the script. The file must belong to the deploy user and be readable by nobody else, because the deploy script reads and rewrites it. If you create it as root, hand it over with `chown deploy: /srv/site/.env && chmod 600 /srv/site/.env`. The deploy script checks this before it changes anything on the server, and stops with that fix when the file is missing or the deploy user cannot read and write it.
 
 ```sh
 POSTGRES_USER=plakboek
@@ -76,8 +78,10 @@ In the repository settings:
 
      Compare it with the fingerprint your hosting provider shows for the server. Add `-p <port>` when SSH listens on another port.
 
+     Replace `your.server.example` with exactly the value you give `DEPLOY_HOST`: the same IP address in both places, or the same host name in both. The deploy script looks the key up by that value, so a key recorded for the IP address does not match a host name, and the other way round.
+
 3. Add these variables to the same environment:
-   - `DEPLOY_HOST`: the server's address.
+   - `DEPLOY_HOST`: the server's address, exactly as you scanned it for `DEPLOY_KNOWN_HOSTS`.
    - `DEPLOY_USER`: the deploy user.
    - `DEPLOY_PATH`: the absolute deploy directory.
    - `DEPLOY_PORT`: only when SSH does not listen on 22.
@@ -98,7 +102,7 @@ The deploy script refuses to connect to a host whose key does not match `DEPLOY_
 
 3. Check that the account is yours. The command prints `Created superadmin` followed by your address, and `/cms/setup` on your domain now answers with a 404 like any unknown page. The command also published the starter home page.
 4. If the command instead reports that the installation already has users, someone else created the first account before you. On a new installation, start over: in the deploy directory run `docker compose -f compose.yaml down --volumes`, which deletes the database and the stored certificates, then re-run the newest Deploy workflow run and repeat steps 2 and 3. Never do this on an installation that holds content.
-5. Open your site.
+5. Open your site. If it has no certificate, see [Troubleshooting](#troubleshooting).
 
 ## Pulling the image
 
@@ -117,3 +121,24 @@ This release ships no backup tooling. Nothing copies your database or your uploa
 ## Run it on your computer
 
 `docker build -t plakboek-app:local .` builds the image. With a `.env` in place, `docker compose -f compose.yaml up -d` starts the whole stack. For day-to-day development you only need the database: `docker compose up -d postgres`, which also publishes it on `127.0.0.1:5432` through `compose.override.yaml`.
+
+## Troubleshooting
+
+### The site has no certificate
+
+When `curl` fails with `tlsv1 alert internal error`, Caddy has no certificate for that name yet. Look at what Caddy tried:
+
+```sh
+cd /srv/site
+docker compose -f compose.yaml logs caddy
+```
+
+The `obtain` and `challenge` lines show the attempts. Their `identifier` field is the name Caddy requests a certificate for, so a typo in `SITE_ADDRESS` shows up there.
+
+The A record, and the AAAA record if you set one, must point at the server's own address. On Hetzner, for example, that is the `::1` address of the server's /64, not the /64 itself. Ports 80 and 443 must be open.
+
+After you fix `.env`, recreate the containers so they read it:
+
+```sh
+docker compose -f compose.yaml up -d --force-recreate app caddy
+```
