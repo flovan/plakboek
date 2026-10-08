@@ -22,6 +22,10 @@ const DEPLOY_PATH_PATTERN = /^\/[A-Za-z0-9._/-]+$/;
 
 const FAKE_SSH = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FAKE_SSH_LOG"
+if [ -n "\${FAKE_SSH_EXIT:-}" ]; then
+  echo "ssh: connect to host box.example.com port 22: Connection refused" >&2
+  exit "$FAKE_SSH_EXIT"
+fi
 exec bash -c "\${@: -1}"
 `;
 
@@ -95,6 +99,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // A test may have made the directory read-only; let the cleanup enter it.
+  await chmod(harness.deployDir, 0o755).catch(() => {});
   await rm(harness.root, { recursive: true, force: true });
 });
 
@@ -204,6 +210,104 @@ describe('deploy script, registry login', () => {
     const docker = await lines(harness.dockerLog);
     expect(docker.some((line) => line.startsWith('login'))).toBe(false);
     expect(docker).toEqual(COMPOSE_STEPS);
+  });
+});
+
+describe('deploy script, checking the server first', () => {
+  const registry = {
+    REGISTRY_HOST: 'ghcr.io',
+    REGISTRY_USER: 'acme-corp',
+    REGISTRY_TOKEN: 'token',
+  };
+
+  async function expectNothingChanged() {
+    expect(await lines(harness.dockerLog)).toEqual([]);
+    expect(existsSync(join(harness.deployDir, 'compose.yaml'))).toBe(false);
+    expect(existsSync(join(harness.deployDir, '.env.next'))).toBe(false);
+  }
+
+  it('checks the server before it copies compose.yaml', () => {
+    const result = deploy();
+    expect(result.code).toBe(0);
+    const checking = result.stdout.indexOf('==> Checking');
+    expect(checking).toBeGreaterThanOrEqual(0);
+    expect(checking).toBeLessThan(
+      result.stdout.indexOf('==> Copying compose.yaml'),
+    );
+  });
+
+  it('keeps ssh status and adds no FATAL line when the connection fails', async () => {
+    const result = deploy({ ...registry, FAKE_SSH_EXIT: '255' });
+    expect(result.code).toBe(255);
+    expect(result.stderr).not.toContain('FATAL');
+    await expectNothingChanged();
+  });
+
+  it('stops with the fix when .env is missing', async () => {
+    const dir = harness.deployDir;
+    await rm(join(dir, '.env'));
+    const result = deploy(registry);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(
+      `FATAL: ${dir}/.env does not exist on box.example.com. Create it as DEPLOY.md describes, owned by deploy and readable only by it: chown deploy: ${dir}/.env && chmod 600 ${dir}/.env`,
+    );
+    await expectNothingChanged();
+    expect(existsSync(join(dir, '.env'))).toBe(false);
+  });
+
+  it('stops with the fix when the deploy directory does not exist', async () => {
+    const absent = join(harness.root, 'absent');
+    expect(absent).toMatch(DEPLOY_PATH_PATTERN);
+    const result = deploy({ ...registry, DEPLOY_PATH: absent });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(
+      `FATAL: ${absent} is not a directory on box.example.com. As root on the server, run: mkdir -p ${absent} && chown deploy: ${absent}`,
+    );
+    expect(await lines(harness.dockerLog)).toEqual([]);
+    expect(existsSync(absent)).toBe(false);
+  });
+
+  describe.skipIf(process.getuid?.() === 0)('with permission bits', () => {
+    it.each([
+      ['unreadable', 0o000],
+      ['read-only', 0o400],
+      ['write-only', 0o200],
+    ])('stops with the fix when .env is %s', async (_label, mode) => {
+      const dir = harness.deployDir;
+      const envPath = join(dir, '.env');
+      await chmod(envPath, mode);
+      let result: ReturnType<typeof deploy>;
+      try {
+        result = deploy(registry);
+        expect((await stat(envPath)).mode & 0o777).toBe(mode);
+      } finally {
+        await chmod(envPath, 0o644);
+      }
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(
+        `FATAL: deploy cannot read and write ${dir}/.env on box.example.com. As root on the server, run: chown deploy: ${dir}/.env && chmod 600 ${dir}/.env`,
+      );
+      expect(await readFile(envPath, 'utf8')).toBe(SERVER_ENV);
+      await expectNothingChanged();
+    });
+
+    it('stops with the fix when the deploy directory is read-only', async () => {
+      const dir = harness.deployDir;
+      await chmod(dir, 0o555);
+      let result: ReturnType<typeof deploy>;
+      try {
+        result = deploy(registry);
+      } finally {
+        await chmod(dir, 0o755);
+      }
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain(
+        `FATAL: deploy cannot write to ${dir} on box.example.com. As root on the server, run: chown deploy: ${dir}`,
+      );
+      expect(await readFile(join(dir, '.env'), 'utf8')).toBe(SERVER_ENV);
+      expect((await stat(join(dir, '.env'))).mode & 0o777).toBe(0o644);
+      await expectNothingChanged();
+    });
   });
 });
 
