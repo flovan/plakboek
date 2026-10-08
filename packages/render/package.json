@@ -1,6 +1,6 @@
 {
   "name": "@plakboek/render",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Server-only rendering of published Plakboek pages and the visitor request handler",
   "homepage": "https://github.com/flovan/plakboek/tree/main/packages/render#readme",
   "bugs": {

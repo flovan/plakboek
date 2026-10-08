@@ -1,6 +1,6 @@
 {
   "name": "@plakboek/core",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "The Plakboek host integration: routes, Vite plugin, production server and configuration for a scaffolded site",
   "homepage": "https://github.com/flovan/plakboek/tree/main/packages/core#readme",
   "bugs": {
