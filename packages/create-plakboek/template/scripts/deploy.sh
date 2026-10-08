@@ -11,9 +11,12 @@
 #                                           optional; log the server in to the
 #                                           registry before it pulls
 #
-# On the server, in this order and stopping at the first failure: pull the
-# image, start Postgres, run the one-off migration, then recreate the app and
-# the proxy. A failed migration therefore leaves the running app untouched.
+# On the server, in this order and stopping at the first failure: check that
+# the deploy directory is writable and that the deploy user can read and write
+# .env, which happens before anything on the server changes and stops with the
+# command that fixes it; then pull the image, start Postgres, run the one-off
+# migration, then recreate the app and the proxy. A failed migration therefore
+# leaves the running app untouched.
 #
 # After a successful rollout the script records the image as the PLAKBOEK_IMAGE
 # line of the server's .env, the file compose reads for interpolation. Compose
@@ -70,6 +73,39 @@ remote() {
 }
 
 COMPOSE_FILE_LOCAL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/compose.yaml"
+
+echo "==> Checking $DEPLOY_PATH on $DEPLOY_HOST"
+# Only tests, no file content is read and nothing is written. Each failure has
+# its own exit status, so a failure of ssh itself is never taken for one of them.
+check_status=0
+remote "[ -d '$DEPLOY_PATH' ] || exit 10; \
+  [ -w '$DEPLOY_PATH' ] || exit 11; \
+  [ -f '$DEPLOY_PATH/.env' ] || exit 12; \
+  { [ -r '$DEPLOY_PATH/.env' ] && [ -w '$DEPLOY_PATH/.env' ]; } || exit 13" \
+  < /dev/null || check_status=$?
+case "$check_status" in
+  0) ;;
+  10)
+    echo "FATAL: $DEPLOY_PATH is not a directory on $DEPLOY_HOST. As root on the server, run: mkdir -p $DEPLOY_PATH && chown $DEPLOY_USER: $DEPLOY_PATH" >&2
+    exit 1
+    ;;
+  11)
+    echo "FATAL: $DEPLOY_USER cannot write to $DEPLOY_PATH on $DEPLOY_HOST. As root on the server, run: chown $DEPLOY_USER: $DEPLOY_PATH" >&2
+    exit 1
+    ;;
+  12)
+    echo "FATAL: $DEPLOY_PATH/.env does not exist on $DEPLOY_HOST. Create it as DEPLOY.md describes, owned by $DEPLOY_USER and readable only by it: chown $DEPLOY_USER: $DEPLOY_PATH/.env && chmod 600 $DEPLOY_PATH/.env" >&2
+    exit 1
+    ;;
+  13)
+    echo "FATAL: $DEPLOY_USER cannot read and write $DEPLOY_PATH/.env on $DEPLOY_HOST. As root on the server, run: chown $DEPLOY_USER: $DEPLOY_PATH/.env && chmod 600 $DEPLOY_PATH/.env" >&2
+    exit 1
+    ;;
+  *)
+    # ssh has already reported its own error.
+    exit "$check_status"
+    ;;
+esac
 
 echo "==> Copying compose.yaml to $DEPLOY_HOST:$DEPLOY_PATH"
 remote "cat > '$DEPLOY_PATH/compose.yaml'" < "$COMPOSE_FILE_LOCAL"
