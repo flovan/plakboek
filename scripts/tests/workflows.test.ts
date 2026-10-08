@@ -127,7 +127,12 @@ describe('release workflow', () => {
     expect(smoke).toMatch(/SCAFFOLD_DATABASE_URL:\s*postgres:\/\//);
     expect(smoke).toContain('pnpm install --frozen-lockfile');
     expect(smoke).toContain('packages/create-plakboek/package.json');
-    expect(smoke).toContain('npm view');
+    expect(smoke).toMatch(
+      /run:\s*node scripts\/release\/wait-for-registry\.ts\s*$/m,
+    );
+    expect(
+      Number(/timeout-minutes:\s*(\d+)/.exec(smoke)?.[1]),
+    ).toBeGreaterThanOrEqual(40);
     expect(smoke).toMatch(
       /bash scripts\/verify-scaffold\.sh --registry "\$VERSION"/,
     );
