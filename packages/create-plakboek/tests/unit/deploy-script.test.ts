@@ -100,7 +100,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   // A test may have made the directory read-only; let the cleanup enter it.
-  await chmod(harness.deployDir, 0o755).catch(() => {});
+  await chmod(harness.deployDir, 0o755).catch(() => undefined);
   await rm(harness.root, { recursive: true, force: true });
 });
 
