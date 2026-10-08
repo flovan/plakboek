@@ -186,6 +186,16 @@ Trusted publishing requires npm `>=11.5.1`. The `publish` job runs on Node
 its floor or Node 24's bundled version regressed -- add an explicit `npm
 install -g npm@latest` step to the job rather than lowering the check.
 
+**The `smoke` job fails in "Wait for the release on the registry" or with
+`ERR_PNPM_NO_MATCHING_VERSION` during the scaffold install.** The npm CDN
+serves each package document per edge for up to five minutes, so freshly
+published versions appear unevenly across packages and across edges. The job
+waits up to 15 minutes for three consecutive green rounds across every
+published package, and the scaffold retries the install for about 14 more
+minutes. If it still fails, confirm each version is really on the registry
+(`npm view <name>@<version> version`), then rerun only the failed job
+(`gh run rerun <run-id> --failed`).
+
 **`npm trust` fails with `E400`.** Since 2026-05-20 the registry requires
 an explicit permission flag (`--allow-publish`) on `npm trust github`, and
 the command itself needs npm `>=11.15.0` -- older than the trusted-publish

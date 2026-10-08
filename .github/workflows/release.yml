@@ -99,7 +99,9 @@ jobs:
     needs: [version, publish]
     if: needs.version.outputs.hasChangesets == 'false'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Budget: wait up to 15 min, install retries up to about 15 min (14 min of
+    # backoff plus the attempts), the proof about 2 min, setup about 1 min.
+    timeout-minutes: 40
     permissions:
       contents: read
     services:
@@ -128,16 +130,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Read the released version
         run: echo "VERSION=$(node -p "require('./packages/create-plakboek/package.json').version")" >> "$GITHUB_ENV"
+      # Waits for both registry documents of every published package, at their
+      # own versions, for consecutive rounds: CDN edges serve each document
+      # independently, so one package being visible says nothing about the rest.
       - name: Wait for the release on the registry
-        run: |
-          for attempt in $(seq 1 40); do
-            if npm view "create-plakboek@$VERSION" version > /dev/null 2>&1; then
-              exit 0
-            fi
-            echo "create-plakboek@$VERSION is not on the registry yet (attempt $attempt of 40)"
-            sleep 15
-          done
-          echo "create-plakboek@$VERSION did not appear within 10 minutes" >&2
-          exit 1
+        run: node scripts/release/wait-for-registry.ts
       - name: Scaffold from the registry and run the fresh-install proof
         run: bash scripts/verify-scaffold.sh --registry "$VERSION"
