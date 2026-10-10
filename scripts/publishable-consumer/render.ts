@@ -1,7 +1,9 @@
 import {
+  CMS_LOGIN_PATH,
   EDIT_ATTRIBUTE,
   EDIT_PARAM,
   EDITOR_FLAG_KEY,
+  NEXT_PARAM,
   NOOP_EDIT,
   TOOLBAR_DISMISSED_KEY,
   type BlockComponent,
@@ -110,6 +112,14 @@ expectEqual('document body', html.includes('<main>probe</main>'), true);
 expectEqual(
   'bootstrap CSP hash',
   TOOLBAR_BOOTSTRAP_CSP_HASH.startsWith('sha256-'),
+  true,
+);
+expectEqual('login path', CMS_LOGIN_PATH, '/cms');
+expectEqual('next parameter', NEXT_PARAM, 'next');
+expectEqual('document mode type', input.mode, 'visitor');
+expectEqual(
+  'bootstrap targets the login path',
+  renderToolbarBootstrap().includes(JSON.stringify(CMS_LOGIN_PATH)),
   true,
 );
 expectEqual(

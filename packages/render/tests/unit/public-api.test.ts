@@ -25,8 +25,10 @@ type ValueKind = 'function' | 'class' | 'constant';
 
 const ROOT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   // constants
+  CMS_LOGIN_PATH: 'constant',
   EDIT_PARAM: 'constant',
   EDITOR_FLAG_KEY: 'constant',
+  NEXT_PARAM: 'constant',
   TOOLBAR_DISMISSED_KEY: 'constant',
   // edit-proxy
   NOOP_EDIT: 'constant',

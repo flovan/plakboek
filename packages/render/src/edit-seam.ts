@@ -1,7 +1,7 @@
 /**
- * The visitor/edit seam (D-03, D-05, D-10): everything a visitor page carries
- * so that an editor can step from the live site into editing it, and nothing
- * more.
+ * The visitor/edit seam (D-03, D-05, D-10, D-27): everything a visitor page
+ * carries so that an editor can step from the live site into editing it, and
+ * nothing more.
  *
  * - `_edit` is detected on the server by the visitor handler, never trusted
  *   from the client. A request carrying it goes to an injected
@@ -12,15 +12,19 @@
  *   is static, framework-free and inert unless a non-secret flag in
  *   `localStorage` says an editor signed in on this browser. It never fetches,
  *   never verifies a session and never grants anything: all it can do is
- *   navigate to the same URL with `_edit=1`, where the server decides.
+ *   navigate to the login path (`/cms?next=<this page>`), where the server
+ *   decides. It never renders inside a frame, so neither the blurred login
+ *   backdrop nor the edit frame shows it.
  * - Shared caches serve the same bytes to every visitor, so a per-request CSP
  *   nonce is impossible. The bootstrap is therefore constant text, and its
  *   `sha256-...` source is exported for a host's `script-src`.
  */
 import { createHash } from 'node:crypto';
 import {
+  CMS_LOGIN_PATH,
   EDIT_PARAM,
   EDITOR_FLAG_KEY,
+  NEXT_PARAM,
   TOOLBAR_DISMISSED_KEY,
 } from './constants.js';
 
@@ -73,7 +77,8 @@ const TOOLBAR_STYLES =
  */
 const BOOTSTRAP_SOURCE = [
   '(function(){try{',
-  `var E=${JSON.stringify(EDITOR_FLAG_KEY)},D=${JSON.stringify(TOOLBAR_DISMISSED_KEY)},P=${JSON.stringify(EDIT_PARAM)};`,
+  'if(self!==top)return;',
+  `var E=${JSON.stringify(EDITOR_FLAG_KEY)},D=${JSON.stringify(TOOLBAR_DISMISSED_KEY)},P=${JSON.stringify(EDIT_PARAM)},L=${JSON.stringify(CMS_LOGIN_PATH)},N=${JSON.stringify(NEXT_PARAM)};`,
   'var ls=localStorage;',
   'if(ls.getItem(E)!=="1"||ls.getItem(D)==="1")return;',
   'if(new URL(location.href).searchParams.has(P))return;',
@@ -85,8 +90,8 @@ const BOOTSTRAP_SOURCE = [
   'var b=document.createElement("button");',
   'b.type="button";b.textContent="Edit";',
   'b.addEventListener("click",function(){',
-  'var n=new URL(location.href);n.searchParams.set(P,"1");',
-  'location.assign(n.pathname+n.search)});',
+  'var n=new URL(location.href);n.searchParams.delete(P);',
+  'location.assign(L+"?"+N+"="+encodeURIComponent(n.pathname+n.search))});',
   'var x=document.createElement("button");',
   'x.type="button";x.textContent="\\u00d7";x.setAttribute("aria-label","Dismiss");',
   'x.addEventListener("click",function(){',
@@ -109,9 +114,9 @@ export const TOOLBAR_BOOTSTRAP_CSP_HASH = `sha256-${createHash('sha256')
 
 /**
  * The one inline script every visitor page carries: the same string on every
- * call. It does nothing unless the editor flag is set in `localStorage` and
- * the toolbar was not dismissed; then it shows an Edit pill that navigates to
- * the same URL with `_edit=1`.
+ * call. It does nothing unless the editor flag is set in `localStorage`, the
+ * toolbar was not dismissed and the page is the top window; then it shows an
+ * Edit pill that navigates to `/cms?next=<this page>`.
  */
 export function renderToolbarBootstrap(): string {
   return BOOTSTRAP_HTML;

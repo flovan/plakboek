@@ -205,16 +205,29 @@ null>`, where `context` is `{ url, visitorLocation }`. The editor package
   does nothing unless the non-secret `EDITOR_FLAG_KEY` flag is set in
   `localStorage` and `TOOLBAR_DISMISSED_KEY` is not. When active it shows an
   Edit pill in a closed shadow root, so the site's CSS cannot reach it, and
-  navigates to the same URL with `_edit=1`. It fetches nothing and never grants
-  anything: a client-side flag is only a hint that an editor signed in on this
-  browser, and the server-side `_edit` handling decides who may edit. The editor
-  sets and clears the flag at sign-in and sign-out.
+  navigates to `CMS_LOGIN_PATH` with the current page (minus `_edit`) in the
+  `NEXT_PARAM` parameter, for example `/cms?next=%2Fabout`. It never renders
+  inside a frame (`self !== top`), so the blurred login backdrop and the edit
+  frame never show it. It fetches nothing and never grants anything: a
+  client-side flag is only a hint that an editor signed in on this browser, and
+  the server decides at `/cms` and `_edit` who may edit. The editor sets and
+  clears the flag at sign-in and sign-out.
 - **CSP.** Shared caches serve identical bytes to every visitor, so a
   per-request nonce is impossible. Allow the script by its hash instead, with
   the exported constant: `script-src 'sha256-...'` where the value is
-  `TOOLBAR_BOOTSTRAP_CSP_HASH`.
+  `TOOLBAR_BOOTSTRAP_CSP_HASH`. **The hash changed in this release**: the
+  pill now routes through the login path and skips frames, so the script text
+  differs. A host that pins the old hash in its `script-src` must switch to the
+  exported constant; cached visitor pages carry the new script after the next
+  deploy re-renders them (cache entries carry the build id).
 - **Keeping editor code out.** A module-graph test added later in this phase
   checks that no editor package is reachable from this package's build.
+- **The render mode.** A document composer receives `mode: 'visitor' | 'edit'`
+  on `DocumentInput`; the visitor handler always passes `'visitor'`, and the
+  editor's frame document passes `'edit'`. In `'edit'` a host omits analytics
+  and third-party widgets so an editing session never counts as a visit, and
+  keeps block-owned scripts so the site still behaves under the editor. The
+  field is required: anyone constructing a `DocumentInput` must now set it.
 
 ## Edit-mode rendering
 
@@ -269,8 +282,10 @@ updating them.
 
 | Export                  | Kind     | Purpose                                                                   |
 | ----------------------- | -------- | ------------------------------------------------------------------------- |
+| `CMS_LOGIN_PATH`        | constant | `/cms`: where the Edit pill sends a browser; the server decides there     |
 | `EDIT_PARAM`            | constant | `_edit`: the query parameter that asks for the editor entry               |
 | `EDITOR_FLAG_KEY`       | constant | The localStorage key marking a signed-in editor                           |
+| `NEXT_PARAM`            | constant | `next`: the query parameter carrying the page to return to after login    |
 | `TOOLBAR_DISMISSED_KEY` | constant | The localStorage key marking a dismissed toolbar                          |
 | `NOOP_EDIT`             | constant | The visitor-side edit proxy: spreads to nothing, costs nothing            |
 | `EDIT_ATTRIBUTE`        | constant | The `data-pk-*` attribute names the renderer writes and the overlay reads |
