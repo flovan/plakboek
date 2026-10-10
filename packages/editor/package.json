@@ -1,0 +1,65 @@
+{
+  "name": "@plakboek/editor",
+  "version": "0.0.0",
+  "description": "On-page editing chrome for Plakboek: shadow-root styles, strings and icons, with a server and a client entry",
+  "homepage": "https://github.com/flovan/plakboek/tree/main/packages/editor#readme",
+  "bugs": {
+    "url": "https://github.com/flovan/plakboek/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flovan/plakboek.git",
+    "directory": "packages/editor"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build:css": "node scripts/build-chrome-css.ts",
+    "build": "node scripts/build-chrome-css.ts && tsdown",
+    "test": "node scripts/build-chrome-css.ts && vitest run",
+    "typecheck": "node scripts/build-chrome-css.ts && tsc --noEmit -p tsconfig.json",
+    "check": "publint --strict && attw --pack . --profile esm-only"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "catalog:",
+    "@tailwindcss/vite": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "es-module-lexer": "catalog:",
+    "publint": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tailwindcss": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

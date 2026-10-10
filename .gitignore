@@ -10,3 +10,4 @@ packages/core/tests/e2e-host/build/
 packages/core/tests/e2e-host/.react-router/
 packages/core/test-results/
 packages/core/playwright-report/
+packages/editor/src/generated/

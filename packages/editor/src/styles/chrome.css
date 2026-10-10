@@ -1,0 +1,24 @@
+/*
+ * Chrome stylesheet entry. Compiled by scripts/build-chrome-css.ts with
+ * Tailwind v4 through Vite's build API. Theme and utilities layers only:
+ * there is no preflight, because chrome lives in shadow roots and must never
+ * reset anything the site owns.
+ *
+ * Automatic source detection is off; only the components under src are
+ * scanned, so words in comments and strings never become utilities.
+ */
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities) source(none);
+
+@source '../**/*.tsx';
+
+:host {
+  all: initial;
+  font:
+    400 14px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Helvetica,
+    Arial,
+    sans-serif;
+}
