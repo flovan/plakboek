@@ -11,6 +11,8 @@
  * Automatic source detection is off; only the components under src are
  * scanned, so words in comments and strings never become utilities.
  */
+@layer theme, base, components, utilities;
+
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities) source(none);
 
@@ -192,5 +194,136 @@
     --pk-overlay-halo: transparent;
     --pk-focus-ring: Highlight;
     --pk-frame-border: CanvasText;
+  }
+}
+
+/*
+ * Layout of the edit shell. The host fills the viewport and never scrolls;
+ * the sidebar and the stage sit side by side and only the framed site
+ * scrolls, inside its own iframe. These rules own all of the shell's
+ * geometry so later components use utilities only.
+ *
+ * The shell's first rules reset what a shadow root would otherwise inherit
+ * from the browser's defaults; they live in the base layer so every utility
+ * still wins over them.
+ */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+  }
+}
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: block;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--pk-stage);
+}
+
+@layer components {
+  /* The container the shell renders into: sidebar column, stage column. */
+  .pk-shell {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .pk-sidebar {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    padding: 16px;
+    background: var(--pk-surface);
+    border-right: 1px solid var(--pk-border);
+    overflow: hidden;
+  }
+
+  /* 24px of stage on every side of the frame. */
+  .pk-stage {
+    min-width: 0;
+    min-height: 0;
+    padding: 24px;
+  }
+
+  .pk-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: #ffffff;
+    border: 1px solid var(--pk-frame-border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    overscroll-behavior: contain;
+  }
+
+  /*
+   * Full width: a 56px rail, and the frame flush to the rail, the top, the
+   * right and the bottom edge, with no radius, border or shadow. The frame
+   * element is the same one, so the site's scroll position is unchanged.
+   */
+  :host([data-layout='full']) .pk-shell {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  :host([data-layout='full']) .pk-sidebar {
+    padding: 8px;
+  }
+
+  :host([data-layout='full']) .pk-stage {
+    padding: 0;
+  }
+
+  :host([data-layout='full']) .pk-frame {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .pk-frame {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+
+  :host([data-layout='full']) .pk-frame {
+    box-shadow: none;
+  }
+}
+
+:host([data-theme='dark']) .pk-frame {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+:host([data-theme='light']) .pk-frame {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+:host([data-layout='full'][data-theme]) .pk-frame {
+  box-shadow: none;
+}
+
+/*
+ * Motion. Only the chrome moves when the layout changes, never the frame:
+ * the iframe's size changes at once, so the site is not re-laid out on every
+ * frame of an animation.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .pk-sidebar {
+    transition:
+      opacity 240ms cubic-bezier(0.2, 0, 0, 1),
+      transform 240ms cubic-bezier(0.2, 0, 0, 1);
   }
 }

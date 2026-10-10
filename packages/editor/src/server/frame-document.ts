@@ -23,7 +23,6 @@ import {
   resolveVisitorPage,
   type PagesConfig,
 } from '@plakboek/pages';
-import { EDIT_PARAM } from '@plakboek/render';
 import {
   normalizeVisitorPath,
   renderPageSnapshot,
@@ -36,6 +35,7 @@ import {
 import type { EditEntrypointDeps } from './entrypoint.js';
 import { buildCmsDocument, frameHeaders } from './html-document.js';
 import type { EditorIdentity } from './identity.js';
+import { editLocation, pathOf } from './locations.js';
 
 /** The `<meta name>` the shell looks for to show its own error panel. */
 export const FRAME_ERROR_MARKER = 'plakboek-frame-error';
@@ -95,26 +95,6 @@ function redirect(location: string): Response {
   });
 }
 
-/** `path` plus the request's own query (already without `_edit`) and one
- * `_edit` value. */
-function withEditValue(
-  path: string,
-  visitorLocation: string,
-  value: 'frame' | '1',
-): string {
-  const separator = visitorLocation.indexOf('?');
-  const query = separator === -1 ? '' : visitorLocation.slice(separator + 1);
-  const parts = [query, `${EDIT_PARAM}=${value}`].filter((part) => part !== '');
-  return `${path}?${parts.join('&')}`;
-}
-
-function pathOf(visitorLocation: string): string {
-  const separator = visitorLocation.indexOf('?');
-  return separator === -1
-    ? visitorLocation
-    : visitorLocation.slice(0, separator);
-}
-
 const FALLBACK_NOT_FOUND = buildCmsDocument({
   title: 'Not found',
   bodyHtml: '<h1>Not found</h1>',
@@ -169,7 +149,7 @@ export async function renderFrameDocument(
     // surface: send it to the shell for the same page.
     if (request.headers.get('sec-fetch-dest') === 'document') {
       return redirect(
-        withEditValue(pathOf(visitorLocation), visitorLocation, '1'),
+        editLocation(pathOf(visitorLocation), visitorLocation, '1'),
       );
     }
 
@@ -179,7 +159,7 @@ export async function renderFrameDocument(
     }
     if (normalized.kind === 'redirect') {
       return redirect(
-        withEditValue(normalized.location, visitorLocation, 'frame'),
+        editLocation(normalized.location, visitorLocation, 'frame'),
       );
     }
     const key = normalized.path;
@@ -207,7 +187,7 @@ export async function renderFrameDocument(
       );
       if (resolution.kind === 'redirect') {
         return redirect(
-          withEditValue(resolution.location, visitorLocation, 'frame'),
+          editLocation(resolution.location, visitorLocation, 'frame'),
         );
       }
       if (resolution.kind === 'invalid-pattern') {
@@ -219,7 +199,7 @@ export async function renderFrameDocument(
       }
       if (resolution.publicPath !== key) {
         return redirect(
-          withEditValue(resolution.publicPath, visitorLocation, 'frame'),
+          editLocation(resolution.publicPath, visitorLocation, 'frame'),
         );
       }
       publicPath = resolution.publicPath;
@@ -236,7 +216,7 @@ export async function renderFrameDocument(
       const resolution = await resolveVisitorPage(deps.db, resolveInput);
       if (resolution.kind === 'redirect') {
         return redirect(
-          withEditValue(resolution.location, visitorLocation, 'frame'),
+          editLocation(resolution.location, visitorLocation, 'frame'),
         );
       }
       if (resolution.kind === 'invalid-pattern') {
@@ -248,7 +228,7 @@ export async function renderFrameDocument(
       }
       if (resolution.publicPath !== key) {
         return redirect(
-          withEditValue(resolution.publicPath, visitorLocation, 'frame'),
+          editLocation(resolution.publicPath, visitorLocation, 'frame'),
         );
       }
       publicPath = resolution.publicPath;

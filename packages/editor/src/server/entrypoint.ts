@@ -31,6 +31,7 @@ import type {
 import type { EditorAssets } from './assets.js';
 import { buildBlockMeta, renderFrameDocument } from './frame-document.js';
 import { readEditorIdentity } from './identity.js';
+import { renderShellDocument } from './shell-document.js';
 
 export type EditEntrypointDeps = {
   /** Verifies the session cookie; only `api.getSession` is used. */
@@ -96,6 +97,12 @@ export function createEditEntrypoint(deps: EditEntrypointDeps): EditEntrypoint {
         context,
       );
     }
-    return null;
+    const shell = renderShellDocument({
+      identity,
+      visitorLocation: context.visitorLocation,
+      assets: deps.assets,
+      csp: deps.csp,
+    });
+    return new Response(shell.html, { status: 200, headers: shell.headers });
   };
 }

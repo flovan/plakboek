@@ -346,3 +346,142 @@ describe('through the visitor handler', () => {
     expect(html).not.toContain('data-pk-');
   });
 });
+
+describe('the shell for a user who can edit', () => {
+  it('answers the edit shell with one iframe on the frame URL, never frameable', async () => {
+    const response = await callEntrypoint(
+      entrypoint(),
+      '/about?_edit=1',
+      cookieOf(harness.editor),
+    );
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get('Content-Type')).toBe(
+      'text/html; charset=utf-8',
+    );
+    expect(response?.headers.get('X-Frame-Options')).toBe('DENY');
+    expect(response?.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
+    expect(response?.headers.get('Content-Security-Policy')).toContain(
+      "frame-ancestors 'none'",
+    );
+    const html = await response!.text();
+    expect(html.match(/<iframe/g)).toHaveLength(1);
+    expect(html).toContain('src="/about?_edit=frame"');
+    expect(html).toContain('data-mode="edit"');
+    expect(html).toContain('shadowrootmode="open"');
+    expect(html).toContain('src="/assets/editor.js"');
+  });
+
+  it('is the shell for any _edit value but the frame one, and keeps the page query on the frame URL', async () => {
+    const response = await callEntrypoint(
+      entrypoint(),
+      '/about?utm=x&_edit=1',
+      cookieOf(harness.editor),
+    );
+    expect(await response!.text()).toContain(
+      'src="/about?utm=x&amp;_edit=frame"',
+    );
+  });
+
+  it('carries neither analytics nor any host document, and never reads the page', async () => {
+    composed.length = 0;
+    const response = await callEntrypoint(
+      entrypoint(),
+      '/about?_edit=1',
+      cookieOf(harness.editor),
+    );
+    const html = await response!.text();
+    expect(html).not.toContain(ANALYTICS_TAG);
+    expect(html).not.toContain('Published heading');
+    expect(composed).toEqual([]);
+  });
+
+  it('sends no policy when the host switched it off', async () => {
+    const response = await callEntrypoint(
+      entrypoint({ csp: false }),
+      '/about?_edit=1',
+      cookieOf(harness.editor),
+    );
+    expect(response?.headers.get('Content-Security-Policy')).toBeNull();
+  });
+
+  it('puts the signed-in user name in the sidebar and the island, never the session', async () => {
+    const response = await callEntrypoint(
+      entrypoint(),
+      '/about?_edit=1',
+      cookieOf(harness.editor),
+    );
+    const html = await response!.text();
+    expect(html).toContain('>Editor</p>');
+    expect(html).not.toContain(harness.editor.cookie.split('=')[1] ?? 'x');
+  });
+});
+
+describe('the shell for a user who cannot edit', () => {
+  it('is the read-only shell with the notice for a viewer', async () => {
+    const response = await callEntrypoint(
+      entrypoint(),
+      '/about?_edit=1',
+      cookieOf(harness.viewer),
+    );
+    expect(response?.status).toBe(200);
+    const html = await response!.text();
+    expect(html).toContain('data-mode="read-only"');
+    expect(html).toContain('role="note"');
+    expect(html).toContain('Your role can view this site but not edit pages.');
+  });
+
+  it('is the same read-only shell for a drafts reader', async () => {
+    const response = await callEntrypoint(
+      entrypoint(),
+      '/about?_edit=1',
+      cookieOf(harness.drafts),
+    );
+    expect(await response!.text()).toContain('data-mode="read-only"');
+  });
+});
+
+describe('the shell for a superadmin who has not enrolled', () => {
+  it('redirects to the enrolment path with the page as next, and renders nothing', async () => {
+    const response = await callEntrypoint(
+      entrypoint(),
+      '/about?_edit=1',
+      cookieOf(harness.superadmin),
+    );
+    expect(response?.status).toBe(302);
+    expect(response?.headers.get('Location')).toBe(
+      '/cms/two-factor/enrol?next=%2Fabout',
+    );
+    expect(await response!.text()).toBe('');
+  });
+
+  it('keeps the page query in next, encoded', async () => {
+    const response = await callEntrypoint(
+      entrypoint(),
+      '/about?utm=x&_edit=1',
+      cookieOf(harness.superadmin),
+    );
+    expect(response?.headers.get('Location')).toBe(
+      '/cms/two-factor/enrol?next=%2Fabout%3Futm%3Dx',
+    );
+  });
+});
+
+describe('the shell through the visitor handler', () => {
+  it('is served private, no-store with its own headers kept', async () => {
+    const handler = createVisitorHandler({
+      db: harness.handle.db,
+      config: harnessConfig,
+      renderDocument,
+      edit: entrypoint(),
+    });
+    const response = await handler(
+      new Request('http://site.test/about?_edit=1', {
+        headers: cookieOf(harness.editor),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(response.headers.get('X-Frame-Options')).toBe('DENY');
+    expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
+  });
+});
