@@ -65,6 +65,7 @@ export async function renderNotFound(
       />,
     ),
     site,
+    mode: 'visitor',
   });
 }
 
@@ -83,5 +84,6 @@ export async function renderError(
       />,
     ),
     site,
+    mode: 'visitor',
   });
 }

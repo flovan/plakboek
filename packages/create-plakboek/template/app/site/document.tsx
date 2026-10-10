@@ -1,5 +1,5 @@
 import type { SiteContext } from '@plakboek/core';
-import type { DocumentInput, PageHead } from '@plakboek/render';
+import type { DocumentInput, DocumentMode, PageHead } from '@plakboek/render';
 import { renderHeadHtml } from '@plakboek/render/server';
 import { renderToStaticMarkup } from 'react-dom/server';
 import appCss from '../app.css?url';
@@ -28,15 +28,28 @@ export type PageInput = {
   /** The page's content as HTML that is already rendered and escaped. */
   readonly main: string;
   readonly site: SiteContext;
+  /** `'visitor'` for a public page, `'edit'` for the render an editor frames. */
+  readonly mode: DocumentMode;
 };
 
-// The shared document: skip link, header, main, footer. The 404 and 500
-// pages use it too, so a change here shows on every page of the site.
-// Visitor pages carry no script of their own.
+// Third-party tags: analytics, tag managers, chat and consent widgets. Put the
+// ones your site loads in `visitorTags`. They are left out when an
+// editor is working on the page, so editing never counts as a visit or loads
+// someone else's widget. Block-owned scripts are not affected and always run.
+const visitorTags = '';
+
+export function thirdPartyScripts(mode: DocumentMode): string {
+  return mode === 'edit' ? '' : visitorTags;
+}
+
+// The shared document: skip link, header, main, footer inside one container
+// query root. The 404 and 500 pages use it too, so a change here shows on
+// every page of the site. Visitor pages carry no script of their own.
 export async function renderPage({
   head,
   main,
   site,
+  mode,
 }: PageInput): Promise<string> {
   const items = await site.getMenu('main');
   const header = renderToStaticMarkup(
@@ -59,8 +72,13 @@ export async function renderPage({
     renderHeadHtml(head),
     `<link rel="stylesheet" href="${escapeAttribute(stylesheetHref)}">`,
     '</head>',
-    '<body class="flex min-h-screen flex-col bg-surface font-sans text-text">',
+    '<body class="bg-surface font-sans text-text">',
+    // The root site element: a container query root, so `@sm:` to `@3xl:`
+    // variants follow the width the page actually has.
+    '<div class="@container flex min-h-screen flex-col">',
     `${skipLink}${header}<main id="content" class="flex-1">${main}</main>${footer}`,
+    '</div>',
+    thirdPartyScripts(mode),
     '</body>',
     '</html>',
   ].join('');
@@ -70,5 +88,10 @@ export async function renderDocument(
   input: DocumentInput,
   site: SiteContext,
 ): Promise<string> {
-  return await renderPage({ head: input.head, main: input.body, site });
+  return await renderPage({
+    head: input.head,
+    main: input.body,
+    site,
+    mode: input.mode,
+  });
 }

@@ -550,11 +550,101 @@ describe('starter theme and root template', () => {
     expect(text).toContain("export { renderDocument } from './document.tsx'");
   });
 
-  it('makes the body a full-height flex column on the surface colour', async () => {
+  it('keeps the surface, font and text on the body and the full-height flex column on the root container', async () => {
+    const text = await read('app/site/document.tsx');
+    expect(text).toContain('<body class="bg-surface font-sans text-text">');
+    expect(text).toContain(
+      '<div class="@container flex min-h-screen flex-col">',
+    );
+  });
+});
+
+describe('starter edit-mode conventions', () => {
+  it('wraps skip link, header, main and footer in one container query root', async () => {
+    const text = await read('app/site/document.tsx');
+    expect(text.match(/@container/g)).toHaveLength(1);
+    const open = text.indexOf('<div class="@container');
+    const close = text.indexOf("'</div>'");
+    expect(open).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(open);
+    for (const needle of [
+      '${skipLink}',
+      '${header}',
+      '<main id="content"',
+      '${footer}',
+    ]) {
+      const at = text.indexOf(needle);
+      expect(at).toBeGreaterThan(open);
+      expect(at).toBeLessThan(close);
+    }
+  });
+
+  it('uses no viewport breakpoint variant anywhere in the starter', async () => {
+    const files = (await listFiles(TEMPLATE)).filter(
+      (file) =>
+        (file.startsWith('app/') || file.startsWith('blocks/')) &&
+        /\.(tsx?|css)$/.test(file),
+    );
+    expect(files.length).toBeGreaterThan(0);
+    // A viewport variant is a class prefix: preceded by a quote, a space or a
+    // colon chain (never by `@`, so `@sm:` is allowed) and followed at once by
+    // the utility, so an object key such as `md: 'py-8'` does not match.
+    const viewportVariant =
+      /(?:^|[\s"'`])(?:[a-z-]+:)*(?:sm|md|lg|xl|2xl):[a-z![\-(]/m;
+    const offenders: string[] = [];
+    for (const file of files) {
+      if (viewportVariant.test(await read(file))) offenders.push(file);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('leaves third-party scripts out in edit mode and keeps them as the host chose for visitors', async () => {
     const text = await read('app/site/document.tsx');
     expect(text).toContain(
-      'flex min-h-screen flex-col bg-surface font-sans text-text',
+      'export function thirdPartyScripts(mode: DocumentMode)',
     );
+    expect(text).toContain('thirdPartyScripts(mode),');
+    expect(text.indexOf('thirdPartyScripts(mode),')).toBeLessThan(
+      text.indexOf("'</body>'"),
+    );
+    // The visitor branch returns the host's own tags; the edit branch never does.
+    expect(text).toContain("return mode === 'edit' ? '' : visitorTags;");
+    expect(text).toMatch(/const visitorTags = '[^']*';/);
+  });
+
+  it('passes the input mode from renderDocument and renders error pages as visitor pages', async () => {
+    const document = await read('app/site/document.tsx');
+    expect(document).toContain('mode: input.mode');
+    const errors = await read('app/site/errors.tsx');
+    expect(errors.match(/mode: 'visitor'/g)).toHaveLength(2);
+    expect(errors).not.toMatch(/mode: 'edit'/);
+  });
+
+  it('adds no login link or editor script to any template file', async () => {
+    const offenders: string[] = [];
+    for (const file of await listFiles(TEMPLATE)) {
+      if (!/\.(tsx?|css|md|json)$/.test(file)) continue;
+      const text = await read(file);
+      if (
+        /(?:href|to)=["']\/cms/.test(text) ||
+        text.includes('plakboek-editor')
+      ) {
+        offenders.push(file);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('documents edit mode for host developers', async () => {
+    const text = await read('README.md');
+    expect(text.match(/^## Edit mode$/gm)).toHaveLength(1);
+    expect(text).toContain('X-Frame-Options: DENY');
+    expect(text).toContain("frame-ancestors 'none'");
+    expect(text).toContain('thirdPartyScripts(mode)');
+    expect(text).toContain('`@container`');
+    expect(text).toMatch(/media queries[^.]*frame/i);
+    expect(text).toMatch(/first segment is `cms` or `api` is refused/);
+    expect(text).toMatch(/In edit mode a block change reloads the edit page/);
   });
 });
 
@@ -712,6 +802,7 @@ describe('starter README', () => {
       'Getting started',
       'Adding a block',
       'Editing the header, footer and menus',
+      'Edit mode',
       'Live reload in development',
       'Reserved paths',
       'Linking to CMS pages from your own routes',
