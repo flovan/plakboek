@@ -7,6 +7,9 @@ import type { SiteContext } from '@plakboek/core';
 /** The page served without any hostile stylesheet, for isolation baselines. */
 const CLEAN_PATH = '/clean';
 
+/** A page whose edit render fails, for the shell's failure panel. */
+const BROKEN_PATH = '/broken';
+
 function escapeText(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -23,6 +26,18 @@ function header(site: SiteContext): string {
       { className: 'site-header' },
       createElement('a', { href: '/', className: 'site-name' }, site.siteName),
       createElement('a', { href: '/about' }, 'About'),
+      // A link whose own script handles the click and prevents its default.
+      createElement(
+        'a',
+        { href: '/about', id: 'handled-link' },
+        'Handled link',
+      ),
+      createElement(
+        'a',
+        { href: 'https://example.invalid/elsewhere', id: 'external-link' },
+        'Elsewhere',
+      ),
+      createElement('a', { href: '#site-footer', id: 'hash-link' }, 'Footer'),
       createElement(
         'button',
         { type: 'button', id: 'open-site-dialog' },
@@ -56,6 +71,9 @@ export function renderDocument(
   site: SiteContext,
 ): string {
   if (input.publicPath === CLEAN_PATH) return cleanDocument(input, site);
+  if (input.publicPath === BROKEN_PATH && input.mode === 'edit') {
+    throw new Error('The e2e host cannot render this page for editing');
+  }
   return [
     '<!DOCTYPE html>',
     `<html lang="${escapeText(input.head.lang)}">`,
@@ -73,6 +91,7 @@ export function renderDocument(
     '<body>',
     header(site),
     `<main class="reset-zone">${input.body}</main>`,
+    '<footer id="site-footer">Site footer</footer>',
     '<div class="cookie-banner" role="region" aria-label="Cookies">We use cookies</div>',
     '<dialog id="site-dialog">',
     '<p>Site dialog</p>',

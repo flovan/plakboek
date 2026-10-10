@@ -1,3 +1,4 @@
+import { EDITOR_FLAG_KEY } from '@plakboek/render';
 import type { MouseEvent, ReactNode } from 'react';
 import { STAGE_ID } from './stage.js';
 
@@ -44,4 +45,20 @@ export function displayNameOf(user: {
   readonly email: string;
 }): string {
   return user.name.trim() === '' ? user.email : user.name;
+}
+
+/**
+ * The Log out form's submit handler. It forgets that an editor signed in on
+ * this browser, so the Edit pill no longer shows on visitor pages, and lets
+ * the form's own POST carry on: the session itself is ended by the server. The
+ * flag is a hint with no authority, so a failure to clear it (storage blocked)
+ * changes nothing that matters, and without a script the flag simply stays and
+ * the pill with it.
+ */
+export function forgetEditorFlag(): void {
+  try {
+    globalThis.localStorage.removeItem(EDITOR_FLAG_KEY);
+  } catch {
+    // Storage is blocked or missing: there was no flag to clear.
+  }
 }

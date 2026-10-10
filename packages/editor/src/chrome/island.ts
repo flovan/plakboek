@@ -25,3 +25,8 @@ export const SHELL_ROOT_ID = 'plakboek-shell-root';
 
 /** The element id of the JSON script that carries the island. */
 export const ISLAND_ELEMENT_ID = 'plakboek-editor-data';
+
+/** The `<meta name>` a failed frame document carries so the shell can show
+ * its own error panel instead. Shared by the server (which writes it) and the
+ * client (which looks for it). */
+export const FRAME_ERROR_MARKER = 'plakboek-frame-error';

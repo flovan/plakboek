@@ -3,6 +3,7 @@ import { hydrateRoot as hydrate, type Root } from 'react-dom/client';
 import type { SidebarLayout } from '../../chrome/controls.js';
 import { ShellApp } from '../../chrome/shell.js';
 import { SHELL_ROOT_ID, type ShellIsland } from '../../chrome/island.js';
+import { watchFrame } from './frame-watch.js';
 import { applyLayout, readLayout, writeLayout } from './layout.js';
 
 function ShellRoot(props: {
@@ -15,6 +16,7 @@ function ShellRoot(props: {
   // `layout` change only after it.
   const [hydrated, setHydrated] = useState(false);
   const [layout, setLayout] = useState<SidebarLayout>('framed');
+  const [frameFailed, setFrameFailed] = useState(false);
   useEffect(() => {
     // The pre-paint script already set the attribute from storage; applying
     // the stored value again covers a browser that blocked that script.
@@ -23,6 +25,22 @@ function ShellRoot(props: {
     setLayout(stored);
     setHydrated(true);
     host.dataset.hydrated = '';
+  }, [host]);
+
+  // Follow the document in the frame: its links, its title, a failed render
+  // and a navigation that took it somewhere else.
+  useEffect(() => {
+    const frame = host.shadowRoot?.querySelector('iframe');
+    if (!(frame instanceof HTMLIFrameElement)) return undefined;
+    return watchFrame(frame, {
+      frameUrl: island.frameUrl,
+      visitorLocation: island.visitorLocation,
+      onFailure: setFrameFailed,
+    });
+  }, [host, island.frameUrl, island.visitorLocation]);
+
+  const reload = useCallback(() => {
+    host.ownerDocument.defaultView?.location.reload();
   }, [host]);
 
   const toggleLayout = useCallback(() => {
@@ -38,6 +56,8 @@ function ShellRoot(props: {
       hydrated={hydrated}
       layout={layout}
       onToggleLayout={toggleLayout}
+      frameFailed={frameFailed}
+      onReload={reload}
     />
   );
 }

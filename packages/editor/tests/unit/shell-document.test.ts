@@ -436,3 +436,45 @@ describe('the rail', () => {
     );
   });
 });
+
+describe('the frame area', () => {
+  it('always carries the narrow-window panel, hidden until the window is under 1024px, and hides the frame there', () => {
+    const html = staticShell(ISLAND);
+    expect(html).toContain(STRINGS['frame.narrow.heading']);
+    expect(html).toContain(STRINGS['frame.narrow.body']);
+    expect(html).toMatch(/class="hidden h-full max-\[1024px\]:block"/);
+    expect(html).toMatch(/<iframe class="pk-frame max-\[1024px\]:hidden"/);
+  });
+
+  it('has no failure panel while the frame is fine', () => {
+    const html = staticShell(ISLAND);
+    expect(html).not.toContain(STRINGS['frame.error.heading']);
+    expect(html).not.toContain('role="alert"');
+  });
+
+  it('draws the failure panel, with a reload button and nothing of the failure, in the hidden frame’s place', () => {
+    const html = renderToStaticMarkup(
+      createElement(ShellApp, {
+        island: ISLAND,
+        hydrated: true,
+        frameFailed: true,
+      }),
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).toContain(STRINGS['frame.error.heading']);
+    expect(html).toContain(STRINGS['frame.error.body']);
+    expect(html).toMatch(
+      new RegExp(`<button[^>]*>${STRINGS['frame.error.reload']}</button>`),
+    );
+    // the iframe stays in the tree (hiding it does not reload it)
+    expect(html).toMatch(
+      /<iframe class="pk-frame hidden" src="\/about\?_edit=frame"/,
+    );
+  });
+
+  it('gives the narrow-window panel no button', () => {
+    const html = staticShell(ISLAND);
+    const panel = html.slice(html.indexOf('role="status"'));
+    expect(panel).not.toContain('<button');
+  });
+});

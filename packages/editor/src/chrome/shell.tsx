@@ -16,6 +16,10 @@ export type ShellAppProps = {
   readonly layout?: SidebarLayout;
   /** Called by the Full width toggle. */
   readonly onToggleLayout?: () => void;
+  /** The frame holds the render-failure page: the stage shows its panel. */
+  readonly frameFailed?: boolean;
+  /** Called by the failure panel's Reload page button. */
+  readonly onReload?: () => void;
 };
 
 /**
@@ -24,7 +28,15 @@ export type ShellAppProps = {
  * island, so the first client render matches the server's.
  */
 export function ShellApp(props: ShellAppProps): ReactElement {
-  const { island, slots, hydrated, layout = 'framed', onToggleLayout } = props;
+  const {
+    island,
+    slots,
+    hydrated,
+    layout = 'framed',
+    onToggleLayout,
+    frameFailed,
+    onReload,
+  } = props;
   return (
     <>
       <Sidebar
@@ -34,7 +46,11 @@ export function ShellApp(props: ShellAppProps): ReactElement {
         layout={layout}
         onToggleLayout={onToggleLayout}
       />
-      <Stage frameUrl={island.frameUrl} />
+      <Stage
+        frameUrl={island.frameUrl}
+        frameFailed={frameFailed}
+        onReload={onReload}
+      />
     </>
   );
 }

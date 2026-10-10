@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import {
   displayNameOf,
+  forgetEditorFlag,
   RAIL_CONTROL,
   skipToPage,
   type SidebarLayout,
@@ -90,7 +91,12 @@ export function Rail(props: RailProps): ReactElement {
             {initialOf(displayName)}
           </div>
         </Tooltip>
-        <form method="post" action={island.logoutPath} className="m-0">
+        <form
+          method="post"
+          action={island.logoutPath}
+          onSubmit={forgetEditorFlag}
+          className="m-0"
+        >
           <input type="hidden" name="next" value={island.visitorLocation} />
           <Tooltip label={STRINGS['sidebar.logOut']}>
             <button

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   CONTROL,
   displayNameOf,
+  forgetEditorFlag,
   skipToPage,
   type SidebarLayout,
   type SidebarSlots,
@@ -109,7 +110,12 @@ export function Sidebar(props: SidebarProps): ReactElement {
           </a>
           <div className="mt-2 flex flex-col gap-2">
             <UserName name={displayName} />
-            <form method="post" action={island.logoutPath} className="m-0">
+            <form
+              method="post"
+              action={island.logoutPath}
+              onSubmit={forgetEditorFlag}
+              className="m-0"
+            >
               <input type="hidden" name="next" value={island.visitorLocation} />
               <button type="submit" className={CONTROL}>
                 <LogOutIcon />

@@ -92,7 +92,8 @@ The shell is never framed (`X-Frame-Options: DENY`, `frame-ancestors 'none'`)
 and sends no referrer. With `csp: true` it also sends a policy that allows
 only its own origin plus two inline styles by hash: the chrome stylesheet,
 whose source expression is `CHROME_STYLE_CSP_HASH`, and the document's one
-static style. There is no `unsafe-inline`, and `base-uri` is `none`. The
+static style, plus one inline script by hash: the layout script described
+below. There is no `unsafe-inline`, and `base-uri` is `none`. The
 frame is served with `X-Frame-Options: SAMEORIGIN` and
 `frame-ancestors 'self'`, so only the shell can embed it.
 
@@ -103,6 +104,43 @@ address, and a policy that forbids same-origin framing would blank it.
 The JSON the shell hands the client holds only what the chrome needs: the
 mode, the user's name and email, the visitor location, the frame URL and the
 log-out path. It is escaped so no value can close its script element.
+
+### Layouts and the frame's behaviour
+
+The shell opens **framed**: a 280px sidebar, and the page 24px from the stage
+edges. The Full width toggle switches to a 56px rail with the page flush to
+the rail, the top, the right and the bottom. The frame's own scroll position
+is unchanged by the switch and the window itself never scrolls. The choice is
+kept per browser in `localStorage` under `plakboek:editor-layout` (`framed` or
+`full`; anything else means framed). A small inline script right after the
+`plakboek-editor` element applies a stored `full` before the first paint, so
+the framed layout never flashes. It is constant text, and its hash is added to the
+shell's `script-src` for you; a host never has to touch it. Before the client script has loaded the
+Full width toggle is disabled, while Exit edit mode (an anchor) and Log out (a
+form post) already work.
+
+Below 1024px wide the frame is replaced by a panel asking for a wider window,
+and it lifts without a reload when the window grows. If the frame's page
+cannot be rendered for editing, the frame is replaced by a panel with a Reload
+page button; nothing of the failure is shown.
+
+The shell follows the frame without interfering with the site:
+
+- a link to another page of the site navigates the whole page to that page
+  in edit mode (`_edit=1`);
+- a link to another site opens in a new tab with `noopener`;
+- a link to a spot on the same page, a download, a link with its own `target`,
+  a non-web link or a click with a modifier key is left to the browser;
+- a link click the site's own script already handled (it called
+  `preventDefault`) is left to the site;
+- a frame that is navigated by a script or a form is followed by the whole
+  page, in edit mode;
+- the shell's title is the page's title followed by "Plakboek".
+
+The shell's listener is attached once, in the bubble phase, and never stops an
+event from travelling on, so a site's click, keyboard and scroll handling is
+unaffected. Log out clears the `plakboek:editor` flag in the browser and posts
+to the log-out path; Exit edit mode keeps the session and the flag.
 
 ### The sidebar slot
 

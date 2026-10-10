@@ -32,13 +32,13 @@ import {
   type RenderedPage,
   type RenderedTree,
 } from '@plakboek/render/server';
+import { FRAME_ERROR_MARKER } from '../chrome/island.js';
 import type { EditEntrypointDeps } from './entrypoint.js';
 import { buildCmsDocument, frameHeaders } from './html-document.js';
 import type { EditorIdentity } from './identity.js';
 import { editLocation, pathOf } from './locations.js';
 
-/** The `<meta name>` the shell looks for to show its own error panel. */
-export const FRAME_ERROR_MARKER = 'plakboek-frame-error';
+export { FRAME_ERROR_MARKER };
 
 /** Block type key to the label and kind the overlay shows. */
 export function buildBlockMeta(

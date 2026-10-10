@@ -196,6 +196,14 @@ async function seedPages(runtime: Runtime, actor: Actor): Promise<void> {
   });
   await publish(runtime, actor, clean);
 
+  // Published, but its edit render fails (the e2e host throws for it).
+  const broken = await createContentPage(runtime, actor, {
+    title: 'Broken',
+    slug: 'broken',
+    blocks: [section(heading('Broken page'))],
+  });
+  await publish(runtime, actor, broken);
+
   // Never published: it exists only in the working tree.
   await createContentPage(runtime, actor, {
     title: 'Draft only',

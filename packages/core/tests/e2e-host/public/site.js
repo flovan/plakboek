@@ -6,7 +6,9 @@
     var button = accordion.querySelector('button');
     var panel = accordion.querySelector('[role="region"]');
     if (!button || !panel) return;
-    button.addEventListener('click', function () {
+    button.addEventListener('click', function (event) {
+      // The site owns this click and says so: the shell must leave it alone.
+      event.preventDefault();
       var open = button.getAttribute('aria-expanded') === 'true';
       button.setAttribute('aria-expanded', String(!open));
       panel.hidden = open;
@@ -34,6 +36,14 @@
         go(1);
       });
   });
+
+  var handled = document.getElementById('handled-link');
+  if (handled) {
+    handled.addEventListener('click', function (event) {
+      event.preventDefault();
+      document.body.dataset.handled = 'true';
+    });
+  }
 
   window.addEventListener('scroll', function () {
     document.body.dataset.scrolled = String(window.scrollY > 100);
