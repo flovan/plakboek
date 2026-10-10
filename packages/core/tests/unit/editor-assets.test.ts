@@ -53,19 +53,43 @@ describe('editorAssetsFromSidecar', () => {
 });
 
 describe('devEditorAssets', () => {
-  it('points at the virtual module and Vite client under the base', () => {
+  it('runs the refresh preamble, the router stub and the Vite client before the entry, in that order', () => {
     expect(devEditorAssets('/')).toEqual({
       entry: `/@id/__x00__${EDITOR_CLIENT_ID}`,
       preload: [],
       css: [],
-      devScripts: [{ src: '/@vite/client' }],
+      devScripts: [
+        {
+          code: 'import "/@id/__x00__virtual:react-router/inject-hmr-runtime";',
+        },
+        {
+          code: 'window.__reactRouterDataRouter ??= { revalidate: async () => {} };',
+        },
+        { src: '/@vite/client' },
+      ],
     });
   });
 
   it('honours a custom base', () => {
     const assets = devEditorAssets('/site');
     expect(assets.entry).toBe(`/site/@id/__x00__${EDITOR_CLIENT_ID}`);
-    expect(assets.devScripts).toEqual([{ src: '/site/@vite/client' }]);
+    expect(assets.devScripts).toEqual([
+      {
+        code: 'import "/site/@id/__x00__virtual:react-router/inject-hmr-runtime";',
+      },
+      {
+        code: 'window.__reactRouterDataRouter ??= { revalidate: async () => {} };',
+      },
+      { src: '/site/@vite/client' },
+    ]);
+  });
+
+  it('leaves production assets without any development script', () => {
+    const assets = editorAssetsFromSidecar(
+      { file: 'assets/plakboek-editor-1.js', imports: [], css: [] },
+      '/',
+    );
+    expect(assets).not.toHaveProperty('devScripts');
   });
 });
 

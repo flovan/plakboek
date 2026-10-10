@@ -103,9 +103,16 @@ export function editorAssetsFromSidecar(
 }
 
 /**
- * The editor's assets while the dev server runs: the virtual module through
- * Vite's own module URL, and Vite's client for HMR. Plan 07-09 adds the React
- * Fast Refresh preamble.
+ * The editor's assets while the dev server runs, in the order the browser
+ * must run them (D-29): React Router's HMR runtime preamble, a data-router
+ * stub, Vite's client, then the virtual module through Vite's own URL.
+ *
+ * The edit page hydrates an entry that is not a React Router route, and
+ * Fast Refresh needs two things from React Router that a route page gets
+ * for free: the preamble (its refresh boundaries throw without it) and a
+ * data router to revalidate before it refreshes. The stub answers that call
+ * and does nothing. Both are React Router internals, which is why a fixture
+ * test pins the behaviour rather than this module's text alone.
  */
 export function devEditorAssets(base: string): EditorAssets {
   const root = withTrailingSlash(base);
@@ -113,6 +120,14 @@ export function devEditorAssets(base: string): EditorAssets {
     entry: `${root}@id/__x00__${EDITOR_CLIENT_ID}`,
     preload: [],
     css: [],
-    devScripts: [{ src: `${root}@vite/client` }],
+    devScripts: [
+      {
+        code: `import "${root}@id/__x00__virtual:react-router/inject-hmr-runtime";`,
+      },
+      {
+        code: 'window.__reactRouterDataRouter ??= { revalidate: async () => {} };',
+      },
+      { src: `${root}@vite/client` },
+    ],
   };
 }
