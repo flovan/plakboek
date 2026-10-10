@@ -35,11 +35,7 @@ import { randomUUID } from 'node:crypto';
 import type { Permission, PermissionResolver } from '@plakboek/permissions';
 import { and, eq, like, or } from 'drizzle-orm';
 import { createAuditRecorder, type AuditFailureHook } from './audit.js';
-import {
-  SET_PASSWORD_TOKEN_TTL_SECONDS,
-  type Auth,
-  type RenderAuthEmail,
-} from './config.js';
+import type { RenderAuthEmail } from './config.js';
 import { renderAuthEmail } from './email/render.js';
 import {
   MailSendError,
@@ -48,6 +44,7 @@ import {
 } from './email/types.js';
 import { assertPasswordPolicy } from './password-policy.js';
 import { account, session, user, verification } from './schema.js';
+import { SET_PASSWORD_TOKEN_TTL_SECONDS } from './ttl.js';
 import {
   InvalidOrExpiredTokenError,
   consumeSingleUseToken,
@@ -313,6 +310,18 @@ export async function requestPasswordLink(
   return OUTCOME;
 }
 
+/** The slice of better-auth's context `completeSetPassword` reads: its
+ * password hasher and the configured minimum length. A full `Auth` instance
+ * satisfies it, and so does the context an endpoint handler receives. */
+export type PasswordHashingAuth = {
+  readonly $context: Promise<{
+    readonly password: {
+      readonly hash: (password: string) => Promise<string>;
+      readonly config: { readonly minPasswordLength: number };
+    };
+  }>;
+};
+
 export type CompleteSetPasswordDeps = {
   /** The database, or an enclosing transaction (the consumption then nests
    * as a savepoint). */
@@ -320,7 +329,7 @@ export type CompleteSetPasswordDeps = {
   /** Supplies better-auth's own password hasher and the installation's
    * configured minimum password length. No better-auth endpoint is
    * called. */
-  readonly auth: Pick<Auth, '$context'>;
+  readonly auth: PasswordHashingAuth;
   /** Passed to the audit recorder. */
   readonly onAuditWriteFailed?: AuditFailureHook;
   readonly now?: () => Date;

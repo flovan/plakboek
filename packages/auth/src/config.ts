@@ -54,7 +54,15 @@ import {
   PasswordPolicyError,
   assertPasswordPolicy,
 } from './password-policy.js';
+import { passwordLinkPlugin } from './password-link-plugin.js';
 import * as schema from './schema.js';
+import {
+  SECONDS_PER_HOUR,
+  SECONDS_PER_MINUTE,
+  SET_PASSWORD_TOKEN_TTL_SECONDS,
+} from './ttl.js';
+
+export { SET_PASSWORD_TOKEN_TTL_SECONDS };
 
 /** Renders one authentication email. `renderAuthEmail` is the default; a
  * host supplies its own to theme the copy without touching this module. */
@@ -86,6 +94,13 @@ export type CreateAuthOptions = {
    * Defaults to the audit recorder's one `console.error` line.
    */
   readonly onAuditWriteFailed?: AuditFailureHook;
+  /**
+   * Switches better-auth's request limiter on or off. Left out, it follows
+   * better-auth's own default: on in production, off elsewhere. The limiter
+   * is what throttles the password-link endpoints and magic-link requests,
+   * so a development or test server is unthrottled unless this is `true`.
+   */
+  readonly rateLimitEnabled?: boolean;
 };
 
 /** Thrown by `createAuth` for invalid options. Messages name the offending
@@ -101,8 +116,6 @@ export class AuthConfigError extends Error {
  * brute-forceable enough to make a forged session cookie realistic. */
 const MIN_SECRET_LENGTH = 32;
 
-const SECONDS_PER_MINUTE = 60;
-const SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE;
 const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR;
 
 /** D-01: a session lives 30 days from its last refresh. There is one
@@ -116,9 +129,6 @@ export const SESSION_UPDATE_AGE_SECONDS = SECONDS_PER_DAY;
 /** D-12 as amended: an impersonation session lapses 8 hours after it
  * starts, if the explicit stop has not ended it sooner. */
 export const IMPERSONATION_SESSION_TTL_SECONDS = 8 * SECONDS_PER_HOUR;
-
-/** AUTH-03: set-password and reset-password links are valid for 48 hours. */
-export const SET_PASSWORD_TOKEN_TTL_SECONDS = 48 * SECONDS_PER_HOUR;
 
 /** D-10: a magic link is a live login bypass, so it dies after 15 minutes. */
 export const MAGIC_LINK_TTL_SECONDS = 15 * SECONDS_PER_MINUTE;
@@ -536,6 +546,7 @@ function assertCreateAuthOptions(options: CreateAuthOptions): void {
     renderEmail,
     onMailDeliveryError,
     onAuditWriteFailed,
+    rateLimitEnabled,
   } = options;
 
   if (
@@ -606,6 +617,12 @@ function assertCreateAuthOptions(options: CreateAuthOptions): void {
       'onAuditWriteFailed must be a function when supplied',
     );
   }
+
+  if (rateLimitEnabled !== undefined && typeof rateLimitEnabled !== 'boolean') {
+    throw new AuthConfigError(
+      'rateLimitEnabled must be a boolean when supplied',
+    );
+  }
 }
 
 /** The plugin tuple `createAuth` installs, each instantiated with its
@@ -616,6 +633,7 @@ type AuthPlugins = [
   ReturnType<typeof admin<AdminOptions>>,
   ReturnType<typeof twoFactor<TwoFactorOptions>>,
   ReturnType<typeof magicLink>,
+  ReturnType<typeof passwordLinkPlugin>,
 ];
 
 type PlakboekAuthOptions = BetterAuthOptions & {
@@ -729,6 +747,16 @@ export function createAuth(options: CreateAuthOptions): Auth {
         }
       },
     }),
+    passwordLinkPlugin({
+      db: options.db,
+      mail: options.mail,
+      renderEmail,
+      baseURL: options.baseURL,
+      onDeliveryError: reportMailDeliveryError,
+      ...(options.onAuditWriteFailed === undefined
+        ? {}
+        : { onAuditWriteFailed: options.onAuditWriteFailed }),
+    }),
   ];
 
   return betterAuth<PlakboekAuthOptions>({
@@ -757,6 +785,9 @@ export function createAuth(options: CreateAuthOptions): Auth {
       },
     },
     disabledPaths: [...DISABLED_AUTH_PATHS],
+    ...(options.rateLimitEnabled === undefined
+      ? {}
+      : { rateLimit: { enabled: options.rateLimitEnabled } }),
     hooks: {
       before: enforcePasswordPolicy(minPasswordLength),
       after: auditTwoFactorChanges(recorder),
