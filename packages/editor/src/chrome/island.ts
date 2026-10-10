@@ -23,6 +23,9 @@ export const HOST_TAG = 'plakboek-editor';
 /** The element inside the shadow root the shell is rendered into. */
 export const SHELL_ROOT_ID = 'plakboek-shell-root';
 
+/** Where the Log out form posts. */
+export const LOGOUT_PATH = '/cms/logout';
+
 /** The element id of the JSON script that carries the island. */
 export const ISLAND_ELEMENT_ID = 'plakboek-editor-data';
 

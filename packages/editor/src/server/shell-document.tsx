@@ -15,6 +15,7 @@ import { ShellApp } from '../chrome/shell.js';
 import {
   HOST_TAG,
   ISLAND_ELEMENT_ID,
+  LOGOUT_PATH,
   SHELL_ROOT_ID,
   type ShellIsland,
 } from '../chrome/island.js';
@@ -34,8 +35,7 @@ import type { EditorIdentity } from './identity.js';
 import { LAYOUT_SCRIPT, LAYOUT_SCRIPT_CSP_HASH } from './layout-script.js';
 import { frameLocation } from './locations.js';
 
-/** Where the Log out form posts. */
-export const LOGOUT_PATH = '/cms/logout';
+export { LOGOUT_PATH };
 
 /** The one static style of the shell document: no margin, no scroll, and the
  * stage colour behind the chrome so there is no flash before it paints. */

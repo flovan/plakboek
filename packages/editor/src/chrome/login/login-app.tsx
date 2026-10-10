@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import type { LinkKind, LoginStep } from '../island.js';
+import { LoginBehaviourContext, type LoginBehaviour } from './behaviour.js';
 import { EnrolStep } from './enrol.js';
 import { InvalidLinkStep } from './invalid-link.js';
 import { MagicLandingStep } from './magic-landing.js';
@@ -12,6 +13,9 @@ export type LoginAppProps = {
   readonly next: string;
   /** Which kind of link an `invalid-link` step stands in for. */
   readonly linkKind?: LinkKind;
+  /** What the client adds to make the card work; absent on the server, where
+   * every step is static markup. */
+  readonly behaviour?: LoginBehaviour;
 };
 
 /**
@@ -21,7 +25,20 @@ export type LoginAppProps = {
  * `STRINGS` with no `style` attribute.
  */
 export function LoginApp(props: LoginAppProps): ReactElement {
-  const { step, next, linkKind = 'sign-in' } = props;
+  const { step, next, linkKind = 'sign-in', behaviour } = props;
+  return (
+    <LoginBehaviourContext.Provider value={behaviour ?? null}>
+      <LoginStepView step={step} next={next} linkKind={linkKind} />
+    </LoginBehaviourContext.Provider>
+  );
+}
+
+function LoginStepView(props: {
+  readonly step: LoginStep;
+  readonly next: string;
+  readonly linkKind: LinkKind;
+}): ReactElement {
+  const { step, next, linkKind } = props;
   switch (step) {
     case 'sign-in':
       return <SignInStep next={next} />;

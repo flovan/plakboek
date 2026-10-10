@@ -91,8 +91,24 @@ async function collectModuleGraph(entryFile: string): Promise<ModuleGraph> {
   return { files, bareSpecifiers, violations };
 }
 
+/**
+ * The auth library is allowed in the client only as its browser client and
+ * that client's plugin subpath: the package root and every other subpath
+ * (the server, its adapters, its plugins) are server code.
+ */
+const BETTER_AUTH_CLIENT = ['better-auth/client'] as const;
+
+function isDisallowedBetterAuth(specifier: string): boolean {
+  if (specifier === 'better-auth') return true;
+  if (!specifier.startsWith('better-auth/')) return false;
+  return !BETTER_AUTH_CLIENT.some(
+    (entry) => specifier === entry || specifier.startsWith(`${entry}/`),
+  );
+}
+
 function isServerOnly(specifier: string): boolean {
   if (specifier.startsWith('node:')) return true;
+  if (isDisallowedBetterAuth(specifier)) return true;
   return SERVER_ONLY.some((entry) =>
     entry.endsWith('/')
       ? specifier.startsWith(entry)
@@ -166,6 +182,28 @@ describe('collectModuleGraph (seeded leaks prove the walker can fail)', () => {
     );
   });
 
+  it('reports the auth library root and its server subpaths, but not its browser client', async () => {
+    await writeFile(
+      path.join(dir, 'auth.js'),
+      [
+        "import { betterAuth } from 'better-auth';",
+        "import { admin } from 'better-auth/plugins';",
+        "import { drizzleAdapter } from 'better-auth/adapters/drizzle';",
+        "import { createAuthClient } from 'better-auth/client';",
+        "export const load = () => import('better-auth/client/plugins');",
+        '',
+      ].join('\n'),
+    );
+    const graph = await collectModuleGraph(path.join(dir, 'auth.js'));
+    expect(serverOnlyReaches(graph).sort()).toEqual(
+      [
+        'better-auth',
+        'better-auth/adapters/drizzle',
+        'better-auth/plugins',
+      ].sort(),
+    );
+  });
+
   it('does not flag a look-alike package, client-safe imports or import-looking comment text', async () => {
     await writeFile(
       path.join(dir, 'clean.js'),
@@ -218,6 +256,18 @@ describe('the built @plakboek/editor client entry', () => {
   it('has only statically analysable dynamic imports', async () => {
     const graph = await collectModuleGraph(clientEntry);
     expect(graph.violations).toEqual([]);
+  });
+
+  it('reaches the auth library through its browser client only', async () => {
+    const graph = await collectModuleGraph(clientEntry);
+    const reached = [...graph.bareSpecifiers.keys()].filter(
+      (specifier) =>
+        specifier === 'better-auth' || specifier.startsWith('better-auth/'),
+    );
+    expect(reached.length).toBeGreaterThan(0);
+    for (const specifier of reached) {
+      expect(specifier).toMatch(/^better-auth\/client(\/|$)/);
+    }
   });
 
   it('walks the entry and its chunks (the walker is not vacuous)', async () => {

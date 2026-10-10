@@ -1,6 +1,7 @@
-import type { ReactElement } from 'react';
+import { useRef, useState, type FormEvent, type ReactElement } from 'react';
 import { CMS_LOGIN_PATH } from '@plakboek/render';
 import { STRINGS } from '../strings.js';
+import { useLoginBehaviour } from './behaviour.js';
 import {
   FIELD_GROUP,
   FIELD_INPUT,
@@ -11,6 +12,12 @@ import {
   TEXT_LINK,
 } from './card.js';
 
+/** A text field's value from a submitted form. */
+function fieldText(form: FormData, name: string): string {
+  const value = form.get(name);
+  return typeof value === 'string' ? value : '';
+}
+
 export type SignInStepProps = {
   readonly next: string;
 };
@@ -19,12 +26,45 @@ export type SignInStepProps = {
  * The sign-in step: the markup the server paints and the client later
  * hydrates with behaviour. The form posts to `/cms`, which answers 405, so a
  * browser that never runs the script cannot put a password in an address:
- * signing in needs JavaScript in this release.
+ * signing in needs JavaScript in this release. The inputs are uncontrolled,
+ * so whatever was typed before the script arrived survives hydration.
  */
 export function SignInStep(props: SignInStepProps): ReactElement {
+  const behaviour = useLoginBehaviour();
+  const busyRef = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    // A second submit while one is in flight is ignored.
+    if (behaviour === null || busyRef.current) return;
+    const form = new FormData(event.currentTarget);
+    const email = fieldText(form, 'email').trim();
+    const password = fieldText(form, 'password');
+    busyRef.current = true;
+    setBusy(true);
+    const result = await behaviour.auth.signInEmail(email, password);
+    if (result.status === 'signed-in') {
+      // The card stays as it is while the hand-over takes it.
+      behaviour.signedIn(result.user);
+      return;
+    }
+    if (passwordRef.current !== null) passwordRef.current.value = '';
+    busyRef.current = false;
+    setBusy(false);
+  }
+
   return (
     <LoginCard heading={STRINGS['login.signIn.heading']} next={props.next}>
-      <form method="post" action={CMS_LOGIN_PATH} noValidate>
+      <form
+        method="post"
+        action={CMS_LOGIN_PATH}
+        noValidate
+        onSubmit={(event) => {
+          void submit(event);
+        }}
+      >
         <div className={FIELD_GROUP}>
           <label htmlFor="plakboek-login-email" className={FIELD_LABEL}>
             {STRINGS['login.signIn.email.label']}
@@ -35,6 +75,7 @@ export function SignInStep(props: SignInStepProps): ReactElement {
             type="email"
             autoComplete="username"
             autoFocus
+            readOnly={busy}
             className={FIELD_INPUT}
           />
         </div>
@@ -47,6 +88,8 @@ export function SignInStep(props: SignInStepProps): ReactElement {
             name="password"
             type="password"
             autoComplete="current-password"
+            ref={passwordRef}
+            readOnly={busy}
             className={FIELD_INPUT}
           />
         </div>

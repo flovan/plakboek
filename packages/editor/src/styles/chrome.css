@@ -347,7 +347,61 @@
   }
 }
 
+/*
+ * The hand-over from the login card to the edit shell. The backdrop takes the
+ * frame's own border, radius and shadow (none in the full layout), and the
+ * sidebar the shell is about to show waits in a column of its own over the
+ * scrim, above it in the stacking order. The opening spinner sits centred in
+ * the rectangle the frame will have.
+ */
+@layer components {
+  .pk-backdrop-leaving {
+    border: 1px solid var(--pk-frame-border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  }
+
+  :host([data-layout='full']) .pk-backdrop-leaving {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .pk-login-sidebar {
+    position: fixed;
+    inset-block: 0;
+    left: 0;
+    z-index: 2;
+    display: flex;
+    width: 280px;
+  }
+
+  .pk-login-sidebar > .pk-sidebar {
+    flex: 1 1 auto;
+  }
+
+  :host([data-layout='full']) .pk-login-sidebar {
+    width: 56px;
+  }
+
+  .pk-login-opening {
+    position: fixed;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
+  .pk-backdrop-leaving {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+
+  :host([data-layout='full']) .pk-backdrop-leaving {
+    box-shadow: none;
+  }
+
   .pk-frame {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   }

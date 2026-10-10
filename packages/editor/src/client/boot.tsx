@@ -1,5 +1,6 @@
 import { HOST_TAG } from '../chrome/island.js';
 import { readIsland } from './island.js';
+import { mountLogin } from './login/mount.js';
 import { mountShell } from './shell/mount.js';
 
 /**
@@ -15,4 +16,5 @@ export function bootEditor(doc: Document = document): void {
   const island = readIsland(doc);
   if (island === null) return;
   if (island.kind === 'shell') mountShell(host, shadowRoot, island);
+  else mountLogin(host, shadowRoot, island);
 }

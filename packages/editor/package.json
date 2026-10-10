@@ -44,7 +44,8 @@
     "@plakboek/auth": "workspace:*",
     "@plakboek/pages": "workspace:*",
     "@plakboek/permissions": "workspace:*",
-    "@plakboek/render": "workspace:*"
+    "@plakboek/render": "workspace:*",
+    "better-auth": "catalog:"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "catalog:",

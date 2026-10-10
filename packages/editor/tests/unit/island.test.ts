@@ -28,16 +28,15 @@ describe('readIsland', () => {
 
   it('reads back a hostile name that was escaped for the page', () => {
     const hostile = { ...VALID, user: { name: '</script> ', email: 'a@b' } };
-    expect(readIsland(sourceOf(escapeJsonForHtml(hostile)))?.user.name).toBe(
-      '</script> ',
-    );
+    expect(readIsland(sourceOf(escapeJsonForHtml(hostile)))).toMatchObject({
+      user: { name: '</script> ' },
+    });
   });
 
   it('reads the read-only mode', () => {
     expect(
-      readIsland(sourceOf(JSON.stringify({ ...VALID, mode: 'read-only' })))
-        ?.mode,
-    ).toBe('read-only');
+      readIsland(sourceOf(JSON.stringify({ ...VALID, mode: 'read-only' }))),
+    ).toMatchObject({ mode: 'read-only' });
   });
 
   it('keeps only the known fields', () => {
@@ -52,7 +51,7 @@ describe('readIsland', () => {
     ['text that is not JSON', '{nope'],
     ['an array', '[]'],
     ['null', 'null'],
-    ['an unknown kind', JSON.stringify({ ...VALID, kind: 'login' })],
+    ['an unknown kind', JSON.stringify({ ...VALID, kind: 'sidebar' })],
     ['an unknown mode', JSON.stringify({ ...VALID, mode: 'admin' })],
     ['a missing user', JSON.stringify({ ...VALID, user: undefined })],
     [
@@ -64,5 +63,46 @@ describe('readIsland', () => {
     ['a missing logout path', JSON.stringify({ ...VALID, logoutPath: null })],
   ])('returns null for %s', (_label, content) => {
     expect(readIsland(sourceOf(content))).toBeNull();
+  });
+});
+
+const LOGIN = {
+  kind: 'login',
+  step: 'sign-in',
+  next: '/about',
+  twoFactorRequiredRoles: ['superadmin', 'admin'],
+};
+
+describe('readIsland for the login document', () => {
+  it('reads a login island exactly as the server wrote it', () => {
+    expect(readIsland(sourceOf(escapeJsonForHtml(LOGIN)))).toEqual(LOGIN);
+  });
+
+  it('reads the optional link kind and email', () => {
+    const island = {
+      ...LOGIN,
+      step: 'invalid-link',
+      linkKind: 'reset',
+      email: 'ada@example.com',
+    };
+    expect(readIsland(sourceOf(JSON.stringify(island)))).toEqual(island);
+  });
+
+  it('keeps only the known fields', () => {
+    expect(
+      readIsland(sourceOf(JSON.stringify({ ...LOGIN, token: 'secret' }))),
+    ).toEqual(LOGIN);
+  });
+
+  it.each([
+    ['an unknown step', { ...LOGIN, step: 'admin' }],
+    ['a missing next', { ...LOGIN, next: undefined }],
+    ['a non-text next', { ...LOGIN, next: 4 }],
+    ['missing required roles', { ...LOGIN, twoFactorRequiredRoles: undefined }],
+    ['roles that are not all text', { ...LOGIN, twoFactorRequiredRoles: [1] }],
+    ['an unknown link kind', { ...LOGIN, linkKind: 'magic' }],
+    ['a non-text email', { ...LOGIN, email: 5 }],
+  ])('returns null for %s', (_label, island) => {
+    expect(readIsland(sourceOf(JSON.stringify(island)))).toBeNull();
   });
 });

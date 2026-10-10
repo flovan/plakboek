@@ -1,5 +1,12 @@
-import type { ReactElement, ReactNode } from 'react';
+import {
+  useContext,
+  useEffect,
+  useRef,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { STRINGS } from '../strings.js';
+import { StepFocusContext, useLoginBehaviour } from './behaviour.js';
 
 /** The id the dialog is labelled by: the step heading. */
 export const LOGIN_HEADING_ID = 'plakboek-login-heading';
@@ -54,8 +61,16 @@ export type LoginCardProps = {
  */
 export function LoginCard(props: LoginCardProps): ReactElement {
   const { heading, body, next, children, secondary } = props;
+  const behaviour = useLoginBehaviour();
+  const moved = useContext(StepFocusContext);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // A step reached after the first one announces itself: focus its heading.
+  useEffect(() => {
+    if (moved) headingRef.current?.focus();
+  }, [moved]);
   return (
     <dialog
+      ref={behaviour?.dialogRef}
       open
       className="pk-login"
       aria-labelledby={LOGIN_HEADING_ID}
@@ -63,6 +78,7 @@ export function LoginCard(props: LoginCardProps): ReactElement {
     >
       <div className="pk-card">
         <h1
+          ref={headingRef}
           id={LOGIN_HEADING_ID}
           tabIndex={-1}
           className="m-0 text-heading font-semibold text-text wrap-anywhere focus:outline-none"
