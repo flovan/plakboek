@@ -16,11 +16,23 @@
  * only and must be narrowed when that route exists (D-22).
  */
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadEnv, type Plugin } from 'vite';
+import {
+  buildEditorSidecar,
+  devEditorAssets,
+  EDITOR_CHUNK_NAME,
+  EDITOR_CLIENT_ID,
+  EDITOR_SIDECAR,
+  editorAssetsFromSidecar,
+  type BundleLike,
+  type EditorSidecar,
+} from './editor-assets.js';
 import { readRuntimeEnv } from './runtime/env.js';
 
 const VIRTUAL_ID = 'virtual:plakboek/host';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
+const RESOLVED_EDITOR_CLIENT_ID = `\0${EDITOR_CLIENT_ID}`;
 
 export type PlakboekPluginOptions = {
   /** Path to the module whose default export is the `defineConfig` result. */
@@ -35,13 +47,42 @@ export type PlakboekPluginOptions = {
   readonly edit?: string;
 };
 
+/**
+ * The module the editor chunk is built from. The editor client is resolved
+ * from this package's own location, so a host under pnpm's isolated layout
+ * needs no direct dependency on the editor.
+ */
+function editorClientSource(): string {
+  const entry = fileURLToPath(import.meta.resolve('@plakboek/editor/client'));
+  return [
+    `import { bootEditor } from ${JSON.stringify(entry)};`,
+    'bootEditor();',
+  ].join('\n');
+}
+
 export function plakboek(options: PlakboekPluginOptions): Plugin {
   let root = process.cwd();
+  let base = '/';
   let command: 'serve' | 'build' = 'serve';
+  // Written by the client build, read by the server build that follows it in
+  // the same process.
+  let sidecar: EditorSidecar | undefined;
+
+  function serverEditorAssets(): string {
+    if (command === 'serve') return JSON.stringify(devEditorAssets(base));
+    if (sidecar === undefined) {
+      throw new Error(
+        `[@plakboek/core] The server build ran before the client build produced ${EDITOR_SIDECAR}, so the editor's client chunk is unknown. Build with \`react-router build\`, which builds the client first.`,
+      );
+    }
+    return JSON.stringify(editorAssetsFromSidecar(sidecar, base));
+  }
+
   return {
     name: 'plakboek',
     configResolved(resolved) {
       root = resolved.root;
+      base = resolved.base;
     },
     config(userConfig, env) {
       command = env.command;
@@ -70,17 +111,43 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
       server.ws.send({ type: 'full-reload' });
       return undefined;
     },
+    buildStart() {
+      // The editor's client is its own entry chunk, referenced only by the
+      // edit shell; nothing a visitor loads imports it.
+      if (command !== 'build' || this.environment.name !== 'client') return;
+      this.emitFile({
+        type: 'chunk',
+        id: EDITOR_CLIENT_ID,
+        name: EDITOR_CHUNK_NAME,
+      });
+    },
+    generateBundle(_outputOptions, bundle) {
+      if (this.environment.name !== 'client') return;
+      const found = buildEditorSidecar(bundle as unknown as BundleLike);
+      if (found === undefined) return;
+      sidecar = found;
+      this.emitFile({
+        type: 'asset',
+        fileName: EDITOR_SIDECAR,
+        source: JSON.stringify(found),
+      });
+    },
     resolveId(id) {
       if (id === VIRTUAL_ID) return RESOLVED_ID;
+      if (id === EDITOR_CLIENT_ID || id === RESOLVED_EDITOR_CLIENT_ID) {
+        return RESOLVED_EDITOR_CLIENT_ID;
+      }
       return undefined;
     },
     load(id) {
+      if (id === RESOLVED_EDITOR_CLIENT_ID) return editorClientSource();
       if (id !== RESOLVED_ID) return undefined;
       if (this.environment.name === 'client') {
         return [
           'export const config = undefined;',
           'export const site = undefined;',
           'export const edit = undefined;',
+          'export const editorAssets = undefined;',
         ].join('\n');
       }
       const configPath = JSON.stringify(resolve(root, options.config));
@@ -91,6 +158,7 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
         options.edit === undefined
           ? 'export const edit = undefined;'
           : `export { edit } from ${JSON.stringify(resolve(root, options.edit))};`,
+        `export const editorAssets = ${serverEditorAssets()};`,
       ].join('\n');
     },
   };

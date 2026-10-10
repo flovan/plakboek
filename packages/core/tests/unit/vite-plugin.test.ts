@@ -11,6 +11,8 @@ import { plakboek, type PlakboekPluginOptions } from '../../src/vite.js';
 
 const VIRTUAL_ID = 'virtual:plakboek/host';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
+const EDITOR_CLIENT_ID = 'virtual:plakboek/editor-client';
+const RESOLVED_EDITOR_CLIENT_ID = `\0${EDITOR_CLIENT_ID}`;
 const ROOT = '/work/host';
 
 type Hook = (this: unknown, ...args: unknown[]) => unknown;
@@ -32,7 +34,7 @@ function instance(options: Partial<PlakboekPluginOptions> = {}): Plugin {
     site: './app/site.ts',
     ...options,
   });
-  callHook(plugin.configResolved, undefined, { root: ROOT });
+  callHook(plugin.configResolved, undefined, { root: ROOT, base: '/' });
   return plugin;
 }
 
@@ -74,10 +76,160 @@ describe('plakboek() virtual host module', () => {
     expect(source).not.toContain(ROOT);
   });
 
+  it('exports the development editor assets for the ssr environment when serving', () => {
+    const source = load(instance(), 'ssr');
+    expect(source).toContain('export const editorAssets = {');
+    expect(source).toContain('/@vite/client');
+    expect(source).toContain(`/@id/__x00__${EDITOR_CLIENT_ID}`);
+  });
+
+  it('exports editorAssets as undefined for the client environment', () => {
+    expect(load(instance(), 'client')).toContain(
+      'export const editorAssets = undefined;',
+    );
+  });
+
   it('answers load for no other module', () => {
     expect(
       callHook(instance().load, { environment: { name: 'ssr' } }, 'x'),
     ).toBeUndefined();
+  });
+});
+
+describe('plakboek() editor chunk', () => {
+  function building(base = '/'): Plugin {
+    const plugin = plakboek({ config: './c.ts', site: './s.ts' });
+    callHook(
+      plugin.config,
+      undefined,
+      { root: ROOT },
+      { mode: 'production', command: 'build' },
+    );
+    callHook(plugin.configResolved, undefined, { root: ROOT, base });
+    return plugin;
+  }
+
+  const clientEnvironment = { environment: { name: 'client' } };
+
+  function bundleWithEditor(): Record<string, unknown> {
+    return {
+      'assets/plakboek-editor-abc.js': {
+        type: 'chunk',
+        name: 'plakboek-editor',
+        fileName: 'assets/plakboek-editor-abc.js',
+        isEntry: true,
+        imports: ['assets/react-def.js'],
+        dynamicImports: [],
+        moduleIds: [],
+        viteMetadata: { importedCss: new Set(['assets/editor-ghi.css']) },
+      },
+      'assets/react-def.js': {
+        type: 'chunk',
+        name: 'react',
+        fileName: 'assets/react-def.js',
+        isEntry: false,
+        imports: [],
+        dynamicImports: [],
+        moduleIds: [],
+      },
+    };
+  }
+
+  it('resolves the editor client id, and its resolved form, to one module', () => {
+    const plugin = instance();
+    expect(callHook(plugin.resolveId, undefined, EDITOR_CLIENT_ID)).toBe(
+      RESOLVED_EDITOR_CLIENT_ID,
+    );
+    expect(
+      callHook(plugin.resolveId, undefined, RESOLVED_EDITOR_CLIENT_ID),
+    ).toBe(RESOLVED_EDITOR_CLIENT_ID);
+  });
+
+  it('loads a module that imports bootEditor from the editor client entry and calls it', () => {
+    const source = callHook(
+      instance().load,
+      { environment: { name: 'client' } },
+      RESOLVED_EDITOR_CLIENT_ID,
+    ) as string;
+    const lines = source.split('\n');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(
+      /^import \{ bootEditor \} from ".*editor.*client\.js";$/,
+    );
+    expect(lines[1]).toBe('bootEditor();');
+  });
+
+  it('emits the editor chunk when building the client, and only then', () => {
+    const emitFile = vi.fn();
+    const plugin = building();
+    callHook(plugin.buildStart, { environment: { name: 'client' }, emitFile });
+    expect(emitFile).toHaveBeenCalledWith({
+      type: 'chunk',
+      id: EDITOR_CLIENT_ID,
+      name: 'plakboek-editor',
+    });
+
+    emitFile.mockClear();
+    callHook(plugin.buildStart, { environment: { name: 'ssr' }, emitFile });
+    callHook(instance().buildStart, {
+      environment: { name: 'client' },
+      emitFile,
+    });
+    expect(emitFile).not.toHaveBeenCalled();
+  });
+
+  it('writes the sidecar for the client bundle and hands its URLs to the server build', () => {
+    const emitFile = vi.fn();
+    const plugin = building('/static/');
+    callHook(
+      plugin.generateBundle,
+      { ...clientEnvironment, emitFile },
+      {},
+      bundleWithEditor(),
+    );
+    expect(emitFile).toHaveBeenCalledTimes(1);
+    const emitted = emitFile.mock.calls[0]?.[0] as {
+      type: string;
+      fileName: string;
+      source: string;
+    };
+    expect(emitted.type).toBe('asset');
+    expect(emitted.fileName).toBe('plakboek-editor.json');
+    expect(JSON.parse(emitted.source)).toEqual({
+      file: 'assets/plakboek-editor-abc.js',
+      imports: ['assets/react-def.js'],
+      css: ['assets/editor-ghi.css'],
+    });
+
+    const server = callHook(
+      plugin.load,
+      { environment: { name: 'ssr' } },
+      RESOLVED_ID,
+    ) as string;
+    expect(server).toContain(
+      `export const editorAssets = ${JSON.stringify({
+        entry: '/static/assets/plakboek-editor-abc.js',
+        preload: ['/static/assets/react-def.js'],
+        css: ['/static/assets/editor-ghi.css'],
+      })};`,
+    );
+  });
+
+  it('writes no sidecar for a server bundle', () => {
+    const emitFile = vi.fn();
+    callHook(
+      building().generateBundle,
+      { environment: { name: 'ssr' }, emitFile },
+      {},
+      bundleWithEditor(),
+    );
+    expect(emitFile).not.toHaveBeenCalled();
+  });
+
+  it('fails the server build with a clear message when no client build ran first', () => {
+    expect(() =>
+      callHook(building().load, { environment: { name: 'ssr' } }, RESOLVED_ID),
+    ).toThrow(/client build/);
   });
 });
 

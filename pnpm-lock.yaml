@@ -459,6 +459,9 @@ importers:
       '@plakboek/db':
         specifier: workspace:*
         version: link:../db
+      '@plakboek/editor':
+        specifier: workspace:*
+        version: link:../editor
       '@plakboek/pages':
         specifier: workspace:*
         version: link:../pages
