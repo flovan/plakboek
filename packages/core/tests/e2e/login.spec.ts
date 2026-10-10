@@ -197,3 +197,181 @@ test.describe('signing in', () => {
     expect(painted).toMatchObject({ left: 304, top: 24 });
   });
 });
+
+const WRONG_CREDENTIALS =
+  'Email or password is incorrect. Check them and try again.';
+const SIGN_IN_API = '**/api/auth/sign-in/email';
+
+async function openModal(page: Page): Promise<void> {
+  await page.goto('/cms?next=/about');
+  await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
+}
+
+test.describe('sign-in problems and errors', () => {
+  test('shows what is missing under each field and sends nothing', async ({
+    page,
+  }) => {
+    await openModal(page);
+    const requests: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/api/auth/')) requests.push(request.url());
+    });
+
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page.getByText('Enter your email address.')).toBeVisible();
+    await expect(page.getByText('Enter your password.')).toBeVisible();
+    await expect(page.getByLabel('Email address')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+    await expect(page.getByLabel('Password')).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+    await expect(page.getByLabel('Email address')).toBeFocused();
+    expect(requests).toEqual([]);
+  });
+
+  test('flags only the invalid field and keeps what was typed in the valid one', async ({
+    page,
+  }) => {
+    await openModal(page);
+    await page.getByLabel('Email address').fill('x@');
+    await page.getByLabel('Password').fill('something typed');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+
+    await expect(
+      page.getByText('Enter an address like name@example.com.'),
+    ).toBeVisible();
+    await expect(page.getByText('Enter your password.')).toHaveCount(0);
+    await expect(page.getByLabel('Password')).toHaveValue('something typed');
+    await expect(page.getByLabel('Password')).not.toHaveAttribute(
+      'aria-invalid',
+      'true',
+    );
+  });
+
+  test('answers a wrong password with one focused alert, clears the password and keeps the address', async ({
+    page,
+  }) => {
+    await openModal(page);
+    const { email } = e2eUsers().editor;
+    await page.getByLabel('Email address').fill(email);
+    await page.getByLabel('Password').fill('definitely the wrong one');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+
+    const alert = page.getByRole('alert');
+    await expect(alert).toHaveText(WRONG_CREDENTIALS);
+    await expect(alert).toBeFocused();
+    await expect(page.getByLabel('Password')).toHaveValue('');
+    await expect(page.getByLabel('Email address')).toHaveValue(email);
+    await expect(page.getByRole('button', { name: 'Sign in' })).toBeEnabled();
+    expect(await dialogState(page)).toEqual({ open: true, modal: true });
+  });
+
+  test('gives an address that has no account the very same alert', async ({
+    page,
+  }) => {
+    await openModal(page);
+    await page.getByLabel('Email address').fill('nobody-here@example.com');
+    await page.getByLabel('Password').fill('definitely the wrong one');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page.getByRole('alert')).toHaveText(WRONG_CREDENTIALS);
+  });
+
+  test('says so when the server cannot be reached, fails, or rate limits', async ({
+    page,
+  }) => {
+    await openModal(page);
+    const email = page.getByLabel('Email address');
+    await email.fill(e2eUsers().editor.email);
+
+    const attempt = async (): Promise<void> => {
+      await page.getByLabel('Password').fill('whatever it is');
+      await page.getByRole('button', { name: 'Sign in' }).click();
+    };
+
+    await page.route(SIGN_IN_API, (route) => route.abort('connectionrefused'));
+    await attempt();
+    await expect(page.getByRole('alert')).toHaveText(
+      'Could not reach the server. Check your connection and try again.',
+    );
+    await page.unroute(SIGN_IN_API);
+
+    await page.route(SIGN_IN_API, (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: '{"message":"boom"}',
+      }),
+    );
+    await attempt();
+    await expect(page.getByRole('alert')).toHaveText(
+      'Something went wrong on our side. Try again in a moment.',
+    );
+    await page.unroute(SIGN_IN_API);
+
+    await page.route(SIGN_IN_API, (route) =>
+      route.fulfill({
+        status: 429,
+        contentType: 'application/json',
+        body: '{"message":"Too many requests. Please try again later."}',
+      }),
+    );
+    await attempt();
+    await expect(page.getByRole('alert')).toHaveText(
+      'Too many attempts. Wait a few minutes, then try again.',
+    );
+    await expect(email).toHaveValue(e2eUsers().editor.email);
+  });
+
+  test('is in flight until the answer comes: read-only fields, a disabled button, one request', async ({
+    page,
+  }) => {
+    await openModal(page);
+    let requests = 0;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(SIGN_IN_API, async (route) => {
+      requests += 1;
+      await held;
+      await route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: '{"code":"INVALID_EMAIL_OR_PASSWORD","message":"Invalid"}',
+      });
+    });
+
+    await page.getByLabel('Email address').fill(e2eUsers().editor.email);
+    await page.getByLabel('Password').fill('whatever it is');
+    const button = page.getByRole('button', { name: 'Signing in' });
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.getByLabel('Email address')).toHaveAttribute(
+      'readonly',
+      '',
+    );
+    await expect(page.getByLabel('Password')).toHaveAttribute('readonly', '');
+
+    // A second submit (Enter in a field) is ignored while the first is out.
+    await page.getByLabel('Password').press('Enter');
+    release();
+    await expect(page.getByRole('alert')).toHaveText(WRONG_CREDENTIALS);
+    expect(requests).toBe(1);
+    await expect(page.getByRole('button', { name: 'Sign in' })).toBeEnabled();
+  });
+});
+
+test.describe('a role that must set up two-step sign-in', () => {
+  test('is sent to the set-up step after the password, not into edit mode', async ({
+    page,
+  }) => {
+    await openModal(page);
+    await signInWith(page, e2eUsers().superadmin);
+    await page.waitForURL((url) => url.pathname === '/cms/two-factor/enrol');
+    expect(new URL(page.url()).searchParams.get('next')).toBe('/about');
+  });
+});

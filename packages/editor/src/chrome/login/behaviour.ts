@@ -7,6 +7,7 @@
  * server and testable without a browser.
  */
 import { createContext, useContext } from 'react';
+import type { AuthFailure } from '../../client/login/validation.js';
 
 /** A signed-in user, as far as the card needs to know. */
 export type SignedInUser = {
@@ -22,11 +23,27 @@ export type SignInResult =
   | { readonly status: 'signed-in'; readonly user: SignedInUser }
   /** The password was right and a second factor is needed. */
   | { readonly status: 'two-factor' }
-  | { readonly status: 'failed' };
+  | { readonly status: 'failed'; readonly failure: AuthFailure };
+
+/** What checking a second-factor code came to. */
+export type CodeResult =
+  | { readonly status: 'verified'; readonly user: SignedInUser }
+  | { readonly status: 'failed'; readonly failure: AuthFailure };
+
+/** What asking for an emailed code came to. */
+export type SendResult =
+  | { readonly status: 'sent' }
+  | { readonly status: 'failed'; readonly failure: AuthFailure };
 
 /** The calls the card makes of the auth service. */
 export type LoginAuth = {
   signInEmail(email: string, password: string): Promise<SignInResult>;
+  /** Checks the code of the authenticator app against the pending sign-in. */
+  verifyTotp(code: string): Promise<CodeResult>;
+  /** Mails a code to the user whose password step just succeeded. */
+  sendOtp(): Promise<SendResult>;
+  /** Checks the emailed code against the pending sign-in. */
+  verifyOtp(code: string): Promise<CodeResult>;
 };
 
 export type LoginBehaviour = {

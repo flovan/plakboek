@@ -1,16 +1,15 @@
 import { useRef, useState, type FormEvent, type ReactElement } from 'react';
 import { CMS_LOGIN_PATH } from '@plakboek/render';
+import {
+  failureMessage,
+  validateEmail,
+  validatePassword,
+  type AuthFailure,
+} from '../../client/login/validation.js';
 import { STRINGS } from '../strings.js';
 import { useLoginBehaviour } from './behaviour.js';
-import {
-  FIELD_GROUP,
-  FIELD_INPUT,
-  FIELD_LABEL,
-  LoginCard,
-  PRIMARY_BUTTON,
-  SECONDARY_BUTTON,
-  TEXT_LINK,
-} from './card.js';
+import { FIELD_GROUP, LoginCard, SECONDARY_BUTTON, TEXT_LINK } from './card.js';
+import { ErrorBox, Field, PrimaryButton } from './fields.js';
 
 /** A text field's value from a submitted form. */
 function fieldText(form: FormData, name: string): string {
@@ -20,19 +19,37 @@ function fieldText(form: FormData, name: string): string {
 
 export type SignInStepProps = {
   readonly next: string;
+  /** The password was right and a second factor is needed; called with the
+   * address that was typed, so the emailed-code step can name it. */
+  readonly onTwoFactor?: (email: string) => void;
 };
+
+/** What one failed attempt shows: the message and a count, so the same
+ * failure twice in a row still gives the box a new element to focus. */
+type Failure = { readonly failure: AuthFailure; readonly attempt: number };
 
 /**
  * The sign-in step: the markup the server paints and the client later
  * hydrates with behaviour. The form posts to `/cms`, which answers 405, so a
  * browser that never runs the script cannot put a password in an address:
- * signing in needs JavaScript in this release. The inputs are uncontrolled,
- * so whatever was typed before the script arrived survives hydration.
+ * signing in needs JavaScript in this release.
+ *
+ * Problems the card can see (an empty or malformed address, an empty
+ * password) show under their field before anything is sent. A refused or
+ * failed request shows in one alert box above the button, which takes focus;
+ * the password is cleared, the address kept, and the words never say which of
+ * the two was wrong. While a request is in flight the inputs are read-only
+ * and a second submit is ignored.
  */
 export function SignInStep(props: SignInStepProps): ReactElement {
+  const { next, onTwoFactor } = props;
   const behaviour = useLoginBehaviour();
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [failed, setFailed] = useState<Failure | null>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -42,6 +59,17 @@ export function SignInStep(props: SignInStepProps): ReactElement {
     const form = new FormData(event.currentTarget);
     const email = fieldText(form, 'email').trim();
     const password = fieldText(form, 'password');
+
+    const emailProblem = validateEmail(email);
+    const passwordProblem = validatePassword(password);
+    setEmailError(emailProblem);
+    setPasswordError(passwordProblem);
+    setFailed(null);
+    if (emailProblem !== null || passwordProblem !== null) {
+      (emailProblem === null ? passwordRef : emailRef).current?.focus();
+      return;
+    }
+
     busyRef.current = true;
     setBusy(true);
     const result = await behaviour.auth.signInEmail(email, password);
@@ -50,13 +78,21 @@ export function SignInStep(props: SignInStepProps): ReactElement {
       behaviour.signedIn(result.user);
       return;
     }
+    if (result.status === 'two-factor') {
+      onTwoFactor?.(email);
+      return;
+    }
     if (passwordRef.current !== null) passwordRef.current.value = '';
+    setFailed((previous) => ({
+      failure: result.failure,
+      attempt: (previous?.attempt ?? 0) + 1,
+    }));
     busyRef.current = false;
     setBusy(false);
   }
 
   return (
-    <LoginCard heading={STRINGS['login.signIn.heading']} next={props.next}>
+    <LoginCard heading={STRINGS['login.signIn.heading']} next={next}>
       <form
         method="post"
         action={CMS_LOGIN_PATH}
@@ -65,43 +101,43 @@ export function SignInStep(props: SignInStepProps): ReactElement {
           void submit(event);
         }}
       >
-        <div className={FIELD_GROUP}>
-          <label htmlFor="plakboek-login-email" className={FIELD_LABEL}>
-            {STRINGS['login.signIn.email.label']}
-          </label>
-          <input
-            id="plakboek-login-email"
-            name="email"
-            type="email"
-            autoComplete="username"
-            autoFocus
-            readOnly={busy}
-            className={FIELD_INPUT}
-          />
-        </div>
-        <div>
-          <label htmlFor="plakboek-login-password" className={FIELD_LABEL}>
-            {STRINGS['login.signIn.password.label']}
-          </label>
-          <input
-            id="plakboek-login-password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            ref={passwordRef}
-            readOnly={busy}
-            className={FIELD_INPUT}
-          />
-        </div>
+        <Field
+          id="plakboek-login-email"
+          name="email"
+          label={STRINGS['login.signIn.email.label']}
+          type="email"
+          autoComplete="username"
+          autoFocus
+          readOnly={busy}
+          error={emailError}
+          inputRef={emailRef}
+          className={FIELD_GROUP}
+        />
+        <Field
+          id="plakboek-login-password"
+          name="password"
+          label={STRINGS['login.signIn.password.label']}
+          type="password"
+          autoComplete="current-password"
+          readOnly={busy}
+          error={passwordError}
+          inputRef={passwordRef}
+        />
         <div className="mt-2 text-right">
           <button type="button" data-action="forgot" className={TEXT_LINK}>
             {STRINGS['login.signIn.forgot']}
           </button>
         </div>
         <div className="mt-6">
-          <button type="submit" className={PRIMARY_BUTTON}>
+          {failed === null ? null : (
+            <ErrorBox
+              key={failed.attempt}
+              message={failureMessage(failed.failure)}
+            />
+          )}
+          <PrimaryButton busy={busy} busyLabel={STRINGS['loading.signingIn']}>
             {STRINGS['login.signIn.submit']}
-          </button>
+          </PrimaryButton>
         </div>
         <div className="mt-4">
           <button

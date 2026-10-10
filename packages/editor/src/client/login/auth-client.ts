@@ -8,10 +8,13 @@
  * whether a person may do anything.
  */
 import type {
+  CodeResult,
   LoginAuth,
+  SendResult,
   SignedInUser,
   SignInResult,
 } from '../../chrome/login/behaviour.js';
+import { classifyAuthError, type AuthFailure } from './validation.js';
 
 /** What a call to the auth service answers: the data, or the error it was
  * refused with (`status` is the HTTP status, `code` the library's own code). */
@@ -33,6 +36,11 @@ export type AuthClient = {
       readonly email: string;
       readonly password: string;
     }): Promise<AuthCallResult>;
+  };
+  readonly twoFactor: {
+    verifyTotp(input: { readonly code: string }): Promise<AuthCallResult>;
+    verifyOtp(input: { readonly code: string }): Promise<AuthCallResult>;
+    sendOtp(): Promise<AuthCallResult>;
   };
 };
 
@@ -87,22 +95,60 @@ export function readSignedInUser(value: unknown): SignedInUser | null {
 export function createLoginAuth(
   client: () => Promise<AuthClient> = getAuthClient,
 ): LoginAuth {
+  /** A refused call or a thrown one, as the failure the card shows. */
+  async function call(
+    run: (client: AuthClient) => Promise<AuthCallResult>,
+  ): Promise<
+    | { readonly ok: true; readonly data: unknown }
+    | { readonly ok: false; readonly failure: AuthFailure }
+  > {
+    try {
+      const result = await run(await client());
+      if (result.error !== null) {
+        return { ok: false, failure: classifyAuthError(result.error) };
+      }
+      return { ok: true, data: result.data };
+    } catch (error) {
+      return { ok: false, failure: classifyAuthError(error) };
+    }
+  }
+
+  async function verify(
+    run: (client: AuthClient) => Promise<AuthCallResult>,
+  ): Promise<CodeResult> {
+    const result = await call(run);
+    if (!result.ok) return { status: 'failed', failure: result.failure };
+    const user = readSignedInUser(
+      isRecord(result.data) ? result.data.user : null,
+    );
+    // An answer without a user is not a sign-in, whatever its status.
+    return user === null
+      ? { status: 'failed', failure: 'server' }
+      : { status: 'verified', user };
+  }
+
   return {
     async signInEmail(email, password): Promise<SignInResult> {
-      try {
-        const result = await (await client()).signIn.email({ email, password });
-        if (result.error !== null) return { status: 'failed' };
-        const data: unknown = result.data;
-        if (isRecord(data) && data.twoFactorRedirect === true) {
-          return { status: 'two-factor' };
-        }
-        const user = readSignedInUser(isRecord(data) ? data.user : null);
-        return user === null
-          ? { status: 'failed' }
-          : { status: 'signed-in', user };
-      } catch {
-        return { status: 'failed' };
+      const result = await call((auth) =>
+        auth.signIn.email({ email, password }),
+      );
+      if (!result.ok) return { status: 'failed', failure: result.failure };
+      const { data } = result;
+      if (isRecord(data) && data.twoFactorRedirect === true) {
+        return { status: 'two-factor' };
       }
+      const user = readSignedInUser(isRecord(data) ? data.user : null);
+      return user === null
+        ? { status: 'failed', failure: 'server' }
+        : { status: 'signed-in', user };
+    },
+    verifyTotp: (code) => verify((auth) => auth.twoFactor.verifyTotp({ code })),
+    verifyOtp: (code) => verify((auth) => auth.twoFactor.verifyOtp({ code })),
+    async sendOtp(): Promise<SendResult> {
+      const result = await call((auth) => auth.twoFactor.sendOtp());
+      return result.ok
+        ? { status: 'sent' }
+        : { status: 'failed', failure: result.failure };
     },
   };
 }
