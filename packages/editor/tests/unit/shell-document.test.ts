@@ -9,6 +9,10 @@ import { CHROME_STYLE_CSP_HASH } from '../../src/chrome/styles.js';
 import { renderEditorScripts } from '../../src/server/assets.js';
 import { cspHashOf } from '../../src/server/html-document.js';
 import {
+  LAYOUT_SCRIPT,
+  LAYOUT_SCRIPT_CSP_HASH,
+} from '../../src/server/layout-script.js';
+import {
   renderShellDocument,
   SHELL_HEAD_STYLE,
   SHELL_HEAD_STYLE_CSP_HASH,
@@ -147,8 +151,8 @@ describe('the shell document', () => {
     expect(island).not.toContain('<');
     expect(JSON.parse(island ?? '').user.name).toBe(hostile);
     expect(html).not.toContain('<img src=x');
-    // the island and the entry module are the only scripts
-    expect(html.match(/<script/g)).toHaveLength(2);
+    // the layout script, the island and the entry module are the only scripts
+    expect(html.match(/<script/g)).toHaveLength(3);
   });
 
   it('is the read-only variant for a user who cannot edit', () => {
@@ -174,6 +178,34 @@ describe('the shell document', () => {
   it('allows the head style by the hash of its exact text', () => {
     expect(SHELL_HEAD_STYLE_CSP_HASH).toBe(cspHashOf(SHELL_HEAD_STYLE));
     expect(shell().html).toContain(`<style>${SHELL_HEAD_STYLE}</style>`);
+  });
+
+  it('puts the layout script right after the host element, before the island and the editor entry', () => {
+    const { html } = shell();
+    const host = html.indexOf('</plakboek-editor>');
+    const layout = html.indexOf(`<script>${LAYOUT_SCRIPT}</script>`);
+    const island = html.indexOf(
+      `<script type="application/json" id="${ISLAND_ID}">`,
+    );
+    expect(layout).toBe(host + '</plakboek-editor>'.length);
+    expect(layout).toBeLessThan(island);
+  });
+
+  it('allows the layout script by the hash of its exact text, and no other inline script', () => {
+    const { html, headers } = shell();
+    const policy = headers['Content-Security-Policy'] ?? '';
+    const scriptSources = /script-src ([^;]*)/.exec(policy)?.[1] ?? '';
+    expect(scriptSources).toBe(`'self' '${LAYOUT_SCRIPT_CSP_HASH}'`);
+    expect(LAYOUT_SCRIPT_CSP_HASH).toBe(cspHashOf(LAYOUT_SCRIPT));
+    // every other script tag is the JSON island (data, never executed) or a
+    // module loaded by URL
+    const inline = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>/g)].map(
+      (match) => match[0],
+    );
+    expect(inline).toEqual([
+      '<script>',
+      `<script type="application/json" id="${ISLAND_ID}">`,
+    ]);
   });
 
   it('sends no policy when switched off', () => {
@@ -254,6 +286,7 @@ describe('the sidebar', () => {
       nav: (context) => `<nav-${context.layout}>`,
     });
     expect(html).toContain('&lt;nav-framed&gt;');
+    expect(html).toContain('&lt;nav-full&gt;');
   });
 
   it('disables the full-width toggle until hydration', () => {
@@ -299,6 +332,107 @@ describe('the sidebar', () => {
   it('has no inline style attribute anywhere', () => {
     expect(staticShell({ ...ISLAND, mode: 'read-only' })).not.toMatch(
       /\sstyle=/,
+    );
+  });
+});
+
+describe('the rail', () => {
+  /** The markup of the rail layer only. */
+  function railOf(island: ShellIsland): string {
+    const html = staticShell(island);
+    const start = html.indexOf('data-rail=""');
+    expect(start).toBeGreaterThan(-1);
+    return html.slice(start);
+  }
+
+  it('is always in the markup beside the sidebar, so either layout paints without a script', () => {
+    const html = staticShell(ISLAND);
+    expect(html.match(/<aside/g)).toHaveLength(1);
+    expect(html).toContain('data-sidebar=""');
+    expect(html).toContain('data-rail=""');
+  });
+
+  it('lists skip link, product name, nav slot, then the toggle, exit, avatar and log out', () => {
+    const rail = railOf(ISLAND);
+    const order = [
+      STRINGS['sidebar.skipLink'],
+      `>${STRINGS['product.name']}<`,
+      'data-slot="nav"',
+      `aria-label="${STRINGS['sidebar.fullWidth']}"`,
+      `aria-label="${STRINGS['sidebar.exit']}"`,
+      'role="img"',
+      `aria-label="${STRINGS['sidebar.logOut']}"`,
+    ].map((needle) => rail.indexOf(needle));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('names every icon button by its expanded label and gives it a tooltip with the same text', () => {
+    const rail = railOf(ISLAND);
+    for (const key of [
+      'sidebar.fullWidth',
+      'sidebar.exit',
+      'sidebar.logOut',
+    ] as const) {
+      expect(rail).toContain(`aria-label="${STRINGS[key]}"`);
+      expect(rail).toMatch(
+        new RegExp(`data-tooltip=""[^>]*>${STRINGS[key]}</span>`),
+      );
+    }
+  });
+
+  it('shows the first letter of the name as the avatar, named and tooltipped with the whole name', () => {
+    const rail = railOf({
+      ...ISLAND,
+      user: { name: 'ada Lovelace', email: 'ada@example.com' },
+    });
+    expect(rail).toMatch(
+      /<div role="img" aria-label="ada Lovelace"[^>]*>A<\/div>/,
+    );
+    expect(rail).toMatch(/data-tooltip=""[^>]*>ada Lovelace<\/span>/);
+  });
+
+  it('falls back to the email for the avatar letter and its name', () => {
+    const rail = railOf({
+      ...ISLAND,
+      user: { name: ' ', email: 'zed@example.com' },
+    });
+    expect(rail).toContain('aria-label="zed@example.com"');
+    expect(rail).toMatch(/>Z<\/div>/);
+  });
+
+  it('keeps exit a real anchor and log out a real post form', () => {
+    const rail = railOf({ ...ISLAND, visitorLocation: '/about?utm=x' });
+    expect(rail).toContain('<a href="/about?utm=x"');
+    expect(rail).toMatch(/<form [^>]*action="\/cms\/logout"[^>]*method="post"/);
+    expect(rail).toContain(
+      '<input type="hidden" name="next" value="/about?utm=x"/>',
+    );
+  });
+
+  it('disables the toggle until hydration and presses it when full', () => {
+    const before = railOf(ISLAND);
+    expect(before).toMatch(/aria-pressed="false" disabled=""/);
+    const html = renderToStaticMarkup(
+      createElement(ShellApp, {
+        island: ISLAND,
+        hydrated: true,
+        layout: 'full',
+      }),
+    );
+    expect(html.match(/aria-pressed="true"/g)).toHaveLength(2);
+    expect(html).not.toContain('disabled=""');
+  });
+
+  it('is hidden by default and shown only by the host layout, so the framed paint cannot flash it', () => {
+    expect(staticShell(ISLAND)).toMatch(
+      /class="invisible absolute [^"]*" data-rail=""/,
+    );
+    const sidebar = staticShell(ISLAND);
+    const framedClass = /class="([^"]*)" data-sidebar=""/.exec(sidebar)?.[1];
+    // `&` is written as an entity in the markup and read back as `&`
+    expect(framedClass).toContain(
+      '[:host([data-layout=full])_&amp;]:invisible',
     );
   });
 });

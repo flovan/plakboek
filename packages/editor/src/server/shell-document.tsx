@@ -31,6 +31,7 @@ import {
   escapeJsonForHtml,
 } from './html-document.js';
 import type { EditorIdentity } from './identity.js';
+import { LAYOUT_SCRIPT, LAYOUT_SCRIPT_CSP_HASH } from './layout-script.js';
 import { frameLocation } from './locations.js';
 
 /** Where the Log out form posts. */
@@ -80,16 +81,20 @@ export function renderShellDocument(input: ShellDocumentInput): ShellDocument {
     chromeStyleElement() +
     `<div id="${SHELL_ROOT_ID}" class="pk-shell">${chrome}</div>` +
     `</template></${HOST_TAG}>`;
+  // Right after the host, so a stored full width is applied before the first
+  // paint and without waiting for the editor's own chunk.
+  const layout = `<script>${LAYOUT_SCRIPT}</script>`;
   const data = `<script type="application/json" id="${ISLAND_ELEMENT_ID}">${escapeJsonForHtml(island)}</script>`;
   const html = buildCmsDocument({
     title: 'Plakboek',
     headHtml: `<style>${SHELL_HEAD_STYLE}</style>`,
-    bodyHtml: host + data + renderEditorScripts(input.assets),
+    bodyHtml: host + layout + data + renderEditorScripts(input.assets),
   });
   return {
     html,
     headers: cmsDocumentHeaders({
       csp: input.csp && !hasDevScripts(input.assets),
+      scriptHashes: [LAYOUT_SCRIPT_CSP_HASH],
       styleHashes: [CHROME_STYLE_CSP_HASH, SHELL_HEAD_STYLE_CSP_HASH],
     }),
   };

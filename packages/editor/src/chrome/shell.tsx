@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import type { ShellIsland } from './island.js';
-import { Sidebar, type SidebarSlots } from './sidebar.js';
+import { Sidebar, type SidebarLayout, type SidebarSlots } from './sidebar.js';
 import { Stage } from './stage.js';
 
 export type { SidebarSlots } from './sidebar.js';
@@ -10,6 +10,12 @@ export type ShellAppProps = {
   readonly slots?: SidebarSlots;
   /** False for the server render and the first client render, true after. */
   readonly hydrated: boolean;
+  /** The layout in force, for the toggle's pressed state. The server render
+   * and the first client render use `framed`; both layouts' chrome is always
+   * in the markup and the host's `data-layout` decides which one is seen. */
+  readonly layout?: SidebarLayout;
+  /** Called by the Full width toggle. */
+  readonly onToggleLayout?: () => void;
 };
 
 /**
@@ -18,14 +24,15 @@ export type ShellAppProps = {
  * island, so the first client render matches the server's.
  */
 export function ShellApp(props: ShellAppProps): ReactElement {
-  const { island, slots, hydrated } = props;
+  const { island, slots, hydrated, layout = 'framed', onToggleLayout } = props;
   return (
     <>
       <Sidebar
         island={island}
         slots={slots}
         hydrated={hydrated}
-        layout="framed"
+        layout={layout}
+        onToggleLayout={onToggleLayout}
       />
       <Stage frameUrl={island.frameUrl} />
     </>
