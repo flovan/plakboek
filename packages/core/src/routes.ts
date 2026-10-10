@@ -36,7 +36,9 @@ export function cmsRoutes(): RouteConfigEntry[] {
     route('cms/setup/test-email', file('test-email'), {
       id: 'plakboek-setup-test-email',
     }),
+    route('cms/logout', file('cms-logout'), { id: 'plakboek-cms-logout' }),
     route('cms/*', file('cms'), { id: 'plakboek-cms-pages' }),
+    route('robots.txt', file('robots'), { id: 'plakboek-robots' }),
     route('api/auth/*', file('auth-api'), { id: 'plakboek-auth' }),
     // The visitor entries stay last: a splat does not match "/", so the
     // visitor route needs both an index and a splat entry.

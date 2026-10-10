@@ -12,7 +12,9 @@ describe('cmsRoutes', () => {
       'plakboek-health',
       'plakboek-setup',
       'plakboek-setup-test-email',
+      'plakboek-cms-logout',
       'plakboek-cms-pages',
+      'plakboek-robots',
       'plakboek-auth',
       'plakboek-visitor-index',
       'plakboek-visitor',
@@ -21,8 +23,10 @@ describe('cmsRoutes', () => {
     expect(routes[1]?.path).toBe('cms/health');
     expect(routes[2]?.path).toBe('cms/setup');
     expect(routes[3]?.path).toBe('cms/setup/test-email');
-    expect(routes[4]?.path).toBe('cms/*');
-    expect(routes[5]?.path).toBe('api/auth/*');
+    expect(routes[4]?.path).toBe('cms/logout');
+    expect(routes[5]?.path).toBe('cms/*');
+    expect(routes[6]?.path).toBe('robots.txt');
+    expect(routes[7]?.path).toBe('api/auth/*');
   });
 
   it('serves /cms and /cms/* from one module under two ids, before any visitor entry', () => {

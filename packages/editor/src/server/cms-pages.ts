@@ -14,13 +14,14 @@
  */
 import {
   needsTwoFactorEnrolment,
+  PASSWORD_LINK_PATHS,
   sanitizeNextPath,
   TWO_FACTOR_ENROLMENT_PATH,
   type Auth,
 } from '@plakboek/auth';
 import type { PermissionResolver } from '@plakboek/permissions';
 import { CMS_LOGIN_PATH, NEXT_PARAM } from '@plakboek/render';
-import type { LoginIsland, LoginStep } from '../chrome/island.js';
+import type { LinkKind, LoginIsland, LoginStep } from '../chrome/island.js';
 import type { EditorAssets } from './assets.js';
 import { readEditorIdentity } from './identity.js';
 import { renderLoginDocument } from './login-document.js';
@@ -44,6 +45,20 @@ export type CmsPages = {
 };
 
 const NO_STORE = 'no-store';
+
+/** The query parameter an emailed link carries its token in. */
+const TOKEN_PARAM = 'token';
+
+/** The longest token accepted as present. Real tokens are far shorter; the
+ * bound only keeps an absurd value out of the page logic. */
+const MAX_TOKEN_LENGTH = 512;
+
+/** The query parameter better-auth adds to a failed sign-in link's callback. */
+const ERROR_PARAM = 'error';
+
+/** Where the sign-in link's callback lands; the sign-in link itself is built
+ * by the auth package and verified by its own endpoint. */
+const MAGIC_LINK_PATH = '/cms/magic-link';
 
 /** `/cms/` and `/cms` are the same page; so are `/CMS` and `/cms`, because
  * the router matches case-insensitively. */
@@ -73,13 +88,78 @@ export function createCmsPages(deps: CmsPagesDeps): CmsPages {
     });
   }
 
-  function island(step: LoginStep, next: string): LoginIsland {
+  function island(
+    step: LoginStep,
+    next: string,
+    extra: { readonly linkKind?: LinkKind; readonly email?: string } = {},
+  ): LoginIsland {
     return {
       kind: 'login',
       step,
       next,
+      ...extra,
       twoFactorRequiredRoles: deps.twoFactorRequiredRoleKeys,
     };
+  }
+
+  /**
+   * A password-link landing: the step when a token is present, the invalid
+   * link step when it is not. The token is only checked for presence and
+   * length. It is not copied into the markup or the island, because the
+   * client reads it from the address bar and spends it, and nothing here
+   * could say whether it is still good without spending it.
+   */
+  function passwordLink(
+    url: URL,
+    next: string,
+    step: 'set-password' | 'reset-password',
+  ): Response {
+    const token = url.searchParams.get(TOKEN_PARAM);
+    const present =
+      token !== null && token.length >= 1 && token.length <= MAX_TOKEN_LENGTH;
+    if (present) return loginResponse(island(step, next));
+    return loginResponse(
+      island('invalid-link', next, {
+        linkKind: step === 'set-password' ? 'invite' : 'reset',
+      }),
+    );
+  }
+
+  /** The sign-in link landing: signing in when a session exists and the link
+   * did not fail, the invalid link step otherwise. */
+  async function magicLink(
+    request: Request,
+    url: URL,
+    next: string,
+  ): Promise<Response> {
+    const failed = url.searchParams.has(ERROR_PARAM);
+    const identity = failed
+      ? null
+      : await readEditorIdentity(deps.auth, deps.resolver, request);
+    if (identity === null) {
+      return loginResponse(
+        island('invalid-link', next, { linkKind: 'sign-in' }),
+      );
+    }
+    return loginResponse(island('magic-landing', next));
+  }
+
+  /** `/cms/two-factor/enrol`: the set-up step for a role that needs one. */
+  async function enrol(request: Request, next: string): Promise<Response> {
+    const identity = await readEditorIdentity(
+      deps.auth,
+      deps.resolver,
+      request,
+    );
+    if (identity === null) {
+      return redirect(
+        `${CMS_LOGIN_PATH}?${NEXT_PARAM}=${encodeURIComponent(next)}`,
+      );
+    }
+    if (!needsTwoFactorEnrolment(identity)) {
+      return redirect(editLocation(pathOf(next), next, '1'));
+    }
+    return loginResponse(island('enrol', next, { email: identity.email }));
   }
 
   /** `/cms`: sign in, or straight on to edit mode with a valid session. */
@@ -106,6 +186,14 @@ export function createCmsPages(deps: CmsPagesDeps): CmsPages {
       switch (normalisedPath(url.pathname)) {
         case CMS_LOGIN_PATH:
           return await entry(request, next);
+        case PASSWORD_LINK_PATHS['set-password']:
+          return passwordLink(url, next, 'set-password');
+        case PASSWORD_LINK_PATHS['reset-password']:
+          return passwordLink(url, next, 'reset-password');
+        case MAGIC_LINK_PATH:
+          return await magicLink(request, url, next);
+        case TWO_FACTOR_ENROLMENT_PATH:
+          return await enrol(request, next);
         default:
           return null;
       }

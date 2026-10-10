@@ -4,9 +4,15 @@
  * redirects, and `noindex` on every answer under `/cms`.
  */
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createUserWithRole } from '@plakboek/auth';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FIXTURE_CLIENT_DIR, FIXTURE_SERVER_ENTRY } from './fixture-host.js';
+import {
+  FIXTURE_CLIENT_DIR,
+  FIXTURE_DIR,
+  FIXTURE_SERVER_ENTRY,
+} from './fixture-host.js';
 import { createInstallation, type Installation } from './installation.js';
 
 /** The origin better-auth checks sign-in requests against. */
@@ -197,6 +203,168 @@ describe('the /cms routes', () => {
         expect(html).toContain('Page not found');
         expect(html).not.toContain('Hello world');
       }
+    });
+  });
+
+  describe('logout', () => {
+    function logout(
+      options: {
+        cookie?: string;
+        headers?: Record<string, string>;
+        body?: string;
+      } = {},
+    ): Promise<Response> {
+      return get('/cms/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          ...(options.cookie === undefined ? {} : { Cookie: options.cookie }),
+          ...options.headers,
+        },
+        body: options.body ?? 'next=%2Fabout',
+      });
+    }
+
+    async function sessionOf(cookie: string): Promise<unknown> {
+      const response = await get('/api/auth/get-session', {
+        headers: { Cookie: cookie },
+      });
+      return await response.json();
+    }
+
+    it('answers a GET with 405 and tells crawlers to stay out', async () => {
+      const response = await get('/cms/logout');
+      expect(response.status).toBe(405);
+      expect(response.headers.get('Allow')).toBe('POST');
+      expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
+    });
+
+    it('refuses a post from another origin and leaves the session alone', async () => {
+      const cookie = await signIn(EDITOR);
+      const response = await logout({
+        cookie,
+        headers: { Origin: 'http://evil.test' },
+      });
+      expect(response.status).toBe(403);
+      expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
+      expect(response.headers.getSetCookie()).toEqual([]);
+      expect(await sessionOf(cookie)).not.toBeNull();
+    });
+
+    it('refuses a post with no Origin unless the browser says it is same-origin', async () => {
+      const cookie = await signIn(EDITOR);
+      expect((await logout({ cookie })).status).toBe(403);
+      expect(
+        (
+          await logout({
+            cookie,
+            headers: { 'Sec-Fetch-Site': 'cross-site' },
+          })
+        ).status,
+      ).toBe(403);
+      expect(await sessionOf(cookie)).not.toBeNull();
+    });
+
+    it('ends the session on the server and goes back to the page without _edit', async () => {
+      const cookie = await signIn(EDITOR);
+      expect(await sessionOf(cookie)).not.toBeNull();
+      const response = await logout({
+        cookie,
+        headers: { Origin: SITE_ORIGIN },
+        body: 'next=%2Fabout%3F_edit%3D1%26tab%3D2',
+      });
+      expect(response.status).toBe(303);
+      expect(response.headers.get('Location')).toBe('/about?tab=2');
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
+      const cleared = response.headers
+        .getSetCookie()
+        .find((entry) => entry.includes('session_token'));
+      expect(cleared).toBeDefined();
+      expect(cleared).toMatch(/Max-Age=0/i);
+
+      // The old cookie no longer resolves to anyone, so /cms asks to sign in.
+      expect(await sessionOf(cookie)).toBeNull();
+      const entry = await get('/cms?next=/about', {
+        headers: { Cookie: cookie },
+      });
+      expect(entry.status).toBe(200);
+      expect(await entry.text()).toContain('pk-backdrop');
+    });
+
+    it('accepts a browser that sends no Origin but marks the request same-origin', async () => {
+      const cookie = await signIn(EDITOR);
+      const response = await logout({
+        cookie,
+        headers: { 'Sec-Fetch-Site': 'same-origin' },
+      });
+      expect(response.status).toBe(303);
+      expect(await sessionOf(cookie)).toBeNull();
+    });
+
+    it.each([
+      ['a protocol-relative address', '//evil.test'],
+      ['an absolute address', 'https://evil.test'],
+      ['an address under /cms', '/cms/setup'],
+    ])('goes home for %s', async (_label, hostile) => {
+      const cookie = await signIn(EDITOR);
+      const response = await logout({
+        cookie,
+        headers: { Origin: SITE_ORIGIN },
+        body: `next=${encodeURIComponent(hostile)}`,
+      });
+      expect(response.status).toBe(303);
+      expect(response.headers.get('Location')).toBe('/');
+    });
+
+    it('goes home without a next, and still answers with no session at all', async () => {
+      const response = await logout({
+        headers: { Origin: SITE_ORIGIN },
+        body: '',
+      });
+      expect(response.status).toBe(303);
+      expect(response.headers.get('Location')).toBe('/');
+    });
+
+    it('refuses a body over 2 KB', async () => {
+      const response = await logout({
+        headers: { Origin: SITE_ORIGIN },
+        body: `next=${'a'.repeat(3000)}`,
+      });
+      expect(response.status).toBe(413);
+      expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
+    });
+  });
+
+  describe('noindex on every answer under /cms', () => {
+    it('is on the health, setup and test-email answers', async () => {
+      for (const path of [
+        '/cms/health',
+        '/cms/setup',
+        '/cms/setup/test-email',
+        '/CMS/Health',
+      ]) {
+        const response = await get(path);
+        expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
+      }
+    });
+
+    it('is on the answer to a POST to health and to the host 404', async () => {
+      const response = await get('/cms/anything/at/all', { method: 'POST' });
+      expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
+    });
+  });
+
+  describe('robots.txt', () => {
+    it("serves the host's own public/robots.txt, which wins over the default", async () => {
+      const response = await get('/robots.txt');
+      expect(response.status).toBe(200);
+      const own = readFileSync(
+        join(FIXTURE_DIR, 'public', 'robots.txt'),
+        'utf8',
+      );
+      expect(await response.text()).toBe(own);
+      expect(own).not.toContain('Disallow: /cms');
     });
   });
 });
