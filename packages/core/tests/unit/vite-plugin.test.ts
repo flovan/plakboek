@@ -396,6 +396,18 @@ describe('plakboek() development hooks', () => {
     expect(hotUpdate(plugin, 'ssr', [{ id: 'a' }, { id: 'b' }])).toBe(1);
   });
 
+  it('leaves a client update to React Fast Refresh: no reload and no claim on the modules', () => {
+    const plugin = instance();
+    const send = vi.fn();
+    const result = callHook(
+      plugin.hotUpdate,
+      { environment: { name: 'client' } },
+      { modules: [{ id: 'a' }], server: { ws: { send } } },
+    );
+    expect(result).toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('sends nothing for a client update or an ssr update without modules', () => {
     const plugin = instance();
     expect(hotUpdate(plugin, 'client', [{ id: 'a' }])).toBe(0);

@@ -4,16 +4,21 @@
  * import. The virtual module holds server code, so the client environment
  * only ever receives an inert stub.
  *
- * Development (D-22, D-28): `.env` is loaded into the server process, the dev
- * server refuses to start on an invalid runtime environment, and a change to
- * any server-side module sends one full page reload. Visitor pages ship no
- * client React, so there is no HMR on the visitor path and no dev cache; the
- * next request re-evaluates the host config and rebuilds the registries.
+ * Development (D-22, D-28, D-29): `.env` is loaded into the server process, the
+ * dev server refuses to start on an invalid runtime environment, and a change
+ * to any server-environment module sends one full page reload. Visitor pages
+ * ship no client React, so there is no HMR on the visitor path and no dev
+ * cache; the next request re-evaluates the host config and rebuilds the
+ * registries.
  *
- * Record for Phase 7: the `_edit` route hydrates real React, so it must
- * support React Fast Refresh for host block components while preserving
- * editor state. The blanket full reload below applies to the visitor path
- * only and must be narrowed when that route exists (D-22).
+ * The edit page hydrates chrome only in this release. Editor client modules,
+ * and any client-only module in their graph, update through React Fast Refresh
+ * with their state kept: the shell loads React Router's refresh preamble and a
+ * data-router stub before the editor entry (`devEditorAssets`). A change to a
+ * server-environment module (a block, the site document, the config) still
+ * sends one full reload, which reloads the edit shell and its frame so the
+ * server-rendered page shows the change. The next phase narrows that rule when
+ * blocks render on the client.
  */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
