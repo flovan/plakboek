@@ -7,6 +7,14 @@
  * decisions is expressed here as a better-auth option, and each policy
  * number is exported once so tests, email copy and later modules read the
  * same value instead of restating it.
+ *
+ * Two-factor and magic links (D-26): better-auth's two-factor plugin only
+ * challenges the password sign-in endpoints, so a magic link would be a
+ * single-step sign-in. Two guards keep that from happening: `sendMagicLink`
+ * mails nothing to a user with two-factor enabled (answering exactly as it
+ * does for an unknown address), and a `session.create.before` hook refuses
+ * the session when the magic-link verify endpoint would create one for such
+ * a user, which covers a link issued before they enrolled.
  */
 import {
   createPermissionResolver,
@@ -470,12 +478,47 @@ function auditTwoFactorChanges(recorder: AuditRecorder) {
   });
 }
 
+/** Whether a user row has two-factor enabled. A missing or non-boolean
+ * field reads as not enabled; the column is a boolean with no default
+ * surprise. */
+function hasTwoFactorEnabled(user: unknown): boolean {
+  return readField(user, 'twoFactorEnabled') === true;
+}
+
+/** The magic-link verification endpoint, relative to the auth base path. */
+const MAGIC_LINK_VERIFY_PATH = '/magic-link/verify';
+
 type SessionHooks = NonNullable<
   NonNullable<BetterAuthOptions['databaseHooks']>['session']
 >;
 type SessionUpdateBeforeHook = NonNullable<
   NonNullable<SessionHooks['update']>['before']
 >;
+type SessionCreateBeforeHook = NonNullable<
+  NonNullable<SessionHooks['create']>['before']
+>;
+
+/**
+ * Backstop for D-26. better-auth's two-factor plugin challenges only the
+ * password sign-in endpoints, so a magic link would otherwise be a
+ * single-step sign-in for a user who has a second factor. `sendMagicLink`
+ * never mails such a user, but a link issued before they enrolled is still
+ * live, so the session it would create is refused here instead: the verify
+ * call answers its normal error redirect and no session or cookie exists.
+ * The link is spent either way (better-auth consumes it before this runs).
+ * Sessions created by any other endpoint are untouched.
+ */
+function refuseMagicLinkSessionForTwoFactorUser(): SessionCreateBeforeHook {
+  return async (session, context) => {
+    if (context?.path !== MAGIC_LINK_VERIFY_PATH) {
+      return;
+    }
+    const found = await context.context.internalAdapter.findUserById(
+      session.userId,
+    );
+    return hasTwoFactorEnabled(found) ? false : undefined;
+  };
+}
 
 /**
  * D-12 as amended: an impersonation session lapses at the expiry it was
@@ -733,6 +776,12 @@ export function createAuth(options: CreateAuthOptions): Auth {
         if (found === null || found === undefined) {
           return;
         }
+        // D-26: a link is a one-step sign-in, so it is never sent to a user
+        // who has a second factor. The early return matches the unknown
+        // address above, so the answer and its timing class do not differ.
+        if (hasTwoFactorEnabled(found.user)) {
+          return;
+        }
         try {
           const message = renderEmail('magic-link', {
             to: found.user.email,
@@ -781,6 +830,7 @@ export function createAuth(options: CreateAuthOptions): Auth {
     },
     databaseHooks: {
       session: {
+        create: { before: refuseMagicLinkSessionForTwoFactorUser() },
         update: { before: capImpersonationExpiry(options.db) },
       },
     },

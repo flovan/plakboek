@@ -120,10 +120,13 @@ export function passwordLinkPlugin(options: PasswordLinkPluginOptions) {
           const body: unknown = ctx.body;
           const email = boundedString(field(body, 'email'), MAX_EMAIL_LENGTH);
           const next = field(body, 'next');
+          const nextValue =
+            next === undefined
+              ? undefined
+              : boundedString(next, MAX_NEXT_LENGTH);
           if (
             email === undefined ||
-            (next !== undefined &&
-              boundedString(next, MAX_NEXT_LENGTH) === undefined)
+            (next !== undefined && nextValue === undefined)
           ) {
             throw invalidRequest();
           }
@@ -135,7 +138,7 @@ export function passwordLinkPlugin(options: PasswordLinkPluginOptions) {
               baseURL: options.baseURL,
               onDeliveryError: options.onDeliveryError,
             },
-            { email, purpose: 'reset-password' },
+            { email, purpose: 'reset-password', next: nextValue },
           );
           return await ctx.json({ status: true });
         },

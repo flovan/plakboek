@@ -1,0 +1,5 @@
+---
+'@plakboek/auth': minor
+---
+
+`createAuth` now serves two rate-limited, origin-checked HTTP endpoints for the login modal: `POST /plakboek/password-link/request` (forgot password; one answer whether or not the address is registered, 3 per 60 s per client) and `POST /plakboek/password-link/complete` (spends a set-password or reset-password token; `INVALID_LINK` for every token failure, `PASSWORD_TOO_SHORT` without spending the link, 10 per 60 s per client). New `sanitizeNextPath` is the one open-redirect guard for a `next` value, and `requestPasswordLink` accepts an optional `next` that the emailed link carries. A magic link is no longer sent to a user who has two-factor enabled, and a link issued before they enrolled creates no session, so a sign-in link cannot skip the second factor. `TWO_FACTOR_ENROLMENT_PATH` is now `/cms/two-factor/enrol`. New `rateLimitEnabled` option on `createAuth` switches better-auth's limiter on or off; it defaults to on in production only. `CompleteSetPasswordDeps.auth` now only needs the password hasher slice of the better-auth context.

@@ -42,6 +42,7 @@ import {
   type MailMessage,
   type MailSender,
 } from './email/types.js';
+import { sanitizeNextPath } from './next-path.js';
 import { assertPasswordPolicy } from './password-policy.js';
 import { account, session, user, verification } from './schema.js';
 import { SET_PASSWORD_TOKEN_TTL_SECONDS } from './ttl.js';
@@ -95,6 +96,12 @@ export type RequestPasswordLinkDeps = {
 export type RequestPasswordLinkInput = {
   readonly email: string;
   readonly purpose: PasswordLinkPurpose;
+  /**
+   * The page the user came from. Run through `sanitizeNextPath`; a value
+   * that is not a same-origin path is dropped, and without one the link
+   * carries no `next` and lands home (D-09, D-11).
+   */
+  readonly next?: string | undefined;
 };
 
 /** Where each link lands, under `/cms`, which the admin shell reserves. The
@@ -109,6 +116,9 @@ export const PASSWORD_LINK_PATHS: Readonly<
 
 /** The query parameter the link carries its token in. */
 const LINK_TOKEN_PARAMETER = 'token';
+
+/** The query parameter the link carries the page to return to in. */
+const LINK_NEXT_PARAMETER = 'next';
 
 const SECONDS_PER_HOUR = 60 * 60;
 
@@ -151,9 +161,12 @@ function passwordLinkBase(baseURL: unknown, purpose: PasswordLinkPurpose): URL {
   return new URL(PASSWORD_LINK_PATHS[purpose], base);
 }
 
-function withToken(linkBase: URL, token: string): string {
+function withToken(linkBase: URL, token: string, next: string): string {
   const link = new URL(linkBase);
   link.searchParams.set(LINK_TOKEN_PARAMETER, token);
+  if (next !== '/') {
+    link.searchParams.set(LINK_NEXT_PARAMETER, next);
+  }
   return link.toString();
 }
 
@@ -249,6 +262,7 @@ export async function requestPasswordLink(
   const linkBase = passwordLinkBase(deps.baseURL, purpose);
   const renderEmail = deps.renderEmail ?? renderAuthEmail;
   const email = lookupForm(input.email);
+  const next = sanitizeNextPath(input.next);
 
   const [found] = await deps.db
     .select({ id: user.id, email: user.email, name: user.name })
@@ -287,7 +301,7 @@ export async function requestPasswordLink(
   try {
     message = renderEmail(purpose, {
       to: found?.email ?? email,
-      url: withToken(linkBase, token),
+      url: withToken(linkBase, token, next),
       expiresInHours: String(SET_PASSWORD_TOKEN_TTL_SECONDS / SECONDS_PER_HOUR),
       ...(found === undefined ? {} : { name: found.name }),
     });

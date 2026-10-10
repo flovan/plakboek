@@ -21,6 +21,7 @@ const UNKNOWN = 'nobody@example.com';
 const REQUEST_PATH = '/api/auth/plakboek/password-link/request';
 const COMPLETE_PATH = '/api/auth/plakboek/password-link/complete';
 const LINK_PATTERN = /https?:\/\/\S+[?&]token=[\w-]+/;
+const FULL_LINK_PATTERN = /https?:\/\/[^\s\]]+[?&]token=[^\s\]]+/;
 
 const roles = defineRoles(defaultRoles);
 
@@ -186,8 +187,9 @@ describe('forgot password over HTTP (T-07-08)', () => {
   });
 });
 
+/** The whole link, every query parameter included. */
 function linkOf(message: MailMessage | undefined): URL {
-  const link = LINK_PATTERN.exec(message?.text ?? '')?.[0];
+  const link = FULL_LINK_PATTERN.exec(message?.text ?? '')?.[0];
   expect(link).toBeDefined();
   return new URL(link ?? '');
 }

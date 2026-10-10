@@ -58,6 +58,7 @@ import {
   requestPasswordLink,
   resendSetPasswordLink,
   runAuditedMutation,
+  sanitizeNextPath,
   startImpersonation,
   stopImpersonation,
   type AfterCommitCallback,
@@ -150,6 +151,7 @@ const functions: Record<string, unknown> = {
   requestPasswordLink,
   resendSetPasswordLink,
   runAuditedMutation,
+  sanitizeNextPath,
   startImpersonation,
   stopImpersonation,
 };
@@ -249,6 +251,16 @@ for (const [name, value] of Object.entries(frozenObjects)) {
   if (typeof value !== 'object' || value === null || !Object.isFrozen(value)) {
     fail(`${name} is not a frozen object`);
   }
+}
+
+if (sanitizeNextPath('//x') !== '/') {
+  fail('sanitizeNextPath did not refuse a protocol-relative path');
+}
+if (sanitizeNextPath('/about?_edit=1&a=b') !== '/about?a=b') {
+  fail('sanitizeNextPath did not strip the _edit parameter');
+}
+if (TWO_FACTOR_ENROLMENT_PATH !== '/cms/two-factor/enrol') {
+  fail('TWO_FACTOR_ENROLMENT_PATH is not /cms/two-factor/enrol');
 }
 
 const registrationError = new AfterCommitRegistrationError(

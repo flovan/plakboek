@@ -34,21 +34,21 @@ audited paths described here.
 
 ### Configuration and policy
 
-| Export                              | Kind     | Purpose                                                                                                                                                             |
-| ----------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createAuth`                        | function | Builds the better-auth instance for one installation from injected options: sliding sessions, audited two-factor, magic links, closed routes and the password floor |
-| `AuthConfigError`                   | class    | Thrown by `createAuth` for an invalid option; names the option, never the value                                                                                     |
-| `SESSION_EXPIRES_IN_SECONDS`        | constant | `2592000` (30 days): how long a session lives after its last refresh                                                                                                |
-| `SESSION_UPDATE_AGE_SECONDS`        | constant | `86400` (one day): how old a session must be before a request slides its expiry                                                                                     |
-| `IMPERSONATION_SESSION_TTL_SECONDS` | constant | `28800` (8 hours): the fixed lifetime of an impersonation session, which never slides                                                                               |
-| `SET_PASSWORD_TOKEN_TTL_SECONDS`    | constant | `172800` (48 hours): lifetime of set-password and reset-password links                                                                                              |
-| `MAGIC_LINK_TTL_SECONDS`            | constant | `900` (15 minutes): lifetime of a magic link                                                                                                                        |
-| `TWO_FACTOR_CODE_TTL_SECONDS`       | constant | `300` (5 minutes): lifetime of an emailed second-factor code                                                                                                        |
-| `TWO_FACTOR_LOCKOUT`                | constant | Frozen `{ maxFailedAttempts: 5, durationSeconds: 900 }`, one counter shared by authenticator and emailed codes                                                      |
-| `DISABLED_AUTH_PATHS`               | constant | Frozen list of better-auth HTTP routes that answer 404; the full list and the reason are under the security notes                                                   |
-| `Auth`                              | type     | The better-auth instance `createAuth` returns                                                                                                                       |
-| `CreateAuthOptions`                 | type     | `db`, `baseURL`, `secret`, `mail`, `roles`, and optionally `appName`, `minPasswordLength`, `renderEmail`, `onMailDeliveryError`, `onAuditWriteFailed`               |
-| `RenderAuthEmail`                   | type     | A template renderer a host can pass as `renderEmail` to theme the emails                                                                                            |
+| Export                              | Kind     | Purpose                                                                                                                                                                   |
+| ----------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createAuth`                        | function | Builds the better-auth instance for one installation from injected options: sliding sessions, audited two-factor, magic links, closed routes and the password floor       |
+| `AuthConfigError`                   | class    | Thrown by `createAuth` for an invalid option; names the option, never the value                                                                                           |
+| `SESSION_EXPIRES_IN_SECONDS`        | constant | `2592000` (30 days): how long a session lives after its last refresh                                                                                                      |
+| `SESSION_UPDATE_AGE_SECONDS`        | constant | `86400` (one day): how old a session must be before a request slides its expiry                                                                                           |
+| `IMPERSONATION_SESSION_TTL_SECONDS` | constant | `28800` (8 hours): the fixed lifetime of an impersonation session, which never slides                                                                                     |
+| `SET_PASSWORD_TOKEN_TTL_SECONDS`    | constant | `172800` (48 hours): lifetime of set-password and reset-password links                                                                                                    |
+| `MAGIC_LINK_TTL_SECONDS`            | constant | `900` (15 minutes): lifetime of a magic link                                                                                                                              |
+| `TWO_FACTOR_CODE_TTL_SECONDS`       | constant | `300` (5 minutes): lifetime of an emailed second-factor code                                                                                                              |
+| `TWO_FACTOR_LOCKOUT`                | constant | Frozen `{ maxFailedAttempts: 5, durationSeconds: 900 }`, one counter shared by authenticator and emailed codes                                                            |
+| `DISABLED_AUTH_PATHS`               | constant | Frozen list of better-auth HTTP routes that answer 404; the full list and the reason are under the security notes                                                         |
+| `Auth`                              | type     | The better-auth instance `createAuth` returns                                                                                                                             |
+| `CreateAuthOptions`                 | type     | `db`, `baseURL`, `secret`, `mail`, `roles`, and optionally `appName`, `minPasswordLength`, `renderEmail`, `onMailDeliveryError`, `onAuditWriteFailed`, `rateLimitEnabled` |
+| `RenderAuthEmail`                   | type     | A template renderer a host can pass as `renderEmail` to theme the emails                                                                                                  |
 
 ### Passwords
 
@@ -159,6 +159,18 @@ needs a host-level retry or outbox. `afterCommit` throws
 | `TokenClockOptions`          | type     | An optional clock                                                                                                                     |
 | `AuthorizeWithToken`         | type     | The action a consumed token authorises, given the transaction and the subject id                                                      |
 
+### Redirect targets
+
+| Export             | Kind     | Purpose                                                                                                                                                                  |
+| ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sanitizeNextPath` | function | The one open-redirect guard for a `next` value: returns a same-origin relative path (query kept, fragment and every `_edit` parameter dropped), or `/` for anything else |
+
+`sanitizeNextPath` answers `/` for a non-string, an empty or over-long
+(more than 2048 characters) value, anything not starting with a single `/`
+(absolute, protocol-relative and scheme URLs), backslashes and control
+characters (raw or percent-encoded), and any target under `/cms` or `/api`
+in any case or encoding. Runs of slashes in the path collapse to one.
+
 ### Password links
 
 | Export                       | Kind     | Purpose                                                                                                                                                                                                |
@@ -172,7 +184,7 @@ needs a host-level retry or outbox. `afterCommit` throws
 | `PasswordLinkRequestOutcome` | type     | `{ delivered: true }`, the only outcome                                                                                                                                                                |
 | `PasswordLinkProbe`          | type     | Test observation points fired on both the known-address and unknown-address branch                                                                                                                     |
 | `RequestPasswordLinkDeps`    | type     | `db`, `mail`, `baseURL`, and optionally `renderEmail`, `onDeliveryError`, `probe`                                                                                                                      |
-| `RequestPasswordLinkInput`   | type     | `email`, `purpose`                                                                                                                                                                                     |
+| `RequestPasswordLinkInput`   | type     | `email`, `purpose`, and optionally `next` (the page to return to, sanitised by `sanitizeNextPath`)                                                                                                     |
 | `CompleteSetPasswordDeps`    | type     | `db`, `auth` (better-auth's hasher and the configured `minPasswordLength`), and optionally `onAuditWriteFailed`, `now`                                                                                 |
 | `CompleteSetPasswordInput`   | type     | `purpose`, `token`, `newPassword`                                                                                                                                                                      |
 
@@ -218,7 +230,7 @@ needs a host-level retry or outbox. `afterCommit` throws
 | `needsTwoFactorEnrolment`         | function | The same decision as a boolean                                                                                 |
 | `isTwoFactorRequiredForRole`      | function | Whether a role key requires a second factor; only `superadmin` does                                            |
 | `TWO_FACTOR_REQUIRED_ROLE_KEYS`   | constant | Frozen `['superadmin']`                                                                                        |
-| `TWO_FACTOR_ENROLMENT_PATH`       | constant | `/cms/settings/2fa/enrol`, where a gated user is sent                                                          |
+| `TWO_FACTOR_ENROLMENT_PATH`       | constant | `/cms/two-factor/enrol`, where a gated user is sent; the enrolment step lives in the login modal served there  |
 | `TwoFactorEnrolmentRequiredError` | class    | Carries `redirectTo` and `roleKey` only                                                                        |
 | `TwoFactorSubject`                | type     | The role key and `twoFactorEnabled` flag, read from the session's user row                                     |
 
@@ -306,6 +318,38 @@ const auth = createAuth({
   onMailDeliveryError: (error) => reportToMonitoring(error),
 });
 ```
+
+### Password-link endpoints
+
+`createAuth` also serves the two HTTP endpoints the login modal needs, under
+the same base path as every other auth route (`/api/auth` when mounted
+there). Both are `POST`, both take JSON, and both refuse a foreign `Origin`
+the way better-auth's own sign-in does.
+
+| Endpoint                           | Body                              | Answers                                                                                                                                                                            | Limit                  |
+| ---------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `/plakboek/password-link/request`  | `{ email, next? }`                | `200 { status: true }` for every well-formed body, registered address or not; `400 INVALID_REQUEST` for a malformed one. Mails a reset-password link carrying the sanitised `next` | 3 per 60 s per client  |
+| `/plakboek/password-link/complete` | `{ purpose, token, newPassword }` | `200 { status: true }`; `400 INVALID_LINK` for an expired, used, unknown or malformed token (one answer); `400 PASSWORD_TOO_SHORT`, leaving the link usable; `400 INVALID_REQUEST` | 10 per 60 s per client |
+
+Set-password links are issued by invitations only, never by the request
+endpoint. A link carries `?token=` and, when one was given and survives
+`sanitizeNextPath`, `&next=`; without a usable `next` it lands home.
+
+The limits are better-auth's limiter, which is on in production and off
+elsewhere. Pass `createAuth({ rateLimitEnabled: true })` to switch it on in
+development or test, or `false` to switch it off. The default in-memory
+store is per process and keyed by the client address better-auth can
+resolve, so a host behind a proxy must forward a trusted client IP header.
+
+### Magic links and two-factor
+
+A magic link is a one-step sign-in, and better-auth's two-factor plugin
+challenges only the password sign-in endpoints. So a magic link is never
+sent to a user who has two-factor enabled (the request answers exactly as
+it does for an unknown address), and a link issued before the user enrolled
+creates no session when followed: the verify call answers its normal error
+redirect and sets no cookie. The role gate in the two-factor section is
+unchanged.
 
 ### Mail delivery
 
@@ -462,9 +506,12 @@ not affected.
   receives the failure, so pass it.
 - **Schedule the audit log prune.** The package never runs
   `pruneAuditLog` itself; see the next section.
-- **Rate-limit the unauthenticated endpoints** (sign-in, magic link,
-  password-link requests) at the HTTP edge. The package keeps their
-  responses uniform but does not throttle them.
+- **Rate-limit the unauthenticated endpoints.** The password-link
+  endpoints and magic-link requests are throttled by better-auth's limiter
+  in production (see Password-link endpoints); sign-in is throttled by its
+  default rule. Add edge limiting in front of both for a shared deployment,
+  and forward a trusted client IP header so the limiter can tell clients
+  apart.
 
 ## Audit log retention
 
