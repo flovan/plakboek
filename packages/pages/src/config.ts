@@ -38,6 +38,7 @@ import {
   type BlockConstraintSet,
 } from './constraints.js';
 import { registerResolvedBlocks, type BlockDefinition } from './registry.js';
+import type { ReservedPagePathEvent } from './reserved.js';
 import {
   lintSectionProperties,
   reportSectionLint,
@@ -227,6 +228,9 @@ export type PagesHooks = {
   readonly onSectionLint?: (event: SectionLintEvent) => void;
   readonly onBelowFloor?: (event: BelowFloorEvent) => void;
   readonly onLocaleRemoved?: (event: LocaleRemovedEvent) => void;
+  /** Boot check (D-23): a stored page whose first address segment is one the
+   * CMS reserves (`cms`, `api`). The page is kept; this only flags it. */
+  readonly onReservedPagePath?: (event: ReservedPagePathEvent) => void;
   /** Forwarded to `registerHostFieldType` (EXT-02, D-05): fires when a
    * host `fieldTypes` entry shadows one of `@plakboek/content`'s sixteen
    * built-in field types -- shadowing is permitted, never silent. */
