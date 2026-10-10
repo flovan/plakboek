@@ -1,0 +1,17 @@
+{
+  // The browser-facing half of the Playwright suite: page.evaluate callbacks
+  // run in the browser, so they are typed against the DOM. Global setup and
+  // the config import server code and stay in ../../tsconfig.json.
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "helpers/site-behaviour.ts",
+    "helpers/snapshots.ts",
+    "helpers/host.ts",
+    "**/*.spec.ts"
+  ]
+}

@@ -6,3 +6,7 @@ coverage/
 .release-bootstrap/
 packages/core/tests/fixture-host/build*/
 packages/core/tests/fixture-host/.react-router/
+packages/core/tests/e2e-host/build/
+packages/core/tests/e2e-host/.react-router/
+packages/core/test-results/
+packages/core/playwright-report/

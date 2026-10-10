@@ -6,6 +6,10 @@
     ".planning/**",
     "packages/core/tests/fixture-host/build*/**",
     "packages/core/tests/fixture-host/.react-router/**",
+    "packages/core/tests/e2e-host/build/**",
+    "packages/core/tests/e2e-host/.react-router/**",
+    "packages/core/test-results/**",
+    "packages/core/playwright-report/**",
     "packages/create-plakboek/template/**",
     "packages/create-plakboek/tests/fixtures/template/**"
   ],

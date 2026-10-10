@@ -1,0 +1,21 @@
+/* The same layout as theme.css without any hostile rule. */
+body {
+  margin: 8px;
+  font: 16px/1.5 sans-serif;
+}
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 12px;
+  background: white;
+  border-bottom: 1px solid #ccc;
+}
+
+.section {
+  padding: 16px 0;
+}

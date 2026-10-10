@@ -55,7 +55,8 @@
     "build": "tsdown",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tests/e2e/tsconfig.json",
     "check": "publint --strict && attw --pack . --profile esm-only"
   },
   "dependencies": {
@@ -73,6 +74,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "catalog:",
+    "@playwright/test": "catalog:",
     "@react-router/dev": "catalog:",
     "@react-router/node": "catalog:",
     "@types/node": "catalog:",

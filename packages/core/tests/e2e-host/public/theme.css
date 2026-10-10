@@ -1,0 +1,119 @@
+/* Hostile on purpose: every rule here is something a real site theme might do
+   and that editor chrome must survive. */
+html {
+  font-size: 10px !important;
+  container-type: inline-size;
+}
+
+:root {
+  --pk-accent: hotpink;
+  --color-accent: hotpink;
+  --spacing: 99px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: content-box !important;
+}
+
+body {
+  margin: 37px !important;
+  font: 19px/1.7 serif !important;
+}
+
+/* Scoped so the site's own interactive styles survive. */
+.reset-zone .reset-target {
+  all: revert !important;
+}
+
+/* Rules that would hit anything a CMS injected into the site document. */
+plakboek-editor,
+[popover],
+body > iframe,
+body > *:last-child:not(dialog) {
+  display: none !important;
+  outline: 5px solid red !important;
+}
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 12px;
+  background: white;
+  border-bottom: 1px solid #ccc;
+}
+
+.cookie-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  padding: 12px;
+  background: #222;
+  color: white;
+}
+
+.badge {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 2147483647;
+  padding: 4px 8px;
+  background: gold;
+}
+
+.reset-zone > section:first-child {
+  min-height: 100vh;
+}
+
+.section {
+  padding: 16px 0;
+}
+
+.variant-transform {
+  transform: translateZ(0);
+}
+
+.variant-filter {
+  filter: saturate(1.01);
+}
+
+.variant-contain {
+  contain: layout paint;
+}
+
+.variant-isolation {
+  isolation: isolate;
+}
+
+.accordion button {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+.carousel-viewport {
+  overflow: hidden;
+  width: 300px;
+}
+
+.carousel-track {
+  display: flex;
+  transition: transform 0.2s;
+}
+
+.carousel-slide {
+  flex: 0 0 300px;
+  height: 80px;
+  background: #eef;
+}
+
+#site-dialog {
+  padding: 16px;
+}
