@@ -6,6 +6,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { e2eUsers } from './helpers/host.ts';
+import { signIn } from './helpers/session.ts';
 
 const HOST = 'plakboek-editor';
 const BACKDROP = `${HOST} iframe.pk-backdrop`;
@@ -19,6 +20,8 @@ type FrameReport = {
   readonly height: number;
   readonly transform: string;
   readonly inner: number | null;
+  /** How many animations are running on the frame. */
+  readonly animations: number;
 };
 
 /**
@@ -47,6 +50,7 @@ async function recordFrameRects(page: Page): Promise<FrameReport[]> {
           height: rect.height,
           transform: getComputedStyle(frame).transform,
           inner: frame.contentWindow?.innerWidth ?? null,
+          animations: frame.getAnimations().length,
         };
         const sink = (window as unknown as Record<string, unknown>)
           .reportFrameRect;
@@ -57,6 +61,58 @@ async function recordFrameRects(page: Page): Promise<FrameReport[]> {
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
+  });
+  return reports;
+}
+
+type SpinnerReport = {
+  readonly text: string;
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+  /** When the test received the report. */
+  readonly at: number;
+};
+
+/**
+ * Reports the opening spinner whenever it is on screen, from a timer in the
+ * page (some engines stop animation frames while a navigation is pending).
+ * While a navigation is held a test cannot evaluate in the page, so the page
+ * tells the test instead.
+ */
+async function recordOpeningSpinner(page: Page): Promise<SpinnerReport[]> {
+  const reports: SpinnerReport[] = [];
+  await page.exposeFunction(
+    'reportOpeningSpinner',
+    (report: Omit<SpinnerReport, 'at'>) => {
+      reports.push({ ...report, at: Date.now() });
+    },
+  );
+  await page.addInitScript(() => {
+    const tick = (): void => {
+      const element = document
+        .querySelector('plakboek-editor')
+        ?.shadowRoot?.querySelector('[data-transition="opening"]');
+      if (element) {
+        const box = element.getBoundingClientRect();
+        const sink = (window as unknown as Record<string, unknown>)
+          .reportOpeningSpinner;
+        if (typeof sink === 'function') {
+          Promise.resolve(
+            sink({
+              text: element.querySelector('[role="status"]')?.textContent ?? '',
+              left: box.left,
+              top: box.top,
+              width: box.width,
+              height: box.height,
+            }),
+          ).catch(() => undefined);
+        }
+      }
+      setTimeout(tick, 50);
+    };
+    setTimeout(tick, 50);
   });
   return reports;
 }
@@ -179,8 +235,9 @@ test.describe('signing in', () => {
     for (const report of [...login, ...shell]) {
       expect(['none', '']).toContain(report.transform);
       if (report.inner !== null && report.width > 0) {
-        expect(report.inner).toBeLessThanOrEqual(report.width);
-        // A 1px border on each side, and a width that is fractional mid-way.
+        // A 1px border on each side; the frame's width is fractional mid-way
+        // and the window's inner width is a whole number.
+        expect(report.inner).toBeLessThanOrEqual(report.width + 1);
         expect(report.inner).toBeGreaterThanOrEqual(report.width - 3);
       }
     }
@@ -373,5 +430,182 @@ test.describe('a role that must set up two-step sign-in', () => {
     await signInWith(page, e2eUsers().superadmin);
     await page.waitForURL((url) => url.pathname === '/cms/two-factor/enrol');
     expect(new URL(page.url()).searchParams.get('next')).toBe('/about');
+  });
+});
+
+const LAYOUT_KEY = 'plakboek:editor-layout';
+
+/** The viewport of the suite (playwright.config.ts). */
+const VIEWPORT = { width: 1400, height: 900 };
+
+/** Where the shell puts the frame: the sidebar and 24px of stage, or the rail. */
+const FRAMED = { left: 304, top: 24, width: 1072, height: 852 };
+const FULL = { left: 56, top: 0, width: 1344, height: 900 };
+
+function closeTo(
+  actual: { left: number; top: number; width: number; height: number },
+  expected: { left: number; top: number; width: number; height: number },
+): void {
+  for (const side of ['left', 'top', 'width', 'height'] as const) {
+    expect(Math.abs(actual[side] - expected[side])).toBeLessThanOrEqual(1);
+  }
+}
+
+test.describe('the hand-over for each layout and motion setting', () => {
+  test('ends on the full-width rect and the shell paints full width, when that layout is stored', async ({
+    page,
+  }) => {
+    await page.addInitScript((key) => {
+      window.localStorage.setItem(key, 'full');
+    }, LAYOUT_KEY);
+    const reports = await recordFrameRects(page);
+    await openModal(page);
+    await signInWith(page, e2eUsers().editor);
+    await page.waitForURL(
+      (url) => url.pathname === '/about' && url.search === '?_edit=1',
+    );
+    await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
+    await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
+
+    const login = reports.filter((r) => new URL(r.href).pathname === '/cms');
+    const shell = reports.filter((r) => new URL(r.href).search === '?_edit=1');
+    const last = login.at(-1);
+    const painted = shell[0];
+    if (last === undefined || painted === undefined) {
+      throw new Error('no frame was reported');
+    }
+    closeTo(last, FULL);
+    closeTo(painted, FULL);
+    closeTo(last, painted);
+    // Still never scaled.
+    for (const report of [...login, ...shell]) {
+      expect(['none', '']).toContain(report.transform);
+    }
+  });
+
+  test('uses no animation at all under reduced motion and still reaches edit mode', async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const reports = await recordFrameRects(page);
+    await openModal(page);
+    await signInWith(page, e2eUsers().editor);
+    await page.waitForURL(
+      (url) => url.pathname === '/about' && url.search === '?_edit=1',
+    );
+    await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
+
+    const login = reports.filter((r) => new URL(r.href).pathname === '/cms');
+    expect(login.length).toBeGreaterThan(0);
+    // No Animation object ever ran on the frame, and it was never half way:
+    // it is the whole viewport or already the shell's rectangle.
+    for (const report of login) expect(report.animations).toBe(0);
+    for (const report of login) {
+      expect([VIEWPORT.width, FRAMED.width]).toContain(
+        Math.round(report.width),
+      );
+    }
+    const shell = reports.filter((r) => new URL(r.href).search === '?_edit=1');
+    const painted = shell[0];
+    if (painted === undefined) throw new Error('no frame was reported');
+    closeTo(painted, FRAMED);
+  });
+
+  test('shows a spinner with the hidden status "Opening the page" when the edit page is slow', async ({
+    page,
+  }) => {
+    const spinners = await recordOpeningSpinner(page);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(/\/about\?_edit=1$/, async (route) => {
+      if (route.request().resourceType() === 'document') await held;
+      await route.continue();
+    });
+    await openModal(page);
+    await page.getByLabel('Email address').fill(e2eUsers().editor.email);
+    await page.getByLabel('Password').fill(e2eUsers().editor.password);
+    const clicked = Date.now();
+    await page.getByRole('button', { name: 'Sign in' }).click();
+
+    // (While the navigation is held the test cannot ask the page anything, so
+    // it waits for what the page reports.)
+    await expect
+      .poll(() => spinners.length, { timeout: 5000 })
+      .toBeGreaterThan(0);
+    const first = spinners[0];
+    if (first === undefined) throw new Error('the spinner was never reported');
+    // Not at once: the hand-over takes 600ms and the spinner waits 400ms more.
+    expect(first.at - clicked).toBeGreaterThanOrEqual(950);
+    expect(first.text).toBe('Opening the page');
+    // It sits centred in the frame's final rectangle, over the unchanged frame.
+    closeTo(first, FRAMED);
+
+    release();
+    await page.waitForURL(
+      (url) => url.pathname === '/about' && url.search === '?_edit=1',
+    );
+    await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
+    // The shell's own first paint never shows it.
+    await expect(page.locator(`${HOST} [data-transition]`)).toHaveCount(0);
+    await expect(page.getByText('Opening the page')).toHaveCount(0);
+  });
+});
+
+test.describe('the Edit pill with a valid session', () => {
+  test('goes straight to the page in edit mode: /cms answers a redirect and no dialog is ever shown', async ({
+    page,
+  }) => {
+    await signIn(page, e2eUsers().editor);
+    await page.addInitScript((key) => {
+      window.localStorage.setItem(key, '1');
+    }, EDITOR_FLAG);
+    const cmsStatuses: number[] = [];
+    page.on('response', (response) => {
+      const url = new URL(response.url());
+      if (url.pathname === '/cms') cmsStatuses.push(response.status());
+    });
+    let dialogSeen = false;
+    await page.exposeFunction('dialogWasShown', () => {
+      dialogSeen = true;
+    });
+    await page.addInitScript(() => {
+      const watch = (): void => {
+        if (
+          document
+            .querySelector('plakboek-editor')
+            ?.shadowRoot?.querySelector('dialog')
+        ) {
+          (
+            window as unknown as { dialogWasShown: () => void }
+          ).dialogWasShown();
+          return;
+        }
+        requestAnimationFrame(watch);
+      };
+      requestAnimationFrame(watch);
+    });
+
+    await page.goto('/about');
+    await expect.poll(() => page.locator('plakboek-toolbar').count()).toBe(1);
+    // The pill is in a closed shadow root: click where its Edit button is.
+    const x = VIEWPORT.width - 76;
+    const y = VIEWPORT.height - 33;
+    expect(
+      await page.evaluate(
+        ([px, py]) => document.elementFromPoint(px ?? 0, py ?? 0)?.localName,
+        [x, y],
+      ),
+    ).toBe('plakboek-toolbar');
+    await page.mouse.click(x, y);
+
+    await page.waitForURL(
+      (url) => url.pathname === '/about' && url.search === '?_edit=1',
+    );
+    await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
+    expect(cmsStatuses).toEqual([302]);
+    expect(dialogSeen).toBe(false);
+    await expect(page.locator(`${HOST} dialog`)).toHaveCount(0);
   });
 });
