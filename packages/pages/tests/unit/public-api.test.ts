@@ -181,6 +181,8 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   resolvePublishedPage: 'function',
   resolveVisitorPage: 'function',
   toPublicPagePath: 'function',
+  // editable
+  resolveEditablePage: 'function',
 });
 
 /** Every type the entry point exports. Types leave no runtime trace, so this
@@ -321,6 +323,10 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'ResolveVisitorPageInput',
   'ToPublicPagePathInput',
   'VisitorPageResolution',
+  // editable
+  'EditablePageResolution',
+  'EditablePageView',
+  'ResolveEditablePageInput',
 ]);
 
 /**
@@ -373,6 +379,7 @@ const WITHHELD: readonly string[] = Object.freeze([
   'buildPageSnapshot',
   'computeManifestHash',
   'asPageSnapshot',
+  'toPublishedPageSeo',
   // schema.ts -- every table
   'pages',
   'pageBlocks',

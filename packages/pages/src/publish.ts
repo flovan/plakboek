@@ -85,8 +85,10 @@ export type PageSnapshot = {
   readonly seo?: PublishedPageSeo;
 };
 
-/** Picks the head fields out of a stored SEO value; never throws. */
-function toPublishedPageSeo(value: unknown): PublishedPageSeo {
+/** Picks the head fields out of a stored SEO value; never throws. Exported
+ * (not part of the barrel) so the editor's live read normalises the stored
+ * SEO exactly as a publish freezes it. */
+export function toPublishedPageSeo(value: unknown): PublishedPageSeo {
   const seo = normalizeEntrySeo(value);
   return {
     title: seo.title,

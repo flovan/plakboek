@@ -70,6 +70,8 @@ import {
   DEFAULT_HOME_SLUG,
   DEFAULT_SECTION_NESTING_DEPTH,
   DEGRADED_REASONS,
+  type EditablePageResolution,
+  type EditablePageView,
   DegradedBlockPublishError,
   type DegradedBlockEvent,
   type DegradedReason,
@@ -185,8 +187,10 @@ import {
   type ResolvedBlockPlacement,
   type ResolvedBlockProperty,
   type ResolvedPropertyConstraint,
+  type ResolveEditablePageInput,
   type ResolvePageUrlPathInput,
   resolveBlockProperties,
+  resolveEditablePage,
   resolvePageUrlPath,
   resolvePublishedPage,
   type ResolvePublishedPageInput,
@@ -302,6 +306,7 @@ const functions: Record<string, unknown> = {
   reportPageLocaleRemoval,
   reportPagesWarning,
   resolveBlockProperties,
+  resolveEditablePage,
   resolvePageUrlPath,
   resolvePublishedPage,
   resolveVisitorPage,
@@ -1116,6 +1121,24 @@ const visitorPageResolution: VisitorPageResolution = {
   publicPath: '/',
   view: publishedPageView,
 };
+const resolveEditablePageInput: ResolveEditablePageInput =
+  matchPublicPagePathInput;
+const editablePageView: EditablePageView = {
+  id: 'page-id',
+  locale: 'en',
+  path: 'home',
+  title: 'Home',
+  status: 'draft',
+  version: 1,
+  livePublicationId: null,
+  seo: publishedPageSeo,
+};
+const editablePageResolution: EditablePageResolution = {
+  kind: 'page',
+  publicPath: '/',
+  page: editablePageView,
+  blocks: [],
+};
 
 // PagesDeps needs live db/recorder/resolver handles this probe never opens
 // -- proven only as a parameter type of a never-called function, the same
@@ -1228,6 +1251,9 @@ const typeProofs: unknown[] = [
   resolvePublishedPageInput,
   resolveVisitorPageInput,
   visitorPageResolution,
+  resolveEditablePageInput,
+  editablePageView,
+  editablePageResolution,
   publicMatch,
   config,
 ];

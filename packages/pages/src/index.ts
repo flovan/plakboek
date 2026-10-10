@@ -448,3 +448,11 @@ export type {
   ToPublicPagePathInput,
   VisitorPageResolution,
 } from './visitor.js';
+
+// editable.ts
+export { resolveEditablePage } from './editable.js';
+export type {
+  EditablePageResolution,
+  EditablePageView,
+  ResolveEditablePageInput,
+} from './editable.js';
