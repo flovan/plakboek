@@ -132,9 +132,37 @@ app container holds rendered pages, and a publish purges the page right after
 its transaction commits. Every other `NODE_ENV` runs uncached, so the next
 request re-evaluates the host configuration.
 
-The plugin's `edit` option names a module exporting `edit`, the editor's
-entrypoint. A request carrying `_edit` is handed to it; without the option such
-a request is bounced to the plain page.
+## Edit mode
+
+A request carrying `_edit` (`/about?_edit=1`) is handed to the editor, which
+checks the session on the server and either serves the edit shell or bounces
+to the plain page. The editor is composed automatically: the runtime builds it
+on the first `_edit` request of a process, from its own authentication,
+permissions, database, page configuration and site document, so a host does
+nothing to get it. The plugin's `edit` option names a module exporting `edit`,
+an entrypoint of your own, and still overrides the CMS editor entirely.
+
+The editor's client is delivered as a separate chunk. `react-router build`
+emits it as `assets/plakboek-editor-<hash>.js`, next to a
+`plakboek-editor.json` sidecar that lists the chunk, the chunks it loads and
+its stylesheets. The server build reads that sidecar, so it knows the hashed
+URL without Vite's own manifest, and only the edit shell references it: a
+visitor's page never mentions the editor.
+
+Keeping editor code away from visitors is checked at build time, not by a
+runtime branch. Two checks together are the gate, and a failure of either fails
+the build in every host and in CI:
+
+1. the render package's module-graph test, which keeps the editor out of the
+   visitor handler's server graph;
+2. a client-closure check in the plugin: after the client build, no chunk
+   reachable from the client entry or from any route chunk, statically or
+   through a dynamic import, may contain a module of `@plakboek/editor` (or of
+   the editor's libraries). The build stops and lists every
+   `entry -> chunk: module` path it found.
+
+A host's own route modules, components and client entry must therefore never
+import `@plakboek/editor`; the editor loads only through its own chunk.
 
 ## The `plakboek` command
 

@@ -79,8 +79,11 @@ describe('findEditorLeaks', () => {
   });
 
   it('finds nothing, and does not throw, when there is no editor chunk', () => {
-    const { 'assets/plakboek-editor-4.js': _editor, ...without } =
-      cleanBundle();
+    const without = Object.fromEntries(
+      Object.entries(cleanBundle()).filter(
+        ([, item]) => item.name !== EDITOR_CHUNK_NAME,
+      ),
+    );
     expect(findEditorLeaks(without)).toEqual([]);
     expect(findEditorLeaks({})).toEqual([]);
   });

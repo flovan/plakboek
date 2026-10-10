@@ -215,6 +215,35 @@ describe('plakboek() editor chunk', () => {
     );
   });
 
+  it('fails the client build, naming every leak, when a visitor chunk reaches editor code', () => {
+    const bundle = bundleWithEditor();
+    bundle['assets/home-1.js'] = {
+      type: 'chunk',
+      name: 'home',
+      fileName: 'assets/home-1.js',
+      isEntry: true,
+      imports: ['assets/react-def.js'],
+      dynamicImports: [],
+      moduleIds: ['/work/node_modules/@plakboek/editor/dist/client.js'],
+    };
+    const emitFile = vi.fn();
+    const error = vi.fn((message: string) => {
+      throw new Error(message);
+    });
+    expect(() =>
+      callHook(
+        building().generateBundle,
+        { ...clientEnvironment, emitFile, error },
+        {},
+        bundle,
+      ),
+    ).toThrow(
+      /assets\/home-1\.js -> assets\/home-1\.js: \/work\/node_modules\/@plakboek\/editor\/dist\/client\.js/,
+    );
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(emitFile).not.toHaveBeenCalled();
+  });
+
   it('writes no sidecar for a server bundle', () => {
     const emitFile = vi.fn();
     callHook(

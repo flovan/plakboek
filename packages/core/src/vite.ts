@@ -18,6 +18,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv, type Plugin } from 'vite';
+import { findEditorLeaks } from './editor-closure.js';
 import {
   buildEditorSidecar,
   devEditorAssets,
@@ -123,7 +124,22 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
     },
     generateBundle(_outputOptions, bundle) {
       if (this.environment.name !== 'client') return;
-      const found = buildEditorSidecar(bundle as unknown as BundleLike);
+      const output = bundle as unknown as BundleLike;
+      // The build-time check of EDIT-14: nothing a visitor loads may reach
+      // editor code, however a host's own routes import it.
+      const leaks = findEditorLeaks(output);
+      if (leaks.length > 0) {
+        this.error(
+          [
+            '[@plakboek/core] Editor code is reachable from a client chunk that visitors load, so it would ship to them:',
+            ...leaks.map(
+              (leak) => `  ${leak.entry} -> ${leak.chunk}: ${leak.module}`,
+            ),
+            'Host route modules and the client entry must never import @plakboek/editor; the editor loads only through its own chunk.',
+          ].join('\n'),
+        );
+      }
+      const found = buildEditorSidecar(output);
       if (found === undefined) return;
       sidecar = found;
       this.emitFile({
