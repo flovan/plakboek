@@ -1,7 +1,12 @@
-import { adoptChromeStyles, chromeStyleSheet } from '@plakboek/editor/client';
+import {
+  adoptChromeStyles,
+  bootEditor,
+  chromeStyleSheet,
+} from '@plakboek/editor/client';
 import {
   CHROME_STYLE_CSP_HASH,
   chromeStyleElement,
+  createEditEntrypoint,
 } from '@plakboek/editor/server';
 
 const failures: string[] = [];
@@ -21,6 +26,8 @@ expectEqual(
 );
 expectEqual('adoptChromeStyles', typeof adoptChromeStyles, 'function');
 expectEqual('chromeStyleSheet', typeof chromeStyleSheet, 'function');
+expectEqual('bootEditor', typeof bootEditor, 'function');
+expectEqual('createEditEntrypoint', typeof createEditEntrypoint, 'function');
 expectEqual(
   'chromeStyleElement markup',
   chromeStyleElement().startsWith('<style>'),

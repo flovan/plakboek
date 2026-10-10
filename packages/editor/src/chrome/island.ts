@@ -16,3 +16,12 @@ export type ShellIsland = {
   /** Where the Log out form posts. */
   readonly logoutPath: string;
 };
+
+/** The custom element the shell lives in. */
+export const HOST_TAG = 'plakboek-editor';
+
+/** The element inside the shadow root the shell is rendered into. */
+export const SHELL_ROOT_ID = 'plakboek-shell-root';
+
+/** The element id of the JSON script that carries the island. */
+export const ISLAND_ELEMENT_ID = 'plakboek-editor-data';

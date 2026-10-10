@@ -21,14 +21,24 @@ const CLIENT_HEADING = '### Client entry: `@plakboek/editor/client`';
 type ValueKind = 'function' | 'class' | 'constant';
 
 const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
+  // server/entrypoint
+  createEditEntrypoint: 'function',
   // chrome/styles
   chromeStyleElement: 'function',
   CHROME_STYLE_CSP_HASH: 'constant',
 });
 
-const SERVER_TYPES: readonly string[] = Object.freeze([]);
+const SERVER_TYPES: readonly string[] = Object.freeze([
+  // server/entrypoint
+  'EditEntrypointDeps',
+  // server/assets
+  'EditorAssets',
+  'EditorDevScript',
+]);
 
 const CLIENT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
+  // client/boot
+  bootEditor: 'function',
   // chrome/styles
   chromeStyleSheet: 'function',
   adoptChromeStyles: 'function',
@@ -38,6 +48,8 @@ const CLIENT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
 });
 
 const CLIENT_TYPES: readonly string[] = Object.freeze([
+  // chrome/shell
+  'SidebarSlots',
   // chrome/strings
   'StringKey',
 ]);

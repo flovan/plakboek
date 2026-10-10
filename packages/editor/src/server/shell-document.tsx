@@ -12,7 +12,12 @@
  */
 import { renderToString } from 'react-dom/server';
 import { ShellApp } from '../chrome/shell.js';
-import type { ShellIsland } from '../chrome/island.js';
+import {
+  HOST_TAG,
+  ISLAND_ELEMENT_ID,
+  SHELL_ROOT_ID,
+  type ShellIsland,
+} from '../chrome/island.js';
 import { chromeStyleElement, CHROME_STYLE_CSP_HASH } from '../chrome/styles.js';
 import {
   hasDevScripts,
@@ -27,9 +32,6 @@ import {
 } from './html-document.js';
 import type { EditorIdentity } from './identity.js';
 import { frameLocation } from './locations.js';
-
-/** The element id of the JSON island. */
-export const ISLAND_ID = 'plakboek-editor-data';
 
 /** Where the Log out form posts. */
 export const LOGOUT_PATH = '/cms/logout';
@@ -73,12 +75,12 @@ export function renderShellDocument(input: ShellDocumentInput): ShellDocument {
   const island = buildShellIsland(input);
   const chrome = renderToString(<ShellApp island={island} hydrated={false} />);
   const host =
-    `<plakboek-editor data-layout="framed" data-mode="${island.mode}">` +
+    `<${HOST_TAG} data-layout="framed" data-mode="${island.mode}">` +
     '<template shadowrootmode="open">' +
     chromeStyleElement() +
-    `<div id="plakboek-shell-root" class="pk-shell">${chrome}</div>` +
-    '</template></plakboek-editor>';
-  const data = `<script type="application/json" id="${ISLAND_ID}">${escapeJsonForHtml(island)}</script>`;
+    `<div id="${SHELL_ROOT_ID}" class="pk-shell">${chrome}</div>` +
+    `</template></${HOST_TAG}>`;
+  const data = `<script type="application/json" id="${ISLAND_ELEMENT_ID}">${escapeJsonForHtml(island)}</script>`;
   const html = buildCmsDocument({
     title: 'Plakboek',
     headHtml: `<style>${SHELL_HEAD_STYLE}</style>`,

@@ -16,16 +16,99 @@ pnpm add @plakboek/editor react react-dom
 
 ## Status
 
-Pre-alpha. This release carries the package shell: the chrome stylesheet and
-the helpers that deliver it. The shell, the login card and the overlay arrive
-in later releases of the same phase.
+Pre-alpha. This release carries the chrome stylesheet and the helpers that
+deliver it, and the server entry that answers the edit shell and the framed
+site, with the client boot that hydrates the shell. The login card, the layout
+toggle and the overlay arrive in later releases of the same phase.
 
 ## Browser floor
 
 The editor targets current evergreen Chromium, Firefox and WebKit. It relies
 on constructable stylesheets, declarative shadow DOM and the `:host` selector;
-older browsers are not supported. Visitors never load this package, so the
-floor applies to editors only.
+older browsers are not supported: without declarative shadow DOM the shell
+renders no chrome, and `bootEditor()` finds no shadow root and does nothing.
+Visitors never load this package, so the floor applies to editors only.
+
+## How edit mode shows the site
+
+Edit mode is two requests to the page's own address, both answered by the
+edit entrypoint behind the visitor handler's `_edit` seam.
+
+- `<page>?_edit=1` is the **shell**, a document the CMS owns. Its single
+  `plakboek-editor` element carries a declarative shadow root with the
+  sidebar and a stage, and the stage holds one same-origin `<iframe>` pointing
+  at the second request. The iframe is used purely as a viewport.
+- `<page>?_edit=frame` is the **site**, rendered by the host's own document
+  and blocks at its own URL, for the live working tree (with `pages:edit`),
+  and with the live `data-pk-*` attributes on every block.
+
+The editor's own React code reaches into the frame's document directly, with
+no cross-document message bridge. The site therefore keeps a real window
+scroll and real media queries, sized exactly as the frame, and chrome and
+site cannot style each other: they live in different documents, and the
+chrome lives in shadow roots. The frame shows the actual rendered page, and
+the editor adds nothing to it beyond what the host's `renderDocument` and
+blocks produce plus the live attributes. The frame is shown at actual size
+(1:1): entering or leaving full width resizes the frame, it never scales it.
+
+Every shell and frame request re-reads the session, the two-factor gate and
+the user's role on the server. Nothing a client sends other than the session
+cookie grants anything, and the `plakboek:editor` flag in the browser only
+decides whether the Edit pill appears.
+
+| Request                                              | Answer                                                                                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| No session                                           | `null`: the visitor handler redirects to the plain page                                    |
+| A role that needs two-factor and has not enrolled    | The shell redirects to `/cms/two-factor/enrol?next=<page>`; the frame answers `null`       |
+| A user with `pages:edit`                             | The shell, and the frame with the live working tree and live attributes                    |
+| A user with `pages:read-drafts` but not `pages:edit` | The read-only shell, and the working tree as plain markup                                  |
+| Any other signed-in user                             | The read-only shell, and the published page                                                |
+| A page that does not exist                           | The host's not-found document inside the frame, status 404                                 |
+| A render that fails                                  | A small editor document with a `plakboek-frame-error` marker and no error text, status 500 |
+| A frame URL opened as a top-level page               | A redirect to the shell for the same page                                                  |
+
+Every shell and frame response carries `X-Robots-Tag: noindex, nofollow`. The
+visitor handler serves them `private, no-store`.
+
+### Wiring the entrypoint
+
+`createEditEntrypoint(deps)` takes the auth instance, the permission
+resolver, the database, the pages config and home slug, the component map the
+visitor handler uses, the host's `renderDocument`, an optional `notFound`
+page, and the editor assets. Pass the result as the visitor handler's `edit`.
+
+`EditorAssets` describes the built client the shell loads:
+
+| Field        | Meaning                                                                                                         |
+| ------------ | --------------------------------------------------------------------------------------------------------------- |
+| `entry`      | URL of the module that calls `bootEditor()`                                                                     |
+| `preload`    | URLs of chunks to preload                                                                                       |
+| `css`        | URLs of stylesheets the client chunks need                                                                      |
+| `devScripts` | Development-only scripts (a URL or inline code) that run first; the shell then sends no Content-Security-Policy |
+
+### What the shell sends
+
+The shell is never framed (`X-Frame-Options: DENY`, `frame-ancestors 'none'`)
+and sends no referrer. With `csp: true` it also sends a policy that allows
+only its own origin plus two inline styles by hash: the chrome stylesheet,
+whose source expression is `CHROME_STYLE_CSP_HASH`, and the document's one
+static style. There is no `unsafe-inline`, and `base-uri` is `none`. The
+frame is served with `X-Frame-Options: SAMEORIGIN` and
+`frame-ancestors 'self'`, so only the shell can embed it.
+
+A host's site pages must not send `X-Frame-Options: DENY` or
+`frame-ancestors 'none'`: the frame is the site's own document at its own
+address, and a policy that forbids same-origin framing would blank it.
+
+The JSON the shell hands the client holds only what the chrome needs: the
+mode, the user's name and email, the visitor location, the frame URL and the
+log-out path. It is escaped so no value can close its script element.
+
+### The sidebar slot
+
+`SidebarSlots` describes the navigation region between the product name and
+the footer. It receives the current layout so items can render icon-only in a
+rail, and it renders nothing when no slot is given.
 
 ## The chrome stylesheet
 
@@ -86,17 +169,23 @@ updating them.
 
 ### Server entry: `@plakboek/editor/server`
 
-| Export                  | Kind     | Purpose                                                                 |
-| ----------------------- | -------- | ----------------------------------------------------------------------- |
-| `chromeStyleElement`    | function | The chrome stylesheet as `<style>` markup for a declarative shadow root |
-| `CHROME_STYLE_CSP_HASH` | constant | The `sha256-...` of that markup's CSS, for a host's strict `style-src`  |
+| Export                  | Kind     | Purpose                                                                          |
+| ----------------------- | -------- | -------------------------------------------------------------------------------- |
+| `createEditEntrypoint`  | function | The edit entrypoint for the visitor handler's `edit` option: the shell and frame |
+| `chromeStyleElement`    | function | The chrome stylesheet as `<style>` markup for a declarative shadow root          |
+| `CHROME_STYLE_CSP_HASH` | constant | The `sha256-...` of that markup's CSS, for a host's strict `style-src`           |
+| `EditEntrypointDeps`    | type     | What `createEditEntrypoint` needs                                                |
+| `EditorAssets`          | type     | The built client the shell loads: entry, preloads, stylesheets, dev scripts      |
+| `EditorDevScript`       | type     | A development-only script: a `src` URL or inline `code`                          |
 
 ### Client entry: `@plakboek/editor/client`
 
 | Export              | Kind     | Purpose                                                                       |
 | ------------------- | -------- | ----------------------------------------------------------------------------- |
+| `bootEditor`        | function | Hydrates the shell the server rendered inside the `plakboek-editor` host      |
 | `chromeStyleSheet`  | function | The chrome stylesheet for one document, built with that document's window     |
 | `adoptChromeStyles` | function | Adopts the chrome stylesheet into a shadow root, once                         |
 | `STRINGS`           | constant | Every edit-mode string, by stable dotted key, in English                      |
 | `formatString`      | function | A string with its `{name}` placeholders filled; the compiler checks the names |
+| `SidebarSlots`      | type     | The slots a later release fills the sidebar with                              |
 | `StringKey`         | type     | A key of `STRINGS`                                                            |

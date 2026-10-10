@@ -3,12 +3,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { ShellApp } from '../../src/chrome/shell.js';
 import type { ShellIsland } from '../../src/chrome/island.js';
+import { ISLAND_ELEMENT_ID as ISLAND_ID } from '../../src/chrome/island.js';
 import { STRINGS } from '../../src/chrome/strings.js';
 import { CHROME_STYLE_CSP_HASH } from '../../src/chrome/styles.js';
 import { renderEditorScripts } from '../../src/server/assets.js';
 import { cspHashOf } from '../../src/server/html-document.js';
 import {
-  ISLAND_ID,
   renderShellDocument,
   SHELL_HEAD_STYLE,
   SHELL_HEAD_STYLE_CSP_HASH,
