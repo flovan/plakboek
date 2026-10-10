@@ -265,6 +265,22 @@ describe('the /cms routes', () => {
       expect(await sessionOf(cookie)).not.toBeNull();
     });
 
+    it('treats an Origin of "null", which a no-referrer document sends, like a missing one', async () => {
+      const cookie = await signIn(EDITOR);
+      const crossSite = await logout({
+        cookie,
+        headers: { Origin: 'null', 'Sec-Fetch-Site': 'cross-site' },
+      });
+      expect(crossSite.status).toBe(403);
+      expect(await sessionOf(cookie)).not.toBeNull();
+      const sameOrigin = await logout({
+        cookie,
+        headers: { Origin: 'null', 'Sec-Fetch-Site': 'same-origin' },
+      });
+      expect(sameOrigin.status).toBe(303);
+      expect(await sessionOf(cookie)).toBeNull();
+    });
+
     it('ends the session on the server and goes back to the page without _edit', async () => {
       const cookie = await signIn(EDITOR);
       expect(await sessionOf(cookie)).not.toBeNull();

@@ -40,12 +40,17 @@ function plain(
  * Whether the request came from this site's own pages. `PLAKBOEK_URL` is
  * authoritative; the request's own origin is accepted too, because behind a
  * TLS-terminating proxy the two can legitimately differ and a foreign page
- * can forge neither. Without an `Origin` header only a browser's own
- * `Sec-Fetch-Site: same-origin` counts.
+ * can forge neither.
+ *
+ * A browser sends no usable `Origin` in two cases that matter here: none at
+ * all, and the literal `null`, which it sends for a form post made from a
+ * document with `Referrer-Policy: no-referrer`, as the edit shell is. Both
+ * fall back to the browser's own `Sec-Fetch-Site`, which a page cannot set
+ * and which must say `same-origin`.
  */
 function isOwnRequest(request: Request, runtime: Runtime): boolean {
   const origin = request.headers.get('Origin');
-  if (origin === null) {
+  if (origin === null || origin === 'null') {
     return request.headers.get('Sec-Fetch-Site') === 'same-origin';
   }
   const allowed = new Set<string>([new URL(runtime.env.siteUrl).origin]);
