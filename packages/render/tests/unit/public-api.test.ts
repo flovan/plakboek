@@ -41,6 +41,7 @@ const ROOT_TYPES: readonly string[] = Object.freeze([
   'BlockIdentity',
   // head
   'DocumentInput',
+  'DocumentMode',
   'PageHead',
   'RenderDocument',
   // edit-proxy

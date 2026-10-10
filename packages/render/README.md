@@ -280,7 +280,8 @@ updating them.
 | `EditAttributes`        | type     | `data-` attributes the editor binds to                                    |
 | `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes        |
 | `PageHead`              | type     | What a document composer needs to write a page's `<head>`                 |
-| `DocumentInput`         | type     | `{ head, body, publicPath }`: what a document composer receives           |
+| `DocumentInput`         | type     | `{ head, body, publicPath, mode }`: what a document composer receives     |
+| `DocumentMode`          | type     | `'visitor' \| 'edit'`: which rendering a document composer is producing   |
 | `RenderDocument`        | type     | A host's document composer: `(input) => string \| Promise<string>`        |
 
 ### Server entry: `@plakboek/render/server`

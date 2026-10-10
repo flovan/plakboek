@@ -29,6 +29,7 @@ const input = (publicPath: string, lang = 'en'): DocumentInput => ({
   },
   body: '<main>x</main>',
   publicPath,
+  mode: 'visitor',
 });
 
 function recordingSite(): {

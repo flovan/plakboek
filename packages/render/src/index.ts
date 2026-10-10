@@ -22,7 +22,12 @@ export type {
 } from './block-component.js';
 
 // head
-export type { DocumentInput, PageHead, RenderDocument } from './head.js';
+export type {
+  DocumentInput,
+  DocumentMode,
+  PageHead,
+  RenderDocument,
+} from './head.js';
 
 // edit-proxy
 export { NOOP_EDIT } from './edit-proxy.js';

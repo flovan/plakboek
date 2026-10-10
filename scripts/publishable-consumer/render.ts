@@ -91,6 +91,7 @@ const input: DocumentInput = {
   head,
   body: '<main>probe</main>',
   publicPath: '/en/about',
+  mode: 'visitor',
 };
 const composer: RenderDocument = renderDefaultDocument;
 

@@ -65,7 +65,10 @@ export function renderDocument(
     renderHeadHtml(input.head),
     '<link rel="stylesheet" href="/theme.css">',
     '<script src="/site.js" defer></script>',
-    '<script src="/analytics.js" defer></script>',
+    // Analytics must not count an editing session: omitted in the edit render.
+    ...(input.mode === 'visitor'
+      ? ['<script src="/analytics.js" defer></script>']
+      : []),
     '</head>',
     '<body>',
     header(site),

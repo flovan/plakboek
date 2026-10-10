@@ -388,6 +388,7 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
         head: rendered.head,
         body: `${rendered.body}${renderToolbarBootstrap()}`,
         publicPath: key,
+        mode: 'visitor',
       });
       const body = encoder.encode(html);
       const entry = {
