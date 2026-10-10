@@ -6,6 +6,7 @@ import {
 import {
   CHROME_STYLE_CSP_HASH,
   chromeStyleElement,
+  createCmsPages,
   createEditEntrypoint,
 } from '@plakboek/editor/server';
 
@@ -28,6 +29,7 @@ expectEqual('adoptChromeStyles', typeof adoptChromeStyles, 'function');
 expectEqual('chromeStyleSheet', typeof chromeStyleSheet, 'function');
 expectEqual('bootEditor', typeof bootEditor, 'function');
 expectEqual('createEditEntrypoint', typeof createEditEntrypoint, 'function');
+expectEqual('createCmsPages', typeof createCmsPages, 'function');
 expectEqual(
   'chromeStyleElement markup',
   chromeStyleElement().startsWith('<style>'),

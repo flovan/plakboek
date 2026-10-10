@@ -70,9 +70,13 @@ expectEqual(
   'cmsRoutes ids',
   routes.map((entry) => entry.id).join(','),
   [
+    'plakboek-cms',
     'plakboek-health',
     'plakboek-setup',
     'plakboek-setup-test-email',
+    'plakboek-cms-logout',
+    'plakboek-cms-pages',
+    'plakboek-robots',
     'plakboek-auth',
     'plakboek-visitor-index',
     'plakboek-visitor',

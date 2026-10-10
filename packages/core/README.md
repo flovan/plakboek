@@ -111,17 +111,36 @@ process win over the file.
 `cmsRoutes()` returns these routes, in this order, each pointing at a built
 route module inside this package:
 
-| Path                    | Purpose                                            |
-| ----------------------- | -------------------------------------------------- |
-| `/cms/health`           | Liveness and database probe (`200` or `503`).      |
-| `/cms/setup`            | First-run setup of the first superadmin.           |
-| `/cms/setup/test-email` | Sends a test email from the setup page.            |
-| `/api/auth/*`           | The authentication API.                            |
-| `/` and `/*`            | The visitor route: published pages, from Postgres. |
+| Path                    | Purpose                                                                                                                     |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `/cms`                  | The login page: the real page blurred behind a sign-in card.                                                                |
+| `/cms/health`           | Liveness and database probe (`200` or `503`).                                                                               |
+| `/cms/setup`            | First-run setup of the first superadmin.                                                                                    |
+| `/cms/setup/test-email` | Sends a test email from the setup page.                                                                                     |
+| `/cms/logout`           | `POST` only: ends the session and returns to the page the user left.                                                        |
+| `/cms/*`                | The email-link landings (set password, reset password, sign-in link, two-step set-up); anything else is the host's own 404. |
+| `/robots.txt`           | Disallows `/cms`. A host's own `public/robots.txt` is served instead.                                                       |
+| `/api/auth/*`           | The authentication API.                                                                                                     |
+| `/` and `/*`            | The visitor route: published pages, from Postgres.                                                                          |
 
-`/cms/*` and `/api/auth/*` are reserved for the CMS. A page whose first slug
-segment is `cms` or `api` is shadowed and unreachable. A host's own routes win
-over every CMS route when they come first in `app/routes.ts`.
+`/cms` and everything under it, and `/api/auth/*`, are reserved for the CMS. No
+path under `/cms` ever falls through to the visitor route, and every answer
+under `/cms` (including health, setup, logout and the 404) carries
+`X-Robots-Tag: noindex, nofollow`, set by the route modules themselves so it
+holds in `react-router dev` as well. A page whose first slug segment is `cms`
+or `api` would be shadowed by these routes, so the page engine now refuses to
+create one, and the host runtime reports any that already exists, once, when
+it is first built (through the `onReservedPagePath` pages hook, default a
+console warning). Such a page is kept as it is; rename it to make it reachable.
+A host's own routes win over every CMS route when they come first in
+`app/routes.ts`.
+
+`/cms` with a valid session goes straight to the page in edit mode; without one
+it shows the sign-in card over the page named by `?next=`, which must be a path
+on this site (anything else is `/`). `POST /cms/logout` is accepted only from
+this site's own pages (`Origin`, or `Sec-Fetch-Site: same-origin` when the
+browser sends no usable origin), reads at most 2 KB and answers `303` to the
+sanitised `next`, never to an address with `_edit`.
 
 The health body is a fixed `{"status":"ok"}` or `{"status":"unavailable"}`;
 a database error never reaches the response.

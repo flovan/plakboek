@@ -148,6 +148,45 @@ to the log-out path; Exit edit mode keeps the session and the flag.
 the footer. It receives the current layout so items can render icon-only in a
 rail, and it renders nothing when no slot is given.
 
+## The login page and the link landings
+
+`createCmsPages(deps)` returns `{ handle(request) }`, the handler behind core's
+`/cms` routes. It answers a response for the paths it owns and `null` for any
+other, which core turns into the host's own 404. It takes the auth instance,
+the permission resolver, the editor assets, `csp` and the role keys that must
+set up two-step sign-in.
+
+| Path                    | Answer                                                                                                                                             |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/cms`                  | No session: the sign-in card. A session: `302` to `<next>?_edit=1`. A role that still has to set up two-step sign-in: `302` to the enrolment path. |
+| `/cms/set-password`     | The choose-a-password step when a `token` is present (1 to 512 characters), the invalid-link step otherwise                                        |
+| `/cms/reset-password`   | The same, for a reset link                                                                                                                         |
+| `/cms/magic-link`       | The "Signing you in" step when a session exists and the link did not fail, the invalid-link step otherwise                                         |
+| `/cms/two-factor/enrol` | No session: `302` to `/cms?next=<page>`. Nothing to set up: `302` to `<page>?_edit=1`. Otherwise the confirm-password step                         |
+
+Paths match without regard to case, and a trailing slash is ignored. Every
+page is the login document: the real page named by `?next=` in a same-origin
+iframe that fills the viewport, blurred by 12px, `inert`, hidden from
+assistive technology and out of the tab order, a scrim over it, and the card in
+a native `<dialog open>`. All of it is in the server's markup, in a declarative
+shadow root, so the first paint already shows blur, scrim and card with no
+script and no entrance animation. The iframe is static markup outside the
+hydrated card, so hydrating never reloads it. `?next=` is accepted only as a
+same-origin path (anything else is `/`), the same rule the edit redirects use.
+
+A page that is framed behind the card is the site's own page, so a host's site
+pages must allow same-origin framing here as they must for the edit frame.
+
+A link's token never enters the page. The server only checks that one is
+present; it is not copied into the markup or the JSON island, the document
+sends `Referrer-Policy: no-referrer` so it cannot leave through a request the
+page makes, and it is for the client to read it from the address bar and remove
+it there.
+An expired, used and malformed link share one heading and one sentence. Signing
+in needs JavaScript in this release: the card's forms post to `/cms`, which
+answers `405`, so a browser that never runs the editor cannot put a password in
+an address.
+
 ## The chrome stylesheet
 
 Chrome is styled by its own precompiled Tailwind v4 stylesheet, built at

@@ -25,6 +25,7 @@ import {
 } from '@plakboek/cache';
 import type { Db } from '@plakboek/db';
 import type * as EditorServer from '@plakboek/editor/server';
+import * as pagesPackage from '@plakboek/pages';
 import type { PagesDeps } from '@plakboek/pages';
 import {
   createPermissionResolver,
@@ -245,6 +246,25 @@ export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
 const runtimes = new WeakMap<object, Runtime>();
 
 /**
+ * Starts, without waiting for it, the boot-time report of pages that already
+ * sit at an address the CMS reserves (`/cms`, `/api`): they are kept and
+ * flagged through the pages hook, never changed (D-23). A failure costs one
+ * line naming only the error type and never reaches a request.
+ */
+function reportReservedPagePaths(runtime: Runtime): void {
+  void pagesPackage
+    .checkReservedPagePaths(runtime.db.db)
+    .then((rows) => {
+      pagesPackage.reportReservedPagePaths(runtime.pages, rows);
+    })
+    .catch((error: unknown) => {
+      process.stderr.write(
+        `[@plakboek/core] The check for pages at reserved addresses failed: ${error instanceof Error ? error.name : typeof error}\n`,
+      );
+    });
+}
+
+/**
  * The runtime for a host module, built once per configuration object. The
  * environment is read and validated when the runtime is first built, so a
  * missing secret fails the first request (and the CLI) with the full list of
@@ -258,6 +278,7 @@ export function runtimeFor(
   if (runtime === undefined) {
     runtime = createRuntime(host, readRuntimeEnv(source));
     runtimes.set(host.config, runtime);
+    reportReservedPagePaths(runtime);
   }
   return runtime;
 }
