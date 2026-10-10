@@ -8,17 +8,32 @@ describe('cmsRoutes', () => {
 
   it('lists the CMS routes before the visitor entries, in order', () => {
     expect(routes.map((entry) => entry.id)).toEqual([
+      'plakboek-cms',
       'plakboek-health',
       'plakboek-setup',
       'plakboek-setup-test-email',
+      'plakboek-cms-pages',
       'plakboek-auth',
       'plakboek-visitor-index',
       'plakboek-visitor',
     ]);
-    expect(routes[0]?.path).toBe('cms/health');
-    expect(routes[1]?.path).toBe('cms/setup');
-    expect(routes[2]?.path).toBe('cms/setup/test-email');
-    expect(routes[3]?.path).toBe('api/auth/*');
+    expect(routes[0]?.path).toBe('cms');
+    expect(routes[1]?.path).toBe('cms/health');
+    expect(routes[2]?.path).toBe('cms/setup');
+    expect(routes[3]?.path).toBe('cms/setup/test-email');
+    expect(routes[4]?.path).toBe('cms/*');
+    expect(routes[5]?.path).toBe('api/auth/*');
+  });
+
+  it('serves /cms and /cms/* from one module under two ids, before any visitor entry', () => {
+    const cms = routes.find((entry) => entry.id === 'plakboek-cms');
+    const pages = routes.find((entry) => entry.id === 'plakboek-cms-pages');
+    expect(cms?.file).toBe(pages?.file);
+    expect(cms?.file.endsWith('cms.js')).toBe(true);
+    const ids = routes.map((entry) => entry.id);
+    const firstVisitor = ids.indexOf('plakboek-visitor-index');
+    expect(ids.indexOf('plakboek-cms')).toBeLessThan(firstVisitor);
+    expect(ids.indexOf('plakboek-cms-pages')).toBeLessThan(firstVisitor);
   });
 
   it('returns an index entry and a splat entry with distinct explicit ids', () => {

@@ -210,9 +210,12 @@ updating them.
 | Export                  | Kind     | Purpose                                                                          |
 | ----------------------- | -------- | -------------------------------------------------------------------------------- |
 | `createEditEntrypoint`  | function | The edit entrypoint for the visitor handler's `edit` option: the shell and frame |
+| `createCmsPages`        | function | The `/cms` pages handler: the login document and the email-link landings         |
 | `chromeStyleElement`    | function | The chrome stylesheet as `<style>` markup for a declarative shadow root          |
 | `CHROME_STYLE_CSP_HASH` | constant | The `sha256-...` of that markup's CSS, for a host's strict `style-src`           |
 | `EditEntrypointDeps`    | type     | What `createEditEntrypoint` needs                                                |
+| `CmsPages`              | type     | What `createCmsPages` returns: `handle(request)`, a response or `null`           |
+| `CmsPagesDeps`          | type     | What `createCmsPages` needs                                                      |
 | `EditorAssets`          | type     | The built client the shell loads: entry, preloads, stylesheets, dev scripts      |
 | `EditorDevScript`       | type     | A development-only script: a `src` URL or inline `code`                          |
 

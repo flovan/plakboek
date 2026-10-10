@@ -214,7 +214,8 @@
     box-sizing: border-box;
   }
 
-  button {
+  button,
+  input {
     font: inherit;
     color: inherit;
   }
@@ -290,6 +291,64 @@
     border: 0;
     border-radius: 0;
     box-shadow: none;
+  }
+}
+
+/*
+ * The login document (`<plakboek-editor data-mode="login">`). The backdrop is
+ * the real page in an iframe at the size of the viewport, blurred by 12px.
+ * The native dialog is also the scrim: it fills the viewport while open, in
+ * the page (server markup) and in the top layer (after the client reopens it
+ * modally) alike, so the card does not move between the two. The card is
+ * centred with auto margins, which a flex container drops when the card is
+ * taller than the viewport: it then aligns to the top and the dialog scrolls.
+ */
+@layer components {
+  .pk-backdrop {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #ffffff;
+    filter: blur(12px);
+  }
+
+  .pk-login[open] {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 16px;
+    border: 0;
+    overflow: auto;
+    color: var(--pk-text);
+    background: var(--pk-scrim);
+  }
+
+  .pk-card {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 400px;
+    margin: auto;
+    padding: 32px;
+    background: var(--pk-surface);
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+  }
+
+  @media (max-height: 640px) {
+    .pk-login[open] {
+      padding-block: 24px;
+    }
   }
 }
 

@@ -23,6 +23,8 @@ type ValueKind = 'function' | 'class' | 'constant';
 const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   // server/entrypoint
   createEditEntrypoint: 'function',
+  // server/cms-pages
+  createCmsPages: 'function',
   // chrome/styles
   chromeStyleElement: 'function',
   CHROME_STYLE_CSP_HASH: 'constant',
@@ -31,6 +33,9 @@ const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
 const SERVER_TYPES: readonly string[] = Object.freeze([
   // server/entrypoint
   'EditEntrypointDeps',
+  // server/cms-pages
+  'CmsPages',
+  'CmsPagesDeps',
   // server/assets
   'EditorAssets',
   'EditorDevScript',
