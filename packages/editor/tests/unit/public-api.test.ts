@@ -32,9 +32,15 @@ const CLIENT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   // chrome/styles
   chromeStyleSheet: 'function',
   adoptChromeStyles: 'function',
+  // chrome/strings
+  STRINGS: 'constant',
+  formatString: 'function',
 });
 
-const CLIENT_TYPES: readonly string[] = Object.freeze([]);
+const CLIENT_TYPES: readonly string[] = Object.freeze([
+  // chrome/strings
+  'StringKey',
+]);
 
 type Documented = { readonly name: string; readonly kind: string };
 
