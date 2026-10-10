@@ -137,6 +137,10 @@ async function compile(): Promise<string> {
     build: {
       write: false,
       cssMinify: true,
+      // The editor targets current evergreen browsers, so nothing is lowered
+      // (the default target would rewrite `color-scheme` into polyfill
+      // variables the chrome has no use for).
+      cssTarget: 'esnext',
       rollupOptions: { input: ENTRY },
     },
   });

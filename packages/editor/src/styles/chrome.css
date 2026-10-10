@@ -4,6 +4,10 @@
  * there is no preflight, because chrome lives in shadow roots and must never
  * reset anything the site owns.
  *
+ * Everything is sized in px. A site's `html { font-size }` must not rescale
+ * chrome, and the build fails on any rem or em unit, so the Tailwind
+ * namespaces whose defaults are relative units are reset below.
+ *
  * Automatic source detection is off; only the components under src are
  * scanned, so words in comments and strings never become utilities.
  */
@@ -12,8 +16,84 @@
 
 @source '../**/*.tsx';
 
+/*
+ * Utilities built on Tailwind's property defaults (translate, shadow, ring,
+ * outline) that the shell uses from its first release. Safelisted so the
+ * guarded @layer properties path of the build is exercised even before every
+ * component exists.
+ */
+@source inline("translate-x-2 -translate-x-2 shadow-card shadow-frame shadow-frame-dark ring-2 outline-2");
+
+/*
+ * Theme. Reset every namespace whose Tailwind default is not a px value we
+ * chose, then declare ours. The colour utilities read the --pk-* tokens
+ * below, so a host attribute or the browser's colour scheme re-themes chrome
+ * without recompiling.
+ */
+@theme {
+  --color-*: initial;
+  --text-*: initial;
+  --font-*: initial;
+  --font-weight-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --container-*: initial;
+  --breakpoint-*: initial;
+  --tracking-*: initial;
+
+  --spacing: 4px;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-weight-normal: 400;
+  --font-weight-semibold: 600;
+
+  --text-caption: 12px;
+  --text-caption--line-height: 1.2;
+  --text-body: 14px;
+  --text-body--line-height: 1.5;
+  --text-heading: 20px;
+  --text-heading--line-height: 1.2;
+
+  --radius-sm: 4px;
+  --radius-lg: 8px;
+
+  --shadow-card: 0 24px 48px rgba(0, 0, 0, 0.24);
+  --shadow-frame: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-frame-dark: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+@theme inline {
+  --color-stage: var(--pk-stage);
+  --color-surface: var(--pk-surface);
+  --color-surface-muted: var(--pk-surface-muted);
+  --color-accent: var(--pk-accent);
+  --color-accent-contrast: var(--pk-accent-contrast);
+  --color-accent-hover: var(--pk-accent-hover);
+  --color-destructive: var(--pk-destructive);
+  --color-text: var(--pk-text);
+  --color-text-muted: var(--pk-text-muted);
+  --color-control-border: var(--pk-control-border);
+  --color-border: var(--pk-border);
+  --color-scrim: var(--pk-scrim);
+  --color-overlay-outline: var(--pk-overlay-outline);
+  --color-overlay-halo: var(--pk-overlay-halo);
+  --color-overlay-chip-text: var(--pk-overlay-chip-text);
+  --color-input-fill: var(--pk-input-fill);
+  --color-focus-ring: var(--pk-focus-ring);
+  --color-frame-border: var(--pk-frame-border);
+}
+
+/*
+ * Tokens, light. Declared on the shadow host: chrome never reads the site's
+ * colours, fonts or font size. `color-scheme` is set here only, so native
+ * controls inside chrome match; the site's own scheme is never touched.
+ */
 :host {
   all: initial;
+  color-scheme: light dark;
   font:
     400 14px/1.5 -apple-system,
     BlinkMacSystemFont,
@@ -21,4 +101,96 @@
     Helvetica,
     Arial,
     sans-serif;
+  color: var(--pk-text);
+
+  --pk-stage: #f4f4f5;
+  --pk-surface: #ffffff;
+  --pk-surface-muted: #f4f4f5;
+  --pk-accent: #4f46e5;
+  --pk-accent-contrast: #ffffff;
+  --pk-accent-hover: #4338ca;
+  --pk-destructive: #b91c1c;
+  --pk-text: #27272a;
+  --pk-text-muted: #52525b;
+  --pk-control-border: #71717a;
+  --pk-border: #e4e4e7;
+  --pk-scrim: rgba(24, 24, 27, 0.4);
+  --pk-overlay-outline: #4f46e5;
+  --pk-overlay-halo: rgba(255, 255, 255, 0.9);
+  --pk-overlay-chip-text: #ffffff;
+  --pk-input-fill: #ffffff;
+  --pk-focus-ring: var(--pk-accent);
+  --pk-frame-border: var(--pk-border);
+}
+
+/* Tokens, dark, when the browser prefers it. */
+@media (prefers-color-scheme: dark) {
+  :host {
+    --pk-stage: #18181b;
+    --pk-surface: #27272a;
+    --pk-surface-muted: #3f3f46;
+    --pk-accent: #818cf8;
+    --pk-accent-contrast: #09090b;
+    --pk-accent-hover: #a5b4fc;
+    --pk-destructive: #f87171;
+    --pk-text: #fafafa;
+    --pk-text-muted: #a1a1aa;
+    --pk-border: #3f3f46;
+    --pk-scrim: rgba(0, 0, 0, 0.6);
+    --pk-input-fill: #18181b;
+  }
+}
+
+/*
+ * A `data-theme` attribute on the host wins over the browser's preference
+ * (the later phase that adds a theme toggle sets it). Both sets are repeated
+ * here so the attribute decides in either direction.
+ */
+:host([data-theme='light']) {
+  color-scheme: light;
+
+  --pk-stage: #f4f4f5;
+  --pk-surface: #ffffff;
+  --pk-surface-muted: #f4f4f5;
+  --pk-accent: #4f46e5;
+  --pk-accent-contrast: #ffffff;
+  --pk-accent-hover: #4338ca;
+  --pk-destructive: #b91c1c;
+  --pk-text: #27272a;
+  --pk-text-muted: #52525b;
+  --pk-border: #e4e4e7;
+  --pk-scrim: rgba(24, 24, 27, 0.4);
+  --pk-input-fill: #ffffff;
+}
+
+:host([data-theme='dark']) {
+  color-scheme: dark;
+
+  --pk-stage: #18181b;
+  --pk-surface: #27272a;
+  --pk-surface-muted: #3f3f46;
+  --pk-accent: #818cf8;
+  --pk-accent-contrast: #09090b;
+  --pk-accent-hover: #a5b4fc;
+  --pk-destructive: #f87171;
+  --pk-text: #fafafa;
+  --pk-text-muted: #a1a1aa;
+  --pk-border: #3f3f46;
+  --pk-scrim: rgba(0, 0, 0, 0.6);
+  --pk-input-fill: #18181b;
+}
+
+/*
+ * Forced colours: the overlay uses the system highlight pair, the halo is
+ * dropped, the focus ring uses Highlight and the frame keeps a 1px border in
+ * the system text colour.
+ */
+@media (forced-colors: active) {
+  :host {
+    --pk-overlay-outline: Highlight;
+    --pk-overlay-chip-text: HighlightText;
+    --pk-overlay-halo: transparent;
+    --pk-focus-ring: Highlight;
+    --pk-frame-border: CanvasText;
+  }
 }

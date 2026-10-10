@@ -168,6 +168,14 @@ describe('formatString', () => {
     ).toContain('exists for {email},');
   });
 
+  it('requires the variables a key names, checked by the compiler', () => {
+    // @ts-expect-error the key names {email}, so the variables are required
+    const missing = formatString('login.magicLink.sent.body');
+    expect(missing).toContain('{email}');
+    // @ts-expect-error a variable the key does not name is rejected
+    formatString('sidebar.exit', { email: 'a@b.test' });
+  });
+
   it('returns a string without placeholders unchanged', () => {
     expect(formatString('sidebar.exit')).toBe('Exit edit mode');
   });

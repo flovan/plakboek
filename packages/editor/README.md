@@ -52,6 +52,31 @@ package build time with `@tailwindcss/vite` through Vite's build API.
   `CHROME_STYLE_CSP_HASH`: `style-src 'sha256-...'`, where the value is the
   exported constant.
 
+## Colour tokens
+
+Chrome has its own tokens, defined on the shadow host as `--pk-*` custom
+properties, for a light and a dark scheme. They follow the browser's
+`prefers-color-scheme`, and a `data-theme="light"` or `data-theme="dark"`
+attribute on the host overrides the preference in either direction, which is
+where a later theme toggle plugs in. The site's own colour scheme is never
+read or changed: `color-scheme` is set on the host only. Under forced colours
+the overlay and the focus ring use the system colours.
+
+## Strings
+
+Every string edit mode shows lives in one module, `STRINGS`, keyed by stable
+dotted names such as `login.signIn.submit`. Components ask for a key, never
+for English text, so adding a translation later changes no component. A
+`{name}` in a value is a variable; `formatString(key, { name })` fills it, and
+the types require exactly the variables a key names. Values are plain text and
+are never escaped here: React escapes them when it renders.
+
+## Icons
+
+Six inline SVG icons (frame, expand, exit, log-out, spinner, alert) draw in
+`currentColor` at 16px or 20px and are hidden from assistive technology. The
+spinner rotates only where the browser allows motion.
+
 ## Public API
 
 Every export of `@plakboek/editor`, grouped by entry. The client entry reaches
@@ -68,7 +93,10 @@ updating them.
 
 ### Client entry: `@plakboek/editor/client`
 
-| Export              | Kind     | Purpose                                                                   |
-| ------------------- | -------- | ------------------------------------------------------------------------- |
-| `chromeStyleSheet`  | function | The chrome stylesheet for one document, built with that document's window |
-| `adoptChromeStyles` | function | Adopts the chrome stylesheet into a shadow root, once                     |
+| Export              | Kind     | Purpose                                                                       |
+| ------------------- | -------- | ----------------------------------------------------------------------------- |
+| `chromeStyleSheet`  | function | The chrome stylesheet for one document, built with that document's window     |
+| `adoptChromeStyles` | function | Adopts the chrome stylesheet into a shadow root, once                         |
+| `STRINGS`           | constant | Every edit-mode string, by stable dotted key, in English                      |
+| `formatString`      | function | A string with its `{name}` placeholders filled; the compiler checks the names |
+| `StringKey`         | type     | A key of `STRINGS`                                                            |
