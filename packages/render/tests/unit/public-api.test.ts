@@ -30,6 +30,8 @@ const ROOT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   TOOLBAR_DISMISSED_KEY: 'constant',
   // edit-proxy
   NOOP_EDIT: 'constant',
+  // live-edit
+  EDIT_ATTRIBUTE: 'constant',
 });
 
 const ROOT_TYPES: readonly string[] = Object.freeze([
@@ -56,6 +58,12 @@ const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   createComponentMap: 'function',
   // render-snapshot
   renderPageSnapshot: 'function',
+  // live-edit
+  createLiveEdit: 'function',
+  // render-tree
+  renderPageTree: 'function',
+  // path
+  normalizeVisitorPath: 'function',
   // handler
   createVisitorHandler: 'function',
   VisitorHandlerConfigError: 'class',
@@ -80,6 +88,14 @@ const SERVER_TYPES: readonly string[] = Object.freeze([
   // render-snapshot
   'RenderedPage',
   'RenderPageSnapshotInput',
+  // live-edit
+  'LiveEditInput',
+  // render-tree
+  'BlockMeta',
+  'RenderedTree',
+  'RenderPageTreeInput',
+  // path
+  'VisitorPathResult',
   // handler
   'VisitorHandler',
   'VisitorHandlerConfigIssue',

@@ -216,6 +216,37 @@ null>`, where `context` is `{ url, visitorLocation }`. The editor package
 - **Keeping editor code out.** A module-graph test added later in this phase
   checks that no editor package is reachable from this package's build.
 
+## Edit-mode rendering
+
+The editor renders the page it edits as ordinary server HTML. `renderPageTree`
+walks a live working tree (`BlockNode[]` from `@plakboek/pages`) through the
+same containment recursion the visitor snapshot path uses, so one throwing
+block is dropped with its subtree and reported while the rest of the page
+renders.
+
+- **The attribute contract.** In `live` mode each block's `edit` proxy
+  (`createLiveEdit`) spreads `data-pk-block` (the block id), `data-pk-type`
+  (the type key), `data-pk-kind` (`section` or `block`) and `data-pk-label`
+  (the label from the block definition, else the type key). `edit.field(name)`
+  yields `data-pk-field`; `field` is not enumerable, so spreading `{...edit}`
+  never carries it. The names are exported as `EDIT_ATTRIBUTE`; the overlay
+  and every later selection feature bind to exactly these.
+- **A block must spread `{...edit}` on its root element.** A block that does
+  not renders without attributes and cannot be outlined or selected.
+- **Nothing else is added.** No class, inline style or wrapper element is ever
+  put on or around a block a host renders; only the `data-pk-*` attributes.
+- **Placeholders.** A block that would render nothing in the edit render (an
+  unknown type, no component, a degraded node, or a component that throws or
+  returns a promise) is replaced by an inert `div` carrying the attributes
+  above plus `data-pk-unavailable`, with `min-height: 40px` so it can be
+  hovered. The overlay labels it "{type} (unavailable)". The visitor path
+  still drops such a block.
+- **`plain` mode.** For read-only viewers of a working tree: `NOOP_EDIT`, no
+  placeholders, no `data-pk-*` attribute at all, so the markup matches what a
+  visitor would receive.
+- **Paths.** `normalizeVisitorPath` is exported from the server entry so the
+  editor canonicalises a frame request exactly like the visitor handler.
+
 ## Root versus server entry
 
 The package publishes two subpaths.
@@ -236,20 +267,21 @@ updating them.
 
 ### Root entry: `@plakboek/render`
 
-| Export                  | Kind     | Purpose                                                                |
-| ----------------------- | -------- | ---------------------------------------------------------------------- |
-| `EDIT_PARAM`            | constant | `_edit`: the query parameter that asks for the editor entry            |
-| `EDITOR_FLAG_KEY`       | constant | The localStorage key marking a signed-in editor                        |
-| `TOOLBAR_DISMISSED_KEY` | constant | The localStorage key marking a dismissed toolbar                       |
-| `NOOP_EDIT`             | constant | The visitor-side edit proxy: spreads to nothing, costs nothing         |
-| `BlockIdentity`         | type     | `id`, `blockType` and `schemaVersion` of a rendered block              |
-| `BlockComponentProps`   | type     | What the renderer passes a block: `block`, `props`, `children`, `edit` |
-| `BlockComponent`        | type     | A block's render function: a plain function of `BlockComponentProps`   |
-| `EditAttributes`        | type     | `data-` attributes the editor binds to                                 |
-| `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes     |
-| `PageHead`              | type     | What a document composer needs to write a page's `<head>`              |
-| `DocumentInput`         | type     | `{ head, body, publicPath }`: what a document composer receives        |
-| `RenderDocument`        | type     | A host's document composer: `(input) => string \| Promise<string>`     |
+| Export                  | Kind     | Purpose                                                                   |
+| ----------------------- | -------- | ------------------------------------------------------------------------- |
+| `EDIT_PARAM`            | constant | `_edit`: the query parameter that asks for the editor entry               |
+| `EDITOR_FLAG_KEY`       | constant | The localStorage key marking a signed-in editor                           |
+| `TOOLBAR_DISMISSED_KEY` | constant | The localStorage key marking a dismissed toolbar                          |
+| `NOOP_EDIT`             | constant | The visitor-side edit proxy: spreads to nothing, costs nothing            |
+| `EDIT_ATTRIBUTE`        | constant | The `data-pk-*` attribute names the renderer writes and the overlay reads |
+| `BlockIdentity`         | type     | `id`, `blockType` and `schemaVersion` of a rendered block                 |
+| `BlockComponentProps`   | type     | What the renderer passes a block: `block`, `props`, `children`, `edit`    |
+| `BlockComponent`        | type     | A block's render function: a plain function of `BlockComponentProps`      |
+| `EditAttributes`        | type     | `data-` attributes the editor binds to                                    |
+| `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes        |
+| `PageHead`              | type     | What a document composer needs to write a page's `<head>`                 |
+| `DocumentInput`         | type     | `{ head, body, publicPath }`: what a document composer receives           |
+| `RenderDocument`        | type     | A host's document composer: `(input) => string \| Promise<string>`        |
 
 ### Server entry: `@plakboek/render/server`
 
@@ -262,6 +294,9 @@ updating them.
 | `VisitorHandlerConfigError`  | class    | Thrown by `createVisitorHandler` with every invalid dependency           |
 | `renderPageSnapshot`         | function | Renders a published snapshot to a head and a body through one React pass |
 | `createComponentMap`         | function | Builds the block-type to component map from the host's block definitions |
+| `createLiveEdit`             | function | One block's live edit proxy: the `data-pk-*` identity attributes         |
+| `renderPageTree`             | function | Renders a live working tree for the editor, in `live` or `plain` mode    |
+| `normalizeVisitorPath`       | function | Canonicalises a request path exactly like the visitor handler            |
 | `PageHeadInput`              | type     | Input to `buildPageHead`                                                 |
 | `PageSeoInput`               | type     | The stored SEO set as a structural type                                  |
 | `VisitorHandler`             | type     | `(request: Request) => Promise<Response>`                                |
@@ -273,6 +308,11 @@ updating them.
 | `EditRequestContext`         | type     | The parsed URL and the `visitorLocation` an `EditEntrypoint` receives    |
 | `ComponentMap`               | type     | A read-only map from block type to `BlockComponent`                      |
 | `RenderPageSnapshotInput`    | type     | Input to `renderPageSnapshot`                                            |
+| `LiveEditInput`              | type     | Input to `createLiveEdit`: id, block type, kind and label                |
+| `RenderPageTreeInput`        | type     | Input to `renderPageTree`                                                |
+| `BlockMeta`                  | type     | A block type's overlay label and its `section` or `block` kind           |
+| `RenderedTree`               | type     | The head, body and degraded flag of a rendered working tree              |
+| `VisitorPathResult`          | type     | `ok`, `redirect` or `not-found`: what `normalizeVisitorPath` returns     |
 | `RenderedPage`               | type     | The head, body, cache tags and degraded flag of a rendered page          |
 | `RenderHooks`                | type     | Optional host hooks: unknown block, render error, cache error and more   |
 | `UnknownBlockEvent`          | type     | What `onUnknownBlock` receives                                           |

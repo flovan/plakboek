@@ -1,4 +1,5 @@
 import {
+  EDIT_ATTRIBUTE,
   EDIT_PARAM,
   EDITOR_FLAG_KEY,
   NOOP_EDIT,
@@ -14,8 +15,11 @@ import {
 } from '@plakboek/render';
 import {
   buildPageHead,
+  createLiveEdit,
+  normalizeVisitorPath,
   renderDefaultDocument,
   renderHeadHtml,
+  renderPageTree,
   renderToolbarBootstrap,
   TOOLBAR_BOOTSTRAP_CSP_HASH,
   type PageHeadInput,
@@ -38,6 +42,20 @@ expectEqual(
   'TOOLBAR_DISMISSED_KEY',
   TOOLBAR_DISMISSED_KEY.startsWith('plakboek:'),
   true,
+);
+expectEqual('EDIT_ATTRIBUTE.block', EDIT_ATTRIBUTE.block, 'data-pk-block');
+expectEqual('renderPageTree', typeof renderPageTree, 'function');
+expectEqual(
+  'createLiveEdit root attributes',
+  Object.keys(
+    createLiveEdit({ id: 'b1', blockType: 'x', kind: 'block', label: 'X' }),
+  ).length,
+  4,
+);
+expectEqual(
+  'normalizeVisitorPath',
+  normalizeVisitorPath('/About').kind,
+  'redirect',
 );
 expectEqual('NOOP_EDIT keys', Object.keys(NOOP_EDIT).length, 0);
 expectEqual(

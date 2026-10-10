@@ -32,6 +32,22 @@ export type {
   RenderPageSnapshotInput,
 } from './render-snapshot.js';
 
+// live-edit
+export { createLiveEdit } from './live-edit.js';
+export type { LiveEditInput } from './live-edit.js';
+
+// render-tree
+export { renderPageTree } from './render-tree.js';
+export type {
+  BlockMeta,
+  RenderedTree,
+  RenderPageTreeInput,
+} from './render-tree.js';
+
+// path
+export { normalizeVisitorPath } from './path.js';
+export type { VisitorPathResult } from './path.js';
+
 // handler
 export { createVisitorHandler, VisitorHandlerConfigError } from './handler.js';
 export type {

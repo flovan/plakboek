@@ -27,3 +27,6 @@ export type { DocumentInput, PageHead, RenderDocument } from './head.js';
 // edit-proxy
 export { NOOP_EDIT } from './edit-proxy.js';
 export type { EditAttributes, EditProxy } from './edit-proxy.js';
+
+// live-edit
+export { EDIT_ATTRIBUTE } from './live-edit.js';
