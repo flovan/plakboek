@@ -14,13 +14,13 @@ const Section: BlockComponent<{ variant?: string }> = ({
 );
 
 const Heading: BlockComponent<{ text: string }> = ({ props, edit }) => (
-  <h2 {...edit.field('text')} className="reset-target">
+  <h2 {...edit} {...edit.field('text')} className="reset-target">
     {props.text}
   </h2>
 );
 
 const Text: BlockComponent<{ text: string }> = ({ props, edit }) => (
-  <p {...edit.field('text')} className="reset-target">
+  <p {...edit} {...edit.field('text')} className="reset-target">
     {props.text}
   </p>
 );

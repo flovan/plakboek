@@ -246,7 +246,6 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    padding: 16px;
     background: var(--pk-surface);
     border-right: 1px solid var(--pk-border);
     overflow: hidden;
@@ -277,10 +276,6 @@
    */
   :host([data-layout='full']) .pk-shell {
     grid-template-columns: 56px minmax(0, 1fr);
-  }
-
-  :host([data-layout='full']) .pk-sidebar {
-    padding: 8px;
   }
 
   :host([data-layout='full']) .pk-stage {
@@ -375,14 +370,92 @@
 }
 
 /*
+ * The hover overlay. A layer of the shell exactly over the frame's content
+ * box (its position and size are set from the frame on every update), clipped
+ * to it. Inside, a zero-size plane starts at the shell's own origin, so the
+ * outline and chip boxes are placed in the shell's coordinates. Nothing in
+ * the layer takes part in pointer interaction.
+ *
+ * The outline is a 2px border drawn inside the element's border box plus a
+ * 1px outline (the halo) around it. Borders and outlines survive forced
+ * colours where a box-shadow would not.
+ */
+@layer components {
+  .pk-overlay {
+    position: absolute;
+    z-index: 2;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .pk-overlay-plane {
+    position: absolute;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+
+  .pk-overlay-target {
+    display: contents;
+  }
+
+  .pk-overlay-outline,
+  .pk-overlay-section {
+    position: absolute;
+    box-sizing: border-box;
+    pointer-events: none;
+    outline: 1px solid var(--pk-overlay-halo);
+    forced-color-adjust: none;
+  }
+
+  .pk-overlay-outline {
+    border: 2px solid var(--pk-overlay-outline);
+  }
+
+  .pk-overlay-section {
+    border: 1px dashed var(--pk-overlay-outline);
+  }
+
+  .pk-overlay-chip {
+    position: absolute;
+    box-sizing: border-box;
+    display: block;
+    height: 20px;
+    max-width: 240px;
+    padding: 0 8px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--pk-overlay-outline);
+    color: var(--pk-overlay-chip-text);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+    forced-color-adjust: none;
+  }
+}
+
+/*
  * Motion. Only the chrome moves when the layout changes, never the frame:
  * the iframe's size changes at once, so the site is not re-laid out on every
- * frame of an animation.
+ * frame of an animation. The hover overlay fades in over 100ms.
  */
 @media (prefers-reduced-motion: no-preference) {
-  .pk-sidebar {
-    transition:
-      opacity 240ms cubic-bezier(0.2, 0, 0, 1),
-      transform 240ms cubic-bezier(0.2, 0, 0, 1);
+  .pk-overlay-outline,
+  .pk-overlay-section,
+  .pk-overlay-chip {
+    animation: pk-overlay-in 100ms ease-out;
+  }
+
+  @keyframes pk-overlay-in {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
   }
 }

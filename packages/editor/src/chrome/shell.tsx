@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { OverlayLayer } from '../client/overlay/overlay-layer.js';
 import type { ShellIsland } from './island.js';
 import { Sidebar, type SidebarLayout, type SidebarSlots } from './sidebar.js';
 import { Stage } from './stage.js';
@@ -25,7 +26,9 @@ export type ShellAppProps = {
 /**
  * The edit shell: the sidebar and the stage that holds the framed site. It is
  * rendered to markup on the server and hydrated on the client from the same
- * island, so the first client render matches the server's.
+ * island, so the first client render matches the server's. The hover overlay
+ * is mounted only for a user who can edit, and only once the client has
+ * hydrated: it reads the frame, which the server cannot.
  */
 export function ShellApp(props: ShellAppProps): ReactElement {
   const {
@@ -51,6 +54,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
         frameFailed={frameFailed}
         onReload={onReload}
       />
+      {hydrated && island.mode === 'edit' ? <OverlayLayer /> : null}
     </>
   );
 }
