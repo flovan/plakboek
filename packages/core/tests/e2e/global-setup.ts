@@ -164,7 +164,58 @@ async function publish(
   });
 }
 
-async function seedPages(runtime: Runtime, actor: Actor): Promise<void> {
+/**
+ * Adds a block of a type the host never declares to a page's working tree, as
+ * a sibling right after `siblingId`, by direct SQL: the engine refuses to
+ * insert an unknown type, but a tree can hold one when a host drops a block
+ * type later. Owner, locale, parent and depth are copied from the sibling and
+ * the block takes the next free position in that parent. The read path
+ * degrades it, and the edit render shows its placeholder.
+ */
+async function insertUnknownTypeBlock(
+  connectionString: string,
+  siblingId: string,
+  blockType: string,
+): Promise<void> {
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    const result = await client.query(
+      `INSERT INTO page_blocks (
+         owner_type, owner_id, locale, parent_block_id, block_type, props,
+         schema_version, depth, sort_order, version, created_at, updated_at
+       )
+       SELECT
+         sibling.owner_type, sibling.owner_id, sibling.locale,
+         sibling.parent_block_id, $2, '{}'::jsonb, 1, sibling.depth,
+         COALESCE((
+           SELECT max(other.sort_order) + 1
+           FROM page_blocks other
+           WHERE other.owner_type = sibling.owner_type
+             AND other.owner_id = sibling.owner_id
+             AND other.locale = sibling.locale
+             AND other.parent_block_id IS NOT DISTINCT FROM sibling.parent_block_id
+         ), 0),
+         1, now(), now()
+       FROM page_blocks sibling
+       WHERE sibling.id = $1`,
+      [siblingId, blockType],
+    );
+    if (result.rowCount !== 1) {
+      throw new Error(
+        `The e2e setup found no block ${siblingId} to place ${blockType} beside`,
+      );
+    }
+  } finally {
+    await client.end();
+  }
+}
+
+async function seedPages(
+  runtime: Runtime,
+  actor: Actor,
+  connectionString: string,
+): Promise<void> {
   // `about` is published, then changed so the working tree differs from the
   // published snapshot.
   const about = await createContentPage(runtime, actor, {
@@ -179,13 +230,20 @@ async function seedPages(runtime: Runtime, actor: Actor): Promise<void> {
   if (sectionId === undefined) {
     throw new Error('The e2e about page has no section to extend');
   }
-  await insertBlock(runtime.pages, actor, {
+  const unpublished = await insertBlock(runtime.pages, actor, {
     owner: about.owner,
     blockType: 'heading',
     parentBlockId: sectionId,
     props: { text: 'Unpublished change' },
     basePageVersion: await about.currentVersion(),
   });
+  // A block whose type the host no longer declares, for the overlay's
+  // "(unavailable)" label.
+  await insertUnknownTypeBlock(
+    connectionString,
+    unpublished.id,
+    'retired-widget',
+  );
 
   const clean = await createContentPage(runtime, actor, {
     title: 'Clean',
@@ -263,10 +321,11 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     });
     await createUser(runtime, EDITOR, 'editor');
     await createUser(runtime, VIEWER, 'viewer');
-    await seedPages(runtime, {
-      userId: bootstrapped.userId,
-      roleKey: SUPERADMIN_ROLE_KEY,
-    });
+    await seedPages(
+      runtime,
+      { userId: bootstrapped.userId, roleKey: SUPERADMIN_ROLE_KEY },
+      database.connectionString,
+    );
 
     server = await createServer({
       buildPath: E2E_SERVER_ENTRY,
