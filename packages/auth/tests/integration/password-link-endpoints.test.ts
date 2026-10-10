@@ -186,6 +186,51 @@ describe('forgot password over HTTP (T-07-08)', () => {
   });
 });
 
+function linkOf(message: MailMessage | undefined): URL {
+  const link = LINK_PATTERN.exec(message?.text ?? '')?.[0];
+  expect(link).toBeDefined();
+  return new URL(link ?? '');
+}
+
+describe('next on emailed links (D-09, D-11)', () => {
+  async function linkFor(next: unknown): Promise<URL> {
+    let link = new URL(BASE_URL);
+    await withFixture(async ({ auth, mail }) => {
+      const response = await post(auth, REQUEST_PATH, { email: KNOWN, next });
+      expect(response.status).toBe(200);
+      await flushDetached();
+      link = linkOf(mail.sent[0]);
+    });
+    return link;
+  }
+
+  it('carries a same-origin path next to the token', async () => {
+    const link = await linkFor('/about');
+    expect(link.pathname).toBe('/cms/reset-password');
+    expect(link.searchParams.get('token')).toBeTruthy();
+    expect(link.searchParams.get('next')).toBe('/about');
+    expect(link.search).toContain('next=%2Fabout');
+  });
+
+  it('strips _edit from the carried path', async () => {
+    const link = await linkFor('/about?_edit=1&a=b');
+    expect(link.searchParams.get('next')).toBe('/about?a=b');
+  });
+
+  it('leaves next off for anything that is not a same-origin path', async () => {
+    for (const hostile of ['//evil.test', 'https://evil.test/x', '/cms/x']) {
+      const link = await linkFor(hostile);
+      expect(link.searchParams.has('next')).toBe(false);
+      expect(link.searchParams.get('token')).toBeTruthy();
+    }
+  });
+
+  it('leaves next off when none is given', async () => {
+    const link = await linkFor(undefined);
+    expect(link.searchParams.has('next')).toBe(false);
+  });
+});
+
 describe('completing a link over HTTP', () => {
   it('sets the new password from the emailed token, once', async () => {
     await withFixture(async ({ auth, mail }) => {
