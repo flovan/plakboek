@@ -61,7 +61,12 @@ const LOGIN_STEPS: readonly LoginStep[] = [
   'enrol',
 ];
 
-const LINK_KINDS: readonly LinkKind[] = ['invite', 'reset', 'sign-in'];
+const LINK_KINDS: readonly LinkKind[] = [
+  'invite',
+  'reset',
+  'sign-in',
+  'two-factor',
+];
 
 function loginStepOf(value: unknown): LoginStep | null {
   return LOGIN_STEPS.find((step) => step === value) ?? null;

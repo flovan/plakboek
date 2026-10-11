@@ -62,6 +62,10 @@ const MAX_TOKEN_LENGTH = 512;
 /** The query parameter better-auth adds to a failed sign-in link's callback. */
 const ERROR_PARAM = 'error';
 
+/** The value of `error` when the link was good but no session could be made
+ * for it, which is what happens to an account with two-step sign-in. */
+const NO_SESSION_ERROR = 'failed_to_create_session';
+
 /** Where the sign-in link's callback lands; the sign-in link itself is built
  * by the auth package and verified by its own endpoint. */
 const MAGIC_LINK_PATH = '/cms/magic-link';
@@ -139,6 +143,11 @@ export function createCmsPages(deps: CmsPagesDeps): CmsPages {
     next: string,
   ): Promise<Response> {
     const failed = url.searchParams.has(ERROR_PARAM);
+    if (url.searchParams.get(ERROR_PARAM) === NO_SESSION_ERROR) {
+      return loginResponse(
+        island('invalid-link', next, { linkKind: 'two-factor' }),
+      );
+    }
     const identity = failed
       ? null
       : await readEditorIdentity(deps.auth, deps.resolver, request);

@@ -78,6 +78,11 @@ describe('readIsland for the login document', () => {
     expect(readIsland(sourceOf(escapeJsonForHtml(LOGIN)))).toEqual(LOGIN);
   });
 
+  it('reads the link kind of a sign-in link that could not make a session', () => {
+    const island = { ...LOGIN, step: 'invalid-link', linkKind: 'two-factor' };
+    expect(readIsland(sourceOf(JSON.stringify(island)))).toEqual(island);
+  });
+
   it('reads the optional link kind and email', () => {
     const island = {
       ...LOGIN,

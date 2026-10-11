@@ -47,7 +47,7 @@ export type LoginStep =
 
 /** What kind of link an invalid-link step stands in for, so its one button
  * can offer the right way forward. */
-export type LinkKind = 'invite' | 'reset' | 'sign-in';
+export type LinkKind = 'invite' | 'reset' | 'sign-in' | 'two-factor';
 
 /**
  * What the server hands the client of the login document in its JSON island.

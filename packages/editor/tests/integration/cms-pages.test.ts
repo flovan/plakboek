@@ -261,6 +261,20 @@ describe('the sign-in link landing', () => {
     });
   });
 
+  it('tells a link that could not make a session apart, without saying why it could not', async () => {
+    const html = await (
+      await page('/cms/magic-link?error=failed_to_create_session&next=/about')
+    ).text();
+    expect(html).toContain(STRINGS['login.invalidLink.twoFactor.heading']);
+    expect(html).toContain(STRINGS['login.invalidLink.twoFactor.body']);
+    expect(html).not.toContain(STRINGS['login.invalidLink.signIn.submit']);
+    expect(islandOf(html)).toMatchObject({
+      step: 'invalid-link',
+      linkKind: 'two-factor',
+      next: '/about',
+    });
+  });
+
   it('shows the invalid link step when the link failed, session or not', async () => {
     const html = await (
       await page('/cms/magic-link?error=INVALID_TOKEN', {

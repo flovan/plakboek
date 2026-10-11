@@ -437,6 +437,29 @@ test.describe('sign-in links', () => {
   });
 });
 
+test.describe('a sign-in link that made no session', () => {
+  test('tells the person to use their password and a code, and leads back to sign-in', async ({
+    page,
+  }) => {
+    await openModal(
+      page,
+      '/cms/magic-link?error=failed_to_create_session&next=/about',
+    );
+    await expect(
+      page.getByRole('heading', { name: 'This link could not sign you in' }),
+    ).toBeVisible();
+    await expect(
+      page.getByText('Sign in with your password and a code instead.', {
+        exact: false,
+      }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Back to sign in' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Sign in', level: 1 }),
+    ).toBeVisible();
+  });
+});
+
 test.describe('the landing without a session', () => {
   test('is the invalid-link step for sign-in links', async ({ page }) => {
     await openModal(page, '/cms/magic-link?next=/about');

@@ -106,6 +106,17 @@ describe('renderLoginDocument', () => {
     }
   });
 
+  it('says a sign-in link that made no session is for accounts without two-step sign-in', () => {
+    const template = templateOf(
+      login({ step: 'invalid-link', linkKind: 'two-factor' }).html,
+    );
+    expect(template).toContain(
+      `>${STRINGS['login.invalidLink.twoFactor.heading']}</h1>`,
+    );
+    expect(template).toContain(STRINGS['login.invalidLink.twoFactor.body']);
+    expect(template).toContain(STRINGS['login.invalidLink.invite.submit']);
+  });
+
   it('renders the sign-in step with its fields, autocomplete values and autofocus', () => {
     const template = templateOf(login().html);
     const email = tagOf(template, /<input[^>]*name="email"[^>]*>/);

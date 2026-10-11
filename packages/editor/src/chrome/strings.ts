@@ -96,6 +96,9 @@ export const STRINGS = Object.freeze({
   'login.invalidLink.invite.body':
     'Ask the person who invited you to send a new invitation.',
   'login.invalidLink.invite.submit': 'Back to sign in',
+  'login.invalidLink.twoFactor.heading': 'This link could not sign you in',
+  'login.invalidLink.twoFactor.body':
+    'If your account uses two-step sign-in, sign-in links are not available. Sign in with your password and a code instead.',
 
   // In-flight words for a submit button
   'loading.signingIn': 'Signing in',
