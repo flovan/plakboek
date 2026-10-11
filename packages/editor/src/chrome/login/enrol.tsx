@@ -12,6 +12,7 @@ import {
   type OtpauthKey,
 } from '../../client/login/enrol.js';
 import {
+  CODE_FIELD_MAX_LENGTH,
   failureMessage,
   normaliseCode,
   validateCode,
@@ -305,7 +306,7 @@ function KeyStage(
           label={STRINGS['login.twoFactor.code.label']}
           autoComplete="one-time-code"
           inputMode="numeric"
-          maxLength={6}
+          maxLength={CODE_FIELD_MAX_LENGTH}
           hint={STRINGS['enrol.key.codeHint']}
           readOnly={busy}
           error={codeError}

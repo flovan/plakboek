@@ -21,6 +21,11 @@ export const PASSWORD_MIN_LENGTH = 12;
  * spaces are not part of the code. */
 const CODE_PATTERN = /^\d{6}$/;
 
+/** How much a code field takes: the six digits and the one space an
+ * authenticator app puts in the middle, so pasting `123 456` is not cut short
+ * before `normaliseCode` removes the space. */
+export const CODE_FIELD_MAX_LENGTH = 7;
+
 /** Something before an `@`, something after it, and a dot in the domain. The
  * server is the judge of a real address; this only catches a typing slip. */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;

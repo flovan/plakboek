@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { STRINGS } from '../../src/chrome/strings.js';
 import {
   AUTH_ERROR_CODES,
+  CODE_FIELD_MAX_LENGTH,
   classifyAuthError,
   failureMessage,
   maskEmail,
@@ -64,6 +65,15 @@ describe('validateCode', () => {
       expect(validateCode(value)).toBeNull();
     },
   );
+});
+
+describe('CODE_FIELD_MAX_LENGTH', () => {
+  it('leaves room for the space an authenticator app shows in the middle', () => {
+    expect('123 456'.length).toBeLessThanOrEqual(CODE_FIELD_MAX_LENGTH);
+    expect(CODE_FIELD_MAX_LENGTH).toBeGreaterThan(6);
+    // Whatever the field takes, once normalised, is still a valid code.
+    expect(validateCode('123 456'.slice(0, CODE_FIELD_MAX_LENGTH))).toBeNull();
+  });
 });
 
 describe('what is sent', () => {

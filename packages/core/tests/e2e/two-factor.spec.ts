@@ -83,7 +83,7 @@ test.describe('two-step sign-in', () => {
     const field = page.getByLabel('Authentication code');
     await expect(field).toHaveAttribute('inputmode', 'numeric');
     await expect(field).toHaveAttribute('autocomplete', 'one-time-code');
-    await expect(field).toHaveAttribute('maxlength', '6');
+    await expect(field).toHaveAttribute('maxlength', '7');
 
     await submitCode(page, totp(shared.secret));
     await page.waitForURL(
@@ -97,6 +97,28 @@ test.describe('two-step sign-in', () => {
     expect(
       await page.evaluate((key) => localStorage.getItem(key), EDITOR_FLAG),
     ).toBe('1');
+  });
+
+  test('accepts a code pasted the way the app shows it, with a space in the middle', async ({
+    page,
+  }) => {
+    await openModal(page);
+    await signInWithPassword(page, shared.user);
+    await expect(
+      page.getByRole('heading', { name: 'Enter your code' }),
+    ).toBeFocused();
+
+    const code = totp(shared.secret);
+    await page.getByLabel('Authentication code').focus();
+    // `insertText` is subject to the field's maxlength, as a paste is.
+    await page.keyboard.insertText(`${code.slice(0, 3)} ${code.slice(3)}`);
+    await expect(page.getByLabel('Authentication code')).toHaveValue(
+      `${code.slice(0, 3)} ${code.slice(3)}`,
+    );
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await page.waitForURL(
+      (url) => url.pathname === '/about' && url.search === '?_edit=1',
+    );
   });
 
   test('says a wrong code is not valid, keeps the field and lets the right code through', async ({

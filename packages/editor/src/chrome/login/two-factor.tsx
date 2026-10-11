@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent, type ReactElement } from 'react';
 import {
+  CODE_FIELD_MAX_LENGTH,
   failureMessage,
   maskEmail,
   normaliseCode,
@@ -104,7 +105,7 @@ function CodeForm(props: {
         label={STRINGS['login.twoFactor.code.label']}
         autoComplete="one-time-code"
         inputMode="numeric"
-        maxLength={6}
+        maxLength={CODE_FIELD_MAX_LENGTH}
         readOnly={busy}
         error={codeError}
         inputRef={inputRef}
