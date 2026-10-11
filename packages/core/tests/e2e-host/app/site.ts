@@ -38,6 +38,8 @@ function header(site: SiteContext): string {
         'Elsewhere',
       ),
       createElement('a', { href: '#site-footer', id: 'hash-link' }, 'Footer'),
+      // A file of this site: not a page the editor can frame.
+      createElement('a', { href: '/uploads/report.pdf' }, 'Report'),
       // Same-origin by the URL parser, yet its path starts with two slashes.
       createElement(
         'a',

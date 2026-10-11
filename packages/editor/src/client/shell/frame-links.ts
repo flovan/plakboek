@@ -10,7 +10,8 @@
  *
  * - `follow-top`: the link leads to another document of this site. The whole
  *   page navigates to the target in edit mode.
- * - `new-tab`: the link leads to another site. It opens in a new tab and the
+ * - `new-tab`: the link leads to another site, or to something of this site
+ *   that is not a page (a file, `/cms`, `/api`). It opens in a new tab and the
  *   shell stays.
  * - `allow`: everything else keeps the browser's behaviour, the site's own
  *   included: links to a spot on the same page, downloads, links that name
@@ -56,6 +57,25 @@ export type FrameNavigation =
   | { readonly action: 'allow' };
 
 const ALLOW: FrameNavigation = { action: 'allow' };
+
+/** First address segments the CMS owns: never a page of the site. Mirrors the
+ * reserved page segments of `@plakboek/pages`, which this client code does not
+ * import. */
+const CMS_SEGMENTS = new Set(['cms', 'api']);
+
+/** A trailing file extension: `/uploads/report.pdf`, `/sitemap.xml`. */
+const FILE_EXTENSION = /\.[a-z0-9]{1,8}$/i;
+
+/** Whether a same-origin URL can be a page of the site, as opposed to a file
+ * or a route the CMS owns. Such a target is opened apart from the shell, which
+ * would otherwise take the whole editor to it. */
+function isPageUrl(url: URL): boolean {
+  const segments = url.pathname.split('/').filter((part) => part !== '');
+  const first = segments[0]?.toLowerCase() ?? '';
+  if (CMS_SEGMENTS.has(first)) return false;
+  const last = segments.at(-1) ?? '';
+  return !FILE_EXTENSION.test(last);
+}
 
 /** Targets that mean "this window or one of its parents": the shell is the
  * top window, so all three end up as a navigation of the shell. */
@@ -129,6 +149,7 @@ export function classifyFrameNavigation(click: FrameClick): FrameNavigation {
   if (target.origin !== click.topOrigin) {
     return { action: 'new-tab', url: target.href };
   }
+  if (!isPageUrl(target)) return { action: 'new-tab', url: target.href };
   // A link to a spot on the page the frame already shows scrolls the frame.
   if (target.href.includes('#') && isSameDocument(target, frame)) return ALLOW;
   return { action: 'follow-top', location: editShellLocation(target) };
@@ -137,7 +158,8 @@ export function classifyFrameNavigation(click: FrameClick): FrameNavigation {
 /** What the listener needs from the shell to carry a decision out. */
 export type FrameLinkShell = {
   readonly topOrigin: string;
-  /** Navigates the whole page to a same-site location. */
+  /** Navigates the whole page to a same-site location. When the location is
+   * the page the shell already shows, the frame reloads instead. */
   readonly followTop: (location: string) => void;
   /** Opens a URL in a new tab that cannot reach back to the shell. */
   readonly openTab: (url: string) => void;

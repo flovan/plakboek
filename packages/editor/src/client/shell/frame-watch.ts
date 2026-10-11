@@ -67,6 +67,17 @@ export function watchFrame(
     topWindow.location.assign(location);
   }
 
+  /** A link to the page already shown: the click must not be swallowed, so
+   * the frame reloads the page it was opened for. */
+  function followFromLink(location: string): void {
+    const here = `${topWindow.location.pathname}${topWindow.location.search}`;
+    if (location === here) {
+      frame.contentWindow?.location.replace(expected.href);
+      return;
+    }
+    followTop(location);
+  }
+
   function inspect(): void {
     const frameDocument = frame.contentDocument;
     if (frameDocument === null) {
@@ -92,7 +103,7 @@ export function watchFrame(
     if (frameWindow !== null) {
       attachFrameLinks(frameWindow, {
         topOrigin: topWindow.location.origin,
-        followTop,
+        followTop: followFromLink,
         openTab: (url) => {
           topWindow.open(url, '_blank', 'noopener');
         },

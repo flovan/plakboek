@@ -121,6 +121,64 @@ test.describe('a link clicked in the framed site', () => {
     expect(reached).toEqual([]);
   });
 
+  test('to a file of the site opens a new tab and the shell stays', async ({
+    page,
+    context,
+  }) => {
+    await context.route('**/uploads/report.pdf', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: '<!DOCTYPE html><title>Report</title><p>Report</p>',
+      }),
+    );
+    await openShell(page, '/?_edit=1');
+    await markShell(page);
+
+    const popupOpened = page.waitForEvent('popup');
+    await page
+      .frameLocator(FRAME)
+      .getByRole('link', { name: 'Report' })
+      .click();
+    const popup = await popupOpened;
+    await popup.waitForLoadState();
+
+    expect(new URL(popup.url()).pathname).toBe('/uploads/report.pdf');
+    expect(locationOf(page)).toBe('/?_edit=1');
+    expect(await shellMarker(page)).toBe(1);
+  });
+
+  test('to the page already shown reloads the frame instead of doing nothing', async ({
+    page,
+  }) => {
+    await openShell(page, '/?_edit=1');
+    await markShell(page);
+    const handle = await page.locator(FRAME).elementHandle();
+    const frame = await handle?.contentFrame();
+    if (frame === null || frame === undefined) {
+      throw new Error('The shell has no framed document');
+    }
+    await frame.evaluate(() => {
+      (window as Window & { __frameMarker?: number }).__frameMarker = 1;
+    });
+
+    await page
+      .frameLocator(FRAME)
+      .getByRole('link', { name: 'Adversarial fixture', exact: true })
+      .click();
+
+    await expect
+      .poll(() =>
+        frame.evaluate(
+          () => (window as Window & { __frameMarker?: number }).__frameMarker,
+        ),
+      )
+      .toBeUndefined();
+    expect(locationOf(page)).toBe('/?_edit=1');
+    expect(await shellMarker(page)).toBe(1);
+    expect(frame.url()).toContain('_edit=frame');
+  });
+
   test('to a spot on the same page scrolls the frame and leaves the page alone', async ({
     page,
   }) => {

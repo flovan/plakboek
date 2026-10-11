@@ -191,6 +191,37 @@ describe('classifyFrameNavigation: allow', () => {
   });
 });
 
+describe('classifyFrameNavigation: pages and not pages', () => {
+  it('opens a same-site file in a new tab instead of taking the editor to it', () => {
+    expect(
+      classifyFrameNavigation(click({ href: '/uploads/report.pdf' })),
+    ).toEqual({ action: 'new-tab', url: `${TOP}/uploads/report.pdf` });
+    expect(
+      classifyFrameNavigation(click({ href: '/sitemap.xml' })).action,
+    ).toBe('new-tab');
+  });
+
+  it('opens the CMS and API routes in a new tab, whatever their case', () => {
+    for (const href of ['/cms', '/cms/two-factor', '/api/auth/x', '/CMS/x']) {
+      expect(classifyFrameNavigation(click({ href })).action).toBe('new-tab');
+    }
+  });
+
+  it('still follows a page whose name only starts with a reserved word', () => {
+    for (const href of ['/cms-news', '/apiary', '/company/team']) {
+      expect(classifyFrameNavigation(click({ href })).action).toBe(
+        'follow-top',
+      );
+    }
+  });
+
+  it('follows a link to the page the frame already shows, so the shell can reload it', () => {
+    expect(
+      classifyFrameNavigation(click({ href: '/about', frameUrl: FRAME_URL })),
+    ).toEqual({ action: 'follow-top', location: '/about?_edit=1' });
+  });
+});
+
 describe('editShellLocation', () => {
   it('adds _edit=1 to a path with no query', () => {
     expect(editShellLocation(new URL(`${TOP}/a`))).toBe('/a?_edit=1');
