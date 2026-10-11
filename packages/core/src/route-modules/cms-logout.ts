@@ -92,6 +92,10 @@ export function loader(): Response {
 export async function action({
   request,
 }: ActionFunctionArgs): Promise<Response> {
+  // React Router also sends PUT, PATCH and DELETE to an action.
+  if (request.method !== 'POST') {
+    return plain(405, 'Method Not Allowed', { Allow: 'POST' });
+  }
   const runtime = getHostRuntime();
   if (!isOwnRequest(request, runtime)) return plain(403, 'Forbidden');
 

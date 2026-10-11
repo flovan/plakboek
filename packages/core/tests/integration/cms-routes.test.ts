@@ -239,6 +239,27 @@ describe('the /cms routes', () => {
       expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
     });
 
+    it.each(['PUT', 'PATCH', 'DELETE'])(
+      'refuses %s, which React Router would also hand to the action, and leaves the session alone',
+      async (method) => {
+        const cookie = await signIn(EDITOR);
+        const response = await get('/cms/logout', {
+          method,
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Cookie: cookie,
+            Origin: SITE_ORIGIN,
+          },
+          body: 'next=%2Fabout',
+        });
+        expect(response.status).toBe(405);
+        expect(response.headers.get('Allow')).toBe('POST');
+        expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
+        expect(response.headers.getSetCookie()).toEqual([]);
+        expect(await sessionOf(cookie)).not.toBeNull();
+      },
+    );
+
     it('refuses a post from another origin and leaves the session alone', async () => {
       const cookie = await signIn(EDITOR);
       const response = await logout({
