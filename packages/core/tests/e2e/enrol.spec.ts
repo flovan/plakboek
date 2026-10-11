@@ -14,7 +14,11 @@ import {
 } from '@playwright/test';
 import { signIn } from './helpers/session.ts';
 import { totp, wrongTotp } from './helpers/totp.ts';
-import { createTestUser, type TestUser } from './helpers/users.ts';
+import {
+  createTestUser,
+  enrolTwoFactor,
+  type TestUser,
+} from './helpers/users.ts';
 
 const HOST = 'plakboek-editor';
 const EDITOR_FLAG = 'plakboek:editor';
@@ -206,5 +210,173 @@ test.describe('two-step sign-in set-up', () => {
     } finally {
       await later.close();
     }
+  });
+
+  test('the set-up page without a session sends the visitor to sign in', async ({
+    request,
+  }) => {
+    const response = await request.get(`${ENROL_PATH}?next=%2Fabout`, {
+      maxRedirects: 0,
+    });
+    expect(response.status()).toBe(302);
+    expect(response.headers().location).toBe('/cms?next=%2Fabout');
+  });
+
+  test('a user who has already set it up is sent on to edit mode', async ({
+    playwright,
+    baseURL,
+  }) => {
+    const user = await createTestUser({ roleKey: 'superadmin' });
+    const origin = baseURL ?? '';
+    const request = await playwright.request.newContext();
+    try {
+      await enrolTwoFactor(request, origin, user);
+      // The same session that just verified the first code opens the page.
+      const response = await request.get(
+        `${origin}${ENROL_PATH}?next=%2Fabout`,
+        {
+          maxRedirects: 0,
+        },
+      );
+      expect(response.status()).toBe(302);
+      expect(response.headers().location).toBe('/about?_edit=1');
+
+      // Asking for a second key once the first is confirmed is refused, so a
+      // stolen session cannot swap the authenticator out from under the user.
+      const second = await request.post(
+        `${origin}/api/auth/two-factor/enable`,
+        {
+          data: { password: user.password },
+          headers: { Origin: origin },
+        },
+      );
+      expect(second.status()).toBe(400);
+      expect(((await second.json()) as { code?: string }).code).toBe(
+        'TOTP_ALREADY_ENABLED',
+      );
+    } finally {
+      await request.dispose();
+    }
+  });
+
+  test('reloading on the key step returns to the password step, and a second request for a key replaces the first', async ({
+    page,
+  }) => {
+    const user = await createTestUser({ roleKey: 'superadmin' });
+    await signInToEnrolment(page, user);
+    await confirmPassword(page, user.password);
+    await expect(
+      page.getByRole('heading', {
+        name: 'Add this site to your authenticator app',
+      }),
+    ).toBeFocused();
+    const first = await shownSecret(page);
+
+    // Nothing about the key survives a reload: the step starts again.
+    await page.reload();
+    await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
+    await expect(
+      page.getByRole('heading', { name: 'Set up two-step sign-in' }),
+    ).toBeVisible();
+    expect(await storedText(page)).not.toContain(first);
+
+    // Asking again while the first key was never confirmed is answered with a
+    // new key; the first one no longer works.
+    await confirmPassword(page, user.password);
+    await expect(
+      page.getByRole('heading', {
+        name: 'Add this site to your authenticator app',
+      }),
+    ).toBeFocused();
+    const second = await shownSecret(page);
+    expect(second).not.toBe(first);
+
+    await page.getByLabel('Authentication code').fill(totp(first));
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await expect(page.getByRole('alert')).toHaveText(
+      'That code is not valid or has expired. Check it and try again.',
+    );
+
+    await page.getByLabel('Authentication code').fill(totp(second));
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Save your backup codes' }),
+    ).toBeFocused();
+  });
+
+  test('checks the password and the code before sending anything', async ({
+    page,
+  }) => {
+    const user = await createTestUser({ roleKey: 'superadmin' });
+    await signInToEnrolment(page, user);
+    const sent: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/two-factor/')) sent.push(request.url());
+    });
+
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByText('Enter your password.')).toBeVisible();
+    expect(sent).toEqual([]);
+
+    await confirmPassword(page, user.password);
+    await expect(
+      page.getByRole('heading', {
+        name: 'Add this site to your authenticator app',
+      }),
+    ).toBeFocused();
+    const before = sent.length;
+    await page.getByLabel('Authentication code').fill('12a456');
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await expect(page.getByText('Enter the 6-digit code.')).toBeVisible();
+    expect(sent.length).toBe(before);
+  });
+
+  test('copies the setup key and the backup codes, and says so', async ({
+    page,
+    context,
+    browserName,
+  }) => {
+    if (browserName === 'chromium') {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    }
+    const user = await createTestUser({ roleKey: 'superadmin' });
+    await signInToEnrolment(page, user);
+    await confirmPassword(page, user.password);
+    await expect(
+      page.getByRole('heading', {
+        name: 'Add this site to your authenticator app',
+      }),
+    ).toBeFocused();
+    const secret = await shownSecret(page);
+
+    await page.getByRole('button', { name: 'Copy setup key' }).click();
+    await expect(page.getByRole('status')).toHaveText('Setup key copied.');
+    if (browserName === 'chromium') {
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+        secret,
+      );
+    }
+
+    await page.getByLabel('Authentication code').fill(totp(secret));
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Save your backup codes' }),
+    ).toBeFocused();
+    await page.getByRole('button', { name: 'Copy codes' }).click();
+    await expect(page.getByRole('status')).toHaveText('Backup codes copied.');
+  });
+
+  test('an editor, for whom two-step sign-in is optional, never sees the set-up step', async ({
+    page,
+  }) => {
+    const user = await createTestUser({ roleKey: 'editor' });
+    await openModal(page);
+    await signInWithPassword(page, user);
+    await page.waitForURL(
+      (url) => url.pathname === '/about' && url.search === '?_edit=1',
+    );
+    await expect(
+      page.getByRole('heading', { name: 'Set up two-step sign-in' }),
+    ).toHaveCount(0);
   });
 });
