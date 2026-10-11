@@ -8,34 +8,19 @@
  * visitor page, and every answer carries `X-Robots-Tag: noindex, nofollow`.
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
-import { withCmsHeaders } from '../cms-headers.js';
+import { cmsGuard, withCmsHeaders } from '../cms-headers.js';
 import { getHostRuntime } from '../runtime/host.js';
 
 export async function loader({
   request,
 }: LoaderFunctionArgs): Promise<Response> {
-  try {
+  return await cmsGuard(async () => {
     const runtime = getHostRuntime();
     const pages = await runtime.cmsPages();
-    return withCmsHeaders(
-      (await pages.handle(request)) ??
-        (await runtime.notFoundResponse(request)),
+    return (
+      (await pages.handle(request)) ?? (await runtime.notFoundResponse(request))
     );
-  } catch (error) {
-    // The name only: a message could carry a connection string or a path.
-    process.stderr.write(
-      `[@plakboek/core] /cms request failed: ${error instanceof Error ? error.name : typeof error}\n`,
-    );
-    return withCmsHeaders(
-      new Response('Internal Server Error', {
-        status: 500,
-        headers: {
-          'Content-Type': 'text/plain; charset=utf-8',
-          'Cache-Control': 'no-store',
-        },
-      }),
-    );
-  }
+  });
 }
 
 /** The login form posts here without a script: refused, so a password never

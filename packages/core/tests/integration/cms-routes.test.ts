@@ -365,6 +365,13 @@ describe('the /cms routes', () => {
       }
     });
 
+    it('is on the 405 for a POST to health', async () => {
+      const response = await get('/cms/health', { method: 'POST' });
+      expect(response.status).toBe(405);
+      expect(response.headers.get('Allow')).toBe('GET, HEAD');
+      expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');
+    });
+
     it('is on the answer to a POST to health and to the host 404', async () => {
       const response = await get('/cms/anything/at/all', { method: 'POST' });
       expect(response.headers.get('X-Robots-Tag')).toBe('noindex, nofollow');

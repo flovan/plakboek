@@ -25,3 +25,31 @@ export function withCmsHeaders(response: Response): Response {
     headers,
   });
 }
+
+/**
+ * Runs a `/cms` handler and returns its response with the header set. A
+ * handler that throws (an invalid environment, a database failure) is answered
+ * with a plain 500 that carries the same header, so no error path under `/cms`
+ * can be indexed and none carries an error message. Only the error's name is
+ * logged: a message could hold a connection string or a path.
+ */
+export async function cmsGuard(
+  run: () => Promise<Response> | Response,
+): Promise<Response> {
+  try {
+    return withCmsHeaders(await run());
+  } catch (error) {
+    process.stderr.write(
+      `[@plakboek/core] /cms request failed: ${error instanceof Error ? error.name : typeof error}\n`,
+    );
+    return withCmsHeaders(
+      new Response('Internal Server Error', {
+        status: 500,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-store',
+        },
+      }),
+    );
+  }
+}

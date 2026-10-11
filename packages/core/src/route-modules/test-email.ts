@@ -3,7 +3,7 @@
  * a GET is the host's own 404, so the URL reveals nothing.
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router';
-import { withCmsHeaders } from '../cms-headers.js';
+import { cmsGuard } from '../cms-headers.js';
 import { getHostRuntime } from '../runtime/host.js';
 import { handleTestEmailPost } from '../setup/handlers.js';
 import { createSendLimiter } from '../setup/token.js';
@@ -14,13 +14,15 @@ const limiter = createSendLimiter({ max: 5, maxEntries: 1000 });
 export async function loader({
   request,
 }: LoaderFunctionArgs): Promise<Response> {
-  return withCmsHeaders(await getHostRuntime().notFoundResponse(request));
+  return await cmsGuard(
+    async () => await getHostRuntime().notFoundResponse(request),
+  );
 }
 
 export async function action({
   request,
 }: ActionFunctionArgs): Promise<Response> {
-  return withCmsHeaders(
-    await handleTestEmailPost(request, getHostRuntime(), limiter),
+  return await cmsGuard(
+    async () => await handleTestEmailPost(request, getHostRuntime(), limiter),
   );
 }
