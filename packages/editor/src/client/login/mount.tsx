@@ -7,7 +7,7 @@ import type {
 } from '../../chrome/login/behaviour.js';
 import { LoginApp } from '../../chrome/login/login-app.js';
 import { createLoginAuth } from './auth-client.js';
-import { runLoginTransition } from './transition.js';
+import { editAddress, runLoginTransition } from './transition.js';
 
 /** Where the set-up of two-step sign-in is (the auth package's own constant,
  * repeated because the client entry cannot import that package; a unit test
@@ -115,6 +115,10 @@ export function mountLogin(
         onLeaving: () => {
           state.leaving = true;
         },
+        // The session exists by now: if the animation cannot run, open the
+        // page anyway instead of leaving the card half-way and busy.
+      }).catch(() => {
+        globalThis.location.assign(editAddress(island.next));
       });
     },
   };

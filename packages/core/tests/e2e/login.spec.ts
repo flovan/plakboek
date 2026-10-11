@@ -255,6 +255,25 @@ test.describe('signing in', () => {
   });
 });
 
+test.describe('a hand-over that cannot animate', () => {
+  test('still opens the page in edit mode instead of leaving the card stuck', async ({
+    page,
+  }) => {
+    // An engine without the Web Animations API: the animated part throws.
+    await page.addInitScript(() => {
+      Element.prototype.animate = () => {
+        throw new Error('animate is not available');
+      };
+    });
+    await openModal(page);
+    await signInWith(page, e2eUsers().editor);
+    await page.waitForURL(
+      (url) => url.pathname === '/about' && url.search === '?_edit=1',
+    );
+    await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
+  });
+});
+
 const WRONG_CREDENTIALS =
   'Email or password is incorrect. Check them and try again.';
 const SIGN_IN_API = '**/api/auth/sign-in/email';
