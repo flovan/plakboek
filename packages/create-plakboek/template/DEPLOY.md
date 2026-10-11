@@ -63,6 +63,16 @@ PLAKBOEK_MAIL_FROM=no-reply@example.com
 
 Generate the passwords with `openssl rand -hex 24`. A password with `@`, `:` or `/` in it must be percent-encoded inside `DATABASE_URL`, which is why hexadecimal is easiest.
 
+### Client addresses and the request limiter
+
+Sign-in, forgotten-password and sign-in-link requests are limited per client address. The app reads that address from the `X-Forwarded-For` header, and only when the header holds a single address. The Caddy service in this stack sets exactly that, so the limiter works as shipped. If you put another proxy or a CDN in front of Caddy, or replace Caddy, the header can arrive with several addresses, and then every visitor shares one allowance: one caller can lock everyone out of signing in. Tell the app which proxies to trust by adding their addresses or ranges to `.env`, for example:
+
+```sh
+PLAKBOEK_TRUSTED_PROXIES=172.18.0.0/16,203.0.113.7
+```
+
+For a CDN that sets a header of its own and always overwrites it, name that header instead, for example `PLAKBOEK_CLIENT_IP_HEADERS=CF-Connecting-IP`. List only proxies that clients cannot get around: the app must not be reachable except through them. The limit is per client address, not per email address, so add limiting at the edge if the site is a target for mail floods.
+
 ## Configure GitHub
 
 In the repository settings:

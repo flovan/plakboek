@@ -200,6 +200,41 @@ describe('readRuntimeEnv', () => {
   });
 });
 
+describe('the proxy variables', () => {
+  it('are left out when unset', () => {
+    const env = readRuntimeEnv(valid);
+    expect(env.trustedProxies).toBeUndefined();
+    expect(env.clientIpHeaders).toBeUndefined();
+  });
+
+  it('read a comma-separated list, trimmed and without blank entries', () => {
+    const env = readRuntimeEnv({
+      ...valid,
+      PLAKBOEK_TRUSTED_PROXIES: ' 172.18.0.0/16 , 10.0.0.5,, ::1',
+      PLAKBOEK_CLIENT_IP_HEADERS: 'CF-Connecting-IP, X-Real-IP',
+    });
+    expect(env.trustedProxies).toEqual(['172.18.0.0/16', '10.0.0.5', '::1']);
+    expect(env.clientIpHeaders).toEqual(['CF-Connecting-IP', 'X-Real-IP']);
+  });
+
+  it.each(['caddy', '10.0.0.0/33', '10.0.0.0/8/8', ',,'])(
+    'refuse %j as a trusted proxy, naming the variable and never the value',
+    (value) => {
+      const error = failure({ ...valid, PLAKBOEK_TRUSTED_PROXIES: value });
+      expect(variables(error)).toEqual(['PLAKBOEK_TRUSTED_PROXIES']);
+      expect(error.message).not.toContain(value);
+    },
+  );
+
+  it.each(['bad header', 'a:b', ',,'])(
+    'refuse %j as a header list',
+    (value) => {
+      const error = failure({ ...valid, PLAKBOEK_CLIENT_IP_HEADERS: value });
+      expect(variables(error)).toEqual(['PLAKBOEK_CLIENT_IP_HEADERS']);
+    },
+  );
+});
+
 describe('readMailEnv', () => {
   it('needs only the public url: no database url and no secret', () => {
     const env = readMailEnv({

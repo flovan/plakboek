@@ -411,6 +411,73 @@ describe('rate limits (T-07-07, closes AR-02-02 for the reset path)', () => {
     );
   });
 
+  it('keys the limit on the client behind a trusted proxy chain, not on the proxy', async () => {
+    await withFixture(
+      async ({ auth }) => {
+        const behindProxy = (client: string) => ({
+          'x-forwarded-for': `${client}, 10.0.0.5`,
+        });
+        const statuses: number[] = [];
+        for (let step = 0; step < 4; step += 1) {
+          statuses.push(
+            (await requestLink(auth, KNOWN, behindProxy('203.0.113.30')))
+              .status,
+          );
+        }
+        expect(statuses).toEqual([200, 200, 200, 429]);
+        const other = await requestLink(
+          auth,
+          KNOWN,
+          behindProxy('203.0.113.31'),
+        );
+        expect(other.status).toBe(200);
+      },
+      { rateLimitEnabled: true, trustedProxies: ['10.0.0.0/24'] },
+    );
+  });
+
+  it('without trustedProxies a multi-hop header has no client address, so everyone shares one allowance', async () => {
+    await withFixture(
+      async ({ auth }) => {
+        const behindProxy = (client: string) => ({
+          'x-forwarded-for': `${client}, 10.0.0.5`,
+        });
+        const statuses: number[] = [];
+        for (let step = 0; step < 3; step += 1) {
+          statuses.push(
+            (await requestLink(auth, KNOWN, behindProxy('203.0.113.50')))
+              .status,
+          );
+        }
+        // A different client is already refused: this is the denial of
+        // service `trustedProxies` exists to prevent.
+        statuses.push(
+          (await requestLink(auth, KNOWN, behindProxy('203.0.113.51'))).status,
+        );
+        expect(statuses).toEqual([200, 200, 200, 429]);
+      },
+      { rateLimitEnabled: true },
+    );
+  });
+
+  it('reads the client from the header the proxy sets when ipAddressHeaders names it', async () => {
+    await withFixture(
+      async ({ auth }) => {
+        const client = { 'cf-connecting-ip': '203.0.113.40' };
+        const statuses: number[] = [];
+        for (let step = 0; step < 4; step += 1) {
+          statuses.push((await requestLink(auth, KNOWN, client)).status);
+        }
+        expect(statuses).toEqual([200, 200, 200, 429]);
+        const other = await requestLink(auth, KNOWN, {
+          'cf-connecting-ip': '203.0.113.41',
+        });
+        expect(other.status).toBe(200);
+      },
+      { rateLimitEnabled: true, ipAddressHeaders: ['cf-connecting-ip'] },
+    );
+  });
+
   it('allows ten complete steps and answers the eleventh with 429', async () => {
     await withFixture(
       async ({ auth }) => {

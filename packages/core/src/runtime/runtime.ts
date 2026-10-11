@@ -196,6 +196,12 @@ export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
     mail,
     roles: config.roles,
     appName: config.siteName,
+    ...(env.trustedProxies === undefined
+      ? {}
+      : { trustedProxies: env.trustedProxies }),
+    ...(env.clientIpHeaders === undefined
+      ? {}
+      : { ipAddressHeaders: env.clientIpHeaders }),
   });
 
   const cache = env.production ? createProductionCache() : undefined;

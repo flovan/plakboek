@@ -15,9 +15,15 @@
  * - `PLAKBOEK_SECRET` (required) at least 32 characters, no fallback in any
  *   NODE_ENV.
  * - `PLAKBOEK_BUILD_ID` (optional) identifies the deployed render code.
+ * - `PLAKBOEK_TRUSTED_PROXIES` (optional) comma-separated IP addresses or CIDR
+ *   ranges of the reverse proxies in front of the app, so the request limiter
+ *   finds the real client behind them.
+ * - `PLAKBOEK_CLIENT_IP_HEADERS` (optional) comma-separated header names the
+ *   client address is read from, for a proxy that sets a header of its own.
  * - `PLAKBOEK_SMTP_HOST/PORT/SECURE/USER/PASS` and `PLAKBOEK_MAIL_FROM`
  *   (optional) the mail transport; read only when the host is non-blank.
  */
+import { isIP } from 'node:net';
 import type { SmtpOptions } from '@plakboek/auth';
 
 /** The shortest secret the auth layer accepts. */
@@ -29,6 +35,7 @@ export const SECRET_GENERATION_COMMAND = `node -e "console.log(require('node:cry
 const BUILD_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 const POSTGRES_URL_PATTERN = /^postgres(ql)?:\/\//i;
 const MAX_PORT = 65_535;
+const HEADER_NAME = /^[A-Za-z0-9-]{1,100}$/;
 
 /** What the runtime reads from the environment, validated. */
 export type RuntimeEnv = {
@@ -38,6 +45,10 @@ export type RuntimeEnv = {
   readonly siteUrl: string;
   readonly secret: string;
   readonly buildId?: string;
+  /** Reverse-proxy addresses or CIDR ranges, for client-address lookup. */
+  readonly trustedProxies?: readonly string[];
+  /** Headers the client address is read from, in order. */
+  readonly clientIpHeaders?: readonly string[];
   readonly smtp?: SmtpOptions;
   readonly mailFrom?: string;
   /** `NODE_ENV === 'production'`. */
@@ -148,6 +159,65 @@ function readSecret(source: EnvSource, issues: EnvIssue[]): string | undefined {
   return value;
 }
 
+/** A comma-separated list with blanks and empty entries dropped. */
+function listOf(value: string): string[] {
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+/** An IPv4 or IPv6 address, optionally with a `/prefix` that fits it. */
+function isIpOrCidr(value: string): boolean {
+  const [address, prefix, ...rest] = value.split('/');
+  if (address === undefined || rest.length > 0) return false;
+  const family = isIP(address);
+  if (family === 0) return false;
+  if (prefix === undefined) return true;
+  return (
+    /^\d{1,3}$/.test(prefix) && Number(prefix) <= (family === 4 ? 32 : 128)
+  );
+}
+
+function readTrustedProxies(
+  source: EnvSource,
+  issues: EnvIssue[],
+): readonly string[] | undefined {
+  const raw = present(source, 'PLAKBOEK_TRUSTED_PROXIES');
+  if (raw === undefined) return undefined;
+  const entries = listOf(raw);
+  if (entries.length === 0 || !entries.every(isIpOrCidr)) {
+    issues.push({
+      variable: 'PLAKBOEK_TRUSTED_PROXIES',
+      message:
+        'PLAKBOEK_TRUSTED_PROXIES must be a comma-separated list of IP addresses or CIDR ranges, such as 172.18.0.0/16',
+    });
+    return undefined;
+  }
+  return entries;
+}
+
+function readClientIpHeaders(
+  source: EnvSource,
+  issues: EnvIssue[],
+): readonly string[] | undefined {
+  const raw = present(source, 'PLAKBOEK_CLIENT_IP_HEADERS');
+  if (raw === undefined) return undefined;
+  const entries = listOf(raw);
+  if (
+    entries.length === 0 ||
+    !entries.every((entry) => HEADER_NAME.test(entry))
+  ) {
+    issues.push({
+      variable: 'PLAKBOEK_CLIENT_IP_HEADERS',
+      message:
+        'PLAKBOEK_CLIENT_IP_HEADERS must be a comma-separated list of header names, such as CF-Connecting-IP',
+    });
+    return undefined;
+  }
+  return entries;
+}
+
 function readSmtp(
   source: EnvSource,
   issues: EnvIssue[],
@@ -234,6 +304,8 @@ export function readRuntimeEnv(source: EnvSource = process.env): RuntimeEnv {
     }
   }
 
+  const trustedProxies = readTrustedProxies(source, issues);
+  const clientIpHeaders = readClientIpHeaders(source, issues);
   const smtp = readSmtp(source, issues);
   const mailFrom = present(source, 'PLAKBOEK_MAIL_FROM')?.trim();
 
@@ -252,6 +324,8 @@ export function readRuntimeEnv(source: EnvSource = process.env): RuntimeEnv {
     siteUrl,
     secret,
     ...(buildId === undefined ? {} : { buildId }),
+    ...(trustedProxies === undefined ? {} : { trustedProxies }),
+    ...(clientIpHeaders === undefined ? {} : { clientIpHeaders }),
     ...(smtp === undefined ? {} : { smtp }),
     ...(mailFrom === undefined ? {} : { mailFrom }),
     production: source.NODE_ENV === 'production',

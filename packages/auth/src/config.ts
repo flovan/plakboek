@@ -16,6 +16,7 @@
  * the session when the magic-link verify endpoint would create one for such
  * a user, which covers a link issued before they enrolled.
  */
+import { isIP } from 'node:net';
 import {
   createPermissionResolver,
   type DefinedRoles,
@@ -109,6 +110,23 @@ export type CreateAuthOptions = {
    * so a development or test server is unthrottled unless this is `true`.
    */
   readonly rateLimitEnabled?: boolean;
+  /**
+   * The addresses or CIDR ranges of the reverse proxies in front of the app
+   * (`"10.0.0.5"`, `"172.18.0.0/16"`). Behind them, the client address the
+   * limiter keys on is the first `X-Forwarded-For` hop that is not one of
+   * these. Left out, only a single-value header is trusted, and a request
+   * whose header holds several addresses (a proxy that appends to what the
+   * client sent) has no client address, so every such client shares one
+   * allowance. List only proxies that clients cannot bypass: a listed range
+   * that also covers clients lets them choose their own address.
+   */
+  readonly trustedProxies?: readonly string[];
+  /**
+   * The headers the client address is read from, in order. Defaults to
+   * `X-Forwarded-For`. Use it when a proxy sets a header of its own
+   * (`CF-Connecting-IP`), and only when the proxy always overwrites it.
+   */
+  readonly ipAddressHeaders?: readonly string[];
 };
 
 /** Thrown by `createAuth` for invalid options. Messages name the offending
@@ -590,6 +608,8 @@ function assertCreateAuthOptions(options: CreateAuthOptions): void {
     onMailDeliveryError,
     onAuditWriteFailed,
     rateLimitEnabled,
+    trustedProxies,
+    ipAddressHeaders,
   } = options;
 
   if (
@@ -666,6 +686,43 @@ function assertCreateAuthOptions(options: CreateAuthOptions): void {
       'rateLimitEnabled must be a boolean when supplied',
     );
   }
+
+  if (
+    trustedProxies !== undefined &&
+    (!Array.isArray(trustedProxies) || !trustedProxies.every(isIpOrCidr))
+  ) {
+    throw new AuthConfigError(
+      'trustedProxies must be a list of IP addresses or CIDR ranges such as "10.0.0.5" or "172.18.0.0/16"',
+    );
+  }
+
+  if (
+    ipAddressHeaders !== undefined &&
+    (!Array.isArray(ipAddressHeaders) ||
+      ipAddressHeaders.length === 0 ||
+      !ipAddressHeaders.every(isHeaderName))
+  ) {
+    throw new AuthConfigError(
+      'ipAddressHeaders must be a non-empty list of header names',
+    );
+  }
+}
+
+/** An HTTP header name: letters, digits and hyphens. */
+function isHeaderName(value: unknown): boolean {
+  return typeof value === 'string' && /^[A-Za-z0-9-]{1,100}$/.test(value);
+}
+
+/** An IPv4 or IPv6 address, optionally with a `/prefix` that fits it. */
+function isIpOrCidr(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const [address, prefix, ...rest] = value.split('/');
+  if (address === undefined || rest.length > 0) return false;
+  const family = isIP(address);
+  if (family === 0) return false;
+  if (prefix === undefined) return true;
+  if (!/^\d{1,3}$/.test(prefix)) return false;
+  return Number(prefix) <= (family === 4 ? 32 : 128);
 }
 
 /** The plugin tuple `createAuth` installs, each instantiated with its
@@ -835,6 +892,21 @@ export function createAuth(options: CreateAuthOptions): Auth {
       },
     },
     disabledPaths: [...DISABLED_AUTH_PATHS],
+    ...(options.trustedProxies === undefined &&
+    options.ipAddressHeaders === undefined
+      ? {}
+      : {
+          advanced: {
+            ipAddress: {
+              ...(options.trustedProxies === undefined
+                ? {}
+                : { trustedProxies: [...options.trustedProxies] }),
+              ...(options.ipAddressHeaders === undefined
+                ? {}
+                : { ipAddressHeaders: [...options.ipAddressHeaders] }),
+            },
+          },
+        }),
     ...(options.rateLimitEnabled === undefined
       ? {}
       : { rateLimit: { enabled: options.rateLimitEnabled } }),

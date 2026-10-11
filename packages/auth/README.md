@@ -34,21 +34,21 @@ audited paths described here.
 
 ### Configuration and policy
 
-| Export                              | Kind     | Purpose                                                                                                                                                                   |
-| ----------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createAuth`                        | function | Builds the better-auth instance for one installation from injected options: sliding sessions, audited two-factor, magic links, closed routes and the password floor       |
-| `AuthConfigError`                   | class    | Thrown by `createAuth` for an invalid option; names the option, never the value                                                                                           |
-| `SESSION_EXPIRES_IN_SECONDS`        | constant | `2592000` (30 days): how long a session lives after its last refresh                                                                                                      |
-| `SESSION_UPDATE_AGE_SECONDS`        | constant | `86400` (one day): how old a session must be before a request slides its expiry                                                                                           |
-| `IMPERSONATION_SESSION_TTL_SECONDS` | constant | `28800` (8 hours): the fixed lifetime of an impersonation session, which never slides                                                                                     |
-| `SET_PASSWORD_TOKEN_TTL_SECONDS`    | constant | `172800` (48 hours): lifetime of set-password and reset-password links                                                                                                    |
-| `MAGIC_LINK_TTL_SECONDS`            | constant | `900` (15 minutes): lifetime of a magic link                                                                                                                              |
-| `TWO_FACTOR_CODE_TTL_SECONDS`       | constant | `300` (5 minutes): lifetime of an emailed second-factor code                                                                                                              |
-| `TWO_FACTOR_LOCKOUT`                | constant | Frozen `{ maxFailedAttempts: 5, durationSeconds: 900 }`, one counter shared by authenticator and emailed codes                                                            |
-| `DISABLED_AUTH_PATHS`               | constant | Frozen list of better-auth HTTP routes that answer 404; the full list and the reason are under the security notes                                                         |
-| `Auth`                              | type     | The better-auth instance `createAuth` returns                                                                                                                             |
-| `CreateAuthOptions`                 | type     | `db`, `baseURL`, `secret`, `mail`, `roles`, and optionally `appName`, `minPasswordLength`, `renderEmail`, `onMailDeliveryError`, `onAuditWriteFailed`, `rateLimitEnabled` |
-| `RenderAuthEmail`                   | type     | A template renderer a host can pass as `renderEmail` to theme the emails                                                                                                  |
+| Export                              | Kind     | Purpose                                                                                                                                                                                                         |
+| ----------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createAuth`                        | function | Builds the better-auth instance for one installation from injected options: sliding sessions, audited two-factor, magic links, closed routes and the password floor                                             |
+| `AuthConfigError`                   | class    | Thrown by `createAuth` for an invalid option; names the option, never the value                                                                                                                                 |
+| `SESSION_EXPIRES_IN_SECONDS`        | constant | `2592000` (30 days): how long a session lives after its last refresh                                                                                                                                            |
+| `SESSION_UPDATE_AGE_SECONDS`        | constant | `86400` (one day): how old a session must be before a request slides its expiry                                                                                                                                 |
+| `IMPERSONATION_SESSION_TTL_SECONDS` | constant | `28800` (8 hours): the fixed lifetime of an impersonation session, which never slides                                                                                                                           |
+| `SET_PASSWORD_TOKEN_TTL_SECONDS`    | constant | `172800` (48 hours): lifetime of set-password and reset-password links                                                                                                                                          |
+| `MAGIC_LINK_TTL_SECONDS`            | constant | `900` (15 minutes): lifetime of a magic link                                                                                                                                                                    |
+| `TWO_FACTOR_CODE_TTL_SECONDS`       | constant | `300` (5 minutes): lifetime of an emailed second-factor code                                                                                                                                                    |
+| `TWO_FACTOR_LOCKOUT`                | constant | Frozen `{ maxFailedAttempts: 5, durationSeconds: 900 }`, one counter shared by authenticator and emailed codes                                                                                                  |
+| `DISABLED_AUTH_PATHS`               | constant | Frozen list of better-auth HTTP routes that answer 404; the full list and the reason are under the security notes                                                                                               |
+| `Auth`                              | type     | The better-auth instance `createAuth` returns                                                                                                                                                                   |
+| `CreateAuthOptions`                 | type     | `db`, `baseURL`, `secret`, `mail`, `roles`, and optionally `appName`, `minPasswordLength`, `renderEmail`, `onMailDeliveryError`, `onAuditWriteFailed`, `rateLimitEnabled`, `trustedProxies`, `ipAddressHeaders` |
+| `RenderAuthEmail`                   | type     | A template renderer a host can pass as `renderEmail` to theme the emails                                                                                                                                        |
 
 ### Passwords
 
@@ -339,7 +339,19 @@ The limits are better-auth's limiter, which is on in production and off
 elsewhere. Pass `createAuth({ rateLimitEnabled: true })` to switch it on in
 development or test, or `false` to switch it off. The default in-memory
 store is per process and keyed by the client address better-auth can
-resolve, so a host behind a proxy must forward a trusted client IP header.
+resolve. By default that address is read from `X-Forwarded-For`, and only when
+the header holds one address: a header with several (a proxy that appends to
+what the client sent) has no client address, and every such client then shares
+one allowance per path, so one caller can lock everyone out of "forgot
+password" and sign-in. A host directly exposed has the opposite problem: a
+client can pick its own allowance by sending its own header. A host behind a
+proxy should therefore pass `createAuth({ trustedProxies: ['172.18.0.0/16'] })`
+with the address or range of its proxies, so the client is the first hop that is
+not one of them, or `ipAddressHeaders: ['CF-Connecting-IP']` when the proxy sets
+a header of its own and always overwrites it. List only proxies clients cannot
+bypass. The limit is per client and path, not per email address: an attacker
+with many addresses can still send many reset emails to one mailbox, one
+request per allowance, so edge limiting is worth adding for a shared deployment.
 
 ### Magic links and two-factor
 
@@ -510,8 +522,8 @@ not affected.
   endpoints and magic-link requests are throttled by better-auth's limiter
   in production (see Password-link endpoints); sign-in is throttled by its
   default rule. Add edge limiting in front of both for a shared deployment,
-  and forward a trusted client IP header so the limiter can tell clients
-  apart.
+  and set `trustedProxies` (or `ipAddressHeaders`) so the limiter can tell
+  clients apart behind your proxy.
 
 ## Audit log retention
 
