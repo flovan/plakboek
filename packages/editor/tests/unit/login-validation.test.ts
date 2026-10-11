@@ -105,6 +105,12 @@ describe('classifyAuthError', () => {
     ).toBe('lockout');
   });
 
+  it('reads a refused password confirmation as a wrong password, not as the server failing', () => {
+    expect(classifyAuthError({ status: 400, code: 'INVALID_PASSWORD' })).toBe(
+      'password',
+    );
+  });
+
   it('reads any other 429 as rate limiting', () => {
     expect(classifyAuthError({ status: 429 })).toBe('rate-limited');
     expect(classifyAuthError({ status: 429, code: 'RATE_LIMITED' })).toBe(
@@ -151,6 +157,7 @@ describe('failureMessage', () => {
 
   it('has the UI-SPEC copy for every failure that stays on its step', () => {
     expect(failureMessage('code')).toBe(STRINGS['error.code']);
+    expect(failureMessage('password')).toBe(STRINGS['error.passwordIncorrect']);
     expect(failureMessage('rate-limited')).toBe(STRINGS['error.rateLimited']);
     expect(failureMessage('network')).toBe(STRINGS['error.network']);
     expect(failureMessage('server')).toBe(STRINGS['error.server']);
@@ -192,6 +199,9 @@ describe('what the card repeats from the auth library', () => {
     );
     expect(AUTH_ERROR_CODES.challengeGone).toBe(
       TWO_FACTOR_ERROR_CODES.INVALID_TWO_FACTOR_COOKIE.code,
+    );
+    expect(AUTH_ERROR_CODES.wrongPassword).toBe(
+      BASE_ERROR_CODES.INVALID_PASSWORD.code,
     );
   });
 
