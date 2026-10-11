@@ -409,6 +409,42 @@ describe('setPageUrlPattern: collision refusal', () => {
   });
 });
 
+describe('setPageUrlPattern: reserved prefix refusal', () => {
+  let environment: PagesTestEnvironment;
+
+  beforeAll(async () => {
+    environment = await setUpPagesTestEnvironment();
+  });
+
+  afterAll(async () => {
+    await tearDownPagesTestEnvironment(environment);
+  });
+
+  it.each(['cms/{path}', 'api/{path}', '{locale}/cms/{path}'])(
+    'refuses %s with RESERVED_PREFIX and leaves the stored pattern alone',
+    async (pattern) => {
+      const { handle, deps, superadmin } = environment;
+      const error: unknown = await setPageUrlPattern(deps, superadmin, {
+        newPattern: pattern,
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(PageUrlPatternError);
+      expect(
+        (error as PageUrlPatternError).issues.map((issue) => issue.code),
+      ).toEqual(['RESERVED_PREFIX']);
+      expect(await getStoredUrlPattern(handle)).toBe('{locale}/{path}');
+    },
+  );
+
+  it('refuses it in the preview too, so a caller learns before writing', async () => {
+    await expect(
+      computeUrlPatternChangeImpact(environment.db, {
+        newPattern: '{locale}/api/{path}',
+      }),
+    ).rejects.toBeInstanceOf(PageUrlPatternError);
+  });
+});
+
 describe('setPageUrlPattern: successful change', () => {
   let environment: PagesTestEnvironment;
 

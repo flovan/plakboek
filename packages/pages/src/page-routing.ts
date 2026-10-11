@@ -34,6 +34,7 @@ import {
   type PublicPageAddressCheck,
 } from './public-path.js';
 import { registerGlobalPurge } from './purge.js';
+import { assertPatternNotReserved } from './reserved.js';
 import { pageEngineSettings, pages } from './schema.js';
 import {
   PageEngineSettingsMissingError,
@@ -371,6 +372,7 @@ export async function computeUrlPatternChangeImpact(
 ): Promise<PageUrlPatternChangeImpact> {
   const currentPattern = await getPageUrlPattern(db);
   const parsedNewPattern = parsePageUrlPattern(input.newPattern);
+  assertPatternNotReserved(parsedNewPattern);
   const addresses = await computeProspectiveAddresses(db, parsedNewPattern);
 
   let changedCount = 0;

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PageUrlPatternError } from '../../src/page-url-pattern.js';
 import {
   assertNotReservedFirstSegment,
+  assertPatternNotReserved,
   RESERVED_PAGE_PATH_SEGMENTS,
   ReservedPageSlugError,
   reportReservedPagePaths,
@@ -58,6 +60,37 @@ describe('assertNotReservedFirstSegment (D-23)', () => {
     expect(error.message).toBe(
       '@plakboek/pages: The first part of a page address cannot be "cms" or "api". Choose a different address.',
     );
+  });
+});
+
+describe('assertPatternNotReserved', () => {
+  it.each(['cms/{path}', 'api/{path}', '{locale}/cms/{path}', 'api/v1/{path}'])(
+    'refuses %s, whose default-locale addresses start with a reserved segment',
+    (pattern) => {
+      let caught: unknown;
+      try {
+        assertPatternNotReserved(pattern);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(PageUrlPatternError);
+      const issues = (caught as PageUrlPatternError).issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0]?.code).toBe('RESERVED_PREFIX');
+      expect(['cms', 'api']).toContain(issues[0]?.value);
+    },
+  );
+
+  it.each([
+    '{locale}/{path}',
+    '{path}',
+    'cms-{path}',
+    'site/cms/{path}',
+    'cmsx/{path}',
+    '{locale}/api-{path}',
+    'pages/{path}',
+  ])('allows %s', (pattern) => {
+    expect(() => assertPatternNotReserved(pattern)).not.toThrow();
   });
 });
 

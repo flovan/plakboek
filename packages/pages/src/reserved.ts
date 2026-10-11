@@ -17,6 +17,11 @@ import type { AuditDatabase } from '@plakboek/auth';
 import { inArray, sql } from 'drizzle-orm';
 import { pages } from './schema.js';
 import { reportPagesWarning } from './warnings.js';
+import {
+  PageUrlPatternError,
+  type ParsedPageUrlPattern,
+} from './page-url-pattern.js';
+import { defaultLocaleFirstSegment } from './public-path.js';
 
 /** First path segments the CMS route table owns. Read by anything that must
  * stay clear of them (a later sitemap exclusion, for one). */
@@ -69,6 +74,30 @@ export function assertNotReservedFirstSegment(path: string): void {
   if (segment !== null) {
     throw new ReservedPageSlugError(segment, path);
   }
+}
+
+/**
+ * Write-time guard for the project-wide URL pattern: throws
+ * `PageUrlPatternError` with a `RESERVED_PREFIX` issue when the pattern would
+ * give the default locale's pages an address that starts with a reserved
+ * segment (`cms/{path}`, `api/{path}`, or `{locale}/cms/{path}`, whose
+ * default-locale form has no locale segment). Every page's public address
+ * would then sit under a route the CMS owns. The first segment must be the
+ * reserved word on its own, so `cms-{path}` passes, and a pattern whose first
+ * segment is `{path}` is left to the per-page guard.
+ */
+export function assertPatternNotReserved(
+  pattern: string | ParsedPageUrlPattern,
+): void {
+  const segment = defaultLocaleFirstSegment(pattern);
+  if (!RESERVED_PAGE_PATH_SEGMENTS.includes(segment)) return;
+  throw new PageUrlPatternError([
+    {
+      code: 'RESERVED_PREFIX',
+      value: segment,
+      message: `the pattern would put every page address under "${segment}", which the CMS owns; start the pattern with something else`,
+    },
+  ]);
 }
 
 /** One stored page whose first path segment is reserved. */
