@@ -82,12 +82,15 @@ function queryWithoutEdit(search: string): string {
 }
 
 /** The location of the edit shell for a page: its path and query with every
- * `_edit` removed and `_edit=1` added. */
+ * `_edit` removed and `_edit=1` added. The result is always a path on this
+ * origin: the parser can leave a pathname that starts with `//` (for example
+ * `/.//host/x`), which the browser would read as another host, so leading
+ * slashes collapse to one. */
 export function editShellLocation(url: URL): string {
   const query = [queryWithoutEdit(url.search), `${EDIT_PARAM}=1`]
     .filter((part) => part !== '')
     .join('&');
-  return `${url.pathname}?${query}`;
+  return `${url.pathname.replace(/^\/{2,}/, '/')}?${query}`;
 }
 
 /** Whether two URLs are the same document: the same path and the same query

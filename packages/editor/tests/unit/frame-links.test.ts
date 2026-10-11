@@ -202,6 +202,27 @@ describe('editShellLocation', () => {
     ).toBe('/a?x=%20y&z&_edit=1');
   });
 
+  it('never yields a scheme-relative location for a same-origin double-slash path', () => {
+    for (const href of ['/.//evil.com/x?a=1', `${TOP}//evil.com/x`]) {
+      const location = editShellLocation(new URL(href, TOP));
+      expect(location.startsWith('//')).toBe(false);
+      expect(location.startsWith('/')).toBe(true);
+    }
+    expect(editShellLocation(new URL('/.//evil.com/x?a=1', TOP))).toBe(
+      '/evil.com/x?a=1&_edit=1',
+    );
+  });
+
+  it('keeps a double-slash link on the site when classified', () => {
+    for (const href of ['/.//evil.com/x', `${TOP}//evil.com/x`]) {
+      const decision = classifyFrameNavigation(click({ href }));
+      expect(decision.action).toBe('follow-top');
+      if (decision.action === 'follow-top') {
+        expect(decision.location.startsWith('//')).toBe(false);
+      }
+    }
+  });
+
   it('keeps a parameter that only starts with _edit', () => {
     expect(editShellLocation(new URL(`${TOP}/a?_editor=1`))).toBe(
       '/a?_editor=1&_edit=1',

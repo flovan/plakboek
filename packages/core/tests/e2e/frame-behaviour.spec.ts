@@ -96,6 +96,31 @@ test.describe('a link clicked in the framed site', () => {
     expect(await shellMarker(page)).toBe(1);
   });
 
+  test('with a double-slash path stays on the site instead of leaving for another host', async ({
+    page,
+    context,
+  }) => {
+    const reached: string[] = [];
+    await context.route('https://example.invalid/**', (route) => {
+      reached.push(route.request().url());
+      return route.abort();
+    });
+    await openShell(page, '/?_edit=1');
+    const origin = new URL(page.url()).origin;
+
+    await page
+      .frameLocator(FRAME)
+      .getByRole('link', { name: 'Double slash' })
+      .click();
+    await page.waitForURL(
+      (url) => url.pathname === '/example.invalid/double-slash',
+    );
+
+    expect(new URL(page.url()).origin).toBe(origin);
+    expect(locationOf(page)).toBe('/example.invalid/double-slash?_edit=1');
+    expect(reached).toEqual([]);
+  });
+
   test('to a spot on the same page scrolls the frame and leaves the page alone', async ({
     page,
   }) => {

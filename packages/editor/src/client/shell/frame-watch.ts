@@ -58,6 +58,8 @@ export function watchFrame(
   let handled: Document | null = null;
 
   function followTop(location: string): void {
+    // Only a path on this origin: `//host/x` would leave the site.
+    if (!location.startsWith('/') || location.startsWith('//')) return;
     // Never navigate to where the shell already is: that would reload it
     // forever if the frame kept ending up elsewhere.
     const here = `${topWindow.location.pathname}${topWindow.location.search}`;

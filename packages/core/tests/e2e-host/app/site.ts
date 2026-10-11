@@ -38,6 +38,12 @@ function header(site: SiteContext): string {
         'Elsewhere',
       ),
       createElement('a', { href: '#site-footer', id: 'hash-link' }, 'Footer'),
+      // Same-origin by the URL parser, yet its path starts with two slashes.
+      createElement(
+        'a',
+        { href: '/.//example.invalid/double-slash' },
+        'Double slash',
+      ),
       createElement(
         'button',
         { type: 'button', id: 'open-site-dialog' },
