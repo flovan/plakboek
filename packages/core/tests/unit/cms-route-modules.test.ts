@@ -37,35 +37,54 @@ afterEach(() => {
   write.mockRestore();
 });
 
-async function expectGuarded500(response: Response): Promise<void> {
-  expect(response.status).toBe(500);
-  expect(response.headers.get('X-Robots-Tag')).toBe(ROBOTS);
-  expect(response.headers.get('Cache-Control')).toBe('no-store');
-  expect(await response.text()).toBe('Internal Server Error');
+/** What a guarded error answer must be, read off the response. */
+async function facts(response: Response): Promise<{
+  status: number;
+  robots: string | null;
+  cache: string | null;
+  body: string;
+}> {
+  return {
+    status: response.status,
+    robots: response.headers.get('X-Robots-Tag'),
+    cache: response.headers.get('Cache-Control'),
+    body: await response.text(),
+  };
 }
+
+const GUARDED_500 = {
+  status: 500,
+  robots: ROBOTS,
+  cache: 'no-store',
+  body: 'Internal Server Error',
+};
 
 describe('a failing runtime under /cms', () => {
   it('is a headered 500 from the health loader', async () => {
     const { loader } = await import('../../src/route-modules/health.js');
-    await expectGuarded500(await loader());
+    expect(await facts(await loader())).toEqual(GUARDED_500);
   });
 
   it('is a headered 500 from the setup loader and action', async () => {
     const { loader, action } = await import('../../src/route-modules/setup.js');
-    await expectGuarded500(await loader(args() as never));
-    await expectGuarded500(await action(args('POST') as never));
+    expect(await facts(await loader(args() as never))).toEqual(GUARDED_500);
+    expect(await facts(await action(args('POST') as never))).toEqual(
+      GUARDED_500,
+    );
   });
 
   it('is a headered 500 from the test-email loader and action', async () => {
     const { loader, action } =
       await import('../../src/route-modules/test-email.js');
-    await expectGuarded500(await loader(args() as never));
-    await expectGuarded500(await action(args('POST') as never));
+    expect(await facts(await loader(args() as never))).toEqual(GUARDED_500);
+    expect(await facts(await action(args('POST') as never))).toEqual(
+      GUARDED_500,
+    );
   });
 
   it('is a headered 500 from the /cms loader', async () => {
     const { loader } = await import('../../src/route-modules/cms.js');
-    await expectGuarded500(await loader(args() as never));
+    expect(await facts(await loader(args() as never))).toEqual(GUARDED_500);
   });
 });
 

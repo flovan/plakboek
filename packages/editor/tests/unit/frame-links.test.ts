@@ -248,9 +248,9 @@ describe('editShellLocation', () => {
     for (const href of ['/.//evil.com/x', `${TOP}//evil.com/x`]) {
       const decision = classifyFrameNavigation(click({ href }));
       expect(decision.action).toBe('follow-top');
-      if (decision.action === 'follow-top') {
-        expect(decision.location.startsWith('//')).toBe(false);
-      }
+      const location =
+        decision.action === 'follow-top' ? decision.location : '//';
+      expect(location.startsWith('//')).toBe(false);
     }
   });
 
