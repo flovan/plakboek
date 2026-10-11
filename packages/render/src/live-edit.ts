@@ -12,7 +12,8 @@ import type { EditAttributes, EditProxy } from './edit-proxy.js';
 
 /** The attribute names that are the edit-mode contract between the renderer
  * and the overlay. `unavailable` marks the placeholder for a block that
- * renders nothing. */
+ * renders nothing; its value is the reason (`unknown`, `degraded` or
+ * `failed`). */
 export const EDIT_ATTRIBUTE = Object.freeze({
   block: 'data-pk-block',
   type: 'data-pk-type',

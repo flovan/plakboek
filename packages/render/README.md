@@ -251,9 +251,11 @@ renders.
 - **Placeholders.** A block that would render nothing in the edit render (an
   unknown type, no component, a degraded node, or a component that throws or
   returns a promise) is replaced by an inert `div` carrying the attributes
-  above plus `data-pk-unavailable`, with `min-height: 40px` so it can be
-  hovered. The overlay labels it "{type} (unavailable)". The visitor path
-  still drops such a block.
+  above, with the same `kind` and `label` the block's own proxy would have had
+  (an unknown type falls back to `block` and its type key), plus
+  `data-pk-unavailable` whose value is why: `unknown`, `degraded` or `failed`.
+  It has `min-height: 40px` so it can be hovered. The overlay labels it
+  "{label} (unavailable)". The visitor path still drops such a block.
 - **`plain` mode.** For read-only viewers of a working tree: `NOOP_EDIT`, no
   placeholders, no `data-pk-*` attribute at all, so the markup matches what a
   visitor would receive.

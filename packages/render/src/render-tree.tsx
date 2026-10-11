@@ -9,14 +9,15 @@
  * - `live`: every block receives a live proxy (`createLiveEdit`), and a block
  *   that would render nothing (unknown type, no component, degraded, throwing,
  *   async) is replaced by an inert placeholder carrying the same attributes
- *   plus `data-pk-unavailable`, so the overlay has something to outline.
+ *   plus `data-pk-unavailable` (the reason), so the overlay has something to
+ *   outline.
  * - `plain`: `NOOP_EDIT` and no placeholder, so a read-only viewer of a
  *   working tree receives visitor-identical markup.
  *
  * No wrapper element is ever added around a block a host renders.
  */
 import type { BlockNode, PublishedPageSeo } from '@plakboek/pages';
-import { renderBlocks } from './block-host.js';
+import { renderBlocks, type PlaceholderReason } from './block-host.js';
 import type { ComponentMap } from './components.js';
 import { NOOP_EDIT, type EditProxy } from './edit-proxy.js';
 import { buildPageHead, type PageHead } from './head.js';
@@ -55,20 +56,32 @@ export type RenderedTree = {
   readonly degraded: boolean;
 };
 
-/** The edit-only stand-in: a hoverable box with the attributes and nothing else. */
-function placeholder(node: BlockNode): ReactNode {
-  return (
-    <div
-      {...{
-        [EDIT_ATTRIBUTE.block]: node.id,
-        [EDIT_ATTRIBUTE.type]: node.blockType,
-        [EDIT_ATTRIBUTE.kind]: 'block',
-        [EDIT_ATTRIBUTE.label]: node.blockType,
-        [EDIT_ATTRIBUTE.unavailable]: '',
-      }}
-      style={{ minHeight: '40px' }}
-    />
-  );
+/**
+ * The edit-only stand-in: a hoverable box with the attributes of the block it
+ * replaces and nothing else. Its kind and label come from the same block
+ * metadata a rendering block's proxy gets, so a section that fails is still a
+ * section to the overlay, and `data-pk-unavailable` says why it is a stand-in:
+ * `unknown` (no such type or component), `degraded` (stored below the type's
+ * compatibility floor) or `failed` (it threw or could not render).
+ */
+function placeholderFor(
+  blockMeta: ReadonlyMap<string, BlockMeta>,
+): (node: BlockNode, reason: PlaceholderReason) => ReactNode {
+  return (node, reason) => {
+    const meta = blockMeta.get(node.blockType);
+    return (
+      <div
+        {...{
+          [EDIT_ATTRIBUTE.block]: node.id,
+          [EDIT_ATTRIBUTE.type]: node.blockType,
+          [EDIT_ATTRIBUTE.kind]: meta?.kind ?? 'block',
+          [EDIT_ATTRIBUTE.label]: meta?.label ?? node.blockType,
+          [EDIT_ATTRIBUTE.unavailable]: reason,
+        }}
+        style={{ minHeight: '40px' }}
+      />
+    );
+  };
 }
 
 /** Renders a live working tree; never touches the database. */
@@ -99,7 +112,7 @@ export function renderPageTree(input: RenderPageTreeInput): RenderedTree {
     pageId: page.id,
     editFor,
     isDegraded: (node) => node.degraded,
-    placeholderFor: live ? placeholder : undefined,
+    placeholderFor: live ? placeholderFor(blockMeta) : undefined,
   });
   return { head, body, degraded };
 }

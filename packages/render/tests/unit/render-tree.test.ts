@@ -185,7 +185,7 @@ describe('placeholders (live)', () => {
     expect(body).toContain('Before');
     expect(body).toContain('After');
     expect(body).toContain('data-pk-block="b1"');
-    expect(body).toContain('data-pk-unavailable=""');
+    expect(body).toContain('data-pk-unavailable="failed"');
     expect(body).not.toContain('secret editor content');
     expect(onBlockRenderError).toHaveBeenCalledTimes(1);
     consoleError.mockRestore();
@@ -196,7 +196,7 @@ describe('placeholders (live)', () => {
     const { body, degraded } = render([node('l1', 'later')]);
     expect(degraded).toBe(true);
     expect(body).toContain('data-pk-block="l1"');
-    expect(body).toContain('data-pk-unavailable=""');
+    expect(body).toContain('data-pk-unavailable="failed"');
     consoleError.mockRestore();
   });
 
@@ -207,7 +207,7 @@ describe('placeholders (live)', () => {
       onUnknownBlock,
     });
     expect(body).toBe(
-      '<div data-pk-block="x1" data-pk-type="mystery" data-pk-kind="block" data-pk-label="mystery" data-pk-unavailable="" style="min-height:40px"></div>',
+      '<div data-pk-block="x1" data-pk-type="mystery" data-pk-kind="block" data-pk-label="mystery" data-pk-unavailable="unknown" style="min-height:40px"></div>',
     );
     expect(onUnknownBlock).toHaveBeenCalledTimes(1);
     consoleError.mockRestore();
@@ -238,8 +238,48 @@ describe('placeholders (live)', () => {
     expect(heading).not.toHaveBeenCalled();
     expect(degraded).toBe(true);
     expect(body).toContain('data-pk-block="d1"');
-    expect(body).toContain('data-pk-unavailable=""');
+    expect(body).toContain('data-pk-unavailable="degraded"');
     expect(body).not.toContain('Old');
+  });
+
+  it('keeps the kind and label of a known type on its placeholder, whatever the reason', () => {
+    const consoleError = silenceConsole();
+    const failing = new Map(components).set('section', Boom);
+    const input = {
+      page: {
+        id: PAGE_ID,
+        locale: 'en',
+        title: 'T',
+        seo: {
+          title: null,
+          description: null,
+          imageAssetId: null,
+          canonicalUrl: null,
+          noindex: false,
+          nofollow: false,
+        },
+      },
+      publicPath: '/test',
+      blockMeta,
+      mode: 'live' as const,
+    };
+    const thrown = renderPageTree({
+      ...input,
+      components: failing,
+      blocks: [node('s1', 'section')],
+    });
+    expect(thrown.body).toBe(
+      '<div data-pk-block="s1" data-pk-type="section" data-pk-kind="section" data-pk-label="Section" data-pk-unavailable="failed" style="min-height:40px"></div>',
+    );
+    const degraded = renderPageTree({
+      ...input,
+      components,
+      blocks: [node('s2', 'section', {}, [], 'below-floor')],
+    });
+    expect(degraded.body).toContain('data-pk-kind="section"');
+    expect(degraded.body).toContain('data-pk-label="Section"');
+    expect(degraded.body).toContain('data-pk-unavailable="degraded"');
+    consoleError.mockRestore();
   });
 
   it('drops the subtree of a failing block', () => {
