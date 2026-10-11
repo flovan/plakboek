@@ -9,9 +9,11 @@ import {
   classifyAuthError,
   failureMessage,
   maskEmail,
+  normaliseBackupCode,
   normaliseCode,
   normaliseEmail,
   TWO_FACTOR_MAX_ATTEMPTS,
+  validateBackupCode,
   validateCode,
   validateEmail,
   validatePassword,
@@ -73,6 +75,24 @@ describe('CODE_FIELD_MAX_LENGTH', () => {
     expect(CODE_FIELD_MAX_LENGTH).toBeGreaterThan(6);
     // Whatever the field takes, once normalised, is still a valid code.
     expect(validateCode('123 456'.slice(0, CODE_FIELD_MAX_LENGTH))).toBeNull();
+  });
+});
+
+describe('validateBackupCode', () => {
+  it('asks for a code when there is none', () => {
+    expect(validateBackupCode('')).toBe('Enter a backup code.');
+    expect(validateBackupCode('  \n ')).toBe('Enter a backup code.');
+  });
+
+  it.each(['abcde-12345', ' abcde-12345 ', 'AbCdE12345'])(
+    'accepts %j and leaves the format to the service',
+    (value) => {
+      expect(validateBackupCode(value)).toBeNull();
+    },
+  );
+
+  it('strips whitespace but keeps the case', () => {
+    expect(normaliseBackupCode(' aBcDe -12345\n')).toBe('aBcDe-12345');
   });
 });
 
@@ -197,6 +217,9 @@ describe('what the card repeats from the auth library', () => {
     );
     expect(AUTH_ERROR_CODES.invalidCode).toBe(
       TWO_FACTOR_ERROR_CODES.INVALID_CODE.code,
+    );
+    expect(AUTH_ERROR_CODES.invalidBackupCode).toBe(
+      TWO_FACTOR_ERROR_CODES.INVALID_BACKUP_CODE.code,
     );
     expect(AUTH_ERROR_CODES.expiredCode).toBe(
       TWO_FACTOR_ERROR_CODES.OTP_HAS_EXPIRED.code,

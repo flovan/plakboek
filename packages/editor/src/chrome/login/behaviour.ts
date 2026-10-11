@@ -75,6 +75,9 @@ export type LoginAuth = {
   signInEmail(email: string, password: string): Promise<SignInResult>;
   /** Checks the code of the authenticator app against the pending sign-in. */
   verifyTotp(code: string): Promise<CodeResult>;
+  /** Checks one of the saved backup codes against the pending sign-in. The
+   * service spends the code. */
+  verifyBackupCode(code: string): Promise<CodeResult>;
   /** Mails a code to the user whose password step just succeeded. */
   sendOtp(): Promise<SendResult>;
   /** Checks the emailed code against the pending sign-in. */

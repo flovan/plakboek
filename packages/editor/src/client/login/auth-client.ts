@@ -71,6 +71,7 @@ export type AuthClient = {
   readonly twoFactor: {
     verifyTotp(input: { readonly code: string }): Promise<AuthCallResult>;
     verifyOtp(input: { readonly code: string }): Promise<AuthCallResult>;
+    verifyBackupCode(input: { readonly code: string }): Promise<AuthCallResult>;
     sendOtp(): Promise<AuthCallResult>;
     enable(input: { readonly password: string }): Promise<AuthCallResult>;
   };
@@ -199,6 +200,8 @@ export function createLoginAuth(
     },
     verifyTotp: (code) => verify((auth) => auth.twoFactor.verifyTotp({ code })),
     verifyOtp: (code) => verify((auth) => auth.twoFactor.verifyOtp({ code })),
+    verifyBackupCode: (code) =>
+      verify((auth) => auth.twoFactor.verifyBackupCode({ code })),
     async enableTwoFactor(password): Promise<EnableResult> {
       const result = await call((auth) => auth.twoFactor.enable({ password }));
       if (!result.ok) return { status: 'failed', failure: result.failure };

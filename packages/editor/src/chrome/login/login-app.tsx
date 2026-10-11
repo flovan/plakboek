@@ -15,7 +15,7 @@ import { MagicRequestStep } from './magic-request.js';
 import { PasswordLinkStep } from './password-link.js';
 import { SentState } from './sent.js';
 import { SignInStep, type SignInStatus } from './sign-in.js';
-import { EmailCodeStep, TwoFactorStep } from './two-factor.js';
+import { BackupCodeStep, EmailCodeStep, TwoFactorStep } from './two-factor.js';
 
 /** What the card shows: a step the page opened on, or one it reached by
  * signing in. */
@@ -23,6 +23,7 @@ export type LoginView =
   | LoginStep
   | 'two-factor-totp'
   | 'two-factor-email'
+  | 'two-factor-backup'
   | 'lockout'
   | 'forgot'
   | 'forgot-sent'
@@ -45,8 +46,9 @@ export type LoginAppProps = {
  * markup for the first paint (the step the page opened on, with no behaviour)
  * and the client hydrates it from the same island, so one component serves
  * both. In the client a sign-in moves it on: password to the authenticator
- * step, from there to the emailed-code step and back, and to the lockout step
- * when the account is locked or five wrong codes have been entered. The
+ * step, from there to the emailed-code step or the backup-code step and back,
+ * and to the lockout step when the account is locked or five wrong codes have
+ * been entered. The
  * request steps (forgot password, sign-in link) end in one shared "Check your
  * email" state, the password landings return to sign-in with a status line,
  * and an unusable link ends in the invalid-link step whose button leads to the
@@ -123,6 +125,18 @@ export function LoginApp(props: LoginAppProps): ReactElement {
             {...handlers}
             onEmailSent={() => {
               go('two-factor-email');
+            }}
+            onUseBackupCode={() => {
+              go('two-factor-backup');
+            }}
+          />
+        );
+      case 'two-factor-backup':
+        return (
+          <BackupCodeStep
+            {...handlers}
+            onUseAuthenticator={() => {
+              go('two-factor-totp');
             }}
           />
         );

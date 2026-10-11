@@ -48,6 +48,8 @@ export async function createTestUser(input: {
 export type Enrolment = {
   /** The base32 secret an authenticator app would hold. */
   readonly secret: string;
+  /** The one-time backup codes issued with it. */
+  readonly backupCodes: readonly string[];
 };
 
 /**
@@ -84,5 +86,10 @@ export async function enrolTwoFactor(
   }
   const secret = secretOfOtpauthUri(enabled.totpURI);
   await post('two-factor/verify-totp', { code: totp(secret) });
-  return { secret };
+  const backupCodes = Array.isArray(enabled.backupCodes)
+    ? enabled.backupCodes.filter(
+        (code): code is string => typeof code === 'string',
+      )
+    : [];
+  return { secret, backupCodes };
 }

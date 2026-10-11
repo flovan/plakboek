@@ -1,9 +1,12 @@
 import { useRef, useState, type FormEvent, type ReactElement } from 'react';
 import {
+  BACKUP_CODE_FIELD_MAX_LENGTH,
   CODE_FIELD_MAX_LENGTH,
   failureMessage,
   maskEmail,
+  normaliseBackupCode,
   normaliseCode,
+  validateBackupCode,
   validateCode,
   type AuthFailure,
 } from '../../client/login/validation.js';
@@ -32,6 +35,23 @@ export type CodeStepHandlers = {
 
 type Failure = { readonly failure: AuthFailure; readonly attempt: number };
 
+/** What a code field accepts before anything is sent: the six digits of an
+ * app or an email, or a saved backup code. */
+type CodeRules = {
+  readonly validate: (value: string) => string | null;
+  readonly normalise: (value: string) => string;
+};
+
+const SIX_DIGITS: CodeRules = {
+  validate: validateCode,
+  normalise: normaliseCode,
+};
+
+const BACKUP_CODE: CodeRules = {
+  validate: validateBackupCode,
+  normalise: normaliseBackupCode,
+};
+
 /**
  * The form both code steps share: one field for the six digits, one primary
  * button and the single error box. It checks the code is six digits before
@@ -41,6 +61,7 @@ type Failure = { readonly failure: AuthFailure; readonly attempt: number };
 function useCodeForm(
   verify: (code: string) => Promise<CodeResult>,
   handlers: CodeStepHandlers,
+  rules: CodeRules = SIX_DIGITS,
 ) {
   const behaviour = useLoginBehaviour();
   const busyRef = useRef(false);
@@ -53,7 +74,7 @@ function useCodeForm(
     event.preventDefault();
     if (behaviour === null || busyRef.current) return;
     const code = fieldText(new FormData(event.currentTarget), 'code');
-    const problem = validateCode(code);
+    const problem = rules.validate(code);
     setCodeError(problem);
     setFailed(null);
     if (problem !== null) {
@@ -62,7 +83,7 @@ function useCodeForm(
     }
     busyRef.current = true;
     setBusy(true);
-    const result = await verify(normaliseCode(code));
+    const result = await verify(rules.normalise(code));
     if (result.status === 'verified') {
       // The card stays as it is while the hand-over takes it.
       behaviour.signedIn(result.user);
@@ -90,8 +111,11 @@ function useCodeForm(
 /** The code field, the error box and the Verify button of a code step. */
 function CodeForm(props: {
   readonly form: ReturnType<typeof useCodeForm>;
+  /** A saved backup code rather than six digits. */
+  readonly backup?: boolean;
 }): ReactElement {
   const { busy, codeError, failed, inputRef, submit } = props.form;
+  const backup = props.backup === true;
   return (
     <form
       noValidate
@@ -102,10 +126,16 @@ function CodeForm(props: {
       <Field
         id="plakboek-login-code"
         name="code"
-        label={STRINGS['login.twoFactor.code.label']}
+        label={
+          backup
+            ? STRINGS['login.twoFactor.backup.label']
+            : STRINGS['login.twoFactor.code.label']
+        }
         autoComplete="one-time-code"
-        inputMode="numeric"
-        maxLength={CODE_FIELD_MAX_LENGTH}
+        {...(backup ? {} : { inputMode: 'numeric' as const })}
+        maxLength={
+          backup ? BACKUP_CODE_FIELD_MAX_LENGTH : CODE_FIELD_MAX_LENGTH
+        }
         readOnly={busy}
         error={codeError}
         inputRef={inputRef}
@@ -114,7 +144,11 @@ function CodeForm(props: {
         {failed === null ? null : (
           <ErrorBox
             key={failed.attempt}
-            message={failureMessage(failed.failure)}
+            message={
+              backup && failed.failure === 'code'
+                ? STRINGS['error.backupCode']
+                : failureMessage(failed.failure)
+            }
           />
         )}
         <PrimaryButton busy={busy} busyLabel={STRINGS['loading.verifying']}>
@@ -128,6 +162,8 @@ function CodeForm(props: {
 export type TwoFactorStepProps = CodeStepHandlers & {
   /** The emailed code was asked for and is on its way. */
   readonly onEmailSent: () => void;
+  /** The person chose to sign in with a saved backup code. */
+  readonly onUseBackupCode: () => void;
 };
 
 /**
@@ -172,22 +208,73 @@ export function TwoFactorStep(props: TwoFactorStepProps): ReactElement {
       body={STRINGS['login.twoFactor.totp.body']}
       next={next}
       secondary={
-        <button
-          type="button"
-          disabled={sending}
-          aria-disabled={sending ? true : undefined}
-          onClick={() => {
-            void sendEmailCode();
-          }}
-          className={TEXT_LINK}
-        >
-          {sending
-            ? STRINGS['loading.sending']
-            : STRINGS['login.twoFactor.totp.useEmail']}
-        </button>
+        <>
+          <button
+            type="button"
+            disabled={sending}
+            aria-disabled={sending ? true : undefined}
+            onClick={() => {
+              void sendEmailCode();
+            }}
+            className={TEXT_LINK}
+          >
+            {sending
+              ? STRINGS['loading.sending']
+              : STRINGS['login.twoFactor.totp.useEmail']}
+          </button>
+          <button
+            type="button"
+            onClick={props.onUseBackupCode}
+            className={TEXT_LINK}
+          >
+            {STRINGS['login.twoFactor.totp.useBackup']}
+          </button>
+        </>
       }
     >
       <CodeForm form={form} />
+    </LoginCard>
+  );
+}
+
+export type BackupCodeStepProps = CodeStepHandlers & {
+  /** Back to the authenticator step. */
+  readonly onUseAuthenticator: () => void;
+};
+
+/**
+ * The backup-code step: one of the codes saved when two-step sign-in was set
+ * up, for a person who no longer has their authenticator app. The service
+ * spends the code, and a wrong one counts towards the same lockout as any
+ * other wrong code.
+ */
+export function BackupCodeStep(props: BackupCodeStepProps): ReactElement {
+  const { next, onUseAuthenticator } = props;
+  const behaviour = useLoginBehaviour();
+  const form = useCodeForm(
+    (code) =>
+      behaviour === null
+        ? Promise.resolve({ status: 'failed', failure: 'server' })
+        : behaviour.auth.verifyBackupCode(code),
+    props,
+    BACKUP_CODE,
+  );
+  return (
+    <LoginCard
+      heading={STRINGS['login.twoFactor.backup.heading']}
+      body={STRINGS['login.twoFactor.backup.body']}
+      next={next}
+      secondary={
+        <button
+          type="button"
+          onClick={onUseAuthenticator}
+          className={TEXT_LINK}
+        >
+          {STRINGS['login.twoFactor.backup.useTotp']}
+        </button>
+      }
+    >
+      <CodeForm form={form} backup />
     </LoginCard>
   );
 }

@@ -30,6 +30,11 @@ export const CODE_FIELD_MAX_LENGTH = 7;
  * server is the judge of a real address; this only catches a typing slip. */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
 
+/** The longest backup code a field takes. The service's codes are ten
+ * characters with a dash in the middle; this leaves room for spaces around a
+ * pasted one without capping what the service may issue later. */
+export const BACKUP_CODE_FIELD_MAX_LENGTH = 32;
+
 /** The text of an email field as it is sent: without surrounding spaces. */
 export function normaliseEmail(value: string): string {
   return value.trim();
@@ -81,6 +86,20 @@ export function validateCode(value: string): string | null {
     : STRINGS['validation.code.invalid'];
 }
 
+/** The text of a backup-code field as it is sent: without any whitespace.
+ * Case is kept, because the codes use both. */
+export function normaliseBackupCode(value: string): string {
+  return value.replace(/\s+/g, '');
+}
+
+/** The inline message for an empty backup code, or `null`. The service is the
+ * judge of the rest: the code format is its own. */
+export function validateBackupCode(value: string): string | null {
+  return normaliseBackupCode(value) === ''
+    ? STRINGS['validation.backupCode.empty']
+    : null;
+}
+
 /** What a failed auth call stands for in the card. */
 export type AuthFailure =
   | 'credentials'
@@ -102,6 +121,7 @@ export const AUTH_ERROR_CODES = Object.freeze({
   wrongCredentials: 'INVALID_EMAIL_OR_PASSWORD',
   wrongPassword: 'INVALID_PASSWORD',
   invalidCode: 'INVALID_CODE',
+  invalidBackupCode: 'INVALID_BACKUP_CODE',
   expiredCode: 'OTP_HAS_EXPIRED',
   accountLocked: 'ACCOUNT_TEMPORARILY_LOCKED',
   challengeSpent: 'TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE',
@@ -148,6 +168,7 @@ export function classifyAuthError(failure: unknown): AuthFailure {
   if (code === AUTH_ERROR_CODES.wrongPassword) return 'password';
   if (
     code === AUTH_ERROR_CODES.invalidCode ||
+    code === AUTH_ERROR_CODES.invalidBackupCode ||
     code === AUTH_ERROR_CODES.expiredCode
   ) {
     return 'code';

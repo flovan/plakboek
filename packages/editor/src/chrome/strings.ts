@@ -34,6 +34,12 @@ export const STRINGS = Object.freeze({
   'login.twoFactor.totp.body':
     'Enter the 6-digit code from your authenticator app.',
   'login.twoFactor.totp.useEmail': 'Email me a code instead',
+  'login.twoFactor.totp.useBackup': 'Use a backup code',
+  'login.twoFactor.backup.heading': 'Use a backup code',
+  'login.twoFactor.backup.body':
+    'Enter one of the backup codes you saved when you set up two-step sign-in. Each code works once.',
+  'login.twoFactor.backup.label': 'Backup code',
+  'login.twoFactor.backup.useTotp': 'Use your authenticator app instead',
   'login.twoFactor.email.heading': 'Check your email',
   'login.twoFactor.email.body': 'We emailed a 6-digit code to {maskedEmail}.',
   'login.twoFactor.email.resend': 'Resend code',
@@ -102,6 +108,7 @@ export const STRINGS = Object.freeze({
   'validation.email.malformed': 'Enter an address like name@example.com.',
   'validation.password.empty': 'Enter your password.',
   'validation.code.invalid': 'Enter the 6-digit code.',
+  'validation.backupCode.empty': 'Enter a backup code.',
   'validation.newPassword.tooShort': 'Use at least 12 characters.',
   'validation.confirm.mismatch': 'The two passwords do not match.',
 
@@ -111,6 +118,8 @@ export const STRINGS = Object.freeze({
   'error.rateLimited': 'Too many attempts. Wait a few minutes, then try again.',
   'error.code':
     'That code is not valid or has expired. Check it and try again.',
+  'error.backupCode':
+    'That backup code is not valid or has already been used. Check it and try again.',
   'error.network':
     'Could not reach the server. Check your connection and try again.',
   'error.server': 'Something went wrong on our side. Try again in a moment.',

@@ -20,7 +20,11 @@ import {
 const HOST = 'plakboek-editor';
 const EDITOR_FLAG = 'plakboek:editor';
 
-type EnrolledUser = { readonly user: TestUser; readonly secret: string };
+type EnrolledUser = {
+  readonly user: TestUser;
+  readonly secret: string;
+  readonly backupCodes: readonly string[];
+};
 
 function siteOrigin(): string {
   const origin = process.env.E2E_BASE_URL;
@@ -37,8 +41,12 @@ async function enrolledEditor(
   const user = await createTestUser({ roleKey: 'editor' });
   const request = await playwright.request.newContext();
   try {
-    const { secret } = await enrolTwoFactor(request, siteOrigin(), user);
-    return { user, secret };
+    const { secret, backupCodes } = await enrolTwoFactor(
+      request,
+      siteOrigin(),
+      user,
+    );
+    return { user, secret, backupCodes };
   } finally {
     await request.dispose();
   }
@@ -210,6 +218,59 @@ test.describe('two-step sign-in', () => {
     await page.waitForURL(
       (url) => url.pathname === '/about' && url.search === '?_edit=1',
     );
+  });
+
+  test('signs in with a saved backup code when the authenticator app is gone', async ({
+    page,
+    playwright,
+  }) => {
+    const { user, backupCodes } = await enrolledEditor(playwright);
+    const [backupCode] = backupCodes;
+    if (backupCode === undefined) throw new Error('no backup code was issued');
+    await openModal(page);
+    await signInWithPassword(page, user);
+    await expect(
+      page.getByRole('heading', { name: 'Enter your code' }),
+    ).toBeFocused();
+
+    await page.getByRole('button', { name: 'Use a backup code' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Use a backup code' }),
+    ).toBeFocused();
+    const field = page.getByLabel('Backup code', { exact: true });
+    await expect(field).toBeVisible();
+
+    // Nothing is sent for an empty field.
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await expect(page.getByText('Enter a backup code.')).toBeVisible();
+
+    // A code the account does not hold is refused with its own message.
+    await field.fill('wrong-code1');
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await expect(page.getByRole('alert')).toHaveText(
+      'That backup code is not valid or has already been used. Check it and try again.',
+    );
+
+    await field.fill(backupCode);
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await page.waitForURL(
+      (url) => url.pathname === '/about' && url.search === '?_edit=1',
+    );
+    await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
+  });
+
+  test('offers the way back from the backup code to the authenticator app', async ({
+    page,
+  }) => {
+    await openModal(page);
+    await signInWithPassword(page, shared.user);
+    await page.getByRole('button', { name: 'Use a backup code' }).click();
+    await page
+      .getByRole('button', { name: 'Use your authenticator app instead' })
+      .click();
+    await expect(
+      page.getByRole('heading', { name: 'Enter your code' }),
+    ).toBeFocused();
   });
 
   test('ends on the lockout step after five wrong codes, and Back to sign in starts again', async ({

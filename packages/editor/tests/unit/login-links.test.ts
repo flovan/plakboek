@@ -28,6 +28,7 @@ function refused(status: number, code?: string): AuthCallResult {
 type Calls = {
   fetch: { path: string; body: unknown }[];
   magic: unknown[];
+  backup: unknown[];
 };
 
 /** A client whose answers are set per test; every call is recorded. */
@@ -35,8 +36,9 @@ function fakeClient(answers: {
   readonly fetch?: AuthCallResult;
   readonly magic?: AuthCallResult;
   readonly session?: AuthCallResult;
+  readonly backup?: AuthCallResult;
 }): { readonly client: () => Promise<AuthClient>; readonly calls: Calls } {
-  const calls: Calls = { fetch: [], magic: [] };
+  const calls: Calls = { fetch: [], magic: [], backup: [] };
   const never = (): Promise<AuthCallResult> =>
     Promise.reject(new Error('not used here'));
   const client: AuthClient = {
@@ -50,6 +52,10 @@ function fakeClient(answers: {
     twoFactor: {
       verifyTotp: never,
       verifyOtp: never,
+      verifyBackupCode: (input) => {
+        calls.backup.push(input);
+        return Promise.resolve(answers.backup ?? OK);
+      },
       sendOtp: never,
       enable: never,
     },
@@ -236,6 +242,42 @@ describe('readSession', () => {
     expect(await auth.readSession()).toEqual({
       status: 'failed',
       failure: 'server',
+    });
+  });
+});
+
+describe('verifyBackupCode', () => {
+  it('sends the code and reports the user it signed in', async () => {
+    const { client, calls } = fakeClient({
+      backup: {
+        data: { user: { name: 'Ada', email: 'ada@example.com' } },
+        error: null,
+      },
+    });
+    const result =
+      await createLoginAuth(client).verifyBackupCode('abcde-12345');
+    expect(calls.backup).toEqual([{ code: 'abcde-12345' }]);
+    expect(result).toEqual({
+      status: 'verified',
+      user: {
+        name: 'Ada',
+        email: 'ada@example.com',
+        role: null,
+        twoFactorEnabled: false,
+      },
+    });
+  });
+
+  it('reports a refused code as a wrong code, not a credentials failure', async () => {
+    const { client } = fakeClient({
+      backup: {
+        data: null,
+        error: { status: 401, code: 'INVALID_BACKUP_CODE' },
+      },
+    });
+    expect(await createLoginAuth(client).verifyBackupCode('nope')).toEqual({
+      status: 'failed',
+      failure: 'code',
     });
   });
 });
