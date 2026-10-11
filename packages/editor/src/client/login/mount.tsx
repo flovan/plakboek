@@ -1,30 +1,10 @@
 import { useEffect, type ReactElement } from 'react';
 import { hydrateRoot, type Root } from 'react-dom/client';
 import { LOGIN_ROOT_ID, type LoginIsland } from '../../chrome/island.js';
-import type {
-  LoginBehaviour,
-  SignedInUser,
-} from '../../chrome/login/behaviour.js';
+import type { LoginBehaviour } from '../../chrome/login/behaviour.js';
 import { LoginApp } from '../../chrome/login/login-app.js';
 import { createLoginAuth } from './auth-client.js';
 import { editAddress, runLoginTransition } from './transition.js';
-
-/** Where the set-up of two-step sign-in is (the auth package's own constant,
- * repeated because the client entry cannot import that package; a unit test
- * holds the two together). */
-export const ENROLMENT_PATH = '/cms/two-factor/enrol';
-
-/** Whether a user must set up two-step sign-in before editing: their role is
- * one that requires it and they have not. The server decides again on every
- * request; this only picks the card's next step. */
-export function mustEnrol(
-  user: SignedInUser,
-  requiredRoles: readonly string[],
-): boolean {
-  if (user.twoFactorEnabled || user.role === null) return false;
-  const roles = user.role.split(',').map((role) => role.trim());
-  return roles.some((role) => requiredRoles.includes(role));
-}
 
 /** The modal state of the card's dialog, shared by every dialog the card
  * mounts (each step is a fresh dialog). */
@@ -98,13 +78,10 @@ export function mountLogin(
     dialogRef: (dialog) => {
       if (dialog !== null) makeModal(dialog, state);
     },
+    // A user whose role must set up two-step sign-in is sent there by the
+    // server when the edit page is requested, so the card does not need to
+    // know which roles those are.
     signedIn: (user) => {
-      if (mustEnrol(user, island.twoFactorRequiredRoles)) {
-        globalThis.location.assign(
-          `${ENROLMENT_PATH}?next=${encodeURIComponent(island.next)}`,
-        );
-        return;
-      }
       void runLoginTransition({
         host,
         shadowRoot,

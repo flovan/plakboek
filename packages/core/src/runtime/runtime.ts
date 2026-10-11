@@ -15,7 +15,6 @@
 import {
   createAuditRecorder,
   createAuth,
-  TWO_FACTOR_REQUIRED_ROLE_KEYS,
   type Auth,
   type AuditRecorder,
 } from '@plakboek/auth';
@@ -179,7 +178,6 @@ function composeCmsPages(
       resolver,
       assets: editorAssets,
       csp: env.production,
-      twoFactorRequiredRoleKeys: TWO_FACTOR_REQUIRED_ROLE_KEYS,
     });
   });
 }

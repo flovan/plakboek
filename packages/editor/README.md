@@ -153,8 +153,9 @@ rail, and it renders nothing when no slot is given.
 `createCmsPages(deps)` returns `{ handle(request) }`, the handler behind core's
 `/cms` routes. It answers a response for the paths it owns and `null` for any
 other, which core turns into the host's own 404. It takes the auth instance,
-the permission resolver, the editor assets, `csp` and the role keys that must
-set up two-step sign-in.
+the permission resolver, the editor assets and `csp`. The page tells the
+browser nothing about which roles must set up two-step sign-in: the server
+sends a role that still has to set it up to the enrolment path.
 
 | Path                    | Answer                                                                                                                                             |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |

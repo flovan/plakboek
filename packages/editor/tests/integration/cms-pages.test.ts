@@ -28,7 +28,6 @@ function pages(): ReturnType<typeof createCmsPages> {
     resolver: harness.resolver,
     assets: ASSETS,
     csp: true,
-    twoFactorRequiredRoleKeys: ['superadmin'],
   });
 }
 
@@ -83,7 +82,6 @@ describe('/cms', () => {
       kind: 'login',
       step: 'sign-in',
       next: '/about',
-      twoFactorRequiredRoles: ['superadmin'],
     });
   });
 

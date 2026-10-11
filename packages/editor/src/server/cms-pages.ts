@@ -35,8 +35,6 @@ export type CmsPagesDeps = {
   readonly assets: EditorAssets;
   /** Whether the documents send a Content-Security-Policy. */
   readonly csp: boolean;
-  /** The role keys that must set up two-step sign-in, told to the client. */
-  readonly twoFactorRequiredRoleKeys: readonly string[];
 };
 
 export type CmsPages = {
@@ -98,7 +96,6 @@ export function createCmsPages(deps: CmsPagesDeps): CmsPages {
       step,
       next,
       ...extra,
-      twoFactorRequiredRoles: deps.twoFactorRequiredRoleKeys,
     };
   }
 

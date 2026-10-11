@@ -61,8 +61,6 @@ export type LoginIsland = {
   readonly next: string;
   /** Present on `invalid-link` only. */
   readonly linkKind?: LinkKind;
-  /** The role keys that must set up two-step sign-in. */
-  readonly twoFactorRequiredRoles: readonly string[];
   /** The signed-in user's address, present on `enrol` only. */
   readonly email?: string;
 };

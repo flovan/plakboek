@@ -1,7 +1,5 @@
-import { TWO_FACTOR_ENROLMENT_PATH } from '@plakboek/auth';
 import { describe, expect, it } from 'vitest';
 import { LAYOUT_STORAGE_KEY } from '../../src/server/layout-script.js';
-import { ENROLMENT_PATH, mustEnrol } from '../../src/client/login/mount.js';
 import {
   editAddress,
   TIMINGS,
@@ -50,35 +48,7 @@ describe('TIMINGS', () => {
   });
 });
 
-describe('mustEnrol', () => {
-  const roles = ['superadmin', 'admin'];
-  const user = (role: string | null, twoFactorEnabled: boolean) => ({
-    name: 'Ada',
-    email: 'ada@example.com',
-    role,
-    twoFactorEnabled,
-  });
-
-  it('is true for a required role without two-step sign-in', () => {
-    expect(mustEnrol(user('admin', false), roles)).toBe(true);
-  });
-
-  it('is false once two-step sign-in is on, for other roles and without a role', () => {
-    expect(mustEnrol(user('admin', true), roles)).toBe(false);
-    expect(mustEnrol(user('editor', false), roles)).toBe(false);
-    expect(mustEnrol(user(null, false), roles)).toBe(false);
-  });
-
-  it('reads a list of roles', () => {
-    expect(mustEnrol(user('editor, admin', false), roles)).toBe(true);
-  });
-});
-
 describe('constants repeated from other modules', () => {
-  it('names the auth package set-up path', () => {
-    expect(ENROLMENT_PATH).toBe(TWO_FACTOR_ENROLMENT_PATH);
-  });
-
   it('names the layout key the shell and its pre-paint script use', () => {
     expect(LAYOUT_KEY).toBe(LAYOUT_STORAGE_KEY);
   });

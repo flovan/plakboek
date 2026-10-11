@@ -70,7 +70,6 @@ const LOGIN = {
   kind: 'login',
   step: 'sign-in',
   next: '/about',
-  twoFactorRequiredRoles: ['superadmin', 'admin'],
 };
 
 describe('readIsland for the login document', () => {
@@ -98,8 +97,6 @@ describe('readIsland for the login document', () => {
     ['an unknown step', { ...LOGIN, step: 'admin' }],
     ['a missing next', { ...LOGIN, next: undefined }],
     ['a non-text next', { ...LOGIN, next: 4 }],
-    ['missing required roles', { ...LOGIN, twoFactorRequiredRoles: undefined }],
-    ['roles that are not all text', { ...LOGIN, twoFactorRequiredRoles: [1] }],
     ['an unknown link kind', { ...LOGIN, linkKind: 'magic' }],
     ['a non-text email', { ...LOGIN, email: 5 }],
   ])('returns null for %s', (_label, island) => {

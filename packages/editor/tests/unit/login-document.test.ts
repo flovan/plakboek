@@ -20,7 +20,6 @@ function island(overrides: Partial<LoginIsland> = {}): LoginIsland {
     kind: 'login',
     step: 'sign-in',
     next: '/about',
-    twoFactorRequiredRoles: ['superadmin'],
     ...overrides,
   };
 }

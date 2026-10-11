@@ -71,23 +71,11 @@ function linkKindOf(value: unknown): LinkKind | null {
   return LINK_KINDS.find((kind) => kind === value) ?? null;
 }
 
-/** A list of text values, or `null` when it is anything else. */
-function textList(value: unknown): readonly string[] | null {
-  if (!Array.isArray(value)) return null;
-  const items: string[] = [];
-  for (const item of value as unknown[]) {
-    if (typeof item !== 'string') return null;
-    items.push(item);
-  }
-  return items;
-}
-
 /** A strictly shaped login island, or `null` for anything else. */
 function toLoginIsland(value: Record<string, unknown>): LoginIsland | null {
   const step = loginStepOf(value.step);
   const next = text(value.next);
-  const roles = textList(value.twoFactorRequiredRoles);
-  if (step === null || next === null || roles === null) return null;
+  if (step === null || next === null) return null;
   const linkKind =
     value.linkKind === undefined ? undefined : linkKindOf(value.linkKind);
   if (linkKind === null) return null;
@@ -97,7 +85,6 @@ function toLoginIsland(value: Record<string, unknown>): LoginIsland | null {
     kind: 'login',
     step,
     next,
-    twoFactorRequiredRoles: roles,
     ...(linkKind === undefined ? {} : { linkKind }),
     ...(email === undefined ? {} : { email }),
   };
