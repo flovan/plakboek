@@ -61,6 +61,9 @@ export type LoginIsland = {
   readonly next: string;
   /** Present on `invalid-link` only. */
   readonly linkKind?: LinkKind;
+  /** The shortest password the server accepts, for the choose-a-password
+   * steps' hint and messages. */
+  readonly passwordMinLength: number;
   /** The signed-in user's address, present on `enrol` only. */
   readonly email?: string;
 };

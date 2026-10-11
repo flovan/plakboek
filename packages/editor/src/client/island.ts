@@ -71,11 +71,25 @@ function linkKindOf(value: unknown): LinkKind | null {
   return LINK_KINDS.find((kind) => kind === value) ?? null;
 }
 
+/** The largest minimum password length the island may carry. Only a sanity
+ * bound: the server's own value is far smaller. */
+const MAX_PASSWORD_MIN_LENGTH = 1024;
+
 /** A strictly shaped login island, or `null` for anything else. */
 function toLoginIsland(value: Record<string, unknown>): LoginIsland | null {
   const step = loginStepOf(value.step);
   const next = text(value.next);
-  if (step === null || next === null) return null;
+  const passwordMinLength = value.passwordMinLength;
+  if (
+    step === null ||
+    next === null ||
+    typeof passwordMinLength !== 'number' ||
+    !Number.isInteger(passwordMinLength) ||
+    passwordMinLength < 1 ||
+    passwordMinLength > MAX_PASSWORD_MIN_LENGTH
+  ) {
+    return null;
+  }
   const linkKind =
     value.linkKind === undefined ? undefined : linkKindOf(value.linkKind);
   if (linkKind === null) return null;
@@ -85,6 +99,7 @@ function toLoginIsland(value: Record<string, unknown>): LoginIsland | null {
     kind: 'login',
     step,
     next,
+    passwordMinLength,
     ...(linkKind === undefined ? {} : { linkKind }),
     ...(email === undefined ? {} : { email }),
   };

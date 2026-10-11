@@ -82,7 +82,21 @@ describe('/cms', () => {
       kind: 'login',
       step: 'sign-in',
       next: '/about',
+      passwordMinLength: 12,
     });
+  });
+
+  it('tells the client the minimum password length the installation set', async () => {
+    const custom = createCmsPages({
+      auth: harness.auth,
+      resolver: harness.resolver,
+      assets: ASSETS,
+      csp: true,
+      passwordMinLength: 16,
+    });
+    const response = await custom.handle(request('/cms?next=/about'));
+    const html = (await response?.text()) ?? '';
+    expect(islandOf(html)).toMatchObject({ passwordMinLength: 16 });
   });
 
   it('sends an editor straight to the page in edit mode', async () => {

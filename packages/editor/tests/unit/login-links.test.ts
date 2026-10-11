@@ -83,6 +83,14 @@ describe('the new-password checks', () => {
     expect(validateNewPassword('\u{1F600}'.repeat(11))).not.toBeNull();
   });
 
+  it('uses the minimum the server named and says what it is', () => {
+    expect(validateNewPassword('a'.repeat(12), 16)).toBe(
+      'Use at least 16 characters.',
+    );
+    expect(validateNewPassword('a'.repeat(16), 16)).toBeNull();
+    expect(validateNewPassword('a'.repeat(14), 14)).toBeNull();
+  });
+
   it('asks for the two passwords to match exactly', () => {
     expect(validatePasswordConfirmation('abc', 'abc')).toBeNull();
     expect(validatePasswordConfirmation('abc', 'abd')).toBe(

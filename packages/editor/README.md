@@ -153,7 +153,10 @@ rail, and it renders nothing when no slot is given.
 `createCmsPages(deps)` returns `{ handle(request) }`, the handler behind core's
 `/cms` routes. It answers a response for the paths it owns and `null` for any
 other, which core turns into the host's own 404. It takes the auth instance,
-the permission resolver, the editor assets and `csp`. The page tells the
+the permission resolver, the editor assets, `csp` and, when the installation
+raised the password minimum in `createAuth`, that `passwordMinLength` (it
+defaults to the auth package's own 12), so the choose-a-password hint and
+messages name the real minimum. The page tells the
 browser nothing about which roles must set up two-step sign-in: the server
 sends a role that still has to set it up to the enrolment path.
 

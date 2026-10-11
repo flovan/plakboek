@@ -4,7 +4,7 @@
  * stands for. Pure functions over `STRINGS`, so they are tested without a
  * browser and the components stay free of rules.
  */
-import { STRINGS } from '../../chrome/strings.js';
+import { formatString, STRINGS } from '../../chrome/strings.js';
 
 /** Where a wrong-code count stops being a retry and becomes the lockout step:
  * the server locks the account after this many consecutive wrong codes, and
@@ -12,9 +12,10 @@ import { STRINGS } from '../../chrome/strings.js';
  * own setting. */
 export const TWO_FACTOR_MAX_ATTEMPTS = 5;
 
-/** The shortest password the auth package accepts. A password shorter than
- * this is not worth sending; an installation may require more, and the server
- * then refuses it. A test holds this equal to the auth package's own floor. */
+/** The shortest password the auth package accepts, and what the card assumes
+ * when the page does not say otherwise. An installation may require more: the
+ * server then puts its minimum in the login island, and the card uses that. A
+ * test holds this equal to the auth package's own floor. */
 export const PASSWORD_MIN_LENGTH = 12;
 
 /** A code is six digits; an authenticator app shows them as `123 456`, so
@@ -62,10 +63,20 @@ export function validatePassword(value: string): string | null {
 
 /** The inline message for a new password under the minimum, or `null`.
  * Length is counted in code points, as the server counts it. */
-export function validateNewPassword(value: string): string | null {
-  return Array.from(value).length >= PASSWORD_MIN_LENGTH
+export function validateNewPassword(
+  value: string,
+  minLength: number = PASSWORD_MIN_LENGTH,
+): string | null {
+  return Array.from(value).length >= minLength
     ? null
-    : STRINGS['validation.newPassword.tooShort'];
+    : tooShortMessage(minLength);
+}
+
+/** The message for a password under the minimum, naming the minimum. */
+export function tooShortMessage(minLength: number): string {
+  return formatString('validation.newPassword.tooShort', {
+    min: String(minLength),
+  });
 }
 
 /** The inline message under the confirmation field when it differs from the

@@ -52,6 +52,7 @@ function LoginRoot(props: {
     <LoginApp
       step={island.step}
       next={island.next}
+      passwordMinLength={island.passwordMinLength}
       {...(island.linkKind === undefined ? {} : { linkKind: island.linkKind })}
       behaviour={behaviour}
     />

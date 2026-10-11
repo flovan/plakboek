@@ -74,7 +74,8 @@ export const STRINGS = Object.freeze({
 
   // Choosing a password (invitation and reset landings)
   'login.password.new.label': 'New password',
-  'login.password.new.hint': 'At least 12 characters. A passphrase works well.',
+  'login.password.new.hint':
+    'At least {min} characters. A passphrase works well.',
   'login.password.confirm.label': 'Confirm new password',
   'login.setPassword.heading': 'Choose a password',
   'login.setPassword.body':
@@ -109,7 +110,7 @@ export const STRINGS = Object.freeze({
   'validation.password.empty': 'Enter your password.',
   'validation.code.invalid': 'Enter the 6-digit code.',
   'validation.backupCode.empty': 'Enter a backup code.',
-  'validation.newPassword.tooShort': 'Use at least 12 characters.',
+  'validation.newPassword.tooShort': 'Use at least {min} characters.',
   'validation.confirm.mismatch': 'The two passwords do not match.',
 
   // Error box

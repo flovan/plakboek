@@ -70,6 +70,7 @@ const LOGIN = {
   kind: 'login',
   step: 'sign-in',
   next: '/about',
+  passwordMinLength: 12,
 };
 
 describe('readIsland for the login document', () => {
@@ -97,6 +98,20 @@ describe('readIsland for the login document', () => {
     ['an unknown step', { ...LOGIN, step: 'admin' }],
     ['a missing next', { ...LOGIN, next: undefined }],
     ['a non-text next', { ...LOGIN, next: 4 }],
+    [
+      'a missing minimum password length',
+      { ...LOGIN, passwordMinLength: undefined },
+    ],
+    [
+      'a minimum that is not a whole number',
+      { ...LOGIN, passwordMinLength: 12.5 },
+    ],
+    ['a minimum that is not positive', { ...LOGIN, passwordMinLength: 0 }],
+    [
+      'a minimum that is absurdly large',
+      { ...LOGIN, passwordMinLength: 100000 },
+    ],
+    ['a minimum written as text', { ...LOGIN, passwordMinLength: '12' }],
     ['an unknown link kind', { ...LOGIN, linkKind: 'magic' }],
     ['a non-text email', { ...LOGIN, email: 5 }],
   ])('returns null for %s', (_label, island) => {

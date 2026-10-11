@@ -10,6 +10,8 @@ const VARIABLES: Readonly<Record<string, readonly string[]>> = {
   'login.twoFactor.email.body': ['maskedEmail'],
   'login.magicLink.sent.body': ['email'],
   'login.forgot.sent.body': ['email'],
+  'login.password.new.hint': ['min'],
+  'validation.newPassword.tooShort': ['min'],
   'overlay.unavailable': ['type'],
 };
 
@@ -95,7 +97,7 @@ describe('STRINGS', () => {
     );
     expect(STRINGS['validation.password.empty']).toBe('Enter your password.');
     expect(STRINGS['validation.code.invalid']).toBe('Enter the 6-digit code.');
-    expect(STRINGS['validation.newPassword.tooShort']).toBe(
+    expect(formatString('validation.newPassword.tooShort', { min: '12' })).toBe(
       'Use at least 12 characters.',
     );
     expect(STRINGS['validation.confirm.mismatch']).toBe(

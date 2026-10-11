@@ -9,11 +9,12 @@ import { CMS_LOGIN_PATH } from '@plakboek/render';
 import { takeLinkToken } from '../../client/login/link-token.js';
 import {
   failureMessage,
+  tooShortMessage,
   validateNewPassword,
   validatePasswordConfirmation,
   type AuthFailure,
 } from '../../client/login/validation.js';
-import { STRINGS } from '../strings.js';
+import { formatString, STRINGS } from '../strings.js';
 import { useLoginBehaviour } from './behaviour.js';
 import { FIELD_GROUP, LoginCard } from './card.js';
 import { ErrorBox, Field, PrimaryButton } from './fields.js';
@@ -29,6 +30,8 @@ export type PasswordLinkStepProps = {
    * replaces one. Only the words and the purpose sent differ. */
   readonly variant: 'set-password' | 'reset-password';
   readonly next: string;
+  /** The shortest password the server accepts. */
+  readonly passwordMinLength: number;
   /** The password is set: back to sign-in, with the matching status line. */
   readonly onDone?: () => void;
   /** The link has no token, or the service refused it: the invalid-link step. */
@@ -52,7 +55,7 @@ type Failure = { readonly failure: AuthFailure; readonly attempt: number };
  * a refusal.
  */
 export function PasswordLinkStep(props: PasswordLinkStepProps): ReactElement {
-  const { variant, next, onDone, onInvalid } = props;
+  const { variant, next, passwordMinLength, onDone, onInvalid } = props;
   const invite = variant === 'set-password';
   const behaviour = useLoginBehaviour();
   // `undefined` until the address has been read; a second read (a repeated
@@ -85,7 +88,7 @@ export function PasswordLinkStep(props: PasswordLinkStepProps): ReactElement {
     const password = fieldText(form, 'password');
     const confirmation = fieldText(form, 'passwordConfirm');
 
-    const lengthProblem = validateNewPassword(password);
+    const lengthProblem = validateNewPassword(password, passwordMinLength);
     const matchProblem = validatePasswordConfirmation(password, confirmation);
     setPasswordError(lengthProblem);
     setConfirmError(lengthProblem === null ? matchProblem : null);
@@ -118,7 +121,7 @@ export function PasswordLinkStep(props: PasswordLinkStepProps): ReactElement {
     clearPasswords();
     if (result.status === 'too-short') {
       // The link was not spent: the same token is still the right one.
-      setPasswordError(STRINGS['validation.newPassword.tooShort']);
+      setPasswordError(tooShortMessage(passwordMinLength));
       passwordRef.current?.focus();
     } else {
       setFailed((previous) => ({
@@ -159,7 +162,9 @@ export function PasswordLinkStep(props: PasswordLinkStepProps): ReactElement {
           type="password"
           autoComplete="new-password"
           autoFocus
-          hint={STRINGS['login.password.new.hint']}
+          hint={formatString('login.password.new.hint', {
+            min: String(passwordMinLength),
+          })}
           readOnly={busy}
           error={passwordError}
           inputRef={passwordRef}

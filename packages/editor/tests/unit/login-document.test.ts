@@ -20,6 +20,7 @@ function island(overrides: Partial<LoginIsland> = {}): LoginIsland {
     kind: 'login',
     step: 'sign-in',
     next: '/about',
+    passwordMinLength: 12,
     ...overrides,
   };
 }
@@ -94,6 +95,15 @@ describe('renderLoginDocument', () => {
     const { html } = login({ next: '/a"><script>alert(1)</script>' });
     expect(html).not.toContain('<script>alert(1)');
     expect(templateOf(html)).toContain('src="/a&quot;&gt;&lt;script&gt;');
+  });
+
+  it("names the installation's own minimum in the choose-a-password hint", () => {
+    for (const min of [12, 16]) {
+      const template = templateOf(
+        login({ step: 'set-password', passwordMinLength: min }).html,
+      );
+      expect(template).toContain(`At least ${String(min)} characters.`);
+    }
   });
 
   it('renders the sign-in step with its fields, autocomplete values and autofocus', () => {

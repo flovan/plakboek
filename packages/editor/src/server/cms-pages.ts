@@ -15,6 +15,7 @@
 import {
   needsTwoFactorEnrolment,
   PASSWORD_LINK_PATHS,
+  PASSWORD_MIN_LENGTH,
   sanitizeNextPath,
   TWO_FACTOR_ENROLMENT_PATH,
   type Auth,
@@ -35,6 +36,13 @@ export type CmsPagesDeps = {
   readonly assets: EditorAssets;
   /** Whether the documents send a Content-Security-Policy. */
   readonly csp: boolean;
+  /**
+   * The shortest password this installation's auth accepts, told to the
+   * client so its hint and messages name the real minimum. Pass the
+   * `minPasswordLength` given to `createAuth`; it defaults to the auth
+   * package's own minimum, which is what `createAuth` uses without one.
+   */
+  readonly passwordMinLength?: number;
 };
 
 export type CmsPages = {
@@ -95,6 +103,7 @@ export function createCmsPages(deps: CmsPagesDeps): CmsPages {
       kind: 'login',
       step,
       next,
+      passwordMinLength: deps.passwordMinLength ?? PASSWORD_MIN_LENGTH,
       ...extra,
     };
   }

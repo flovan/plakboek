@@ -1,5 +1,8 @@
 import { useRef, useState, type ReactElement } from 'react';
-import { TWO_FACTOR_MAX_ATTEMPTS } from '../../client/login/validation.js';
+import {
+  PASSWORD_MIN_LENGTH,
+  TWO_FACTOR_MAX_ATTEMPTS,
+} from '../../client/login/validation.js';
 import type { LinkKind, LoginStep } from '../island.js';
 import {
   LoginBehaviourContext,
@@ -36,6 +39,9 @@ export type LoginAppProps = {
   readonly next: string;
   /** Which kind of link an `invalid-link` step stands in for. */
   readonly linkKind?: LinkKind;
+  /** The shortest password the server accepts; the choose-a-password steps
+   * name it. Defaults to the auth package's own minimum. */
+  readonly passwordMinLength?: number;
   /** What the client adds to make the card work; absent on the server, where
    * every step is static markup. */
   readonly behaviour?: LoginBehaviour;
@@ -204,6 +210,7 @@ export function LoginApp(props: LoginAppProps): ReactElement {
           <PasswordLinkStep
             variant={view}
             next={next}
+            passwordMinLength={props.passwordMinLength ?? PASSWORD_MIN_LENGTH}
             onDone={() => {
               go(
                 'sign-in',
