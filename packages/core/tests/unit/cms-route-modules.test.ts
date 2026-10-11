@@ -3,7 +3,15 @@
  * serve, with `X-Robots-Tag` too. The runtime is replaced by one that throws,
  * which is what an invalid environment or a database failure looks like.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 
 vi.mock('../../src/runtime/host.js', () => ({
   getHostRuntime: () => {
@@ -19,7 +27,7 @@ const args = (method = 'GET') => ({
   context: {},
 });
 
-let write: ReturnType<typeof vi.spyOn>;
+let write: MockInstance<typeof process.stderr.write>;
 
 beforeEach(() => {
   write = vi.spyOn(process.stderr, 'write').mockReturnValue(true);

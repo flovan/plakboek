@@ -11,7 +11,7 @@
  */
 import { sanitizeNextPath } from '@plakboek/auth';
 import type { ActionFunctionArgs } from 'react-router';
-import { withCmsHeaders } from '../cms-headers.js';
+import { cmsGuard, withCmsHeaders } from '../cms-headers.js';
 import { getHostRuntime } from '../runtime/host.js';
 import type { Runtime } from '../runtime/runtime.js';
 import { payloadTooLarge, readBodyWithinLimit } from '../setup/body-limit.js';
@@ -89,9 +89,7 @@ export function loader(): Response {
   return plain(405, 'Method Not Allowed', { Allow: 'POST' });
 }
 
-export async function action({
-  request,
-}: ActionFunctionArgs): Promise<Response> {
+async function logout(request: Request): Promise<Response> {
   // React Router also sends PUT, PATCH and DELETE to an action.
   if (request.method !== 'POST') {
     return plain(405, 'Method Not Allowed', { Allow: 'POST' });
@@ -104,18 +102,39 @@ export async function action({
   const next = sanitizeNextPath(form.next);
 
   const headers = new Headers({ Location: next, 'Cache-Control': 'no-store' });
+  const cookies: string[] = [];
+  let failure: string | null = null;
   try {
     const signedOut = await runtime.auth.api.signOut({
       headers: request.headers,
       asResponse: true,
     });
     // Every cookie the sign-out clears must reach the browser.
-    for (const cookie of signedOut.headers.getSetCookie()) {
-      headers.append('Set-Cookie', cookie);
+    cookies.push(...signedOut.headers.getSetCookie());
+    // A request without a session (already signed out, a stale cookie) is
+    // answered 400 or 401 and is still a sign-out; any other refusal is not.
+    if (!signedOut.ok && signedOut.status !== 400 && signedOut.status !== 401) {
+      failure = `status ${String(signedOut.status)}`;
     }
-  } catch {
-    // No session to end (already signed out, or an expired cookie): the
-    // visitor still lands on the page without `_edit`, which is the point.
+  } catch (error) {
+    // The name only: a message could carry a connection string.
+    failure = error instanceof Error ? error.name : typeof error;
   }
+
+  if (failure !== null) {
+    // The person must not believe they are signed out when they may not be.
+    process.stderr.write(`[@plakboek/core] logout failed: ${failure}\n`);
+    const refusal = plain(500, 'Could not sign out');
+    // Cookies the engine did clear still reach the browser.
+    for (const cookie of cookies) refusal.headers.append('Set-Cookie', cookie);
+    return refusal;
+  }
+  for (const cookie of cookies) headers.append('Set-Cookie', cookie);
   return withCmsHeaders(new Response(null, { status: 303, headers }));
+}
+
+export async function action({
+  request,
+}: ActionFunctionArgs): Promise<Response> {
+  return await cmsGuard(async () => await logout(request));
 }
