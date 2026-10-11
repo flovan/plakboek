@@ -35,6 +35,17 @@ export type SendResult =
   | { readonly status: 'sent' }
   | { readonly status: 'failed'; readonly failure: AuthFailure };
 
+/** What asking for a new authenticator key came to. */
+export type EnableResult =
+  | {
+      readonly status: 'enabled';
+      /** The `otpauth://` link that carries the key. */
+      readonly setupUri: string;
+      /** The one-time backup codes, shown once and never kept. */
+      readonly backupCodes: readonly string[];
+    }
+  | { readonly status: 'failed'; readonly failure: AuthFailure };
+
 /** The calls the card makes of the auth service. */
 export type LoginAuth = {
   signInEmail(email: string, password: string): Promise<SignInResult>;
@@ -44,6 +55,12 @@ export type LoginAuth = {
   sendOtp(): Promise<SendResult>;
   /** Checks the emailed code against the pending sign-in. */
   verifyOtp(code: string): Promise<CodeResult>;
+  /**
+   * Asks for a new authenticator key for the signed-in user, confirming the
+   * password first. The key is not active until `verifyTotp` accepts a code
+   * from it, which is also how the sign-in being set up is completed.
+   */
+  enableTwoFactor(password: string): Promise<EnableResult>;
 };
 
 export type LoginBehaviour = {

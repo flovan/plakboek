@@ -9,6 +9,7 @@
  */
 import type {
   CodeResult,
+  EnableResult,
   LoginAuth,
   SendResult,
   SignedInUser,
@@ -41,6 +42,7 @@ export type AuthClient = {
     verifyTotp(input: { readonly code: string }): Promise<AuthCallResult>;
     verifyOtp(input: { readonly code: string }): Promise<AuthCallResult>;
     sendOtp(): Promise<AuthCallResult>;
+    enable(input: { readonly password: string }): Promise<AuthCallResult>;
   };
 };
 
@@ -144,6 +146,23 @@ export function createLoginAuth(
     },
     verifyTotp: (code) => verify((auth) => auth.twoFactor.verifyTotp({ code })),
     verifyOtp: (code) => verify((auth) => auth.twoFactor.verifyOtp({ code })),
+    async enableTwoFactor(password): Promise<EnableResult> {
+      const result = await call((auth) => auth.twoFactor.enable({ password }));
+      if (!result.ok) return { status: 'failed', failure: result.failure };
+      const { data } = result;
+      const setupUri =
+        isRecord(data) && typeof data.totpURI === 'string' ? data.totpURI : '';
+      const backupCodes =
+        isRecord(data) && Array.isArray(data.backupCodes)
+          ? data.backupCodes.filter(
+              (code): code is string => typeof code === 'string',
+            )
+          : [];
+      // An answer with no key is not one the card can show.
+      return setupUri === ''
+        ? { status: 'failed', failure: 'server' }
+        : { status: 'enabled', setupUri, backupCodes };
+    },
     async sendOtp(): Promise<SendResult> {
       const result = await call((auth) => auth.twoFactor.sendOtp());
       return result.ok

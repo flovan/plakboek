@@ -55,6 +55,8 @@ export function validateCode(value: string): string | null {
 /** What a failed auth call stands for in the card. */
 export type AuthFailure =
   | 'credentials'
+  /** The password typed to confirm a change was refused. */
+  | 'password'
   | 'code'
   | 'lockout'
   | 'rate-limited'
@@ -69,6 +71,7 @@ export type AuthFailure =
  */
 export const AUTH_ERROR_CODES = Object.freeze({
   wrongCredentials: 'INVALID_EMAIL_OR_PASSWORD',
+  wrongPassword: 'INVALID_PASSWORD',
   invalidCode: 'INVALID_CODE',
   expiredCode: 'OTP_HAS_EXPIRED',
   accountLocked: 'ACCOUNT_TEMPORARILY_LOCKED',
@@ -103,6 +106,7 @@ export function classifyAuthError(failure: unknown): AuthFailure {
     return 'lockout';
   }
   if (status === 429) return 'rate-limited';
+  if (code === AUTH_ERROR_CODES.wrongPassword) return 'password';
   if (
     code === AUTH_ERROR_CODES.invalidCode ||
     code === AUTH_ERROR_CODES.expiredCode
@@ -123,6 +127,8 @@ export function failureMessage(failure: AuthFailure): string {
   switch (failure) {
     case 'credentials':
       return STRINGS['error.credentials'];
+    case 'password':
+      return STRINGS['error.passwordIncorrect'];
     case 'code':
       return STRINGS['error.code'];
     case 'rate-limited':

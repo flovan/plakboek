@@ -120,7 +120,7 @@ export function LoginApp(props: LoginAppProps): ReactElement {
       case 'invalid-link':
         return <InvalidLinkStep linkKind={linkKind} next={next} />;
       case 'enrol':
-        return <EnrolStep next={next} />;
+        return <EnrolStep {...handlers} />;
     }
   }
 
