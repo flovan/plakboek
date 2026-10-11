@@ -46,6 +46,30 @@ export type EnableResult =
     }
   | { readonly status: 'failed'; readonly failure: AuthFailure };
 
+/** What asking for an emailed link came to. The service answers the same
+ * for every well-formed address, so there is no variant for an unknown one. */
+export type LinkRequestResult =
+  | { readonly status: 'sent' }
+  | { readonly status: 'failed'; readonly failure: AuthFailure };
+
+/** The two links that choose a password: an invitation and a reset. */
+export type PasswordLinkPurpose = 'set-password' | 'reset-password';
+
+/** What spending a set-password or reset-password link came to. */
+export type CompleteLinkResult =
+  | { readonly status: 'done' }
+  /** Expired, already used, or never issued: the service does not say which. */
+  | { readonly status: 'invalid-link' }
+  /** The new password is below the minimum; the link was not spent. */
+  | { readonly status: 'too-short' }
+  | { readonly status: 'failed'; readonly failure: AuthFailure };
+
+/** Whether the browser holds a session, read after a sign-in link landed. */
+export type SessionResult =
+  | { readonly status: 'signed-in'; readonly user: SignedInUser }
+  | { readonly status: 'none' }
+  | { readonly status: 'failed'; readonly failure: AuthFailure };
+
 /** The calls the card makes of the auth service. */
 export type LoginAuth = {
   signInEmail(email: string, password: string): Promise<SignInResult>;
@@ -61,6 +85,18 @@ export type LoginAuth = {
    * from it, which is also how the sign-in being set up is completed.
    */
   enableTwoFactor(password: string): Promise<EnableResult>;
+  /** Asks for a password-reset link to be emailed; `next` rides on the link. */
+  requestResetLink(email: string, next: string): Promise<LinkRequestResult>;
+  /** Asks for a sign-in link to be emailed; `next` rides on the link. */
+  requestSignInLink(email: string, next: string): Promise<LinkRequestResult>;
+  /** Spends an emailed link's token to set the account's password. */
+  completePasswordLink(
+    purpose: PasswordLinkPurpose,
+    token: string,
+    newPassword: string,
+  ): Promise<CompleteLinkResult>;
+  /** The session the browser now holds, if any. */
+  readSession(): Promise<SessionResult>;
 };
 
 export type LoginBehaviour = {

@@ -6,6 +6,9 @@ import { LoginCard, PRIMARY_BUTTON } from './card.js';
 export type InvalidLinkStepProps = {
   readonly linkKind: LinkKind;
   readonly next: string;
+  /** The one button: a new reset link, a new sign-in link, or back to
+   * sign-in, according to the kind. */
+  readonly onAction?: () => void;
 };
 
 /**
@@ -13,7 +16,7 @@ export type InvalidLinkStepProps = {
  * nothing reveals which it was. Only the button depends on the kind of link.
  */
 export function InvalidLinkStep(props: InvalidLinkStepProps): ReactElement {
-  const { linkKind, next } = props;
+  const { linkKind, next, onAction } = props;
   const body =
     linkKind === 'invite'
       ? STRINGS['login.invalidLink.invite.body']
@@ -30,11 +33,7 @@ export function InvalidLinkStep(props: InvalidLinkStepProps): ReactElement {
       body={body}
       next={next}
     >
-      <button
-        type="button"
-        data-action={`invalid-${linkKind}`}
-        className={PRIMARY_BUTTON}
-      >
+      <button type="button" onClick={onAction} className={PRIMARY_BUTTON}>
         {action}
       </button>
     </LoginCard>

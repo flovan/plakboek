@@ -9,13 +9,28 @@
  */
 import type {
   CodeResult,
+  CompleteLinkResult,
   EnableResult,
+  LinkRequestResult,
   LoginAuth,
   SendResult,
+  SessionResult,
   SignedInUser,
   SignInResult,
 } from '../../chrome/login/behaviour.js';
-import { classifyAuthError, type AuthFailure } from './validation.js';
+import {
+  classifyAuthError,
+  LINK_ERROR_CODES,
+  type AuthFailure,
+} from './validation.js';
+
+/** Where an emailed sign-in link lands, and where a failed one is sent. */
+export const MAGIC_LINK_LANDING_PATH = '/cms/magic-link';
+
+/** The auth package's two password-link endpoints, under the auth base path. */
+export const PASSWORD_LINK_REQUEST_ENDPOINT = '/plakboek/password-link/request';
+export const PASSWORD_LINK_COMPLETE_ENDPOINT =
+  '/plakboek/password-link/complete';
 
 /** What a call to the auth service answers: the data, or the error it was
  * refused with (`status` is the HTTP status, `code` the library's own code). */
@@ -37,7 +52,22 @@ export type AuthClient = {
       readonly email: string;
       readonly password: string;
     }): Promise<AuthCallResult>;
+    magicLink(input: {
+      readonly email: string;
+      readonly callbackURL: string;
+      readonly errorCallbackURL: string;
+    }): Promise<AuthCallResult>;
   };
+  getSession(): Promise<AuthCallResult>;
+  /** The client's own fetch, for the package's endpoints it has no named
+   * method for. */
+  $fetch(
+    path: string,
+    options: {
+      readonly method: 'POST';
+      readonly body: Readonly<Record<string, unknown>>;
+    },
+  ): Promise<AuthCallResult>;
   readonly twoFactor: {
     verifyTotp(input: { readonly code: string }): Promise<AuthCallResult>;
     verifyOtp(input: { readonly code: string }): Promise<AuthCallResult>;
@@ -93,6 +123,20 @@ export function readSignedInUser(value: unknown): SignedInUser | null {
   };
 }
 
+/** Where a sign-in link sends the browser once the service has checked it,
+ * and where it sends it when the check failed. The page to return to rides
+ * along as `next`, which the landing re-sanitises on the server. */
+export function magicLinkCallbacks(next: string): {
+  readonly callbackURL: string;
+  readonly errorCallbackURL: string;
+} {
+  const encoded = encodeURIComponent(next);
+  return {
+    callbackURL: `${MAGIC_LINK_LANDING_PATH}?next=${encoded}`,
+    errorCallbackURL: `${MAGIC_LINK_LANDING_PATH}?error=1&next=${encoded}`,
+  };
+}
+
 /** The card's auth calls over the real client. */
 export function createLoginAuth(
   client: () => Promise<AuthClient> = getAuthClient,
@@ -127,6 +171,15 @@ export function createLoginAuth(
     return user === null
       ? { status: 'failed', failure: 'server' }
       : { status: 'verified', user };
+  }
+
+  async function requestLink(
+    run: (client: AuthClient) => Promise<AuthCallResult>,
+  ): Promise<LinkRequestResult> {
+    const result = await call(run);
+    return result.ok
+      ? { status: 'sent' }
+      : { status: 'failed', failure: result.failure };
   }
 
   return {
@@ -168,6 +221,52 @@ export function createLoginAuth(
       return result.ok
         ? { status: 'sent' }
         : { status: 'failed', failure: result.failure };
+    },
+    requestResetLink: (email, next) =>
+      requestLink((auth) =>
+        auth.$fetch(PASSWORD_LINK_REQUEST_ENDPOINT, {
+          method: 'POST',
+          body: { email, next },
+        }),
+      ),
+    requestSignInLink: (email, next) =>
+      requestLink((auth) =>
+        auth.signIn.magicLink({ email, ...magicLinkCallbacks(next) }),
+      ),
+    async completePasswordLink(
+      purpose,
+      token,
+      newPassword,
+    ): Promise<CompleteLinkResult> {
+      try {
+        const result = await (
+          await client()
+        ).$fetch(PASSWORD_LINK_COMPLETE_ENDPOINT, {
+          method: 'POST',
+          body: { purpose, token, newPassword },
+        });
+        if (result.error === null) return { status: 'done' };
+        // The service's own refusals are read before the status: a link that
+        // does not work and a password that is too short are not failures.
+        const { code } = result.error;
+        if (code === LINK_ERROR_CODES.invalidLink) {
+          return { status: 'invalid-link' };
+        }
+        if (code === LINK_ERROR_CODES.passwordTooShort) {
+          return { status: 'too-short' };
+        }
+        return { status: 'failed', failure: classifyAuthError(result.error) };
+      } catch (error) {
+        return { status: 'failed', failure: classifyAuthError(error) };
+      }
+    },
+    async readSession(): Promise<SessionResult> {
+      const result = await call((auth) => auth.getSession());
+      if (!result.ok) return { status: 'failed', failure: result.failure };
+      const user = readSignedInUser(
+        isRecord(result.data) ? result.data.user : null,
+      );
+      return user === null ? { status: 'none' } : { status: 'signed-in', user };
     },
   };
 }

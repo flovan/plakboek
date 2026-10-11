@@ -17,8 +17,18 @@ function fieldText(form: FormData, name: string): string {
   return typeof value === 'string' ? value : '';
 }
 
+/** Which password change the card has just finished, for the line above the
+ * form that tells the person to sign in. */
+export type SignInStatus = 'password-set' | 'password-reset';
+
 export type SignInStepProps = {
   readonly next: string;
+  /** A set-password or reset-password step just finished. */
+  readonly status?: SignInStatus | null;
+  /** The person asked to reset a forgotten password. */
+  readonly onForgot?: () => void;
+  /** The person asked for a sign-in link. */
+  readonly onMagicLink?: () => void;
   /** The password was right and a second factor is needed; called with the
    * address that was typed, so the emailed-code step can name it. */
   readonly onTwoFactor?: (email: string) => void;
@@ -42,7 +52,7 @@ type Failure = { readonly failure: AuthFailure; readonly attempt: number };
  * and a second submit is ignored.
  */
 export function SignInStep(props: SignInStepProps): ReactElement {
-  const { next, onTwoFactor } = props;
+  const { next, status, onForgot, onMagicLink, onTwoFactor } = props;
   const behaviour = useLoginBehaviour();
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -101,6 +111,16 @@ export function SignInStep(props: SignInStepProps): ReactElement {
           void submit(event);
         }}
       >
+        {status === undefined || status === null ? null : (
+          <p
+            role="status"
+            className="m-0 mb-4 text-body text-text wrap-anywhere"
+          >
+            {status === 'password-set'
+              ? STRINGS['login.signIn.status.passwordSet']
+              : STRINGS['login.signIn.status.passwordReset']}
+          </p>
+        )}
         <Field
           id="plakboek-login-email"
           name="email"
@@ -124,7 +144,7 @@ export function SignInStep(props: SignInStepProps): ReactElement {
           inputRef={passwordRef}
         />
         <div className="mt-2 text-right">
-          <button type="button" data-action="forgot" className={TEXT_LINK}>
+          <button type="button" onClick={onForgot} className={TEXT_LINK}>
             {STRINGS['login.signIn.forgot']}
           </button>
         </div>
@@ -142,7 +162,7 @@ export function SignInStep(props: SignInStepProps): ReactElement {
         <div className="mt-4">
           <button
             type="button"
-            data-action="magic-link"
+            onClick={onMagicLink}
             className={SECONDARY_BUTTON}
           >
             {STRINGS['login.signIn.magicLink']}

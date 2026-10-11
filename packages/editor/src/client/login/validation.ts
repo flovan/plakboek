@@ -12,6 +12,11 @@ import { STRINGS } from '../../chrome/strings.js';
  * own setting. */
 export const TWO_FACTOR_MAX_ATTEMPTS = 5;
 
+/** The shortest password the auth package accepts. A password shorter than
+ * this is not worth sending; an installation may require more, and the server
+ * then refuses it. A test holds this equal to the auth package's own floor. */
+export const PASSWORD_MIN_LENGTH = 12;
+
 /** A code is six digits; an authenticator app shows them as `123 456`, so
  * spaces are not part of the code. */
 const CODE_PATTERN = /^\d{6}$/;
@@ -43,6 +48,25 @@ export function validateEmail(value: string): string | null {
  * trimmed: spaces are legitimate characters of it. */
 export function validatePassword(value: string): string | null {
   return value === '' ? STRINGS['validation.password.empty'] : null;
+}
+
+/** The inline message for a new password under the minimum, or `null`.
+ * Length is counted in code points, as the server counts it. */
+export function validateNewPassword(value: string): string | null {
+  return Array.from(value).length >= PASSWORD_MIN_LENGTH
+    ? null
+    : STRINGS['validation.newPassword.tooShort'];
+}
+
+/** The inline message under the confirmation field when it differs from the
+ * new password, or `null`. */
+export function validatePasswordConfirmation(
+  password: string,
+  confirmation: string,
+): string | null {
+  return password === confirmation
+    ? null
+    : STRINGS['validation.confirm.mismatch'];
 }
 
 /** The inline message for a code that is not six digits, or `null`. */
@@ -77,6 +101,16 @@ export const AUTH_ERROR_CODES = Object.freeze({
   accountLocked: 'ACCOUNT_TEMPORARILY_LOCKED',
   challengeSpent: 'TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE',
   challengeGone: 'INVALID_TWO_FACTOR_COOKIE',
+});
+
+/**
+ * The codes the password-link endpoints answer a refusal with. They are the
+ * auth package's own literals, which it does not export, so they are held
+ * here as text; the end-to-end link flows exercise both.
+ */
+export const LINK_ERROR_CODES = Object.freeze({
+  invalidLink: 'INVALID_LINK',
+  passwordTooShort: 'PASSWORD_TOO_SHORT',
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
