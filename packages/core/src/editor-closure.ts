@@ -20,24 +20,32 @@ export type EditorLeak = {
   readonly chunk: string;
   /** The editor module's id. */
   readonly module: string;
+  /** The path fragment that made the module count as editor code. */
+  readonly match: string;
 };
 
 const RESOLVED_EDITOR_CLIENT_ID = `\0${EDITOR_CLIENT_ID}`;
 
-/** Path fragments of the editor package and of the libraries only it uses. */
+/**
+ * Path fragments of the editor package and of the libraries only it uses.
+ * Each is whole path segments, so a host file that merely has the word in its
+ * name (`app/blocks/prosemirror-notes.ts`) is not editor code. A library
+ * counts only inside a `node_modules` directory, which also covers pnpm's
+ * nested layout.
+ */
 const EDITOR_PATH_FRAGMENTS = [
   '/@plakboek/editor/',
   '/packages/editor/',
-  '@tiptap/',
-  '@dnd-kit/',
-  'prosemirror',
-  '@plakboek/admin',
+  '/node_modules/@tiptap/',
+  '/node_modules/@dnd-kit/',
+  '/node_modules/prosemirror-',
 ] as const;
 
-function isEditorModule(id: string): boolean {
-  if (id === RESOLVED_EDITOR_CLIENT_ID) return true;
+/** The fragment that makes a module id editor code, or `undefined`. */
+function editorMatch(id: string): string | undefined {
+  if (id === RESOLVED_EDITOR_CLIENT_ID) return EDITOR_CLIENT_ID;
   const path = id.replaceAll('\\', '/');
-  return EDITOR_PATH_FRAGMENTS.some((fragment) => path.includes(fragment));
+  return EDITOR_PATH_FRAGMENTS.find((fragment) => path.includes(fragment));
 }
 
 function chunkOf(bundle: BundleLike, file: string): BundleChunk | undefined {
@@ -85,15 +93,18 @@ export function findEditorLeaks(bundle: BundleLike): readonly EditorLeak[] {
   const leaks: EditorLeak[] = [];
   for (const root of roots) {
     for (const reached of closure(bundle, root.fileName)) {
-      const module = reached.moduleIds.find(isEditorModule);
-      if (module !== undefined) {
+      for (const module of reached.moduleIds) {
+        const match = editorMatch(module);
+        if (match === undefined) continue;
         leaks.push(
           Object.freeze({
             entry: root.fileName,
             chunk: reached.fileName,
             module,
+            match,
           }),
         );
+        break;
       }
     }
   }

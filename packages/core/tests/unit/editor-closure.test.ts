@@ -112,6 +112,7 @@ describe('findEditorLeaks', () => {
         entry: 'assets/home-2.js',
         chunk: 'assets/leaky-7.js',
         module: EDITOR_MODULE,
+        match: '/@plakboek/editor/',
       },
     ]);
   });
@@ -134,6 +135,7 @@ describe('findEditorLeaks', () => {
         entry: 'assets/entry.client-1.js',
         chunk: 'assets/lazy-8.js',
         module: '/work/node_modules/@plakboek/editor/dist/server.js',
+        match: '/@plakboek/editor/',
       },
     ]);
   });
@@ -157,6 +159,7 @@ describe('findEditorLeaks', () => {
         entry: 'assets/home-2.js',
         chunk: 'assets/b-8.js',
         module: EDITOR_MODULE,
+        match: '/@plakboek/editor/',
       },
     ]);
   });
@@ -174,6 +177,7 @@ describe('findEditorLeaks', () => {
         entry: 'assets/lazy-9.js',
         chunk: 'assets/lazy-9.js',
         module: '/work/packages/editor/src/x.ts',
+        match: '/packages/editor/',
       },
     ]);
   });
@@ -184,7 +188,6 @@ describe('findEditorLeaks', () => {
     ['a TipTap module', '/work/node_modules/@tiptap/react/dist/index.js'],
     ['a dnd-kit module', '/work/node_modules/@dnd-kit/core/dist/core.js'],
     ['a ProseMirror module', '/work/node_modules/prosemirror-model/dist/i.js'],
-    ['an admin package module', '/work/node_modules/@plakboek/admin/dist/i.js'],
     [
       'a Windows-style editor path',
       'C:\\work\\node_modules\\@plakboek\\editor\\dist\\client.js',
@@ -211,10 +214,30 @@ describe('findEditorLeaks', () => {
           '/work/app/editor/toolbar.tsx',
           '/work/node_modules/@plakboek/editorial/dist/i.js',
           '/work/node_modules/@plakboek/render/dist/i.js',
+          // A host file that only has the word in its name.
+          '/work/app/blocks/prosemirror-notes.ts',
+          '/work/app/lib/tiptap-lite.ts',
+          '/work/app/dnd-kit-helpers.ts',
+          // A host's own folder named after a library.
+          '/work/app/@tiptap/local.ts',
         ],
       }),
     };
     expect(findEditorLeaks(bundle)).toEqual([]);
+  });
+
+  it('names the fragment that made a module count, so a host can see why', () => {
+    const [leak] = findEditorLeaks({
+      ...cleanBundle(),
+      'assets/home-2.js': chunk('assets/home-2.js', {
+        isEntry: true,
+        name: 'home',
+        moduleIds: [
+          '/work/node_modules/.pnpm/prosemirror-model@1/node_modules/prosemirror-model/dist/i.js',
+        ],
+      }),
+    });
+    expect(leak?.match).toBe('/node_modules/prosemirror-');
   });
 
   it('returns frozen records', () => {

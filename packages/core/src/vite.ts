@@ -31,6 +31,7 @@ import {
   EDITOR_CLIENT_ID,
   EDITOR_SIDECAR,
   editorAssetsFromSidecar,
+  findEditorChunk,
   type BundleLike,
   type EditorSidecar,
 } from './editor-assets.js';
@@ -73,6 +74,9 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
   // Written by the client build, read by the server build that follows it in
   // the same process.
   let sidecar: EditorSidecar | undefined;
+  // Whether this build asked for the editor chunk, so its absence from the
+  // finished bundle is a failure rather than a build without an editor.
+  let editorChunkRequested = false;
 
   function serverEditorAssets(): string {
     if (command === 'serve') return JSON.stringify(devEditorAssets(base));
@@ -121,6 +125,7 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
       // The editor's client is its own entry chunk, referenced only by the
       // edit shell; nothing a visitor loads imports it.
       if (command !== 'build' || this.environment.name !== 'client') return;
+      editorChunkRequested = true;
       this.emitFile({
         type: 'chunk',
         id: EDITOR_CLIENT_ID,
@@ -130,6 +135,14 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
     generateBundle(_outputOptions, bundle) {
       if (this.environment.name !== 'client') return;
       const output = bundle as unknown as BundleLike;
+      // The check below starts from the editor's chunk. If the build asked
+      // for it and it is not there, the check would pass having looked at
+      // nothing, so the build fails instead.
+      if (editorChunkRequested && findEditorChunk(output) === undefined) {
+        this.error(
+          "[@plakboek/core] The client build has no editor chunk, so the check that keeps editor code away from visitors cannot run. Check that no other plugin renames or drops the editor's entry.",
+        );
+      }
       // The build-time check of EDIT-14: nothing a visitor loads may reach
       // editor code, however a host's own routes import it.
       const leaks = findEditorLeaks(output);
@@ -138,9 +151,10 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
           [
             '[@plakboek/core] Editor code is reachable from a client chunk that visitors load, so it would ship to them:',
             ...leaks.map(
-              (leak) => `  ${leak.entry} -> ${leak.chunk}: ${leak.module}`,
+              (leak) =>
+                `  ${leak.entry} -> ${leak.chunk}: ${leak.module} (matched "${leak.match}")`,
             ),
-            'Host route modules and the client entry must never import @plakboek/editor; the editor loads only through its own chunk.',
+            'Host route modules and the client entry must never import @plakboek/editor or a library only the editor uses (@tiptap, @dnd-kit, prosemirror); the editor loads only through its own chunk.',
           ].join('\n'),
         );
       }

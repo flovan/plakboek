@@ -244,6 +244,58 @@ describe('plakboek() editor chunk', () => {
     expect(emitFile).not.toHaveBeenCalled();
   });
 
+  it('fails the client build when it asked for the editor chunk and the bundle has none, so the leak check cannot pass on nothing', () => {
+    const plugin = building();
+    callHook(plugin.buildStart, {
+      environment: { name: 'client' },
+      emitFile: vi.fn(),
+    });
+    const bundle = bundleWithEditor();
+    delete bundle['assets/plakboek-editor-abc.js'];
+    const emitFile = vi.fn();
+    const error = vi.fn((message: string) => {
+      throw new Error(message);
+    });
+    expect(() =>
+      callHook(
+        plugin.generateBundle,
+        { ...clientEnvironment, emitFile, error },
+        {},
+        bundle,
+      ),
+    ).toThrow(/no editor chunk/);
+    expect(emitFile).not.toHaveBeenCalled();
+  });
+
+  it('names the matched fragment in a leak message', () => {
+    const plugin = building();
+    callHook(plugin.buildStart, {
+      environment: { name: 'client' },
+      emitFile: vi.fn(),
+    });
+    const bundle = bundleWithEditor();
+    bundle['assets/home-1.js'] = {
+      type: 'chunk',
+      name: 'home',
+      fileName: 'assets/home-1.js',
+      isEntry: true,
+      imports: [],
+      dynamicImports: [],
+      moduleIds: ['/work/node_modules/@dnd-kit/core/dist/core.js'],
+    };
+    const error = vi.fn((message: string) => {
+      throw new Error(message);
+    });
+    expect(() =>
+      callHook(
+        plugin.generateBundle,
+        { ...clientEnvironment, emitFile: vi.fn(), error },
+        {},
+        bundle,
+      ),
+    ).toThrow(/matched "\/node_modules\/@dnd-kit\/"/);
+  });
+
   it('writes no sidecar for a server bundle', () => {
     const emitFile = vi.fn();
     callHook(
