@@ -1,5 +1,5 @@
 /**
- * Two-step sign-in in the login modal, in three engines: the authenticator
+ * Two-step sign-in in the login modal: the authenticator
  * code, a wrong one, the emailed-code step, and the lockout after too many
  * wrong codes. Accounts are the spec's own (created and enrolled through the
  * real auth API), so a locked account never affects another spec.

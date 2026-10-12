@@ -1,5 +1,5 @@
 /**
- * The edit shell's two layouts on a production build, in three engines: the
+ * The edit shell's two layouts on a production build: the
  * framed default (280px sidebar, the page 24px from the edges), the 56px rail
  * with the page flush, the choice kept per browser and applied before first
  * paint, the rail's keyboard and tooltip behaviour, and keyboard focus

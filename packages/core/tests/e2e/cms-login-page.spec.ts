@@ -1,5 +1,5 @@
 /**
- * The login document at `/cms` on a production build, in three engines. The
+ * The login document at `/cms` on a production build. The
  * first paint is proven with JavaScript turned off: the blurred real page, the
  * scrim and the card must already be there from the server's markup alone.
  * A second group runs with scripts on: a valid session goes straight to edit

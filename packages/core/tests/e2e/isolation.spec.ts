@@ -1,6 +1,5 @@
 /**
- * Isolation in both directions on the real shell, over the adversarial theme,
- * in three engines.
+ * Isolation in both directions on the real shell, over the adversarial theme.
  *
  * The chrome lives in a shadow root of the shell's own document and the site
  * lives in the framed document, so neither can style or reach the other. These

@@ -1,5 +1,5 @@
 /**
- * Two-step sign-in set-up in the login modal, in three engines: a superadmin
+ * Two-step sign-in set-up in the login modal: a superadmin
  * who has not set it up signs in, confirms the password, adds the key to an
  * authenticator (here, the test computes the code the app would show), saves
  * the backup codes and lands in the shell. The gate holds throughout: until

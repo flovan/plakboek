@@ -1,5 +1,5 @@
 /**
- * The edit shell on a production build, in three engines: an editor signs in
+ * The edit shell on a production build: an editor signs in
  * and opens `<page>?_edit=1`, the shell paints, the editor's own chunk loads
  * and hydrates it, and the same-origin iframe shows the live working tree.
  * Anonymous visitors get no editor at all.

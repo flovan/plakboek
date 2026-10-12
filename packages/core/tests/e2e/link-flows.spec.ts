@@ -1,5 +1,5 @@
 /**
- * Every emailed-link step of the login modal, in three engines: forgotten
+ * Every emailed-link step of the login modal: forgotten
  * password, the reset and invitation landings, sign-in links and the shared
  * invalid-link step. Links are issued through the same auth engine the server
  * runs (see `helpers/links.ts`), for accounts the spec creates itself, so a

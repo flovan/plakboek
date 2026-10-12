@@ -1,5 +1,5 @@
 /**
- * The login modal at `/cms` on a production build, in three engines: it is a
+ * The login modal at `/cms` on a production build: it is a
  * real modal once hydrated (focus, pointer and Escape), and a correct sign-in
  * hands the blurred page over to the framed edit shell by animating the real
  * frame, ending where the shell's first paint puts it.

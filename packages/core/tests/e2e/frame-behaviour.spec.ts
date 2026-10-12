@@ -1,6 +1,6 @@
 /**
  * How the edit shell treats navigation and its own exits, on a production
- * build, in three engines: links clicked in the framed site, a frame that
+ * build: links clicked in the framed site, a frame that
  * navigates itself, the failure and narrow-window panels, the page title, and
  * Exit edit mode and Log out.
  */
