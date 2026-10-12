@@ -27,9 +27,15 @@ export type RailProps = {
  * layout, then shown in place. Both layers are always in the markup, so the
  * server's first paint and the client's first render agree whichever layout a
  * browser stored; the host attribute decides which one is seen. Under reduced
- * motion there is no transition and the swap is instant. */
+ * motion there is no transition and the swap is instant.
+ *
+ * The layer being shown leaves `visibility` out of its transition, so it is
+ * visible, and its toggle can take focus, the moment the attribute changes; a
+ * transition from hidden to visible would still be hidden at its start. The
+ * layer being hidden keeps `visibility` in, so it stays visible through its
+ * fade. */
 const RAIL_BODY =
-  'invisible absolute inset-0 flex min-h-0 flex-col items-center p-2 opacity-0 translate-x-2 motion-safe:transition-[opacity,translate,visibility] motion-safe:duration-240 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] [:host([data-layout=full])_&]:visible [:host([data-layout=full])_&]:translate-x-0 [:host([data-layout=full])_&]:opacity-100';
+  'invisible absolute inset-0 flex min-h-0 flex-col items-center p-2 opacity-0 translate-x-2 motion-safe:transition-[opacity,translate,visibility] motion-safe:duration-240 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-safe:[:host([data-layout=full])_&]:transition-[opacity,translate] [:host([data-layout=full])_&]:visible [:host([data-layout=full])_&]:translate-x-0 [:host([data-layout=full])_&]:opacity-100';
 
 /** The first letter of the name, or of the email when there is no name. */
 function initialOf(displayName: string): string {

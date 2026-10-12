@@ -30,7 +30,7 @@ export type SidebarProps = {
  * then hidden and nudged left. See the rail's layer for why both are always
  * in the markup. */
 const SIDEBAR_BODY =
-  'visible absolute inset-0 flex min-h-0 flex-col p-4 opacity-100 motion-safe:transition-[opacity,translate,visibility] motion-safe:duration-240 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] [:host([data-layout=full])_&]:invisible [:host([data-layout=full])_&]:-translate-x-2 [:host([data-layout=full])_&]:opacity-0';
+  'visible absolute inset-0 flex min-h-0 flex-col p-4 opacity-100 motion-safe:transition-[opacity,translate] motion-safe:duration-240 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-safe:[:host([data-layout=full])_&]:transition-[opacity,translate,visibility] [:host([data-layout=full])_&]:invisible [:host([data-layout=full])_&]:-translate-x-2 [:host([data-layout=full])_&]:opacity-0';
 
 /** The user's name, clamped to two lines; once the client is running, a
  * clamped name also carries a tooltip with the whole of it. */

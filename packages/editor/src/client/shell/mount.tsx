@@ -6,6 +6,38 @@ import { SHELL_ROOT_ID, type ShellIsland } from '../../chrome/island.js';
 import { watchFrame } from './frame-watch.js';
 import { applyLayout, readLayout, writeLayout } from './layout.js';
 
+/**
+ * Moves keyboard focus into the layer the layout switch just showed. Both
+ * layers are always in the markup and the host attribute hides one, and
+ * browsers drop focus from a control whose layer becomes hidden, which would
+ * leave a keyboard user on the page body. Focus follows to the same toggle in
+ * the layer now shown, but only when it was inside the layer being hidden: focus
+ * that is elsewhere (after a WebKit mouse click, which does not focus a button)
+ * stays where the browser put it. The call works synchronously because the
+ * shown layer's state leaves `visibility` out of its transition (see the
+ * rail's layer).
+ */
+function focusShownToggle(host: HTMLElement, shown: SidebarLayout): void {
+  const root = host.shadowRoot;
+  if (root === null) return;
+  const hidden = root.querySelector(
+    shown === 'full' ? '[data-sidebar]' : '[data-rail]',
+  );
+  const toggle = root.querySelector(
+    shown === 'full'
+      ? '[data-rail] button[aria-pressed]'
+      : '[data-sidebar] button[aria-pressed]',
+  );
+  const active = root.activeElement;
+  if (
+    active !== null &&
+    hidden?.contains(active) === true &&
+    toggle instanceof HTMLElement
+  ) {
+    toggle.focus({ preventScroll: true });
+  }
+}
+
 function ShellRoot(props: {
   readonly host: HTMLElement;
   readonly island: ShellIsland;
@@ -46,6 +78,7 @@ function ShellRoot(props: {
   const toggleLayout = useCallback(() => {
     const next: SidebarLayout = layout === 'full' ? 'framed' : 'full';
     applyLayout(host, next);
+    focusShownToggle(host, next);
     writeLayout(next);
     setLayout(next);
   }, [host, layout]);

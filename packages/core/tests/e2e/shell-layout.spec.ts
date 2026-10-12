@@ -2,7 +2,8 @@
  * The edit shell's two layouts on a production build, in three engines: the
  * framed default (280px sidebar, the page 24px from the edges), the 56px rail
  * with the page flush, the choice kept per browser and applied before first
- * paint, and the rail's keyboard and tooltip behaviour.
+ * paint, the rail's keyboard and tooltip behaviour, and keyboard focus
+ * following the layout toggle into the layer now shown.
  */
 import { expect, test, type Page } from '@playwright/test';
 import { e2eUsers } from './helpers/host.ts';
@@ -222,6 +223,40 @@ test.describe('the full-width layout', () => {
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'framed');
     expectBox(await page.locator(FRAME).boundingBox(), FRAMED_FRAME);
   });
+});
+
+// Browsers drop focus from a control once its layer finishes hiding, so a stale
+// focus only fails the check made after the swap; the check at once covers the
+// move itself. Both run, with and without the transition.
+test.describe('keyboard focus through the layout toggle', () => {
+  const motions = ['no-preference', 'reduce'] as const;
+  for (const motion of motions) {
+    test(`moves to the toggle of the layout now shown, both ways (${motion} motion)`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion: motion });
+      await openShell(page, '/about?_edit=1');
+
+      await page.locator(FRAMED_TOGGLE).focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
+      await expect(page.locator(RAIL_TOGGLE)).toBeFocused();
+      await expect(page.locator(SIDEBAR_BODY)).toHaveCSS(
+        'visibility',
+        'hidden',
+      );
+      await expect(page.locator(RAIL_TOGGLE)).toBeFocused();
+
+      await page.keyboard.press('Enter');
+      await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'framed');
+      await expect(page.locator(FRAMED_TOGGLE)).toBeFocused();
+      await expect(page.locator(RAIL)).toHaveCSS('visibility', 'hidden');
+      await expect(page.locator(FRAMED_TOGGLE)).toBeFocused();
+
+      await page.keyboard.press('Enter');
+      await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
+    });
+  }
 });
 
 test.describe('the rail', () => {
