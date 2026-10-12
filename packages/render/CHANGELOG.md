@@ -1,5 +1,21 @@
 # @plakboek/render
 
+## 0.6.0
+
+### Minor Changes
+
+- [#20](https://github.com/flovan/plakboek/pull/20) [`41afc1e`](https://github.com/flovan/plakboek/commit/41afc1e6e60582252ac0e47902479cc0eaff1654) Thanks [@flovan](https://github.com/flovan)! - Document composers now learn which rendering they produce: `DocumentInput` gains a required `mode: 'visitor' | 'edit'` (the new `DocumentMode` type), and the visitor handler always passes `'visitor'`. A host's document omits analytics and third-party widgets when `mode` is `'edit'` and keeps block-owned scripts. Anyone who constructs a `DocumentInput` by hand, a test or a custom composer wrapper for example, must now set `mode`.
+
+  The Edit pill on visitor pages no longer jumps to `?_edit=1`: it navigates to `/cms?next=<current page>` so the server decides whether a session continues straight into editing or sees the login screen, and it never renders inside a frame. The two new constants `CMS_LOGIN_PATH` (`/cms`) and `NEXT_PARAM` (`next`) are exported from the root entry. The inline bootstrap text changed, so `TOOLBAR_BOOTSTRAP_CSP_HASH` changed: hosts that pin the hash in `script-src` should use the exported constant.
+
+- [#20](https://github.com/flovan/plakboek/pull/20) [`93b8eae`](https://github.com/flovan/plakboek/commit/93b8eaeefb31f4e936fe9db02f874799a59a40da) Thanks [@flovan](https://github.com/flovan)! - Adds the live side of the edit proxy and a renderer for a page's working tree, for the editor's frame document. `createLiveEdit` returns an `EditProxy` that spreads `data-pk-block`, `data-pk-type`, `data-pk-kind` and `data-pk-label` onto a block's root element (`edit.field(name)` yields `data-pk-field`), with the names exported as `EDIT_ATTRIBUTE` from the root entry. `renderPageTree` renders a `BlockNode[]` through the same block containment the visitor snapshot path uses; in `live` mode a block that renders nothing (unknown type, degraded node, throwing or async component) becomes an inert placeholder that keeps the block's `kind` and `label` and is marked `data-pk-unavailable="unknown|degraded|failed"`, and `plain` mode renders visitor-identical markup with no `data-pk-*` attribute. `normalizeVisitorPath` and its `VisitorPathResult` type are now exported from the server entry. The visitor snapshot output is unchanged.
+
+### Patch Changes
+
+- Updated dependencies [[`ebb81f2`](https://github.com/flovan/plakboek/commit/ebb81f2682f2e3a097435166dead985050f36636)]:
+  - @plakboek/pages@0.6.0
+  - @plakboek/cache@0.6.0
+
 ## 0.5.1
 
 ### Patch Changes

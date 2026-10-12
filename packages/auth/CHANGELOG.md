@@ -1,5 +1,17 @@
 # @plakboek/auth
 
+## 0.6.0
+
+### Minor Changes
+
+- [#20](https://github.com/flovan/plakboek/pull/20) [`8867be6`](https://github.com/flovan/plakboek/commit/8867be6314a74735ee143c8e5034692510faf67b) Thanks [@flovan](https://github.com/flovan)! - `createAuth` now serves two rate-limited, origin-checked HTTP endpoints for the login modal: `POST /plakboek/password-link/request` (forgot password; one answer whether or not the address is registered, 3 per 60 s per client) and `POST /plakboek/password-link/complete` (spends a set-password or reset-password token; `INVALID_LINK` for every token failure, `PASSWORD_TOO_SHORT` without spending the link, 10 per 60 s per client). New `sanitizeNextPath` is the one open-redirect guard for a `next` value, and `requestPasswordLink` accepts an optional `next` that the emailed link carries. A magic link is no longer sent to a user who has two-factor enabled, and a link issued before they enrolled creates no session, so a sign-in link cannot skip the second factor. `TWO_FACTOR_ENROLMENT_PATH` is now `/cms/two-factor/enrol`. New `rateLimitEnabled` option on `createAuth` switches better-auth's limiter on or off; it defaults to on in production only. `CompleteSetPasswordDeps.auth` now only needs the password hasher slice of the better-auth context. New `trustedProxies` and `ipAddressHeaders` options on `createAuth` tell the limiter how to find the client behind a reverse proxy; without them a multi-hop `X-Forwarded-For` header gives every client one shared allowance.
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @plakboek/db@0.6.0
+  - @plakboek/permissions@0.6.0
+
 ## 0.5.1
 
 ### Patch Changes
