@@ -435,6 +435,31 @@ describe('the rail', () => {
       '[:host([data-layout=full])_&amp;]:invisible',
     );
   });
+
+  // The e2e focus test in packages/core depends on this split: a hidden-to-
+  // visible transition is still hidden at its start, so the shown toggle could
+  // not take focus.
+  it('leaves visibility out of the transition of the layer being shown, so its toggle can take focus at once', () => {
+    const html = staticShell(ISLAND);
+    const railClass = /class="([^"]*)" data-rail=""/.exec(html)?.[1];
+    const sidebarClass = /class="([^"]*)" data-sidebar=""/.exec(html)?.[1];
+    if (railClass === undefined || sidebarClass === undefined) {
+      throw new Error('The shell markup has no rail or sidebar layer');
+    }
+    const rail = railClass.split(' ');
+    const sidebar = sidebarClass.split(' ');
+
+    expect(rail).toContain(
+      'motion-safe:transition-[opacity,translate,visibility]',
+    );
+    expect(rail).toContain(
+      'motion-safe:[:host([data-layout=full])_&amp;]:transition-[opacity,translate]',
+    );
+    expect(sidebar).toContain('motion-safe:transition-[opacity,translate]');
+    expect(sidebar).toContain(
+      'motion-safe:[:host([data-layout=full])_&amp;]:transition-[opacity,translate,visibility]',
+    );
+  });
 });
 
 describe('the frame area', () => {
