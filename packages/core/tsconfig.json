@@ -21,5 +21,12 @@
     "vitest.config.ts",
     "vitest.integration.config.ts"
   ],
-  "exclude": ["tests/fixture-host"]
+  "exclude": [
+    "tests/fixture-host",
+    "tests/e2e-host",
+    // Browser-side code of the Playwright suite: typed by tests/e2e/tsconfig.json.
+    "tests/e2e/helpers/site-behaviour.ts",
+    "tests/e2e/helpers/snapshots.ts",
+    "tests/e2e/**/*.spec.ts"
+  ]
 }

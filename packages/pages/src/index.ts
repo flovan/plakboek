@@ -28,6 +28,11 @@
  *   address-availability check (`page-slug.ts`, `page-routing.ts`) -- the
  *   advisory-lock-serialised search a concurrent write must go through, not
  *   a preview a caller runs on its own.
+ * - The reserved-first-segment write guard (`assertNotReservedFirstSegment`,
+ *   `reserved.ts`) -- called from the create, rename, move and translate
+ *   write paths before they write; a caller running it on its own could
+ *   pre-check an address and then write it some other way. The boot check
+ *   (`checkReservedPagePaths`) and its reporter are public.
  * - The edit-lock write guard every mutation calls internally (`locks.ts`) --
  *   reachable only from inside this package's own audited writes, never as
  *   a standalone check a caller could run out of step with the write it
@@ -448,3 +453,20 @@ export type {
   ToPublicPagePathInput,
   VisitorPageResolution,
 } from './visitor.js';
+
+// editable.ts
+export { resolveEditablePage } from './editable.js';
+export type {
+  EditablePageResolution,
+  EditablePageView,
+  ResolveEditablePageInput,
+} from './editable.js';
+
+// reserved.ts
+export {
+  checkReservedPagePaths,
+  RESERVED_PAGE_PATH_SEGMENTS,
+  reportReservedPagePaths,
+  ReservedPageSlugError,
+} from './reserved.js';
+export type { ReservedPagePathEvent, ReservedPagePathRow } from './reserved.js';

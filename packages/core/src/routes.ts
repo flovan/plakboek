@@ -12,10 +12,13 @@
  * with its own routes first: they win every tie, including a host index route
  * at `/`, and every path the host does not claim falls through to the CMS.
  *
- * Reserved paths: `/cms/*` (health and first-run setup now, the editor later) and
- * `/api/auth/*` belong to the CMS. A page whose first slug segment is `cms`
- * or `api` is shadowed by them and unreachable; reserved-slug enforcement is
- * carried to Phase 7.
+ * Reserved paths: `/cms` and everything under it (the login page and its
+ * email-link landings, health, first-run setup, logout) and `/api/auth/*`
+ * belong to the CMS. `/cms/*` never falls through to the visitor route: a path
+ * under it that no specific route claims reaches the editor's pages handler
+ * and ends in the host's own 404. The page engine refuses a page whose first
+ * slug segment is `cms` or `api`, and reports any that already exists at boot,
+ * because the CMS routes would shadow it.
  */
 import { fileURLToPath } from 'node:url';
 import { index, route, type RouteConfigEntry } from '@react-router/dev/routes';
@@ -27,11 +30,15 @@ function file(name: string): string {
 
 export function cmsRoutes(): RouteConfigEntry[] {
   return [
+    route('cms', file('cms'), { id: 'plakboek-cms' }),
     route('cms/health', file('health'), { id: 'plakboek-health' }),
     route('cms/setup', file('setup'), { id: 'plakboek-setup' }),
     route('cms/setup/test-email', file('test-email'), {
       id: 'plakboek-setup-test-email',
     }),
+    route('cms/logout', file('cms-logout'), { id: 'plakboek-cms-logout' }),
+    route('cms/*', file('cms'), { id: 'plakboek-cms-pages' }),
+    route('robots.txt', file('robots'), { id: 'plakboek-robots' }),
     route('api/auth/*', file('auth-api'), { id: 'plakboek-auth' }),
     // The visitor entries stay last: a splat does not match "/", so the
     // visitor route needs both an index and a splat entry.

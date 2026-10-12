@@ -8,6 +8,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createPage, getPage, insertBlock, publishPage } from '@plakboek/pages';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createRuntime } from '../../src/runtime/runtime.js';
 import {
   FIXTURE_CLIENT_DIR,
   FIXTURE_HOST_INDEX_BUILD_DIR,
@@ -134,13 +135,27 @@ describe('the CMS route table inside a host app', () => {
       expect(body).not.toContain('edit seam reached');
     });
 
-    it('bounces every _edit request when no entrypoint is wired in', async () => {
-      // The installation's own runtime is built from the configuration alone.
-      const response = await installation.runtime.visitor(
+    it('bounces every _edit request when the host entrypoint answers null', async () => {
+      const { runtime } = installation;
+      const bouncing = createRuntime(
+        { config: runtime.config, edit: () => Promise.resolve(null) },
+        runtime.env,
+      );
+      const response = await bouncing.visitor(
         new Request('http://localhost:3000/about-cms-page?_edit=1'),
       );
       expect(response.status).toBe(302);
       expect(response.headers.get('Location')).toBe('/about-cms-page');
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+    });
+
+    it('answers a sealed 500 when the real editor has no client assets to load', async () => {
+      // The installation's own runtime is built from the configuration alone,
+      // so it composes the real editor but was given no built client.
+      const response = await installation.runtime.visitor(
+        new Request('http://localhost:3000/about-cms-page?_edit=1'),
+      );
+      expect(response.status).toBe(500);
       expect(response.headers.get('Cache-Control')).toBe('no-store');
     });
   });

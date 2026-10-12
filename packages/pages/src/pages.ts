@@ -20,6 +20,7 @@ import {
   generateUniquePageSlug,
 } from './page-slug.js';
 import { registerPagePurge } from './purge.js';
+import { assertNotReservedFirstSegment } from './reserved.js';
 import { pages, pageUrlHistory } from './schema.js';
 import { getPageEditLocking } from './settings.js';
 import { PAGE_STATUSES, type PageRecord, type PageStatus } from './types.js';
@@ -323,6 +324,7 @@ export async function createPage(
       let slugSource: 'generated' | 'manual';
       if (input.slug !== undefined) {
         slugSource = 'manual';
+        if (parentPath === null) assertNotReservedFirstSegment(input.slug);
         await assertPageSlugAvailable(tx, {
           locale: input.locale,
           slug: input.slug,
@@ -622,6 +624,7 @@ export async function renamePage(
       let slugSource = page.slugSource;
       if (input.slug !== undefined && input.slug !== page.slug) {
         slugSource = 'manual';
+        if (parentPath === null) assertNotReservedFirstSegment(input.slug);
         await assertPageSlugAvailable(tx, {
           locale: page.locale,
           slug: input.slug,
@@ -796,6 +799,11 @@ export async function movePage(
         }
       }
 
+      // Only a page that actually reaches the root is checked: a page that
+      // already sits there keeps its address (keep data, D-23).
+      if (destinationParentPath === null && page.parentPageId !== null) {
+        assertNotReservedFirstSegment(page.slug);
+      }
       const newPrefix = composePagePath(destinationParentPath, page.slug);
       const destinations = computeSubtreeDestinations(
         subtree,

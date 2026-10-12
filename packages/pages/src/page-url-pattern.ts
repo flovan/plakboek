@@ -44,7 +44,8 @@ export type PageUrlPatternIssueCode =
   | 'EMPTY_SEGMENT'
   | 'INVALID_LITERAL'
   | 'PATTERN_TOO_LONG'
-  | 'EMPTY_PATTERN';
+  | 'EMPTY_PATTERN'
+  | 'RESERVED_PREFIX';
 
 export type PageUrlPatternIssue = {
   readonly code: PageUrlPatternIssueCode;

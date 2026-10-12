@@ -6,6 +6,9 @@
  * literal list and to the README's Public API tables, so adding or removing
  * an export means changing all three together.
  *
+ * `passwordLinkPlugin` (the forgot-password and link-landing endpoints) is
+ * internal: `createAuth` installs it, so a host never wires it by hand.
+ *
  * Deliberately absent: the token value generator and identifier builder,
  * the expiry helpers, the advisory lock keys, the stored-address helper and
  * every schema table. A consumer that could reach them could write a
@@ -89,6 +92,8 @@ export type {
   TokenClockOptions,
   AuthorizeWithToken,
 } from './tokens.js';
+
+export { sanitizeNextPath } from './next-path.js';
 
 export {
   requestPasswordLink,

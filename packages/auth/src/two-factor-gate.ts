@@ -28,8 +28,9 @@ export const TWO_FACTOR_REQUIRED_ROLE_KEYS: readonly string[] = Object.freeze([
 
 /** Where an unenrolled user who needs two-factor is sent. It sits under
  * `/cms`, which the admin shell reserves, so every caller routes to this one
- * string. */
-export const TWO_FACTOR_ENROLMENT_PATH = '/cms/settings/2fa/enrol';
+ * string. The enrolment step lives in the login modal the shell serves at
+ * this path (D-26); the gate itself decides exactly what it always did. */
+export const TWO_FACTOR_ENROLMENT_PATH = '/cms/two-factor/enrol';
 
 /** Snapshotted into a Set: `Set.has` never consults the prototype chain, so
  * a role key such as `__proto__` or `constructor` is absent rather than an

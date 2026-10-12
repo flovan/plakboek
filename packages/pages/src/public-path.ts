@@ -60,6 +60,21 @@ function hasLocaleToken(parsed: ParsedPageUrlPattern): boolean {
 }
 
 /**
+ * The first segment of the address a default-locale page gets under
+ * `pattern`, with the hierarchy path left as a placeholder, lower-cased. The
+ * default locale has no `{locale}` value, so a pattern such as
+ * `{locale}/cms/{path}` starts with `cms` for it. A segment that only begins
+ * with the placeholder (`{path}`) or contains it (`cms-{path}`) is returned
+ * with it in place, which no reserved word equals. Pure.
+ */
+export function defaultLocaleFirstSegment(
+  pattern: string | ParsedPageUrlPattern,
+): string {
+  const probe = publicForm(asParsed(pattern), '', SENTINEL);
+  return (probe.slice(1).split('/')[0] ?? '').toLowerCase();
+}
+
+/**
  * The one place a public spelling is composed: the stored pattern resolved
  * for `locale` (an empty locale value for the default one, so its segment
  * disappears), runs of `/` collapsed, outer slashes stripped, then a single

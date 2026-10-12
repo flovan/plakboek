@@ -558,6 +558,30 @@ lock blocking one would be impractical. Each is gated by its own permission
 | `ToPublicPagePathInput`     | type     | Input to `toPublicPagePath`                                                                |
 | `VisitorPageResolution`     | type     | The composite's result: `page`, `redirect`, `not-found` or `invalid-pattern`               |
 
+### Editable page resolution (D-20)
+
+| Export                     | Kind     | Purpose                                                                                                                  |
+| -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `resolveEditablePage`      | function | Resolves a public path to a page's live working tree (unpublished changes included, draft-only pages too, never trashed) |
+| `EditablePageResolution`   | type     | The result: `page` (with its live block tree), `redirect`, `not-found` or `invalid-pattern`                              |
+| `EditablePageView`         | type     | What an editor needs of the page: id, locale, path, title, status, version, live publication id, head SEO set            |
+| `ResolveEditablePageInput` | type     | Input to `resolveEditablePage` (the same shape `resolveVisitorPage` takes)                                               |
+
+`resolveEditablePage` is not permission-gated and returns unpublished content: it belongs behind the editor's own session and permission checks, never on a visitor path.
+
+### Reserved page addresses (D-23)
+
+The CMS owns the first address segments `cms` and `api`. Creating, renaming, moving or translating a page so its hierarchy path starts with one (in any locale, compared case-insensitively) is refused with `ReservedPageSlugError`; a slug generated at the root skips them and takes the next free suffix (`cms-2`). A page that already sits there is kept as is and flagged at boot.
+
+| Export                        | Kind     | Purpose                                                                                                    |
+| ----------------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
+| `RESERVED_PAGE_PATH_SEGMENTS` | constant | The frozen list of reserved first segments (`cms`, `api`)                                                  |
+| `ReservedPageSlugError`       | class    | Thrown by a write that would give a page a reserved first segment; carries `segment` and `path`            |
+| `checkReservedPagePaths`      | function | Lists stored pages (any status) whose first path segment is reserved; one select, never writes             |
+| `reportReservedPagePaths`     | function | Fires `onReservedPagePath` once per row (default: one console warning); a throwing hook never crashes boot |
+| `ReservedPagePathRow`         | type     | One flagged page: `pageId`, `locale`, `path`, `segment`                                                    |
+| `ReservedPagePathEvent`       | type     | What `onReservedPagePath` receives: the row plus `occurredAt`                                              |
+
 `resolved_path` is read exactly as it is stored (`en/about-us` under the
 default pattern) and is the only working-side value the resolver reads; the
 view's title and SEO come out of the published snapshot. Only the resolver maps

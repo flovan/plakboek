@@ -9,8 +9,10 @@
 
 // constants
 export {
+  CMS_LOGIN_PATH,
   EDIT_PARAM,
   EDITOR_FLAG_KEY,
+  NEXT_PARAM,
   TOOLBAR_DISMISSED_KEY,
 } from './constants.js';
 
@@ -22,8 +24,16 @@ export type {
 } from './block-component.js';
 
 // head
-export type { DocumentInput, PageHead, RenderDocument } from './head.js';
+export type {
+  DocumentInput,
+  DocumentMode,
+  PageHead,
+  RenderDocument,
+} from './head.js';
 
 // edit-proxy
 export { NOOP_EDIT } from './edit-proxy.js';
 export type { EditAttributes, EditProxy } from './edit-proxy.js';
+
+// live-edit
+export { EDIT_ATTRIBUTE } from './live-edit.js';

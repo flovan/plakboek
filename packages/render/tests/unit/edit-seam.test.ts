@@ -7,8 +7,9 @@ import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import {
-  EDIT_PARAM,
+  CMS_LOGIN_PATH,
   EDITOR_FLAG_KEY,
+  NEXT_PARAM,
   TOOLBAR_DISMISSED_KEY,
 } from '../../src/constants.js';
 import {
@@ -105,6 +106,8 @@ type RunOptions = {
   readonly href?: string;
   readonly storage?: Record<string, string>;
   readonly throwingStorage?: boolean;
+  /** Runs the bootstrap inside a frame: `top` is another window. */
+  readonly framed?: boolean;
 };
 
 /** Executes the bootstrap against the stubs. */
@@ -136,6 +139,8 @@ function run(options: RunOptions = {}): Run {
     },
   };
   sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  sandbox.top = options.framed === true ? { framed: true } : sandbox;
   if (options.throwingStorage === true) {
     Object.defineProperty(sandbox, 'localStorage', {
       get() {
@@ -183,10 +188,48 @@ describe('the toolbar bootstrap at run time', () => {
     expect(buttonLabelled(host, 'Edit').type).toBe('button');
   });
 
-  it('navigates to the same URL with _edit=1 on activation', () => {
-    const result = run({ storage: ACTIVE });
+  it('navigates to the login path with the current page as next on activation', () => {
+    const result = run({
+      storage: ACTIVE,
+      href: 'https://site.test/about?utm=x',
+    });
     buttonLabelled(result.appended[0]!, 'Edit').listeners.click?.();
-    expect(result.assigned).toEqual([`/about-us?x=1&${EDIT_PARAM}=1`]);
+    expect(result.assigned).toEqual(['/cms?next=%2Fabout%3Futm%3Dx']);
+    expect(result.assigned[0]).toBe(
+      `${CMS_LOGIN_PATH}?${NEXT_PARAM}=${encodeURIComponent('/about?utm=x')}`,
+    );
+  });
+
+  it('carries only the path when the page has no query', () => {
+    const result = run({ storage: ACTIVE, href: 'https://site.test/' });
+    buttonLabelled(result.appended[0]!, 'Edit').listeners.click?.();
+    expect(result.assigned).toEqual(['/cms?next=%2F']);
+  });
+
+  it('never navigates anywhere but the fixed same-origin login path', () => {
+    const result = run({
+      storage: ACTIVE,
+      href: 'https://site.test//evil.example/x?redirect=https://evil.example',
+    });
+    buttonLabelled(result.appended[0]!, 'Edit').listeners.click?.();
+    expect(result.assigned).toHaveLength(1);
+    expect(result.assigned[0]!.startsWith('/cms?next=')).toBe(true);
+    expect(result.assigned[0]).not.toContain('//evil');
+  });
+
+  it('renders nothing inside a frame and throws nothing', () => {
+    expect(() => run({ storage: ACTIVE, framed: true })).not.toThrow();
+    const result = run({ storage: ACTIVE, framed: true });
+    expect(result.created).toHaveLength(0);
+    expect(result.appended).toHaveLength(0);
+  });
+
+  it('is inert on a frame URL carrying _edit=frame', () => {
+    const result = run({
+      storage: ACTIVE,
+      href: 'https://site.test/about?_edit=frame',
+    });
+    expect(result.appended).toHaveLength(0);
   });
 
   it('is inert once the toolbar was dismissed', () => {
@@ -244,6 +287,12 @@ describe('the toolbar bootstrap as text', () => {
     expect(body).not.toContain('data-');
     expect(body).not.toContain('innerHTML');
     expect(Buffer.byteLength(html, 'utf8')).toBeLessThanOrEqual(2048);
+  });
+
+  it('targets the login path through the shared constants, not _edit', () => {
+    expect(body).toContain(JSON.stringify(CMS_LOGIN_PATH));
+    expect(body).toContain(JSON.stringify(NEXT_PARAM));
+    expect(body).not.toContain('searchParams.set');
   });
 
   it('exports the sha256 of exactly the script text as its CSP hash', () => {

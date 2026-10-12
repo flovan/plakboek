@@ -127,7 +127,20 @@ describe('assertTwoFactorSatisfied', () => {
     }
   });
 
-  it('routes every caller to one enrolment path under /cms', () => {
-    expect(TWO_FACTOR_ENROLMENT_PATH).toBe('/cms/settings/2fa/enrol');
+  it('routes every caller to one enrolment path under /cms (D-26)', () => {
+    expect(TWO_FACTOR_ENROLMENT_PATH).toBe('/cms/two-factor/enrol');
+    expect(new TwoFactorEnrolmentRequiredError('superadmin').redirectTo).toBe(
+      TWO_FACTOR_ENROLMENT_PATH,
+    );
+  });
+
+  it('does not weaken the gate: superadmin still requires two-factor', () => {
+    expect(isTwoFactorRequiredForRole('superadmin')).toBe(true);
+    expect(() =>
+      assertTwoFactorSatisfied({
+        roleKey: 'superadmin',
+        twoFactorEnabled: false,
+      }),
+    ).toThrow(TwoFactorEnrolmentRequiredError);
   });
 });

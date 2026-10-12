@@ -5,7 +5,8 @@
  *
  * It never adds a script: a visitor page ships zero client JavaScript by
  * default (D-10). The only script on a visitor page is the editor bootstrap
- * the request handler adds itself.
+ * the request handler adds itself. Because it never adds a script, it ignores
+ * `input.mode`: the visitor and edit renders are identical.
  */
 import { renderHeadHtml, type DocumentInput } from './head.js';
 

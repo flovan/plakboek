@@ -62,6 +62,8 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   issueSingleUseToken: 'function',
   InvalidOrExpiredTokenError: 'class',
   TOKEN_PURPOSES: 'constant',
+  // next-path
+  sanitizeNextPath: 'function',
   // credentials
   requestPasswordLink: 'function',
   completeSetPassword: 'function',

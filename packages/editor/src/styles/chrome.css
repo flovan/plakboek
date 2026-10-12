@@ -1,0 +1,517 @@
+/*
+ * Chrome stylesheet entry. Compiled by scripts/build-chrome-css.ts with
+ * Tailwind v4 through Vite's build API. Theme and utilities layers only:
+ * there is no preflight, because chrome lives in shadow roots and must never
+ * reset anything the site owns.
+ *
+ * Everything is sized in px. A site's `html { font-size }` must not rescale
+ * chrome, and the build fails on any rem or em unit, so the Tailwind
+ * namespaces whose defaults are relative units are reset below.
+ *
+ * Automatic source detection is off; only the components under src are
+ * scanned, so words in comments and strings never become utilities.
+ */
+@layer theme, base, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities) source(none);
+
+@source '../**/*.tsx';
+
+/*
+ * Utilities built on Tailwind's property defaults (translate, shadow, ring,
+ * outline) that the shell uses from its first release. Safelisted so the
+ * guarded @layer properties path of the build is exercised even before every
+ * component exists.
+ */
+@source inline("translate-x-2 -translate-x-2 shadow-card shadow-frame shadow-frame-dark ring-2 outline-2");
+
+/*
+ * Theme. Reset every namespace whose Tailwind default is not a px value we
+ * chose, then declare ours. The colour utilities read the --pk-* tokens
+ * below, so a host attribute or the browser's colour scheme re-themes chrome
+ * without recompiling.
+ */
+@theme {
+  --color-*: initial;
+  --text-*: initial;
+  --font-*: initial;
+  --font-weight-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --container-*: initial;
+  --breakpoint-*: initial;
+  --tracking-*: initial;
+
+  --spacing: 4px;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-weight-normal: 400;
+  --font-weight-semibold: 600;
+
+  --text-caption: 12px;
+  --text-caption--line-height: 1.2;
+  --text-body: 14px;
+  --text-body--line-height: 1.5;
+  --text-heading: 20px;
+  --text-heading--line-height: 1.2;
+
+  --radius-sm: 4px;
+  --radius-lg: 8px;
+
+  --shadow-card: 0 24px 48px rgba(0, 0, 0, 0.24);
+  --shadow-frame: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-frame-dark: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+@theme inline {
+  --color-stage: var(--pk-stage);
+  --color-surface: var(--pk-surface);
+  --color-surface-muted: var(--pk-surface-muted);
+  --color-accent: var(--pk-accent);
+  --color-accent-contrast: var(--pk-accent-contrast);
+  --color-accent-hover: var(--pk-accent-hover);
+  --color-destructive: var(--pk-destructive);
+  --color-text: var(--pk-text);
+  --color-text-muted: var(--pk-text-muted);
+  --color-control-border: var(--pk-control-border);
+  --color-border: var(--pk-border);
+  --color-scrim: var(--pk-scrim);
+  --color-overlay-outline: var(--pk-overlay-outline);
+  --color-overlay-halo: var(--pk-overlay-halo);
+  --color-overlay-chip-text: var(--pk-overlay-chip-text);
+  --color-input-fill: var(--pk-input-fill);
+  --color-focus-ring: var(--pk-focus-ring);
+  --color-frame-border: var(--pk-frame-border);
+}
+
+/*
+ * Tokens, light. Declared on the shadow host: chrome never reads the site's
+ * colours, fonts or font size. `color-scheme` is set here only, so native
+ * controls inside chrome match; the site's own scheme is never touched.
+ */
+:host {
+  all: initial;
+  color-scheme: light dark;
+  font:
+    400 14px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Helvetica,
+    Arial,
+    sans-serif;
+  color: var(--pk-text);
+
+  --pk-stage: #f4f4f5;
+  --pk-surface: #ffffff;
+  --pk-surface-muted: #f4f4f5;
+  --pk-accent: #4f46e5;
+  --pk-accent-contrast: #ffffff;
+  --pk-accent-hover: #4338ca;
+  --pk-destructive: #b91c1c;
+  --pk-text: #27272a;
+  --pk-text-muted: #52525b;
+  --pk-control-border: #71717a;
+  --pk-border: #e4e4e7;
+  --pk-scrim: rgba(24, 24, 27, 0.4);
+  --pk-overlay-outline: #4f46e5;
+  --pk-overlay-halo: rgba(255, 255, 255, 0.9);
+  --pk-overlay-chip-text: #ffffff;
+  --pk-input-fill: #ffffff;
+  --pk-focus-ring: var(--pk-accent);
+  --pk-frame-border: var(--pk-border);
+}
+
+/* Tokens, dark, when the browser prefers it. */
+@media (prefers-color-scheme: dark) {
+  :host {
+    --pk-stage: #18181b;
+    --pk-surface: #27272a;
+    --pk-surface-muted: #3f3f46;
+    --pk-accent: #818cf8;
+    --pk-accent-contrast: #09090b;
+    --pk-accent-hover: #a5b4fc;
+    --pk-destructive: #f87171;
+    --pk-text: #fafafa;
+    --pk-text-muted: #a1a1aa;
+    --pk-border: #3f3f46;
+    --pk-scrim: rgba(0, 0, 0, 0.6);
+    --pk-input-fill: #18181b;
+  }
+}
+
+/*
+ * A `data-theme` attribute on the host wins over the browser's preference
+ * (the later phase that adds a theme toggle sets it). Both sets are repeated
+ * here so the attribute decides in either direction.
+ */
+:host([data-theme='light']) {
+  color-scheme: light;
+
+  --pk-stage: #f4f4f5;
+  --pk-surface: #ffffff;
+  --pk-surface-muted: #f4f4f5;
+  --pk-accent: #4f46e5;
+  --pk-accent-contrast: #ffffff;
+  --pk-accent-hover: #4338ca;
+  --pk-destructive: #b91c1c;
+  --pk-text: #27272a;
+  --pk-text-muted: #52525b;
+  --pk-border: #e4e4e7;
+  --pk-scrim: rgba(24, 24, 27, 0.4);
+  --pk-input-fill: #ffffff;
+}
+
+:host([data-theme='dark']) {
+  color-scheme: dark;
+
+  --pk-stage: #18181b;
+  --pk-surface: #27272a;
+  --pk-surface-muted: #3f3f46;
+  --pk-accent: #818cf8;
+  --pk-accent-contrast: #09090b;
+  --pk-accent-hover: #a5b4fc;
+  --pk-destructive: #f87171;
+  --pk-text: #fafafa;
+  --pk-text-muted: #a1a1aa;
+  --pk-border: #3f3f46;
+  --pk-scrim: rgba(0, 0, 0, 0.6);
+  --pk-input-fill: #18181b;
+}
+
+/*
+ * Forced colours: the overlay uses the system highlight pair, the halo is
+ * dropped, the focus ring uses Highlight and the frame keeps a 1px border in
+ * the system text colour.
+ */
+@media (forced-colors: active) {
+  :host {
+    --pk-overlay-outline: Highlight;
+    --pk-overlay-chip-text: HighlightText;
+    --pk-overlay-halo: transparent;
+    --pk-focus-ring: Highlight;
+    --pk-frame-border: CanvasText;
+  }
+}
+
+/*
+ * Layout of the edit shell. The host fills the viewport and never scrolls;
+ * the sidebar and the stage sit side by side and only the framed site
+ * scrolls, inside its own iframe. These rules own all of the shell's
+ * geometry so later components use utilities only.
+ *
+ * The shell's first rules reset what a shadow root would otherwise inherit
+ * from the browser's defaults; they live in the base layer so every utility
+ * still wins over them.
+ */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+  }
+
+  button,
+  input {
+    font: inherit;
+    color: inherit;
+  }
+}
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: block;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--pk-stage);
+}
+
+@layer components {
+  /* The container the shell renders into: sidebar column, stage column. */
+  .pk-shell {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .pk-sidebar {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: var(--pk-surface);
+    border-right: 1px solid var(--pk-border);
+    overflow: hidden;
+  }
+
+  /* 24px of stage on every side of the frame. */
+  .pk-stage {
+    min-width: 0;
+    min-height: 0;
+    padding: 24px;
+  }
+
+  .pk-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: #ffffff;
+    border: 1px solid var(--pk-frame-border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    overscroll-behavior: contain;
+  }
+
+  /*
+   * Full width: a 56px rail, and the frame flush to the rail, the top, the
+   * right and the bottom edge, with no radius, border or shadow. The frame
+   * element is the same one, so the site's scroll position is unchanged.
+   */
+  :host([data-layout='full']) .pk-shell {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  :host([data-layout='full']) .pk-stage {
+    padding: 0;
+  }
+
+  :host([data-layout='full']) .pk-frame {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+/*
+ * The login document (`<plakboek-editor data-mode="login">`). The backdrop is
+ * the real page in an iframe at the size of the viewport, blurred by 12px.
+ * The native dialog is also the scrim: it fills the viewport while open, in
+ * the page (server markup) and in the top layer (after the client reopens it
+ * modally) alike, so the card does not move between the two. The card is
+ * centred with auto margins, which a flex container drops when the card is
+ * taller than the viewport: it then aligns to the top and the dialog scrolls.
+ */
+@layer components {
+  .pk-backdrop {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #ffffff;
+    filter: blur(12px);
+  }
+
+  .pk-login[open] {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    margin: 0;
+    padding: 16px;
+    border: 0;
+    overflow: auto;
+    color: var(--pk-text);
+    background: var(--pk-scrim);
+  }
+
+  .pk-card {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 400px;
+    margin: auto;
+    padding: 32px;
+    background: var(--pk-surface);
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+  }
+
+  @media (max-height: 640px) {
+    .pk-login[open] {
+      padding-block: 24px;
+    }
+  }
+}
+
+/*
+ * The hand-over from the login card to the edit shell. The backdrop takes the
+ * frame's own border, radius and shadow (none in the full layout), and the
+ * sidebar the shell is about to show waits in a column of its own over the
+ * scrim, above it in the stacking order. The opening spinner sits centred in
+ * the rectangle the frame will have.
+ */
+@layer components {
+  .pk-backdrop-leaving {
+    border: 1px solid var(--pk-frame-border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  }
+
+  :host([data-layout='full']) .pk-backdrop-leaving {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .pk-login-sidebar {
+    position: fixed;
+    inset-block: 0;
+    left: 0;
+    z-index: 2;
+    display: flex;
+    width: 280px;
+  }
+
+  .pk-login-sidebar > .pk-sidebar {
+    flex: 1 1 auto;
+  }
+
+  :host([data-layout='full']) .pk-login-sidebar {
+    width: 56px;
+  }
+
+  .pk-login-opening {
+    position: fixed;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .pk-backdrop-leaving {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+
+  :host([data-layout='full']) .pk-backdrop-leaving {
+    box-shadow: none;
+  }
+
+  .pk-frame {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+
+  :host([data-layout='full']) .pk-frame {
+    box-shadow: none;
+  }
+}
+
+:host([data-theme='dark']) .pk-frame {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+:host([data-theme='light']) .pk-frame {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+:host([data-layout='full'][data-theme]) .pk-frame {
+  box-shadow: none;
+}
+
+/*
+ * The hover overlay. A layer of the shell exactly over the frame's content
+ * box (its position and size are set from the frame on every update), clipped
+ * to it. Inside, a zero-size plane starts at the shell's own origin, so the
+ * outline and chip boxes are placed in the shell's coordinates. Nothing in
+ * the layer takes part in pointer interaction.
+ *
+ * The outline is a 2px border drawn inside the element's border box plus a
+ * 1px outline (the halo) around it. Borders and outlines survive forced
+ * colours where a box-shadow would not.
+ */
+@layer components {
+  .pk-overlay {
+    position: absolute;
+    z-index: 2;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .pk-overlay-plane {
+    position: absolute;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+  }
+
+  .pk-overlay-target {
+    display: contents;
+  }
+
+  .pk-overlay-outline,
+  .pk-overlay-section {
+    position: absolute;
+    box-sizing: border-box;
+    pointer-events: none;
+    outline: 1px solid var(--pk-overlay-halo);
+    forced-color-adjust: none;
+  }
+
+  .pk-overlay-outline {
+    border: 2px solid var(--pk-overlay-outline);
+  }
+
+  .pk-overlay-section {
+    border: 1px dashed var(--pk-overlay-outline);
+  }
+
+  .pk-overlay-chip {
+    position: absolute;
+    box-sizing: border-box;
+    display: block;
+    height: 20px;
+    max-width: 240px;
+    padding: 0 8px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--pk-overlay-outline);
+    color: var(--pk-overlay-chip-text);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+    forced-color-adjust: none;
+  }
+}
+
+/*
+ * Motion. Only the chrome moves when the layout changes, never the frame:
+ * the iframe's size changes at once, so the site is not re-laid out on every
+ * frame of an animation. The hover overlay fades in over 100ms.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .pk-overlay-outline,
+  .pk-overlay-section,
+  .pk-overlay-chip {
+    animation: pk-overlay-in 100ms ease-out;
+  }
+
+  @keyframes pk-overlay-in {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+}

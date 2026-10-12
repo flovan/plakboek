@@ -16,6 +16,7 @@ import type {
 } from '@plakboek/content';
 import type { DefinedRoles, RoleConfig } from '@plakboek/permissions';
 import type { BlockComponent, DocumentInput } from '@plakboek/render';
+import type { EditorAssets } from '@plakboek/editor/server';
 import type { EditEntrypoint } from '@plakboek/render/server';
 
 /** A menu label: one string, or a record keyed by locale. */
@@ -134,5 +135,8 @@ export type SiteModule = {
 export type HostModule = {
   readonly config: PlakboekConfig;
   readonly site?: SiteModule | undefined;
+  /** Overrides the CMS editor; without it the runtime composes the real one. */
   readonly edit?: EditEntrypoint | undefined;
+  /** The built editor client, from the `plakboek()` Vite plugin. */
+  readonly editorAssets?: EditorAssets | undefined;
 };

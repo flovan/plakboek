@@ -1,0 +1,166 @@
+/**
+ * Builds the chrome stylesheet and writes it as a string module.
+ *
+ * Chrome renders in shadow roots, so its styles are one precompiled sheet the
+ * editor adopts per document. Tailwind v4 is run through Vite's build API with
+ * `@tailwindcss/vite`, in memory, then the output is post-processed:
+ *
+ * - Tailwind emits `@property --tw-*` rules plus a fallback
+ *   `@layer properties { @supports (...) { *,:before,:after,::backdrop {...} } }`.
+ *   `@property` is ignored in shadow-tree stylesheets and the `@supports`
+ *   guard is false in Chromium and Firefox, so utilities built on those
+ *   variables (translate, shadow, ring) compute to `none`. The guard is
+ *   unwrapped and the `@property` rules are removed.
+ * - Chrome sizes in px only, so a site's `html { font-size }` cannot rescale
+ *   it. Any `rem` or `em` unit left in the output fails the build.
+ *
+ * A Tailwind upgrade can change the shape of the output, so every step is a
+ * guard: it throws a clear message instead of shipping a sheet that silently
+ * lacks a utility.
+ */
+import { createHash } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import tailwindcss from '@tailwindcss/vite';
+import { build } from 'vite';
+
+const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const ENTRY = fileURLToPath(
+  new URL('../src/styles/chrome.css', import.meta.url),
+);
+const OUTPUT = fileURLToPath(
+  new URL('../src/generated/chrome-css.ts', import.meta.url),
+);
+
+/** Index just past the `}` that closes the block opened at `open`. */
+function closeOf(css: string, open: number): number {
+  let depth = 0;
+  for (let index = open; index < css.length; index += 1) {
+    const char = css[index];
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+  throw new Error('chrome css: unbalanced braces in the compiled stylesheet');
+}
+
+/** Removes every `@property ... { ... }` rule. */
+function stripPropertyRules(css: string): string {
+  let result = css;
+  for (;;) {
+    const start = result.indexOf('@property');
+    if (start === -1) return result;
+    const open = result.indexOf('{', start);
+    if (open === -1) {
+      throw new Error('chrome css: an @property rule has no block');
+    }
+    result = result.slice(0, start) + result.slice(closeOf(result, open));
+  }
+}
+
+/**
+ * Unwraps the `@supports` guard inside `@layer properties`, so its variable
+ * defaults apply in a shadow root. Returns the css unchanged when the guard
+ * is present in the already unwrapped shape.
+ */
+function unwrapPropertiesGuard(css: string): string {
+  const layer = css.indexOf('@layer properties');
+  if (layer === -1) return css;
+  const layerOpen = css.indexOf('{', layer);
+  if (layerOpen === -1) return css;
+  const layerEnd = closeOf(css, layerOpen);
+  const body = css.slice(layerOpen + 1, layerEnd - 1);
+  const supports = body.indexOf('@supports');
+  if (supports === -1) return css;
+  const supportsOpen = body.indexOf('{', supports);
+  const supportsEnd = closeOf(body, supportsOpen);
+  const inner = body.slice(supportsOpen + 1, supportsEnd - 1);
+  const unwrapped = body.slice(0, supports) + inner + body.slice(supportsEnd);
+  return css.slice(0, layerOpen + 1) + unwrapped + css.slice(layerEnd - 1);
+}
+
+/** Post-processes Tailwind's output; throws on any guard failure. */
+export function postProcessChromeCss(compiled: string): string {
+  let css = compiled;
+  const hadProperties = css.includes('@property');
+  if (hadProperties) {
+    const layer = css.indexOf('@layer properties');
+    const guarded =
+      layer !== -1 &&
+      css
+        .slice(layer, closeOf(css, css.indexOf('{', layer)))
+        .includes('@supports');
+    if (!guarded) {
+      throw new Error(
+        'chrome css: @property rules exist but the expected "@layer properties { @supports ... }" guard block was not found; Tailwind changed its output, update scripts/build-chrome-css.ts',
+      );
+    }
+    css = unwrapPropertiesGuard(css);
+  }
+  css = stripPropertyRules(css);
+  if (css.includes('@property')) {
+    throw new Error('chrome css: an @property rule survived post-processing');
+  }
+  const unit = /[\d.]+(?:rem|em)\b/.exec(css);
+  if (unit !== null) {
+    throw new Error(
+      `chrome css: found a relative unit "${unit[0]}"; chrome sizes in px only so a site's html font-size cannot rescale it (do not use tracking-* utilities either)`,
+    );
+  }
+  if (/<\/style/i.test(css)) {
+    throw new Error(
+      'chrome css: the stylesheet contains "</style", which would end the first-paint <style> element early',
+    );
+  }
+  return css;
+}
+
+/** The generated module's source text for a processed stylesheet. */
+export function chromeCssModule(css: string): string {
+  const sha256 = createHash('sha256').update(css).digest('base64');
+  return [
+    '// Generated by scripts/build-chrome-css.ts. Do not edit.',
+    `export const CHROME_CSS = ${JSON.stringify(css)};`,
+    `export const CHROME_CSS_SHA256 = ${JSON.stringify(sha256)};`,
+    '',
+  ].join('\n');
+}
+
+async function compile(): Promise<string> {
+  const result = await build({
+    root: PACKAGE_ROOT,
+    configFile: false,
+    logLevel: 'warn',
+    plugins: [tailwindcss()],
+    build: {
+      write: false,
+      cssMinify: true,
+      // The editor targets current evergreen browsers, so nothing is lowered
+      // (the default target would rewrite `color-scheme` into polyfill
+      // variables the chrome has no use for).
+      cssTarget: 'esnext',
+      rollupOptions: { input: ENTRY },
+    },
+  });
+  const outputs = Array.isArray(result) ? result : [result];
+  for (const output of outputs) {
+    if (!('output' in output)) continue;
+    for (const item of output.output) {
+      if (item.type === 'asset' && item.fileName.endsWith('.css')) {
+        return String(item.source);
+      }
+    }
+  }
+  throw new Error('chrome css: the build produced no css asset');
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const css = postProcessChromeCss(await compile());
+  mkdirSync(fileURLToPath(new URL('../src/generated/', import.meta.url)), {
+    recursive: true,
+  });
+  writeFileSync(OUTPUT, chromeCssModule(css));
+  console.log(`chrome css: ${css.length} bytes written to src/generated`);
+}

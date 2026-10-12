@@ -52,9 +52,20 @@ Menus are declared in `plakboek.config.ts` under `menus`. The header and the foo
 
 Visitor pages carry no script of your own. Keep it that way: the only script on a page is the editor bootstrap the CMS adds.
 
+## Edit mode
+
+Editors sign in at `/cms`. There is no login link on the site, by design: a visitor page carries no editor script and no way in. Once an editor has signed in on a browser, the site shows them a small Edit button.
+
+In edit mode the CMS shows your own document and blocks for the same URL inside a frame, next to the editor sidebar. The framed page is your site at its own address, rendered by your `renderDocument` and your blocks, not a separate preview. What you need to do as the developer:
+
+- `renderDocument` receives `mode`, which is `'visitor'` or `'edit'`. Leave analytics and third-party widgets out when it is `'edit'`, so editing never counts as a visit. `app/site/document.tsx` does this through one function, `thirdPartyScripts(mode)`; add your tags there. Scripts that a block owns keep running in edit mode, so the block still behaves as it does for a visitor.
+- Spread the `edit` prop in every block on the element that should be editable, so the editor can outline it. It adds nothing on a visitor page.
+- Do not send `X-Frame-Options: DENY` or `Content-Security-Policy: frame-ancestors 'none'` on site pages. The CMS frames them from the same origin, so a header that allows the same origin (`SAMEORIGIN` or `'self'`) is fine.
+- Write responsive rules with container queries. The root element in `app/site/document.tsx` is a container (`@container`), so the `@sm:` to `@3xl:` variants follow the space the page actually has, in the frame and on the open web alike. Viewport media queries and the `sm:` to `2xl:` variants also work: in edit mode they follow the width of the frame, because the frame is a viewport of its own. The starter uses no viewport variants, and your theme is easier to reason about if it follows suit.
+
 ## Live reload in development
 
-Edit a block or any file in `app/site/` while `pnpm dev` runs and the browser reloads on its own. The whole page reloads: visitor pages ship no client React, so nothing is hot swapped and scroll position is not kept. A block that throws is left out of the page and reported in the terminal.
+Edit a block or any file in `app/site/` while `pnpm dev` runs and the browser reloads on its own. The whole page reloads: visitor pages ship no client React, so nothing is hot swapped and scroll position is not kept. In edit mode a block change reloads the edit page. A block that throws is left out of the page and reported in the terminal.
 
 ## Reserved paths
 
@@ -63,7 +74,7 @@ The CMS owns two path prefixes:
 - `/cms` for its own pages, such as `/cms/setup` and `/cms/health`.
 - `/api/auth` for sign-in and account requests.
 
-A page with the slug `cms` or `api` cannot be reached, because these routes win over any page. Do not add routes of your own under these prefixes. Every other path that your routes do not claim is looked up as a CMS page.
+A page with the slug `cms` or `api` cannot be reached, because these routes win over any page. Creating or renaming a page so that its first segment is `cms` or `api` is refused. A page that already has one of them is reported at start-up and kept, so rename it yourself. Do not add routes of your own under these prefixes. Every other path that your routes do not claim is looked up as a CMS page.
 
 ## Linking to CMS pages from your own routes
 

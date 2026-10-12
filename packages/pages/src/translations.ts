@@ -24,6 +24,7 @@ import {
   PageNotFoundError,
   toPageRecord,
 } from './pages.js';
+import { assertNotReservedFirstSegment } from './reserved.js';
 import { pages } from './schema.js';
 import type { PageRecord } from './types.js';
 
@@ -167,6 +168,8 @@ export async function createPageTranslation(
       let slugSource: 'generated' | 'manual';
       if (input.slug !== undefined) {
         slugSource = 'manual';
+        if (targetParentPath === null)
+          assertNotReservedFirstSegment(input.slug);
         await assertPageSlugAvailable(tx, {
           locale: input.locale,
           slug: input.slug,

@@ -22,6 +22,7 @@ import {
   SLUG_MAX_LENGTH,
 } from '@plakboek/content';
 import { and, eq, ne, sql } from 'drizzle-orm';
+import { isReservedPageSlug } from './reserved.js';
 import { pages } from './schema.js';
 
 /**
@@ -216,7 +217,8 @@ export type GenerateUniquePageSlugInput = {
  * searching, so two concurrent callers generating from the same base under
  * the same parent and locale never race into the same slug: the second
  * blocks until the first commits its insert and releases the lock. The
- * base is returned as-is when free; otherwise the lowest free `-2`, `-3`,
+ * base is returned as-is when free and not a reserved root segment
+ * (`cms`, `api`; D-23); otherwise the lowest free `-2`, `-3`,
  * ... suffix -- each candidate checked with its own exact-match query
  * against the composed full path, never a prefetched regex batch, so a
  * previously truncated candidate is never missed.
@@ -234,15 +236,21 @@ export async function generateUniquePageSlug(
     sql`SELECT pg_advisory_xact_lock(${PAGE_SLUG_LOCK_NAMESPACE}, ${pageSlugLockKey(input.locale, input.parentPageId)})`,
   );
 
-  const basePath = composePagePath(input.parentPath, normalizedBase);
-  const baseHolder = await findPagePathHolder(
-    tx,
-    input.locale,
-    basePath,
-    input.excludePageId,
-  );
-  if (baseHolder === undefined) {
-    return normalizedBase;
+  // A reserved first segment (D-23) counts as taken at the root, so the
+  // search moves on to the next free suffix instead of throwing.
+  const baseReserved =
+    input.parentPath === null && isReservedPageSlug(normalizedBase);
+  if (!baseReserved) {
+    const basePath = composePagePath(input.parentPath, normalizedBase);
+    const baseHolder = await findPagePathHolder(
+      tx,
+      input.locale,
+      basePath,
+      input.excludePageId,
+    );
+    if (baseHolder === undefined) {
+      return normalizedBase;
+    }
   }
 
   for (let suffix = 2; suffix <= MAX_SLUG_GENERATION_ATTEMPTS; suffix += 1) {

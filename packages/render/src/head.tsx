@@ -19,6 +19,13 @@ export type PageHead = {
   readonly imageUrl: string | null;
 };
 
+/**
+ * Which rendering a document composer is producing: `'visitor'` is the page
+ * served to everyone (and cached); `'edit'` is the framed edit render an
+ * editor works inside.
+ */
+export type DocumentMode = 'visitor' | 'edit';
+
 /** What a document composer receives (D-11). */
 export type DocumentInput = {
   readonly head: PageHead;
@@ -30,6 +37,13 @@ export type DocumentInput = {
    * uses it to mark the current link.
    */
   readonly publicPath: string;
+  /**
+   * The rendering this document is for (D-21). Every caller sets it. In
+   * `'edit'` a host omits analytics and third-party widgets so an editing
+   * session never counts as a visit, and keeps block-owned scripts so the
+   * site still behaves under the editor.
+   */
+  readonly mode: DocumentMode;
 };
 
 /**

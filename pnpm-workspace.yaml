@@ -52,3 +52,8 @@ catalog:
   hono: ^4.13.0
   '@hono/node-server': ^2.1.0
   tsx: ^4.23.0
+  # Exact pin, package legitimacy approved at the phase 07 plan 01 checkpoint (1.64.0).
+  '@playwright/test': 1.64.0
+  # Approved in phase 06 (starter) and reused for the editor chrome stylesheet build; no install script.
+  tailwindcss: ^4.3.0
+  '@tailwindcss/vite': ^4.3.0

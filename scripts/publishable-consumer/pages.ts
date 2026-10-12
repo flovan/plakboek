@@ -37,6 +37,7 @@ import {
   type BlockUpcaster,
   checkBlockCompatibility,
   checkPageLocales,
+  checkReservedPagePaths,
   CircularMoveError,
   CircularPageMoveError,
   compactBlockType,
@@ -70,6 +71,8 @@ import {
   DEFAULT_HOME_SLUG,
   DEFAULT_SECTION_NESTING_DEPTH,
   DEGRADED_REASONS,
+  type EditablePageResolution,
+  type EditablePageView,
   DegradedBlockPublishError,
   type DegradedBlockEvent,
   type DegradedReason,
@@ -120,6 +123,7 @@ import {
   PAGE_EDIT_LOCK_TTL_SECONDS,
   PAGE_SLUG_LOCK_NAMESPACE,
   PAGE_STATUSES,
+  RESERVED_PAGE_PATH_SEGMENTS,
   PAGE_URL_PATTERN_MAX_LENGTH,
   PAGE_URL_PATTERN_TOKENS,
   type PageEngineSettings,
@@ -182,11 +186,17 @@ import {
   reportBelowFloorBlocks,
   reportPageLocaleRemoval,
   reportPagesWarning,
+  reportReservedPagePaths,
+  ReservedPageSlugError,
   type ResolvedBlockPlacement,
   type ResolvedBlockProperty,
   type ResolvedPropertyConstraint,
+  type ReservedPagePathEvent,
+  type ReservedPagePathRow,
+  type ResolveEditablePageInput,
   type ResolvePageUrlPathInput,
   resolveBlockProperties,
+  resolveEditablePage,
   resolvePageUrlPath,
   resolvePublishedPage,
   type ResolvePublishedPageInput,
@@ -251,6 +261,7 @@ const functions: Record<string, unknown> = {
   assertBlockCompatibility,
   checkBlockCompatibility,
   checkPageLocales,
+  checkReservedPagePaths,
   compactBlockType,
   computeBlockDeleteImpact,
   computeBlockRestorePreview,
@@ -301,7 +312,9 @@ const functions: Record<string, unknown> = {
   reportBelowFloorBlocks,
   reportPageLocaleRemoval,
   reportPagesWarning,
+  reportReservedPagePaths,
   resolveBlockProperties,
+  resolveEditablePage,
   resolvePageUrlPath,
   resolvePublishedPage,
   resolveVisitorPage,
@@ -355,6 +368,7 @@ const errorClasses: Record<string, unknown> = {
   PageUrlCollisionError,
   PageUrlPatternCollisionError,
   PageUrlPatternError,
+  ReservedPageSlugError,
   RestoreParentNotFoundError,
   RestoreTargetNotFoundError,
   RevisionBatchNotFoundError,
@@ -393,6 +407,7 @@ const frozenArrays: Record<string, unknown> = {
   OWNER_TYPES,
   PAGE_STATUSES,
   PAGE_URL_PATTERN_TOKENS,
+  RESERVED_PAGE_PATH_SEGMENTS,
   SECTION_LINT_FIELD_TYPES,
   SECTION_LINT_PROPERTY_SUBSTRINGS,
 };
@@ -471,6 +486,7 @@ for (const internal of [
   'assertPlacementAllowed',
   'countAncestorSections',
   'assertPageSlugAvailable',
+  'assertNotReservedFirstSegment',
   'generateUniquePageSlug',
   'assertPageAddressAvailable',
   'assertPageWritable',
@@ -1116,6 +1132,34 @@ const visitorPageResolution: VisitorPageResolution = {
   publicPath: '/',
   view: publishedPageView,
 };
+const resolveEditablePageInput: ResolveEditablePageInput =
+  matchPublicPagePathInput;
+const editablePageView: EditablePageView = {
+  id: 'page-id',
+  locale: 'en',
+  path: 'home',
+  title: 'Home',
+  status: 'draft',
+  version: 1,
+  livePublicationId: null,
+  seo: publishedPageSeo,
+};
+const reservedPagePathRow: ReservedPagePathRow = {
+  pageId: 'page-id',
+  locale: 'en',
+  path: 'cms',
+  segment: 'cms',
+};
+const reservedPagePathEvent: ReservedPagePathEvent = {
+  ...reservedPagePathRow,
+  occurredAt: new Date(0),
+};
+const editablePageResolution: EditablePageResolution = {
+  kind: 'page',
+  publicPath: '/',
+  page: editablePageView,
+  blocks: [],
+};
 
 // PagesDeps needs live db/recorder/resolver handles this probe never opens
 // -- proven only as a parameter type of a never-called function, the same
@@ -1228,6 +1272,11 @@ const typeProofs: unknown[] = [
   resolvePublishedPageInput,
   resolveVisitorPageInput,
   visitorPageResolution,
+  resolveEditablePageInput,
+  editablePageView,
+  editablePageResolution,
+  reservedPagePathRow,
+  reservedPagePathEvent,
   publicMatch,
   config,
 ];

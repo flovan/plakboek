@@ -88,40 +88,61 @@ and fails with all of them listed, never printing a value. In development the
 plugin loads `.env` from the project root; variables already set in the
 process win over the file.
 
-| Variable                               | Required | Meaning                                                                                                                                                          |
-| -------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                         | yes      | Postgres connection string (`postgres://` or `postgresql://`).                                                                                                   |
-| `DATABASE_MIGRATION_URL`               | no       | A direct (session) connection used only by `plakboek migrate`; falls back to `DATABASE_URL`. Migrations need it when `DATABASE_URL` is a pooler.                 |
-| `PLAKBOEK_URL`                         | yes      | The installation's public origin, such as `https://www.example.org`. No path, query or fragment. Never derived from a request.                                   |
-| `PLAKBOEK_SECRET`                      | yes      | At least 32 characters, no fallback in any environment. Generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`. |
-| `PLAKBOEK_BUILD_ID`                    | no       | Identifies the deployed render code, such as a commit hash. Letters, digits, `.`, `_` and `-`, up to 128 characters.                                             |
-| `PLAKBOEK_SMTP_HOST`                   | no       | The SMTP server. The rest of the SMTP group is read only when this is set.                                                                                       |
-| `PLAKBOEK_SMTP_PORT`                   | no       | SMTP port, 1 to 65535.                                                                                                                                           |
-| `PLAKBOEK_SMTP_SECURE`                 | no       | `true` for implicit TLS (port 465), `false` otherwise.                                                                                                           |
-| `PLAKBOEK_SMTP_USER`                   | no       | SMTP user; must be set together with `PLAKBOEK_SMTP_PASS`.                                                                                                       |
-| `PLAKBOEK_SMTP_PASS`                   | no       | SMTP password; must be set together with `PLAKBOEK_SMTP_USER`.                                                                                                   |
-| `PLAKBOEK_MAIL_FROM`                   | no       | The sender address for outgoing mail, such as `no-reply@example.org`.                                                                                            |
-| `PLAKBOEK_MIGRATION_LOCK_WAIT_SECONDS` | no       | How long `plakboek migrate` waits for another migrator (default 120).                                                                                            |
-| `PLAKBOEK_BOOTSTRAP_PASSWORD`          | no       | The password `plakboek bootstrap` uses when it is not given on stdin or at a prompt.                                                                             |
-| `PORT`                                 | no       | The production server's port (default 3000).                                                                                                                     |
-| `HOST`                                 | no       | The production server's bind address (default `0.0.0.0`).                                                                                                        |
+| Variable                               | Required | Meaning                                                                                                                                                                                          |
+| -------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`                         | yes      | Postgres connection string (`postgres://` or `postgresql://`).                                                                                                                                   |
+| `DATABASE_MIGRATION_URL`               | no       | A direct (session) connection used only by `plakboek migrate`; falls back to `DATABASE_URL`. Migrations need it when `DATABASE_URL` is a pooler.                                                 |
+| `PLAKBOEK_URL`                         | yes      | The installation's public origin, such as `https://www.example.org`. No path, query or fragment. Never derived from a request.                                                                   |
+| `PLAKBOEK_SECRET`                      | yes      | At least 32 characters, no fallback in any environment. Generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`.                                 |
+| `PLAKBOEK_BUILD_ID`                    | no       | Identifies the deployed render code, such as a commit hash. Letters, digits, `.`, `_` and `-`, up to 128 characters.                                                                             |
+| `PLAKBOEK_TRUSTED_PROXIES`             | no       | Comma-separated IP addresses or CIDR ranges of the reverse proxies in front of the app, such as `172.18.0.0/16`. Lets the request limiter find the real client in a multi-hop `X-Forwarded-For`. |
+| `PLAKBOEK_CLIENT_IP_HEADERS`           | no       | Comma-separated header names the client address is read from, such as `CF-Connecting-IP`. Only for a proxy that sets that header itself and always overwrites it. Default `X-Forwarded-For`.     |
+| `PLAKBOEK_SMTP_HOST`                   | no       | The SMTP server. The rest of the SMTP group is read only when this is set.                                                                                                                       |
+| `PLAKBOEK_SMTP_PORT`                   | no       | SMTP port, 1 to 65535.                                                                                                                                                                           |
+| `PLAKBOEK_SMTP_SECURE`                 | no       | `true` for implicit TLS (port 465), `false` otherwise.                                                                                                                                           |
+| `PLAKBOEK_SMTP_USER`                   | no       | SMTP user; must be set together with `PLAKBOEK_SMTP_PASS`.                                                                                                                                       |
+| `PLAKBOEK_SMTP_PASS`                   | no       | SMTP password; must be set together with `PLAKBOEK_SMTP_USER`.                                                                                                                                   |
+| `PLAKBOEK_MAIL_FROM`                   | no       | The sender address for outgoing mail, such as `no-reply@example.org`.                                                                                                                            |
+| `PLAKBOEK_MIGRATION_LOCK_WAIT_SECONDS` | no       | How long `plakboek migrate` waits for another migrator (default 120).                                                                                                                            |
+| `PLAKBOEK_BOOTSTRAP_PASSWORD`          | no       | The password `plakboek bootstrap` uses when it is not given on stdin or at a prompt.                                                                                                             |
+| `PORT`                                 | no       | The production server's port (default 3000).                                                                                                                                                     |
+| `HOST`                                 | no       | The production server's bind address (default `0.0.0.0`).                                                                                                                                        |
 
 ## Routes and reserved paths
 
 `cmsRoutes()` returns these routes, in this order, each pointing at a built
 route module inside this package:
 
-| Path                    | Purpose                                            |
-| ----------------------- | -------------------------------------------------- |
-| `/cms/health`           | Liveness and database probe (`200` or `503`).      |
-| `/cms/setup`            | First-run setup of the first superadmin.           |
-| `/cms/setup/test-email` | Sends a test email from the setup page.            |
-| `/api/auth/*`           | The authentication API.                            |
-| `/` and `/*`            | The visitor route: published pages, from Postgres. |
+| Path                    | Purpose                                                                                                                     |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `/cms`                  | The login page: the real page blurred behind a sign-in card.                                                                |
+| `/cms/health`           | Liveness and database probe (`200` or `503`).                                                                               |
+| `/cms/setup`            | First-run setup of the first superadmin.                                                                                    |
+| `/cms/setup/test-email` | Sends a test email from the setup page.                                                                                     |
+| `/cms/logout`           | `POST` only: ends the session and returns to the page the user left.                                                        |
+| `/cms/*`                | The email-link landings (set password, reset password, sign-in link, two-step set-up); anything else is the host's own 404. |
+| `/robots.txt`           | Disallows `/cms`. A host's own `public/robots.txt` is served instead.                                                       |
+| `/api/auth/*`           | The authentication API.                                                                                                     |
+| `/` and `/*`            | The visitor route: published pages, from Postgres.                                                                          |
 
-`/cms/*` and `/api/auth/*` are reserved for the CMS. A page whose first slug
-segment is `cms` or `api` is shadowed and unreachable. A host's own routes win
-over every CMS route when they come first in `app/routes.ts`.
+`/cms` and everything under it, and `/api/auth/*`, are reserved for the CMS. No
+path under `/cms` ever falls through to the visitor route, and every answer
+under `/cms` (including health, setup, logout and the 404) carries
+`X-Robots-Tag: noindex, nofollow`, set by the route modules themselves so it
+holds in `react-router dev` as well. A page whose first slug segment is `cms`
+or `api` would be shadowed by these routes, so the page engine now refuses to
+create one, and the host runtime reports any that already exists, once, when
+it is first built (through the `onReservedPagePath` pages hook, default a
+console warning). Such a page is kept as it is; rename it to make it reachable.
+A host's own routes win over every CMS route when they come first in
+`app/routes.ts`.
+
+`/cms` with a valid session goes straight to the page in edit mode; without one
+it shows the sign-in card over the page named by `?next=`, which must be a path
+on this site (anything else is `/`). `POST /cms/logout` is accepted only from
+this site's own pages (`Origin`, or `Sec-Fetch-Site: same-origin` when the
+browser sends no usable origin), reads at most 2 KB and answers `303` to the
+sanitised `next`, never to an address with `_edit`.
 
 The health body is a fixed `{"status":"ok"}` or `{"status":"unavailable"}`;
 a database error never reaches the response.
@@ -132,9 +153,37 @@ app container holds rendered pages, and a publish purges the page right after
 its transaction commits. Every other `NODE_ENV` runs uncached, so the next
 request re-evaluates the host configuration.
 
-The plugin's `edit` option names a module exporting `edit`, the editor's
-entrypoint. A request carrying `_edit` is handed to it; without the option such
-a request is bounced to the plain page.
+## Edit mode
+
+A request carrying `_edit` (`/about?_edit=1`) is handed to the editor, which
+checks the session on the server and either serves the edit shell or bounces
+to the plain page. The editor is composed automatically: the runtime builds it
+on the first `_edit` request of a process, from its own authentication,
+permissions, database, page configuration and site document, so a host does
+nothing to get it. The plugin's `edit` option names a module exporting `edit`,
+an entrypoint of your own, and still overrides the CMS editor entirely.
+
+The editor's client is delivered as a separate chunk. `react-router build`
+emits it as `assets/plakboek-editor-<hash>.js`, next to a
+`plakboek-editor.json` sidecar that lists the chunk, the chunks it loads and
+its stylesheets. The server build reads that sidecar, so it knows the hashed
+URL without Vite's own manifest, and only the edit shell references it: a
+visitor's page never mentions the editor.
+
+Keeping editor code away from visitors is checked at build time, not by a
+runtime branch. Two checks together are the gate, and a failure of either fails
+the build in every host and in CI:
+
+1. the render package's module-graph test, which keeps the editor out of the
+   visitor handler's server graph;
+2. a client-closure check in the plugin: after the client build, no chunk
+   reachable from the client entry or from any route chunk, statically or
+   through a dynamic import, may contain a module of `@plakboek/editor` (or of
+   the editor's libraries). The build stops and lists every
+   `entry -> chunk: module` path it found.
+
+A host's own route modules, components and client entry must therefore never
+import `@plakboek/editor`; the editor loads only through its own chunk.
 
 ## The `plakboek` command
 

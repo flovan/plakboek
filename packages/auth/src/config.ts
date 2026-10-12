@@ -7,7 +7,16 @@
  * decisions is expressed here as a better-auth option, and each policy
  * number is exported once so tests, email copy and later modules read the
  * same value instead of restating it.
+ *
+ * Two-factor and magic links (D-26): better-auth's two-factor plugin only
+ * challenges the password sign-in endpoints, so a magic link would be a
+ * single-step sign-in. Two guards keep that from happening: `sendMagicLink`
+ * mails nothing to a user with two-factor enabled (answering exactly as it
+ * does for an unknown address), and a `session.create.before` hook refuses
+ * the session when the magic-link verify endpoint would create one for such
+ * a user, which covers a link issued before they enrolled.
  */
+import { isIP } from 'node:net';
 import {
   createPermissionResolver,
   type DefinedRoles,
@@ -54,7 +63,15 @@ import {
   PasswordPolicyError,
   assertPasswordPolicy,
 } from './password-policy.js';
+import { passwordLinkPlugin } from './password-link-plugin.js';
 import * as schema from './schema.js';
+import {
+  SECONDS_PER_HOUR,
+  SECONDS_PER_MINUTE,
+  SET_PASSWORD_TOKEN_TTL_SECONDS,
+} from './ttl.js';
+
+export { SET_PASSWORD_TOKEN_TTL_SECONDS };
 
 /** Renders one authentication email. `renderAuthEmail` is the default; a
  * host supplies its own to theme the copy without touching this module. */
@@ -86,6 +103,30 @@ export type CreateAuthOptions = {
    * Defaults to the audit recorder's one `console.error` line.
    */
   readonly onAuditWriteFailed?: AuditFailureHook;
+  /**
+   * Switches better-auth's request limiter on or off. Left out, it follows
+   * better-auth's own default: on in production, off elsewhere. The limiter
+   * is what throttles the password-link endpoints and magic-link requests,
+   * so a development or test server is unthrottled unless this is `true`.
+   */
+  readonly rateLimitEnabled?: boolean;
+  /**
+   * The addresses or CIDR ranges of the reverse proxies in front of the app
+   * (`"10.0.0.5"`, `"172.18.0.0/16"`). Behind them, the client address the
+   * limiter keys on is the first `X-Forwarded-For` hop that is not one of
+   * these. Left out, only a single-value header is trusted, and a request
+   * whose header holds several addresses (a proxy that appends to what the
+   * client sent) has no client address, so every such client shares one
+   * allowance. List only proxies that clients cannot bypass: a listed range
+   * that also covers clients lets them choose their own address.
+   */
+  readonly trustedProxies?: readonly string[];
+  /**
+   * The headers the client address is read from, in order. Defaults to
+   * `X-Forwarded-For`. Use it when a proxy sets a header of its own
+   * (`CF-Connecting-IP`), and only when the proxy always overwrites it.
+   */
+  readonly ipAddressHeaders?: readonly string[];
 };
 
 /** Thrown by `createAuth` for invalid options. Messages name the offending
@@ -101,8 +142,6 @@ export class AuthConfigError extends Error {
  * brute-forceable enough to make a forged session cookie realistic. */
 const MIN_SECRET_LENGTH = 32;
 
-const SECONDS_PER_MINUTE = 60;
-const SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE;
 const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR;
 
 /** D-01: a session lives 30 days from its last refresh. There is one
@@ -116,9 +155,6 @@ export const SESSION_UPDATE_AGE_SECONDS = SECONDS_PER_DAY;
 /** D-12 as amended: an impersonation session lapses 8 hours after it
  * starts, if the explicit stop has not ended it sooner. */
 export const IMPERSONATION_SESSION_TTL_SECONDS = 8 * SECONDS_PER_HOUR;
-
-/** AUTH-03: set-password and reset-password links are valid for 48 hours. */
-export const SET_PASSWORD_TOKEN_TTL_SECONDS = 48 * SECONDS_PER_HOUR;
 
 /** D-10: a magic link is a live login bypass, so it dies after 15 minutes. */
 export const MAGIC_LINK_TTL_SECONDS = 15 * SECONDS_PER_MINUTE;
@@ -460,12 +496,47 @@ function auditTwoFactorChanges(recorder: AuditRecorder) {
   });
 }
 
+/** Whether a user row has two-factor enabled. A missing or non-boolean
+ * field reads as not enabled; the column is a boolean with no default
+ * surprise. */
+function hasTwoFactorEnabled(user: unknown): boolean {
+  return readField(user, 'twoFactorEnabled') === true;
+}
+
+/** The magic-link verification endpoint, relative to the auth base path. */
+const MAGIC_LINK_VERIFY_PATH = '/magic-link/verify';
+
 type SessionHooks = NonNullable<
   NonNullable<BetterAuthOptions['databaseHooks']>['session']
 >;
 type SessionUpdateBeforeHook = NonNullable<
   NonNullable<SessionHooks['update']>['before']
 >;
+type SessionCreateBeforeHook = NonNullable<
+  NonNullable<SessionHooks['create']>['before']
+>;
+
+/**
+ * Backstop for D-26. better-auth's two-factor plugin challenges only the
+ * password sign-in endpoints, so a magic link would otherwise be a
+ * single-step sign-in for a user who has a second factor. `sendMagicLink`
+ * never mails such a user, but a link issued before they enrolled is still
+ * live, so the session it would create is refused here instead: the verify
+ * call answers its normal error redirect and no session or cookie exists.
+ * The link is spent either way (better-auth consumes it before this runs).
+ * Sessions created by any other endpoint are untouched.
+ */
+function refuseMagicLinkSessionForTwoFactorUser(): SessionCreateBeforeHook {
+  return async (session, context) => {
+    if (context?.path !== MAGIC_LINK_VERIFY_PATH) {
+      return;
+    }
+    const found = await context.context.internalAdapter.findUserById(
+      session.userId,
+    );
+    return hasTwoFactorEnabled(found) ? false : undefined;
+  };
+}
 
 /**
  * D-12 as amended: an impersonation session lapses at the expiry it was
@@ -536,6 +607,9 @@ function assertCreateAuthOptions(options: CreateAuthOptions): void {
     renderEmail,
     onMailDeliveryError,
     onAuditWriteFailed,
+    rateLimitEnabled,
+    trustedProxies,
+    ipAddressHeaders,
   } = options;
 
   if (
@@ -606,6 +680,49 @@ function assertCreateAuthOptions(options: CreateAuthOptions): void {
       'onAuditWriteFailed must be a function when supplied',
     );
   }
+
+  if (rateLimitEnabled !== undefined && typeof rateLimitEnabled !== 'boolean') {
+    throw new AuthConfigError(
+      'rateLimitEnabled must be a boolean when supplied',
+    );
+  }
+
+  if (
+    trustedProxies !== undefined &&
+    (!Array.isArray(trustedProxies) || !trustedProxies.every(isIpOrCidr))
+  ) {
+    throw new AuthConfigError(
+      'trustedProxies must be a list of IP addresses or CIDR ranges such as "10.0.0.5" or "172.18.0.0/16"',
+    );
+  }
+
+  if (
+    ipAddressHeaders !== undefined &&
+    (!Array.isArray(ipAddressHeaders) ||
+      ipAddressHeaders.length === 0 ||
+      !ipAddressHeaders.every(isHeaderName))
+  ) {
+    throw new AuthConfigError(
+      'ipAddressHeaders must be a non-empty list of header names',
+    );
+  }
+}
+
+/** An HTTP header name: letters, digits and hyphens. */
+function isHeaderName(value: unknown): boolean {
+  return typeof value === 'string' && /^[A-Za-z0-9-]{1,100}$/.test(value);
+}
+
+/** An IPv4 or IPv6 address, optionally with a `/prefix` that fits it. */
+function isIpOrCidr(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const [address, prefix, ...rest] = value.split('/');
+  if (address === undefined || rest.length > 0) return false;
+  const family = isIP(address);
+  if (family === 0) return false;
+  if (prefix === undefined) return true;
+  if (!/^\d{1,3}$/.test(prefix)) return false;
+  return Number(prefix) <= (family === 4 ? 32 : 128);
 }
 
 /** The plugin tuple `createAuth` installs, each instantiated with its
@@ -616,6 +733,7 @@ type AuthPlugins = [
   ReturnType<typeof admin<AdminOptions>>,
   ReturnType<typeof twoFactor<TwoFactorOptions>>,
   ReturnType<typeof magicLink>,
+  ReturnType<typeof passwordLinkPlugin>,
 ];
 
 type PlakboekAuthOptions = BetterAuthOptions & {
@@ -715,6 +833,12 @@ export function createAuth(options: CreateAuthOptions): Auth {
         if (found === null || found === undefined) {
           return;
         }
+        // D-26: a link is a one-step sign-in, so it is never sent to a user
+        // who has a second factor. The early return matches the unknown
+        // address above, so the answer and its timing class do not differ.
+        if (hasTwoFactorEnabled(found.user)) {
+          return;
+        }
         try {
           const message = renderEmail('magic-link', {
             to: found.user.email,
@@ -728,6 +852,16 @@ export function createAuth(options: CreateAuthOptions): Auth {
           reportMailDeliveryError(error);
         }
       },
+    }),
+    passwordLinkPlugin({
+      db: options.db,
+      mail: options.mail,
+      renderEmail,
+      baseURL: options.baseURL,
+      onDeliveryError: reportMailDeliveryError,
+      ...(options.onAuditWriteFailed === undefined
+        ? {}
+        : { onAuditWriteFailed: options.onAuditWriteFailed }),
     }),
   ];
 
@@ -753,10 +887,29 @@ export function createAuth(options: CreateAuthOptions): Auth {
     },
     databaseHooks: {
       session: {
+        create: { before: refuseMagicLinkSessionForTwoFactorUser() },
         update: { before: capImpersonationExpiry(options.db) },
       },
     },
     disabledPaths: [...DISABLED_AUTH_PATHS],
+    ...(options.trustedProxies === undefined &&
+    options.ipAddressHeaders === undefined
+      ? {}
+      : {
+          advanced: {
+            ipAddress: {
+              ...(options.trustedProxies === undefined
+                ? {}
+                : { trustedProxies: [...options.trustedProxies] }),
+              ...(options.ipAddressHeaders === undefined
+                ? {}
+                : { ipAddressHeaders: [...options.ipAddressHeaders] }),
+            },
+          },
+        }),
+    ...(options.rateLimitEnabled === undefined
+      ? {}
+      : { rateLimit: { enabled: options.rateLimitEnabled } }),
     hooks: {
       before: enforcePasswordPolicy(minPasswordLength),
       after: auditTwoFactorChanges(recorder),

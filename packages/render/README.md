@@ -205,16 +205,62 @@ null>`, where `context` is `{ url, visitorLocation }`. The editor package
   does nothing unless the non-secret `EDITOR_FLAG_KEY` flag is set in
   `localStorage` and `TOOLBAR_DISMISSED_KEY` is not. When active it shows an
   Edit pill in a closed shadow root, so the site's CSS cannot reach it, and
-  navigates to the same URL with `_edit=1`. It fetches nothing and never grants
-  anything: a client-side flag is only a hint that an editor signed in on this
-  browser, and the server-side `_edit` handling decides who may edit. The editor
-  sets and clears the flag at sign-in and sign-out.
+  navigates to `CMS_LOGIN_PATH` with the current page (minus `_edit`) in the
+  `NEXT_PARAM` parameter, for example `/cms?next=%2Fabout`. It never renders
+  inside a frame (`self !== top`), so the blurred login backdrop and the edit
+  frame never show it. It fetches nothing and never grants anything: a
+  client-side flag is only a hint that an editor signed in on this browser, and
+  the server decides at `/cms` and `_edit` who may edit. The editor sets and
+  clears the flag at sign-in and sign-out.
 - **CSP.** Shared caches serve identical bytes to every visitor, so a
   per-request nonce is impossible. Allow the script by its hash instead, with
   the exported constant: `script-src 'sha256-...'` where the value is
-  `TOOLBAR_BOOTSTRAP_CSP_HASH`.
+  `TOOLBAR_BOOTSTRAP_CSP_HASH`. **The hash changed in this release**: the
+  pill now routes through the login path and skips frames, so the script text
+  differs. A host that pins the old hash in its `script-src` must switch to the
+  exported constant; cached visitor pages carry the new script after the next
+  deploy re-renders them (cache entries carry the build id).
 - **Keeping editor code out.** A module-graph test added later in this phase
   checks that no editor package is reachable from this package's build.
+- **The render mode.** A document composer receives `mode: 'visitor' | 'edit'`
+  on `DocumentInput`; the visitor handler always passes `'visitor'`, and the
+  editor's frame document passes `'edit'`. In `'edit'` a host omits analytics
+  and third-party widgets so an editing session never counts as a visit, and
+  keeps block-owned scripts so the site still behaves under the editor. The
+  field is required: anyone constructing a `DocumentInput` must now set it.
+
+## Edit-mode rendering
+
+The editor renders the page it edits as ordinary server HTML. `renderPageTree`
+walks a live working tree (`BlockNode[]` from `@plakboek/pages`) through the
+same containment recursion the visitor snapshot path uses, so one throwing
+block is dropped with its subtree and reported while the rest of the page
+renders.
+
+- **The attribute contract.** In `live` mode each block's `edit` proxy
+  (`createLiveEdit`) spreads `data-pk-block` (the block id), `data-pk-type`
+  (the type key), `data-pk-kind` (`section` or `block`) and `data-pk-label`
+  (the label from the block definition, else the type key). `edit.field(name)`
+  yields `data-pk-field`; `field` is not enumerable, so spreading `{...edit}`
+  never carries it. The names are exported as `EDIT_ATTRIBUTE`; the overlay
+  and every later selection feature bind to exactly these.
+- **A block must spread `{...edit}` on its root element.** A block that does
+  not renders without attributes and cannot be outlined or selected.
+- **Nothing else is added.** No class, inline style or wrapper element is ever
+  put on or around a block a host renders; only the `data-pk-*` attributes.
+- **Placeholders.** A block that would render nothing in the edit render (an
+  unknown type, no component, a degraded node, or a component that throws or
+  returns a promise) is replaced by an inert `div` carrying the attributes
+  above, with the same `kind` and `label` the block's own proxy would have had
+  (an unknown type falls back to `block` and its type key), plus
+  `data-pk-unavailable` whose value is why: `unknown`, `degraded` or `failed`.
+  It has `min-height: 40px` so it can be hovered. The overlay labels it
+  "{label} (unavailable)". The visitor path still drops such a block.
+- **`plain` mode.** For read-only viewers of a working tree: `NOOP_EDIT`, no
+  placeholders, no `data-pk-*` attribute at all, so the markup matches what a
+  visitor would receive.
+- **Paths.** `normalizeVisitorPath` is exported from the server entry so the
+  editor canonicalises a frame request exactly like the visitor handler.
 
 ## Root versus server entry
 
@@ -236,20 +282,24 @@ updating them.
 
 ### Root entry: `@plakboek/render`
 
-| Export                  | Kind     | Purpose                                                                |
-| ----------------------- | -------- | ---------------------------------------------------------------------- |
-| `EDIT_PARAM`            | constant | `_edit`: the query parameter that asks for the editor entry            |
-| `EDITOR_FLAG_KEY`       | constant | The localStorage key marking a signed-in editor                        |
-| `TOOLBAR_DISMISSED_KEY` | constant | The localStorage key marking a dismissed toolbar                       |
-| `NOOP_EDIT`             | constant | The visitor-side edit proxy: spreads to nothing, costs nothing         |
-| `BlockIdentity`         | type     | `id`, `blockType` and `schemaVersion` of a rendered block              |
-| `BlockComponentProps`   | type     | What the renderer passes a block: `block`, `props`, `children`, `edit` |
-| `BlockComponent`        | type     | A block's render function: a plain function of `BlockComponentProps`   |
-| `EditAttributes`        | type     | `data-` attributes the editor binds to                                 |
-| `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes     |
-| `PageHead`              | type     | What a document composer needs to write a page's `<head>`              |
-| `DocumentInput`         | type     | `{ head, body, publicPath }`: what a document composer receives        |
-| `RenderDocument`        | type     | A host's document composer: `(input) => string \| Promise<string>`     |
+| Export                  | Kind     | Purpose                                                                   |
+| ----------------------- | -------- | ------------------------------------------------------------------------- |
+| `CMS_LOGIN_PATH`        | constant | `/cms`: where the Edit pill sends a browser; the server decides there     |
+| `EDIT_PARAM`            | constant | `_edit`: the query parameter that asks for the editor entry               |
+| `EDITOR_FLAG_KEY`       | constant | The localStorage key marking a signed-in editor                           |
+| `NEXT_PARAM`            | constant | `next`: the query parameter carrying the page to return to after login    |
+| `TOOLBAR_DISMISSED_KEY` | constant | The localStorage key marking a dismissed toolbar                          |
+| `NOOP_EDIT`             | constant | The visitor-side edit proxy: spreads to nothing, costs nothing            |
+| `EDIT_ATTRIBUTE`        | constant | The `data-pk-*` attribute names the renderer writes and the overlay reads |
+| `BlockIdentity`         | type     | `id`, `blockType` and `schemaVersion` of a rendered block                 |
+| `BlockComponentProps`   | type     | What the renderer passes a block: `block`, `props`, `children`, `edit`    |
+| `BlockComponent`        | type     | A block's render function: a plain function of `BlockComponentProps`      |
+| `EditAttributes`        | type     | `data-` attributes the editor binds to                                    |
+| `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes        |
+| `PageHead`              | type     | What a document composer needs to write a page's `<head>`                 |
+| `DocumentInput`         | type     | `{ head, body, publicPath, mode }`: what a document composer receives     |
+| `DocumentMode`          | type     | `'visitor' \| 'edit'`: which rendering a document composer is producing   |
+| `RenderDocument`        | type     | A host's document composer: `(input) => string \| Promise<string>`        |
 
 ### Server entry: `@plakboek/render/server`
 
@@ -262,6 +312,9 @@ updating them.
 | `VisitorHandlerConfigError`  | class    | Thrown by `createVisitorHandler` with every invalid dependency           |
 | `renderPageSnapshot`         | function | Renders a published snapshot to a head and a body through one React pass |
 | `createComponentMap`         | function | Builds the block-type to component map from the host's block definitions |
+| `createLiveEdit`             | function | One block's live edit proxy: the `data-pk-*` identity attributes         |
+| `renderPageTree`             | function | Renders a live working tree for the editor, in `live` or `plain` mode    |
+| `normalizeVisitorPath`       | function | Canonicalises a request path exactly like the visitor handler            |
 | `PageHeadInput`              | type     | Input to `buildPageHead`                                                 |
 | `PageSeoInput`               | type     | The stored SEO set as a structural type                                  |
 | `VisitorHandler`             | type     | `(request: Request) => Promise<Response>`                                |
@@ -273,6 +326,11 @@ updating them.
 | `EditRequestContext`         | type     | The parsed URL and the `visitorLocation` an `EditEntrypoint` receives    |
 | `ComponentMap`               | type     | A read-only map from block type to `BlockComponent`                      |
 | `RenderPageSnapshotInput`    | type     | Input to `renderPageSnapshot`                                            |
+| `LiveEditInput`              | type     | Input to `createLiveEdit`: id, block type, kind and label                |
+| `RenderPageTreeInput`        | type     | Input to `renderPageTree`                                                |
+| `BlockMeta`                  | type     | A block type's overlay label and its `section` or `block` kind           |
+| `RenderedTree`               | type     | The head, body and degraded flag of a rendered working tree              |
+| `VisitorPathResult`          | type     | `ok`, `redirect` or `not-found`: what `normalizeVisitorPath` returns     |
 | `RenderedPage`               | type     | The head, body, cache tags and degraded flag of a rendered page          |
 | `RenderHooks`                | type     | Optional host hooks: unknown block, render error, cache error and more   |
 | `UnknownBlockEvent`          | type     | What `onUnknownBlock` receives                                           |

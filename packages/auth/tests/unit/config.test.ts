@@ -148,6 +148,59 @@ describe('createAuth option validation', () => {
     expect((error as Error).message).toContain('minPasswordLength');
   });
 
+  it.each([
+    ['not-an-address'],
+    ['10.0.0.0/33'],
+    ['2001:db8::/129'],
+    ['10.0.0.0/x'],
+    ['10.0.0.0/8/8'],
+    [''],
+  ])('rejects trustedProxies entry %j', (entry) => {
+    const error = captureError({
+      ...baseOptions(),
+      trustedProxies: ['10.0.0.1', entry],
+    });
+    expect(error).toBeInstanceOf(AuthConfigError);
+    expect((error as Error).message).toContain('trustedProxies');
+    expect((error as Error).message).not.toContain(entry || 'zzz');
+  });
+
+  it('accepts addresses and CIDR ranges in trustedProxies and hands them to better-auth', () => {
+    const auth = createAuth(
+      baseOptions({
+        trustedProxies: ['10.0.0.5', '172.18.0.0/16', '2001:db8::/32', '::1'],
+      }),
+    );
+    expect(auth.options.advanced?.ipAddress?.trustedProxies).toEqual([
+      '10.0.0.5',
+      '172.18.0.0/16',
+      '2001:db8::/32',
+      '::1',
+    ]);
+  });
+
+  it.each([[[]], [['bad header']], [['']], [[7]]])(
+    'rejects ipAddressHeaders %j',
+    (headers) => {
+      const error = captureError({
+        ...baseOptions(),
+        ipAddressHeaders: headers as unknown as readonly string[],
+      });
+      expect(error).toBeInstanceOf(AuthConfigError);
+      expect((error as Error).message).toContain('ipAddressHeaders');
+    },
+  );
+
+  it('hands ipAddressHeaders to better-auth, and sets no advanced options without either', () => {
+    expect(
+      createAuth(baseOptions({ ipAddressHeaders: ['CF-Connecting-IP'] }))
+        .options.advanced?.ipAddress?.ipAddressHeaders,
+    ).toEqual(['CF-Connecting-IP']);
+    expect(createAuth(baseOptions()).options.advanced?.ipAddress).toBe(
+      undefined,
+    );
+  });
+
   it('accepts a minPasswordLength above the policy floor', () => {
     const auth = createAuth(baseOptions({ minPasswordLength: 16 }));
     expect(auth.options.emailAndPassword?.minPasswordLength).toBe(16);

@@ -181,6 +181,13 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   resolvePublishedPage: 'function',
   resolveVisitorPage: 'function',
   toPublicPagePath: 'function',
+  // editable
+  resolveEditablePage: 'function',
+  // reserved
+  checkReservedPagePaths: 'function',
+  RESERVED_PAGE_PATH_SEGMENTS: 'constant',
+  reportReservedPagePaths: 'function',
+  ReservedPageSlugError: 'class',
 });
 
 /** Every type the entry point exports. Types leave no runtime trace, so this
@@ -321,6 +328,13 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'ResolveVisitorPageInput',
   'ToPublicPagePathInput',
   'VisitorPageResolution',
+  // editable
+  'EditablePageResolution',
+  'EditablePageView',
+  'ResolveEditablePageInput',
+  // reserved
+  'ReservedPagePathEvent',
+  'ReservedPagePathRow',
 ]);
 
 /**
@@ -344,6 +358,9 @@ const WITHHELD: readonly string[] = Object.freeze([
   // placement.ts
   'assertPlacementAllowed',
   'countAncestorSections',
+  // reserved.ts
+  'assertNotReservedFirstSegment',
+  'isReservedPageSlug',
   // page-slug.ts
   'assertPageSlugAvailable',
   'generateUniquePageSlug',
@@ -373,6 +390,7 @@ const WITHHELD: readonly string[] = Object.freeze([
   'buildPageSnapshot',
   'computeManifestHash',
   'asPageSnapshot',
+  'toPublishedPageSeo',
   // schema.ts -- every table
   'pages',
   'pageBlocks',
@@ -388,6 +406,8 @@ const ERROR_FACTORIES: Readonly<
   Record<string, (Klass: new (...args: never[]) => unknown) => unknown>
 > = Object.freeze({
   PagesConfigError: (K) => new (K as new (i: unknown[]) => unknown)([]),
+  ReservedPageSlugError: (K) =>
+    new (K as new (s: string, p: string) => unknown)('cms', 'cms/team'),
   BlockConfigError: (K) => new (K as new (i: unknown[]) => unknown)([]),
   BlockPropsValidationError: (K) =>
     new (K as new (i: unknown[]) => unknown)([]),

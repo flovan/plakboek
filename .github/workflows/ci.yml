@@ -87,6 +87,56 @@ jobs:
       - run: pnpm run build
       - run: pnpm run test:integration
 
+  e2e:
+    name: E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The pinned Playwright version lives in pnpm-workspace.yaml, so the
+      # browser cache is keyed on that file: a version bump refreshes it. The
+      # key also names the installed engine.
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('pnpm-workspace.yaml') }}
+      - run: pnpm run build
+      - run: pnpm --filter @plakboek/core exec playwright install --with-deps chromium
+      - run: pnpm --filter @plakboek/core run test:e2e
+      # Playwright keeps traces for failed tests only (trace: 'retain-on-failure'
+      # in packages/core/playwright.config.ts), so a red run can be replayed
+      # with `playwright show-trace`.
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-traces
+          path: packages/core/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   packaging:
     name: Packaging
     runs-on: ubuntu-latest

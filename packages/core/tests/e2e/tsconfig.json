@@ -1,0 +1,28 @@
+{
+  // The browser-facing half of the Playwright suite: page.evaluate callbacks
+  // run in the browser, so they are typed against the DOM. Global setup and
+  // the config import server code and stay in ../../tsconfig.json. The user
+  // helper reaches the e2e host's config, whose blocks are JSX.
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    // The user and link helpers reach the e2e host's config, whose imports of
+    // `@plakboek/core` resolve only through the link e2e global setup makes in
+    // tests/e2e-host/node_modules. That link is absent when typecheck runs
+    // alone, as in CI's Quality job, so mapping the package name to src makes
+    // typecheck independent of the link and of a prior build.
+    "paths": {
+      "@plakboek/core": ["../../src/index.ts"],
+      "@plakboek/core/*": ["../../src/*.ts"]
+    }
+  },
+  "include": [
+    "helpers/site-behaviour.ts",
+    "helpers/snapshots.ts",
+    "helpers/host.ts",
+    "**/*.spec.ts"
+  ]
+}

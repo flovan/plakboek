@@ -65,6 +65,29 @@ describe('the public path a composer receives', () => {
   });
 });
 
+describe('the render mode a composer receives (D-21)', () => {
+  it('is always visitor from the visitor handler', async () => {
+    const seen: DocumentInput[] = [];
+    const handler = createVisitorHandler({
+      db: fixture.handle.db,
+      config: fixtureConfig,
+      renderDocument: (input) => {
+        seen.push(input);
+        return renderDefaultDocument(input);
+      },
+    });
+    for (const path of ['/', '/about', '/nl/over-ons']) {
+      expect((await visit(handler, path)).status).toBe(200);
+    }
+    expect(seen).toHaveLength(3);
+    expect(seen.map((input) => input.mode)).toEqual([
+      'visitor',
+      'visitor',
+      'visitor',
+    ]);
+  });
+});
+
 describe('an async composer', () => {
   it('serves exactly the bytes it resolved to, with an ETag over them', async () => {
     const document = '<!DOCTYPE html><html><body>async composer</body></html>';

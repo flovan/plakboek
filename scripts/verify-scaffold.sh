@@ -235,4 +235,67 @@ fi
 CODE="$(curl --silent --output /dev/null --write-out '%{http_code}' "$BASE_URL/cms/setup")"
 [ "$CODE" = "404" ] || fail "GET /cms/setup answered $CODE, expected 404"
 
+echo "==> Editor code is built but never served to an anonymous visitor"
+# The host build emits the editor as its own chunk plus a sidecar naming it.
+EDITOR_SIDECAR_FILE="build/client/plakboek-editor.json"
+[ -f "$EDITOR_SIDECAR_FILE" ] \
+  || fail "the host build has no $EDITOR_SIDECAR_FILE: the editor chunk was not built"
+EDITOR_CHUNK_FILE="$(node -p "JSON.parse(require('node:fs').readFileSync('$EDITOR_SIDECAR_FILE', 'utf8')).file")"
+[ -n "$EDITOR_CHUNK_FILE" ] && [ -f "build/client/$EDITOR_CHUNK_FILE" ] \
+  || fail "the editor chunk '$EDITOR_CHUNK_FILE' named by the sidecar is missing from build/client"
+# $BODY is the anonymous GET / fetched above: no editor element, no chunk.
+if grep -q 'plakboek-editor' "$BODY"; then
+  fail "the anonymous GET / mentions plakboek-editor: an editor element or chunk reference reached a visitor"
+fi
+if grep -q '/assets/plakboek-editor-' "$BODY"; then
+  fail "the anonymous GET / references the editor chunk under /assets/"
+fi
+
+echo "==> /cms answers the login document and the edit gates hold"
+CMS_HEADERS="$WORK_DIR/cms.headers"
+CMS_BODY="$WORK_DIR/cms.html"
+CODE="$(curl --silent --output "$CMS_BODY" --dump-header "$CMS_HEADERS" --write-out '%{http_code}' "$BASE_URL/cms")"
+[ "$CODE" = "200" ] || fail "GET /cms answered $CODE, expected 200"
+tr -d '\r' < "$CMS_HEADERS" | grep -qi '^x-robots-tag: noindex, nofollow$' \
+  || fail "GET /cms does not carry 'x-robots-tag: noindex, nofollow'"
+grep -q 'shadowrootmode' "$CMS_BODY" \
+  || fail "GET /cms is not the shell document (no shadowrootmode in the body)"
+
+edit_location() {
+  # Prints "<status> <location>" for GET /?_edit=1, with an optional cookie jar.
+  local jar_args=()
+  if [ -n "${1:-}" ]; then
+    jar_args=(--cookie "$1")
+  fi
+  curl --silent --output /dev/null --dump-header "$WORK_DIR/edit.headers" \
+    --write-out '%{http_code}' "${jar_args[@]}" "$BASE_URL/?_edit=1" > "$WORK_DIR/edit.status"
+  printf '%s %s' "$(cat "$WORK_DIR/edit.status")" \
+    "$(tr -d '\r' < "$WORK_DIR/edit.headers" | sed -n 's/^[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]: //p' | head -n 1)"
+}
+
+EDIT_ANON="$(edit_location)"
+[ "$EDIT_ANON" = "302 /" ] \
+  || fail "an anonymous GET /?_edit=1 answered '$EDIT_ANON', expected '302 /'"
+
+# Sign in as the bootstrapped superadmin. The JSON body goes through a file in
+# the work directory so the password is never a command-line argument.
+SIGN_IN_BODY="$WORK_DIR/sign-in.json"
+COOKIE_JAR="$WORK_DIR/cookies.txt"
+(umask 077 && printf '%s' "$PROOF_PASSWORD" | node -e "
+const password = require('node:fs').readFileSync(0, 'utf8');
+process.stdout.write(JSON.stringify({ email: 'proof@example.test', password }));
+" > "$SIGN_IN_BODY")
+CODE="$(curl --silent --output "$WORK_DIR/sign-in.out" --write-out '%{http_code}' \
+  --cookie-jar "$COOKIE_JAR" \
+  --header "Origin: $BASE_URL" --header 'Content-Type: application/json' \
+  --data-binary "@$SIGN_IN_BODY" "$BASE_URL/api/auth/sign-in/email")"
+rm -f "$SIGN_IN_BODY"
+[ "$CODE" = "200" ] || fail "POST /api/auth/sign-in/email answered $CODE, expected 200"
+
+# The superadmin has not enrolled a second factor yet, so edit mode sends them
+# to enrolment and back to the page afterwards.
+EDIT_SESSION="$(edit_location "$COOKIE_JAR")"
+[ "$EDIT_SESSION" = "302 /cms/two-factor/enrol?next=%2F" ] \
+  || fail "GET /?_edit=1 with the superadmin session answered '$EDIT_SESSION', expected '302 /cms/two-factor/enrol?next=%2F'"
+
 echo "scaffold: OK"

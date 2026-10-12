@@ -8,4 +8,7 @@ declare module 'virtual:plakboek/host' {
   export const edit:
     | import('@plakboek/render/server').EditEntrypoint
     | undefined;
+  export const editorAssets:
+    | import('@plakboek/editor/server').EditorAssets
+    | undefined;
 }

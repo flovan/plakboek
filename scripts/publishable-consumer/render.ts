@@ -1,6 +1,9 @@
 import {
+  CMS_LOGIN_PATH,
+  EDIT_ATTRIBUTE,
   EDIT_PARAM,
   EDITOR_FLAG_KEY,
+  NEXT_PARAM,
   NOOP_EDIT,
   TOOLBAR_DISMISSED_KEY,
   type BlockComponent,
@@ -14,8 +17,11 @@ import {
 } from '@plakboek/render';
 import {
   buildPageHead,
+  createLiveEdit,
+  normalizeVisitorPath,
   renderDefaultDocument,
   renderHeadHtml,
+  renderPageTree,
   renderToolbarBootstrap,
   TOOLBAR_BOOTSTRAP_CSP_HASH,
   type PageHeadInput,
@@ -38,6 +44,20 @@ expectEqual(
   'TOOLBAR_DISMISSED_KEY',
   TOOLBAR_DISMISSED_KEY.startsWith('plakboek:'),
   true,
+);
+expectEqual('EDIT_ATTRIBUTE.block', EDIT_ATTRIBUTE.block, 'data-pk-block');
+expectEqual('renderPageTree', typeof renderPageTree, 'function');
+expectEqual(
+  'createLiveEdit root attributes',
+  Object.keys(
+    createLiveEdit({ id: 'b1', blockType: 'x', kind: 'block', label: 'X' }),
+  ).length,
+  4,
+);
+expectEqual(
+  'normalizeVisitorPath',
+  normalizeVisitorPath('/About').kind,
+  'redirect',
 );
 expectEqual('NOOP_EDIT keys', Object.keys(NOOP_EDIT).length, 0);
 expectEqual(
@@ -73,6 +93,7 @@ const input: DocumentInput = {
   head,
   body: '<main>probe</main>',
   publicPath: '/en/about',
+  mode: 'visitor',
 };
 const composer: RenderDocument = renderDefaultDocument;
 
@@ -91,6 +112,14 @@ expectEqual('document body', html.includes('<main>probe</main>'), true);
 expectEqual(
   'bootstrap CSP hash',
   TOOLBAR_BOOTSTRAP_CSP_HASH.startsWith('sha256-'),
+  true,
+);
+expectEqual('login path', CMS_LOGIN_PATH, '/cms');
+expectEqual('next parameter', NEXT_PARAM, 'next');
+expectEqual('document mode type', input.mode, 'visitor');
+expectEqual(
+  'bootstrap targets the login path',
+  renderToolbarBootstrap().includes(JSON.stringify(CMS_LOGIN_PATH)),
   true,
 );
 expectEqual(
