@@ -437,13 +437,19 @@ test.describe('the outline follows its element', () => {
     const frame = await framedSite(page);
     await hoverSpacer(page);
     const before = await overlayBox(page, OUTLINE);
+    const spacerBefore = await boxOf(frame, '.spacer');
 
     // the site's own script opens the second accordion (the first sits in a
     // section of fixed height), which pushes everything below it down
     await frame.evaluate(() => {
       // a browser keeps what is on screen in place when content above it
-      // grows (scroll anchoring); switch that off so the page really moves
+      // grows (scroll anchoring); switch that off so the page really moves.
+      // Chromium and Firefox read the viewport's overflow-anchor from the
+      // root, WebKit reads it from body: with only the root set, WebKit kept
+      // the spacer in place by scrolling the frame exactly as far as the
+      // panel grew
       document.documentElement.style.overflowAnchor = 'none';
+      document.body.style.overflowAnchor = 'none';
       const trigger = document.querySelectorAll('[data-accordion] button')[1];
       if (!(trigger instanceof HTMLElement)) throw new Error('no accordion');
       trigger.click();
@@ -451,6 +457,12 @@ test.describe('the outline follows its element', () => {
     await expect(
       frame.locator('[data-accordion] button').nth(1),
     ).toHaveAttribute('aria-expanded', 'true');
+    // the precondition of this test: the spacer really moved down
+    await expect
+      .poll(async () => (await boxOf(frame, '.spacer')).y - spacerBefore.y, {
+        message: 'the spacer moved down',
+      })
+      .toBeGreaterThan(5);
     await expectOutlineOver(page, frame, '.spacer');
     const after = await overlayBox(page, OUTLINE);
     expect(after.y - before.y).toBeGreaterThan(5);

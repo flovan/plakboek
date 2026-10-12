@@ -65,6 +65,23 @@ async function recordFrameRects(page: Page): Promise<FrameReport[]> {
   return reports;
 }
 
+/**
+ * Waits until the shell document has reported its frame at least once, then
+ * returns those reports. The reports reach the test asynchronously through the
+ * exposed function, so `data-hydrated` can be observed before the shell's
+ * first report lands (Linux WebKit in CI shows this).
+ */
+async function shellReports(
+  reports: readonly FrameReport[],
+): Promise<FrameReport[]> {
+  const fromShell = (): FrameReport[] =>
+    reports.filter((r) => new URL(r.href).search === '?_edit=1');
+  await expect
+    .poll(() => fromShell().length, { message: 'the shell reported its frame' })
+    .toBeGreaterThan(0);
+  return fromShell();
+}
+
 type SpinnerReport = {
   readonly text: string;
   readonly left: number;
@@ -214,12 +231,20 @@ test.describe('signing in', () => {
       /_edit=frame$/,
     );
 
+    const shell = await shellReports(reports);
     const login = reports.filter((r) => new URL(r.href).pathname === '/cms');
-    const shell = reports.filter((r) => new URL(r.href).search === '?_edit=1');
     expect(login.length).toBeGreaterThan(3);
-    expect(shell.length).toBeGreaterThan(0);
+    const last = login.at(-1);
+    const painted = shell[0];
+    if (last === undefined || painted === undefined) {
+      throw new Error('no frame was reported');
+    }
 
-    // The frame starts as the whole viewport and moves in more than one step.
+    // The frame starts as the whole viewport, really animates, and is caught
+    // mid-way at least once. How many frames a run samples depends on the
+    // engine and the machine (Linux WebKit samples only one or two during the
+    // move), so the test asks for a rectangle between the two ends rather
+    // than a count of steps.
     const first = login[0];
     expect(first).toMatchObject({
       left: 0,
@@ -227,8 +252,11 @@ test.describe('signing in', () => {
       width: viewport.width,
       height: viewport.height,
     });
-    const steps = new Set(login.map((r) => Math.round(r.width)));
-    expect(steps.size).toBeGreaterThan(3);
+    expect(login.some((r) => r.animations > 0)).toBe(true);
+    const midway = login.filter(
+      (r) => r.width < viewport.width - 1 && r.width > painted.width + 1,
+    );
+    expect(midway.length).toBeGreaterThan(0);
 
     // The site is never scaled: no transform, and the document inside the
     // frame is as wide as the frame (less a border) at every reported frame.
@@ -243,11 +271,6 @@ test.describe('signing in', () => {
     }
 
     // The last frame of the hand-over is the first paint of the shell, to the pixel.
-    const last = login.at(-1);
-    const painted = shell[0];
-    if (last === undefined || painted === undefined) {
-      throw new Error('no frame was reported');
-    }
     for (const side of ['left', 'top', 'width', 'height'] as const) {
       expect(Math.abs(last[side] - painted[side])).toBeLessThanOrEqual(1);
     }
@@ -486,8 +509,8 @@ test.describe('the hand-over for each layout and motion setting', () => {
     await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
 
+    const shell = await shellReports(reports);
     const login = reports.filter((r) => new URL(r.href).pathname === '/cms');
-    const shell = reports.filter((r) => new URL(r.href).search === '?_edit=1');
     const last = login.at(-1);
     const painted = shell[0];
     if (last === undefined || painted === undefined) {
@@ -514,6 +537,7 @@ test.describe('the hand-over for each layout and motion setting', () => {
     );
     await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
 
+    const shell = await shellReports(reports);
     const login = reports.filter((r) => new URL(r.href).pathname === '/cms');
     expect(login.length).toBeGreaterThan(0);
     // No Animation object ever ran on the frame, and it was never half way:
@@ -524,7 +548,6 @@ test.describe('the hand-over for each layout and motion setting', () => {
         Math.round(report.width),
       );
     }
-    const shell = reports.filter((r) => new URL(r.href).search === '?_edit=1');
     const painted = shell[0];
     if (painted === undefined) throw new Error('no frame was reported');
     closeTo(painted, FRAMED);
