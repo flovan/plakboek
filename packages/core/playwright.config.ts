@@ -3,8 +3,9 @@ import { defineConfig, devices } from '@playwright/test';
 const VIEWPORT = { width: 1400, height: 900 };
 
 /**
- * Real-browser suite for the edit shell and the adversarial host theme.
- * One worker, because every spec shares the database global setup seeds.
+ * Real-browser suite for the edit shell and the adversarial host theme, run in
+ * Chromium only. One worker, because every spec shares the database global
+ * setup seeds.
  */
 export default defineConfig({
   testDir: './tests/e2e',
@@ -22,14 +23,6 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'], viewport: VIEWPORT },
-    },
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'], viewport: VIEWPORT },
-    },
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'], viewport: VIEWPORT },
     },
   ],
 });

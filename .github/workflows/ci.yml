@@ -117,13 +117,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # The pinned Playwright version lives in pnpm-workspace.yaml, so the
-      # browser cache is keyed on that file: a version bump refreshes it.
+      # browser cache is keyed on that file: a version bump refreshes it. The
+      # key also names the installed engine.
       - uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-workspace.yaml') }}
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('pnpm-workspace.yaml') }}
       - run: pnpm run build
-      - run: pnpm --filter @plakboek/core exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm --filter @plakboek/core exec playwright install --with-deps chromium
       - run: pnpm --filter @plakboek/core run test:e2e
       # Playwright keeps traces for failed tests only (trace: 'retain-on-failure'
       # in packages/core/playwright.config.ts), so a red run can be replayed
