@@ -8,7 +8,16 @@
     "lib": ["ES2023", "DOM"],
     "types": ["node"],
     "jsx": "react-jsx",
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    // The user and link helpers reach the e2e host's config, whose imports of
+    // `@plakboek/core` resolve only through the link e2e global setup makes in
+    // tests/e2e-host/node_modules. That link is absent when typecheck runs
+    // alone, as in CI's Quality job, so mapping the package name to src makes
+    // typecheck independent of the link and of a prior build.
+    "paths": {
+      "@plakboek/core": ["../../src/index.ts"],
+      "@plakboek/core/*": ["../../src/*.ts"]
+    }
   },
   "include": [
     "helpers/site-behaviour.ts",
