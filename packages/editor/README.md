@@ -110,7 +110,10 @@ log-out path. It is escaped so no value can close its script element.
 The shell opens **framed**: a 280px sidebar, and the page 24px from the stage
 edges. The Full width toggle switches to a 56px rail with the page flush to
 the rail, the top, the right and the bottom. The frame's own scroll position
-is unchanged by the switch and the window itself never scrolls. The choice is
+is unchanged by the switch and the window itself never scrolls. When the toggle
+has keyboard focus, focus moves with it to the toggle of the layout now shown,
+so a keyboard user can switch straight back and focus never rests on a hidden
+control. The choice is
 kept per browser in `localStorage` under `plakboek:editor-layout` (`framed` or
 `full`; anything else means framed). A small inline script right after the
 `plakboek-editor` element applies a stored `full` before the first paint, so
