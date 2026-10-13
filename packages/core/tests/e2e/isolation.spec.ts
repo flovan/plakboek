@@ -90,6 +90,9 @@ async function openShell(page: Page, path: string): Promise<void> {
   const response = await page.goto(path);
   expect(response?.status()).toBe(200);
   await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
+  // the editing session is running, so the tools are in the sidebar: the
+  // chrome measured below is the chrome of a page being edited
+  await expect(page.locator(HOST)).toHaveAttribute('data-session', 'editing');
   // the framed site has loaded and its own scripts have run
   const frame = await framedSite(page);
   await frame.waitForFunction(

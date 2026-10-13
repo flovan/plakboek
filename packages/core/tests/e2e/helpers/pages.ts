@@ -116,3 +116,21 @@ export async function createEditablePage(input: {
     await closeAllDbs();
   }
 }
+
+/**
+ * Releases every page lock. A spec that ends by closing its browser never
+ * lets the page go (no unload runs), so the lock it took on a shared page
+ * stays until it expires; the next spec to edit that page would find it held
+ * by someone else. Specs that edit a shared page start from here.
+ */
+export async function releaseAllPageLocks(): Promise<void> {
+  const { default: config } = await import('../../e2e-host/plakboek.config.ts');
+  const runtime = createRuntime({ config }, readRuntimeEnv(process.env));
+  try {
+    await runtime.db.db.execute(
+      sql`UPDATE pages SET locked_by = NULL, locked_at = NULL WHERE locked_by IS NOT NULL`,
+    );
+  } finally {
+    await closeAllDbs();
+  }
+}

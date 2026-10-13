@@ -5,6 +5,7 @@
  * the frame's clicks claimed.
  */
 import { expect, type Frame, type Page } from '@playwright/test';
+import { releaseAllPageLocks } from './pages.ts';
 
 export const HOST = 'plakboek-editor';
 export const FRAME = `${HOST} iframe`;
@@ -46,9 +47,11 @@ export async function waitForShell(page: Page): Promise<void> {
 
 /**
  * Opens `<path>?_edit=1` and waits until the editing session runs and the
- * frame's clicks are claimed (the frame leaves the tab order only then).
+ * frame's clicks are claimed (the frame leaves the tab order only then). Locks
+ * an earlier spec left on a shared page are released first.
  */
 export async function openEditor(page: Page, path: string): Promise<void> {
+  await releaseAllPageLocks();
   const separator = path.includes('?') ? '&' : '?';
   const response = await page.goto(`${path}${separator}_edit=1`);
   expect(response?.status()).toBe(200);
