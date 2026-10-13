@@ -15,6 +15,14 @@
  *   called only from this package's own write paths, inside an
  *   already-open audited transaction. One save call to this package's own
  *   revision history.
+ * - The transactional write bodies behind the single-operation functions and
+ *   the batch edit (`insertBlockInTransaction`, `updateBlockInTransaction`,
+ *   `moveBlockInTransaction`, `deleteSubtreeInTransaction`), the sibling
+ *   position resolver and the block row lock (`tree.ts`) -- they take an
+ *   already-open transaction and never bump the page version, so a caller
+ *   reaching them could write blocks without the version check, lock check
+ *   and audit row that `applyBlockEdit` and the single-operation functions
+ *   wrap around them.
  * - The row-locking page read (`pages.ts`) and the append-only URL-history
  *   writer -- every host-facing read excludes a removed locale and every
  *   history row is written inside the transaction that changed the address;
@@ -362,6 +370,23 @@ export type {
   MoveBlockInput,
   UpdateBlockPropsInput,
 } from './tree.js';
+
+// edit-batch.ts
+export {
+  applyBlockEdit,
+  BLOCK_EDIT_MAX_NODES,
+  BLOCK_EDIT_MAX_OPS,
+  BlockEditLimitError,
+  BlockIdConflictError,
+  BlockOwnershipError,
+} from './edit-batch.js';
+export type {
+  BlockEditInput,
+  BlockEditNode,
+  BlockEditOp,
+  BlockEditPosition,
+  BlockEditResult,
+} from './edit-batch.js';
 
 // revisions.ts
 export {

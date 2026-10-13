@@ -22,7 +22,11 @@
  * and friends in `tree.ts`) are internal wiring and stay out of the package
  * barrel.
  */
-import { type AuditActor, type AuditTransaction } from '@plakboek/auth';
+import {
+  PermissionDeniedError,
+  type AuditActor,
+  type AuditTransaction,
+} from '@plakboek/auth';
 import { getRevisionCap } from '@plakboek/content';
 import { eq, inArray, sql } from 'drizzle-orm';
 import type { PagesDeps } from './config.js';
@@ -33,8 +37,10 @@ import { pageBlocks, pages } from './schema.js';
 import { getPageEditLocking } from './settings.js';
 import {
   BlockNotFoundError,
+  deleteSubtreeInTransaction,
   insertBlockInTransaction,
   loadBlockForUpdate,
+  moveBlockInTransaction,
   StaleBlockVersionError,
   updateBlockInTransaction,
   type WriteContext,
@@ -389,20 +395,37 @@ async function applyOperation(
       state.updatedIds.add(op.blockId);
       return;
     }
-    case 'move':
-    case 'delete':
-      throw new TypeError(
-        `@plakboek/pages: batch operation "${op.op}" is not supported yet`,
-      );
+    case 'move': {
+      const current = await touchBlock(tx, state, op.blockId, op.baseVersion);
+      await moveBlockInTransaction(tx, ctx, {
+        current,
+        newParentBlockId: op.position.parentId,
+        previousSiblingId: op.position.previousSiblingId,
+        nextSiblingId: op.position.nextSiblingId,
+      });
+      state.movedIds.add(op.blockId);
+      state.touchedParentIds.add(current.parentBlockId);
+      state.touchedParentIds.add(op.position.parentId);
+      return;
+    }
+    case 'delete': {
+      const current = await touchBlock(tx, state, op.blockId, op.baseVersion);
+      const { rows } = await deleteSubtreeInTransaction(tx, ctx, { current });
+      for (const row of rows) state.deletedIds.add(row.id);
+      state.touchedParentIds.add(current.parentBlockId);
+      return;
+    }
   }
 }
 
 /**
- * Applies a batch of block operations to one page atomically. Through
- * `deps.recorder.run` (`pages:edit` / `block.edit`, one audit row for the
- * whole batch carrying the batch id and the per-kind counts): refuses an
+ * Applies a batch of block operations to one page atomically. Refuses an
  * empty batch, more than `BLOCK_EDIT_MAX_OPS` operations or more than
- * `BLOCK_EDIT_MAX_NODES` inserted blocks before any query; loads and locks
+ * `BLOCK_EDIT_MAX_NODES` inserted blocks before any query, and a batch
+ * holding a delete when the actor lacks `pages:delete` (recorded through
+ * `recordDenied`, nothing written). Then, through `deps.recorder.run`
+ * (`pages:edit` / `block.edit`, one audit row for the whole batch carrying
+ * the batch id and the per-kind counts): loads and locks
  * the page `FOR UPDATE`, throwing `StalePageVersionError` when its version
  * is not `basePageVersion`; checks the page lock once; checks that every
  * existing block the batch names belongs to the page and that no supplied
@@ -413,7 +436,10 @@ async function applyOperation(
  *
  * Property writes accept empty required values (D-21); layout is validated
  * against the column presets (D-33). Placement is checked per block exactly
- * as an insert, a move or a delete would be on its own.
+ * as an insert, a move or a delete would be on its own. A delete records a
+ * delete revision, props and layout included, for every block of the
+ * removed subtree before the rows go; an operation naming a block an
+ * earlier operation of the batch deleted is `BlockNotFoundError`.
  */
 export async function applyBlockEdit(
   deps: PagesDeps,
@@ -421,6 +447,26 @@ export async function applyBlockEdit(
   input: BlockEditInput,
 ): Promise<BlockEditResult> {
   const scan = scanBatch(input);
+
+  // Removing content is a stronger act than editing it: a batch holding a
+  // delete needs `pages:delete` on top of the `pages:edit` the run below
+  // checks. Resolved up front, so a refusal writes only its denied audit row
+  // and no transaction ever opens (research Pitfall 10).
+  if (
+    input.ops.some((op) => op.op === 'delete') &&
+    !deps.resolver
+      .resolve(actor.roleKey, { userId: actor.userId })
+      .has('pages:delete')
+  ) {
+    await deps.recorder.recordDenied(actor, {
+      permission: 'pages:delete',
+      action: 'block.edit',
+      entityType: 'page',
+      entityId: input.pageId,
+    });
+    throw new PermissionDeniedError('pages:delete', actor.roleKey);
+  }
+
   const now = deps.now ?? (() => new Date());
   // Read once, before the transaction opens, like every other write path.
   const revisionCap = await getRevisionCap(deps.db);

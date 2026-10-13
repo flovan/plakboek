@@ -1,6 +1,17 @@
 import {
   acquirePageLock,
   type AcquirePageLockInput,
+  applyBlockEdit,
+  BLOCK_EDIT_MAX_NODES,
+  BLOCK_EDIT_MAX_OPS,
+  BlockEditLimitError,
+  BlockIdConflictError,
+  BlockOwnershipError,
+  type BlockEditInput,
+  type BlockEditNode,
+  type BlockEditOp,
+  type BlockEditPosition,
+  type BlockEditResult,
   AncestorTrashedError,
   assertBlockCompatibility,
   type BelowFloorBlockEntry,
@@ -275,6 +286,7 @@ import * as pages from '@plakboek/pages';
 
 const functions: Record<string, unknown> = {
   acquirePageLock,
+  applyBlockEdit,
   findMissingRequiredProps,
   previewBlockValues,
   resolveColumnPresets,
@@ -356,6 +368,9 @@ const functions: Record<string, unknown> = {
 
 const errorClasses: Record<string, unknown> = {
   AncestorTrashedError,
+  BlockEditLimitError,
+  BlockIdConflictError,
+  BlockOwnershipError,
   BlockLayoutValidationError,
   BlockCompatibilityError,
   BlockConfigError,
@@ -402,6 +417,8 @@ const errorClasses: Record<string, unknown> = {
 };
 
 const numbers: Record<string, unknown> = {
+  BLOCK_EDIT_MAX_NODES,
+  BLOCK_EDIT_MAX_OPS,
   DEFAULT_BLOCK_DEPTH_CEILING,
   DEFAULT_SECTION_NESTING_DEPTH,
   PAGE_EDIT_LOCK_HEARTBEAT_SECONDS,
@@ -518,6 +535,12 @@ for (const internal of [
   'validateBlockProps',
   'validateBlockLayout',
   'readStoredLayout',
+  'insertBlockInTransaction',
+  'updateBlockInTransaction',
+  'moveBlockInTransaction',
+  'deleteSubtreeInTransaction',
+  'resolvePositionSortOrder',
+  'loadBlockForUpdate',
   'applyBlockConstraints',
   'buildSnapshotTree',
   'pages',
@@ -687,6 +710,12 @@ if (sortOrderBetween(null, null) !== SORT_ORDER_STEP) {
 }
 if (nextSortOrder(null) !== SORT_ORDER_STEP) {
   fail('nextSortOrder did not return SORT_ORDER_STEP for an empty list');
+}
+if (BLOCK_EDIT_MAX_OPS !== 50) {
+  fail('BLOCK_EDIT_MAX_OPS is not 50');
+}
+if (BLOCK_EDIT_MAX_NODES !== 500) {
+  fail('BLOCK_EDIT_MAX_NODES is not 500');
 }
 if (needsRebalance(1000, 1001) !== true) {
   fail('needsRebalance did not detect a closed gap');
@@ -1022,6 +1051,33 @@ const updateBlockPropsInput: UpdateBlockPropsInput = {
   baseVersion: 1,
   props: {},
 };
+const blockEditPosition: BlockEditPosition = {
+  parentId: null,
+  previousSiblingId: 'sibling-id',
+};
+const blockEditNode: BlockEditNode = {
+  type: 'section',
+  children: [{ type: 'column' }],
+};
+const blockEditOp: BlockEditOp = {
+  op: 'insert',
+  position: blockEditPosition,
+  node: blockEditNode,
+};
+const blockEditInput: BlockEditInput = {
+  pageId: 'page-id',
+  basePageVersion: 1,
+  ops: [blockEditOp],
+};
+const blockEditResult: BlockEditResult = {
+  pageVersion: 2,
+  revisionBatchId: 'batch-id',
+  createdIds: [],
+  deletedIds: [],
+  updatedIds: [],
+  movedIds: [],
+  touchedParentIds: [null],
+};
 
 const blockRevisionSummary: BlockRevisionSummary = {
   id: 'revision-id',
@@ -1341,6 +1397,11 @@ const typeProofs: unknown[] = [
   insertBlockInput,
   moveBlockInput,
   updateBlockPropsInput,
+  blockEditPosition,
+  blockEditNode,
+  blockEditOp,
+  blockEditInput,
+  blockEditResult,
   blockRevisionSummary,
   computeBlockRestorePreviewInput,
   listPageRevisionBatchesInput,

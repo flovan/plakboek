@@ -138,6 +138,13 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   readBlockTree: 'function',
   StaleBlockVersionError: 'class',
   updateBlockProps: 'function',
+  // edit-batch
+  applyBlockEdit: 'function',
+  BLOCK_EDIT_MAX_NODES: 'constant',
+  BLOCK_EDIT_MAX_OPS: 'constant',
+  BlockEditLimitError: 'class',
+  BlockIdConflictError: 'class',
+  BlockOwnershipError: 'class',
   // revisions
   computeBlockRestorePreview: 'function',
   DegradedRestoreError: 'class',
@@ -300,6 +307,12 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'InsertBlockInput',
   'MoveBlockInput',
   'UpdateBlockPropsInput',
+  // edit-batch
+  'BlockEditInput',
+  'BlockEditNode',
+  'BlockEditOp',
+  'BlockEditPosition',
+  'BlockEditResult',
   // revisions
   'BlockRevisionSummary',
   'ComputeBlockRestorePreviewInput',
@@ -369,6 +382,13 @@ const WITHHELD: readonly string[] = Object.freeze([
   'recordBlockRevision',
   'pruneBlockRevisions',
   'newRevisionBatchId',
+  // tree.ts
+  'insertBlockInTransaction',
+  'updateBlockInTransaction',
+  'moveBlockInTransaction',
+  'deleteSubtreeInTransaction',
+  'resolvePositionSortOrder',
+  'loadBlockForUpdate',
   // pages.ts
   'loadPageForUpdate',
   'recordPageUrlHistory',
@@ -511,6 +531,11 @@ const ERROR_FACTORIES: Readonly<
       1,
       2,
     ),
+  BlockOwnershipError: (K) =>
+    new (K as new (id: string) => unknown)('block-id'),
+  BlockIdConflictError: (K) =>
+    new (K as new (id: string) => unknown)('block-id'),
+  BlockEditLimitError: (K) => new (K as new (l: string) => unknown)('ops'),
   DegradedRestoreError: (K) =>
     new (K as new (o: unknown[]) => unknown)([
       { revisionId: 'rev-id', blockId: 'block-id', blockType: 'hero' },

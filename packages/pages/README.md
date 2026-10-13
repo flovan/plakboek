@@ -451,6 +451,43 @@ A pattern's literal text may contain only lowercase letters, digits, hyphens and
 | `MoveBlockInput`               | type     | Input to `moveBlock`                                                                                |
 | `UpdateBlockPropsInput`        | type     | Input to `updateBlockProps`                                                                         |
 
+### Batch edits (D-25)
+
+`applyBlockEdit` is the editor's one compound write: a list of insert, update,
+move and delete operations against a single page, applied in one transaction
+with one revision batch id, one audit row (`block.edit`, with per-kind counts)
+and one page version bump, or not at all. An insert may carry a whole subtree
+and client-chosen lowercase uuids (an id already in use is refused as a
+conflict, so a re-sent insert never makes a second block, and an undo can put
+a deleted subtree back under its original ids). Every block id, parent id and
+sibling id an operation names must belong to the stated page and locale or be
+created earlier in the same batch; anything else is refused before any write,
+so a block of a locked page can never be changed through another page's id.
+Operations are version-checked per block (`baseVersion`) and the batch against
+the page (`basePageVersion`); a block touched twice in one batch is checked
+against the version the client saw. Writes accept empty required values and
+validate layout against the column presets, exactly as the single-operation
+functions do. A batch holding a delete needs `pages:delete` as well as
+`pages:edit`; without it the refusal is recorded and nothing is written. A
+batch is limited to `BLOCK_EDIT_MAX_OPS` operations and
+`BLOCK_EDIT_MAX_NODES` inserted blocks. A batch edits the working tree only:
+it never publishes, never changes what visitors receive and never purges a
+cache.
+
+| Export                 | Kind     | Purpose                                                                                                   |
+| ---------------------- | -------- | --------------------------------------------------------------------------------------------------------- |
+| `applyBlockEdit`       | function | Applies a batch of insert, update, move and delete operations to one page atomically                      |
+| `BLOCK_EDIT_MAX_NODES` | constant | `500`: the most blocks one batch may insert, subtrees included                                            |
+| `BLOCK_EDIT_MAX_OPS`   | constant | `50`: the most operations one batch may hold                                                              |
+| `BlockEditLimitError`  | class    | A batch is empty, holds too many operations or inserts too many blocks (`limit`: `empty`, `ops`, `nodes`) |
+| `BlockIdConflictError` | class    | An inserted node supplies an id that is already in use                                                    |
+| `BlockOwnershipError`  | class    | A batch names a block that belongs to another page, locale or owner                                       |
+| `BlockEditInput`       | type     | Input to `applyBlockEdit`: page id, base page version and the operations                                  |
+| `BlockEditNode`        | type     | One block to insert, with an optional client id and subtree                                               |
+| `BlockEditOp`          | type     | One insert, update, move or delete operation                                                              |
+| `BlockEditPosition`    | type     | A parent and the siblings a block goes between                                                            |
+| `BlockEditResult`      | type     | The new page version, the revision batch id and the created, updated, moved and deleted ids               |
+
 ### Block revisions and restore (D-26..D-29, D-13)
 
 | Export                            | Kind     | Purpose                                                                       |
