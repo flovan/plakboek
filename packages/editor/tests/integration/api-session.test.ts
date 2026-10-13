@@ -4,6 +4,7 @@
  * refuses what it should, and the lock endpoints keep, release and take over
  * a page's lock.
  */
+import { setPageEditLocking } from '@plakboek/pages';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type {
   ApiError,
@@ -359,6 +360,31 @@ describe('the lock endpoints', () => {
     const response = await lockCall(harness.editor, seeded.pageId, 'take-over');
     expect(response.status).toBe(403);
     expect((await readError(response)).code).toBe('forbidden');
+  });
+
+  it('opens without a lock and refuses to acquire one while locking is off', async () => {
+    const seeded = await createColumnPage(harness, {
+      title: 'Unlocked',
+      text: 'x',
+    });
+    await setPageEditLocking(harness.pagesDeps, harness.actor, {
+      enabled: false,
+    });
+    try {
+      const session = await readSession(
+        await open(harness.editor, '/unlocked'),
+      );
+      expect(session.lock.enabled).toBe(false);
+      expect(session.lock.state).toBe('free');
+
+      const acquire = await lockCall(harness.editor, seeded.pageId, 'acquire');
+      expect(acquire.status).toBe(409);
+      expect((await readError(acquire)).code).toBe('locking-disabled');
+    } finally {
+      await setPageEditLocking(harness.pagesDeps, harness.actor, {
+        enabled: true,
+      });
+    }
   });
 
   it('reads the current tree', async () => {
