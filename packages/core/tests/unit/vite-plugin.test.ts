@@ -13,6 +13,8 @@ const VIRTUAL_ID = 'virtual:plakboek/host';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
 const EDITOR_CLIENT_ID = 'virtual:plakboek/editor-client';
 const RESOLVED_EDITOR_CLIENT_ID = `\0${EDITOR_CLIENT_ID}`;
+const BLOCK_EDIT_ID = 'virtual:plakboek/block-edit';
+const RESOLVED_BLOCK_EDIT_ID = `\0${BLOCK_EDIT_ID}`;
 const ROOT = '/work/host';
 
 type Hook = (this: unknown, ...args: unknown[]) => unknown;
@@ -145,18 +147,59 @@ describe('plakboek() editor chunk', () => {
     ).toBe(RESOLVED_EDITOR_CLIENT_ID);
   });
 
-  it('loads a module that imports bootEditor from the editor client entry and calls it', () => {
+  it('loads a module that boots the editor with the host block edit loaders', () => {
     const source = callHook(
       instance().load,
       { environment: { name: 'client' } },
       RESOLVED_EDITOR_CLIENT_ID,
     ) as string;
     const lines = source.split('\n');
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
     expect(lines[0]).toMatch(
       /^import \{ bootEditor \} from ".*editor.*client\.js";$/,
     );
-    expect(lines[1]).toBe('bootEditor();');
+    expect(lines[1]).toBe(
+      `import { blockEditModules } from "${BLOCK_EDIT_ID}";`,
+    );
+    expect(lines[2]).toBe(
+      'bootEditor(document, { blockEdit: blockEditModules });',
+    );
+  });
+
+  it('resolves the block-edit id, and its resolved form, to one module', () => {
+    const plugin = instance();
+    expect(callHook(plugin.resolveId, undefined, BLOCK_EDIT_ID)).toBe(
+      RESOLVED_BLOCK_EDIT_ID,
+    );
+    expect(callHook(plugin.resolveId, undefined, RESOLVED_BLOCK_EDIT_ID)).toBe(
+      RESOLVED_BLOCK_EDIT_ID,
+    );
+  });
+
+  it('loads the default lazy glob for block edit modules', () => {
+    const source = callHook(
+      instance().load,
+      { environment: { name: 'client' } },
+      RESOLVED_BLOCK_EDIT_ID,
+    ) as string;
+    expect(source).toBe(
+      'export const blockEditModules = import.meta.glob(["/blocks/**/*.edit.{ts,tsx}"]);',
+    );
+  });
+
+  it('loads the host patterns from the blockEdit option, one or several', () => {
+    const load = (blockEdit: PlakboekPluginOptions['blockEdit']): string =>
+      callHook(
+        instance({ blockEdit }).load,
+        { environment: { name: 'client' } },
+        RESOLVED_BLOCK_EDIT_ID,
+      ) as string;
+    expect(load('/app/widgets/*.edit.tsx')).toBe(
+      'export const blockEditModules = import.meta.glob(["/app/widgets/*.edit.tsx"]);',
+    );
+    expect(load(['/a/*.edit.ts', '/b/*.edit.ts'])).toBe(
+      'export const blockEditModules = import.meta.glob(["/a/*.edit.ts","/b/*.edit.ts"]);',
+    );
   });
 
   it('emits the editor chunk when building the client, and only then', () => {

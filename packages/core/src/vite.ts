@@ -40,6 +40,10 @@ import { readRuntimeEnv } from './runtime/env.js';
 const VIRTUAL_ID = 'virtual:plakboek/host';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
 const RESOLVED_EDITOR_CLIENT_ID = `\0${EDITOR_CLIENT_ID}`;
+const BLOCK_EDIT_ID = 'virtual:plakboek/block-edit';
+const RESOLVED_BLOCK_EDIT_ID = `\0${BLOCK_EDIT_ID}`;
+/** Where block edit modules are found when the host sets no `blockEdit`. */
+const DEFAULT_BLOCK_EDIT_GLOB = '/blocks/**/*.edit.{ts,tsx}';
 
 export type PlakboekPluginOptions = {
   /** Path to the module whose default export is the `defineConfig` result. */
@@ -52,6 +56,19 @@ export type PlakboekPluginOptions = {
    * every `_edit` request is bounced to the plain page.
    */
   readonly edit?: string;
+  /**
+   * Where the host's block lifecycle hook modules are found: one Vite glob or
+   * a list of them, root-relative (a leading `/` is the project root).
+   * Defaults to `/blocks/**\/*.edit.{ts,tsx}`.
+   *
+   * A module named `*.edit.ts` or `*.edit.tsx` default-exports
+   * `defineBlockEdit({ blockType, hooks })`. These modules are loaded lazily
+   * into the editor's own chunk through `virtual:plakboek/block-edit` and
+   * nowhere else: the client build fails, naming the chunk and the module, if
+   * anything a visitor loads (a route module, the client entry, a block
+   * definition) imports one. Block definitions therefore stay hook-free.
+   */
+  readonly blockEdit?: string | readonly string[];
 };
 
 /**
@@ -63,8 +80,23 @@ function editorClientSource(): string {
   const entry = fileURLToPath(import.meta.resolve('@plakboek/editor/client'));
   return [
     `import { bootEditor } from ${JSON.stringify(entry)};`,
-    'bootEditor();',
+    `import { blockEditModules } from ${JSON.stringify(BLOCK_EDIT_ID)};`,
+    'bootEditor(document, { blockEdit: blockEditModules });',
   ].join('\n');
+}
+
+/**
+ * The block-edit module: one lazy import per matching file, keyed by its
+ * root-relative path. Only the editor client imports it.
+ */
+function blockEditSource(option: PlakboekPluginOptions['blockEdit']): string {
+  const patterns =
+    option === undefined
+      ? [DEFAULT_BLOCK_EDIT_GLOB]
+      : typeof option === 'string'
+        ? [option]
+        : [...option];
+  return `export const blockEditModules = import.meta.glob(${JSON.stringify(patterns)});`;
 }
 
 export function plakboek(options: PlakboekPluginOptions): Plugin {
@@ -154,7 +186,7 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
               (leak) =>
                 `  ${leak.entry} -> ${leak.chunk}: ${leak.module} (matched "${leak.match}")`,
             ),
-            'Host route modules and the client entry must never import @plakboek/editor or a library only the editor uses (@tiptap, @dnd-kit, prosemirror); the editor loads only through its own chunk.',
+            'Host route modules and the client entry must never import @plakboek/editor, a block edit module (*.edit.ts, *.edit.tsx) or a library only the editor uses (@tiptap, @dnd-kit, prosemirror); the editor loads only through its own chunk.',
           ].join('\n'),
         );
       }
@@ -172,10 +204,15 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
       if (id === EDITOR_CLIENT_ID || id === RESOLVED_EDITOR_CLIENT_ID) {
         return RESOLVED_EDITOR_CLIENT_ID;
       }
+      if (id === BLOCK_EDIT_ID || id === RESOLVED_BLOCK_EDIT_ID) {
+        return RESOLVED_BLOCK_EDIT_ID;
+      }
       return undefined;
     },
     load(id) {
       if (id === RESOLVED_EDITOR_CLIENT_ID) return editorClientSource();
+      if (id === RESOLVED_BLOCK_EDIT_ID)
+        return blockEditSource(options.blockEdit);
       if (id !== RESOLVED_ID) return undefined;
       if (this.environment.name === 'client') {
         return [

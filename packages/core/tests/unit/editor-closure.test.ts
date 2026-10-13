@@ -188,6 +188,9 @@ describe('findEditorLeaks', () => {
     ['a TipTap module', '/work/node_modules/@tiptap/react/dist/index.js'],
     ['a dnd-kit module', '/work/node_modules/@dnd-kit/core/dist/core.js'],
     ['a ProseMirror module', '/work/node_modules/prosemirror-model/dist/i.js'],
+    ['a block edit module', '/site/app/blocks/accordion.edit.tsx'],
+    ['a block edit module with a query', '/site/app/blocks/tabs.edit.ts?v=1'],
+    ['the block-edit virtual module', '\0virtual:plakboek/block-edit'],
     [
       'a Windows-style editor path',
       'C:\\work\\node_modules\\@plakboek\\editor\\dist\\client.js',
@@ -220,10 +223,65 @@ describe('findEditorLeaks', () => {
           '/work/app/dnd-kit-helpers.ts',
           // A host's own folder named after a library.
           '/work/app/@tiptap/local.ts',
+          // Names that only resemble an edit module.
+          '/work/app/blocks/edit.ts',
+          '/work/app/editor-notes.ts',
+          '/work/app/blocks/credit.ts',
         ],
       }),
     };
     expect(findEditorLeaks(bundle)).toEqual([]);
+  });
+
+  it('reports a visitor route that imports an edit module, and not the editor chunk that holds it', () => {
+    const editModule = '/site/app/blocks/accordion.edit.tsx';
+    const clean: BundleLike = {
+      ...cleanBundle(),
+      'assets/plakboek-editor-4.js': chunk('assets/plakboek-editor-4.js', {
+        isEntry: true,
+        name: EDITOR_CHUNK_NAME,
+        imports: ['assets/react-3.js'],
+        dynamicImports: ['assets/auth-5.js', 'assets/accordion.edit-8.js'],
+        moduleIds: ['\0virtual:plakboek/editor-client', EDITOR_MODULE],
+      }),
+      'assets/accordion.edit-8.js': chunk('assets/accordion.edit-8.js', {
+        isDynamicEntry: true,
+        moduleIds: [editModule],
+      }),
+    };
+    expect(findEditorLeaks(clean)).toEqual([]);
+
+    expect(
+      findEditorLeaks({
+        ...clean,
+        'assets/home-2.js': chunk('assets/home-2.js', {
+          isEntry: true,
+          name: 'home',
+          imports: ['assets/react-3.js'],
+          dynamicImports: ['assets/accordion.edit-8.js'],
+          moduleIds: ['/work/app/routes/home.tsx'],
+        }),
+      }),
+    ).toEqual([
+      {
+        entry: 'assets/home-2.js',
+        chunk: 'assets/accordion.edit-8.js',
+        module: editModule,
+        match: '.edit.',
+      },
+    ]);
+  });
+
+  it('reports the block-edit virtual module in a visitor chunk', () => {
+    const [leak] = findEditorLeaks({
+      ...cleanBundle(),
+      'assets/home-2.js': chunk('assets/home-2.js', {
+        isEntry: true,
+        name: 'home',
+        moduleIds: ['\0virtual:plakboek/block-edit'],
+      }),
+    });
+    expect(leak?.match).toBe('virtual:plakboek/block-edit');
   });
 
   it('names the fragment that made a module count, so a host can see why', () => {

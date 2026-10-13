@@ -25,6 +25,15 @@ export type EditorLeak = {
 };
 
 const RESOLVED_EDITOR_CLIENT_ID = `\0${EDITOR_CLIENT_ID}`;
+const BLOCK_EDIT_ID = 'virtual:plakboek/block-edit';
+const RESOLVED_BLOCK_EDIT_ID = `\0${BLOCK_EDIT_ID}`;
+
+/**
+ * A host's block lifecycle hook module (`accordion.edit.tsx`): the file name
+ * ends in `.edit.` plus a script extension. A file merely named `edit.ts` or
+ * `editor-notes.ts` is not one.
+ */
+const EDIT_MODULE = /\.edit\.[cm]?[jt]sx?$/;
 
 /**
  * Path fragments of the editor package and of the libraries only it uses.
@@ -44,7 +53,9 @@ const EDITOR_PATH_FRAGMENTS = [
 /** The fragment that makes a module id editor code, or `undefined`. */
 function editorMatch(id: string): string | undefined {
   if (id === RESOLVED_EDITOR_CLIENT_ID) return EDITOR_CLIENT_ID;
+  if (id === RESOLVED_BLOCK_EDIT_ID) return BLOCK_EDIT_ID;
   const path = id.replaceAll('\\', '/');
+  if (EDIT_MODULE.test(path.split('?')[0] ?? path)) return '.edit.';
   return EDITOR_PATH_FRAGMENTS.find((fragment) => path.includes(fragment));
 }
 
