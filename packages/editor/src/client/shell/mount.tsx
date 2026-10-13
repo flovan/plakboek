@@ -6,6 +6,7 @@ import { SHELL_ROOT_ID, type ShellIsland } from '../../chrome/island.js';
 import type { BlockEditHooks } from '@plakboek/render';
 import type { BootEditorOptions } from '../boot.js';
 import { loadBlockEditModules } from '../frame/block-edit-loader.js';
+import { createHooksRuntime } from '../frame/hooks-runtime.js';
 import { watchFrame } from './frame-watch.js';
 import { applyLayout, readLayout, writeLayout } from './layout.js';
 
@@ -64,10 +65,10 @@ function ShellRoot(props: {
   }, [host]);
 
   // The host's block edit modules load once, after hydration and in edit mode
-  // only. The map waits here for the frame runtime that calls the hooks.
-  const [, setBlockHooks] = useState<ReadonlyMap<string, BlockEditHooks>>(
-    () => new Map(),
-  );
+  // only. The frame runtime below calls their hooks.
+  const [blockHooks, setBlockHooks] = useState<
+    ReadonlyMap<string, BlockEditHooks>
+  >(() => new Map());
   const blockEdit = options.blockEdit;
   useEffect(() => {
     if (!hydrated || blockEdit === undefined) return undefined;
@@ -79,6 +80,41 @@ function ShellRoot(props: {
       cancelled = true;
     };
   }, [hydrated, blockEdit]);
+
+  // A hooks runtime follows each document the frame loads: it enters edit mode
+  // on its blocks, and runs `rendered` (then `enter`) on the blocks the
+  // development block swap replaces, which it hears of from the frame
+  // document. The selection and mode it keeps arrive with the editing session.
+  useEffect(() => {
+    if (!hydrated || blockHooks.size === 0) return undefined;
+    const frame = host.shadowRoot?.querySelector('iframe');
+    if (!(frame instanceof HTMLIFrameElement)) return undefined;
+    const runtime = createHooksRuntime({
+      hooks: blockHooks,
+      propsOf: () => undefined,
+      mode: 'edit',
+    });
+    let attached: Document | null = null;
+    const attach = (): void => {
+      const frameDocument = frame.contentDocument;
+      if (
+        frameDocument === null ||
+        frameDocument === attached ||
+        frameDocument.URL === 'about:blank' ||
+        frameDocument.readyState !== 'complete'
+      ) {
+        return;
+      }
+      attached = frameDocument;
+      runtime.attach(frameDocument);
+    };
+    frame.addEventListener('load', attach);
+    attach();
+    return () => {
+      frame.removeEventListener('load', attach);
+      runtime.dispose();
+    };
+  }, [host, hydrated, blockHooks]);
 
   // Follow the document in the frame: its links, its title, a failed render
   // and a navigation that took it somewhere else.

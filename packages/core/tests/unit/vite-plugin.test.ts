@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { EDIT_ATTRIBUTE } from '@plakboek/render';
 import type { Plugin } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -507,5 +508,67 @@ describe('plakboek() development hooks', () => {
     const plugin = instance();
     expect(hotUpdate(plugin, 'client', [{ id: 'a' }])).toBe(0);
     expect(hotUpdate(plugin, 'ssr', [])).toBe(0);
+  });
+});
+
+describe('plakboek() dev swap module', () => {
+  const DEV_SWAP_ID = 'virtual:plakboek/dev-swap';
+  const RESOLVED_DEV_SWAP_ID = `\0${DEV_SWAP_ID}`;
+
+  function pluginFor(command: 'serve' | 'build'): Plugin {
+    const plugin = instance();
+    // `serve` also loads `.env` from the root; a nonexistent root loads none.
+    callHook(
+      plugin.config,
+      undefined,
+      { root: ROOT },
+      { mode: command === 'serve' ? 'development' : 'production', command },
+    );
+    return plugin;
+  }
+
+  const client = { environment: { name: 'client' } };
+
+  it('resolves its virtual id', () => {
+    expect(callHook(instance().resolveId, undefined, DEV_SWAP_ID)).toBe(
+      RESOLVED_DEV_SWAP_ID,
+    );
+  });
+
+  it('serves a module that swaps blocks on the plugin event, from the editor hot entry', () => {
+    const source = callHook(
+      pluginFor('serve').load,
+      client,
+      RESOLVED_DEV_SWAP_ID,
+    ) as string;
+    expect(source).toContain('createDevBlockSwap');
+    expect(source).toContain('plakboek:blocks-changed');
+    expect(source).toContain('/editor/dist/hot.js');
+    // The edit shell holds no blocks; only a visitor page or the frame swaps.
+    expect(source).toContain("mode === 'frame'");
+  });
+
+  it('names the same block attributes the renderer writes', () => {
+    const source = callHook(
+      pluginFor('serve').load,
+      client,
+      RESOLVED_DEV_SWAP_ID,
+    ) as string;
+    expect(source).toContain(`const BLOCK = '${EDIT_ATTRIBUTE.block}'`);
+    expect(source).toContain(`const TYPE = '${EDIT_ATTRIBUTE.type}'`);
+  });
+
+  it('is an empty module in a build', () => {
+    expect(
+      callHook(pluginFor('build').load, client, RESOLVED_DEV_SWAP_ID),
+    ).toBe('export {};');
+  });
+
+  it('exports devMode true on the server under serve and false in the client stub', () => {
+    const plugin = pluginFor('serve');
+    const hostSource = (name: 'ssr' | 'client') =>
+      callHook(plugin.load, { environment: { name } }, RESOLVED_ID) as string;
+    expect(hostSource('ssr')).toContain('export const devMode = true;');
+    expect(hostSource('client')).toContain('export const devMode = false;');
   });
 });
