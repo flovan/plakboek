@@ -134,6 +134,7 @@ route module inside this package:
 | `/cms/setup`            | First-run setup of the first superadmin.                                                                                    |
 | `/cms/setup/test-email` | Sends a test email from the setup page.                                                                                     |
 | `/cms/logout`           | `POST` only: ends the session and returns to the page the user left.                                                        |
+| `/cms/api/*`            | The editor's JSON API (open a page, read its tree, take and keep its lock, apply edits, preview a block).                   |
 | `/cms/*`                | The email-link landings (set password, reset password, sign-in link, two-step set-up); anything else is the host's own 404. |
 | `/robots.txt`           | Disallows `/cms`. A host's own `public/robots.txt` is served instead.                                                       |
 | `/api/auth/*`           | The authentication API.                                                                                                     |
@@ -160,6 +161,18 @@ sanitised `next`, never to an address with `_edit`.
 
 The health body is a fixed `{"status":"ok"}` or `{"status":"unavailable"}`;
 a database error never reaches the response.
+
+`/cms/api/*` is a resource route (a loader and an action, no client chunk) that
+hands every request to the editor's API, composed on the first API request so a
+process that never receives one never loads the editor's server code. The API
+checks the session, the role and the request's origin itself; the route adds
+`X-Robots-Tag: noindex, nofollow` to every answer, errors included, and answers
+an unknown API path with a JSON `404`.
+
+When a host process starts, it upgrades stored page trees that predate columns
+to the column shape in the background, a few pages at a time, without ever
+holding up a request. A failure logs one line naming the error type and the
+next boot tries again.
 
 The visitor route reads only the published snapshot of a page and renders it on
 the server, with no client React. In production one in-process LRU cache per

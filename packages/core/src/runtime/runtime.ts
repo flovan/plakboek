@@ -303,6 +303,27 @@ function reportReservedPagePaths(runtime: Runtime): void {
 }
 
 /**
+ * Starts, without waiting for it, the upgrade of stored flat trees to the
+ * column shape (D-03), a few pages per call until none is left. A request
+ * never waits for it, and a page's upgrade is its own transaction. A failure
+ * costs one line naming only the error type.
+ */
+function upgradeColumnsInBackground(runtime: Runtime): void {
+  void (async () => {
+    let upgraded = 0;
+    do {
+      ({ upgraded } = await pagesPackage.upgradeAllSectionColumns(
+        runtime.pages,
+      ));
+    } while (upgraded > 0);
+  })().catch((error: unknown) => {
+    process.stderr.write(
+      `[@plakboek/core] The column-shape upgrade failed: ${error instanceof Error ? error.name : typeof error}\n`,
+    );
+  });
+}
+
+/**
  * The runtime for a host module, built once per configuration object. The
  * environment is read and validated when the runtime is first built, so a
  * missing secret fails the first request (and the CLI) with the full list of
@@ -317,6 +338,7 @@ export function runtimeFor(
     runtime = createRuntime(host, readRuntimeEnv(source));
     runtimes.set(host.config, runtime);
     reportReservedPagePaths(runtime);
+    upgradeColumnsInBackground(runtime);
   }
   return runtime;
 }
