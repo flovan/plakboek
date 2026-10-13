@@ -262,6 +262,50 @@ renders.
 - **Paths.** `normalizeVisitorPath` is exported from the server entry so the
   editor canonicalises a frame request exactly like the visitor handler.
 
+## Block lifecycle hooks
+
+An interactive block (carousel, accordion, tabs) can react to the editor's
+selection and mode without its hook code reaching visitors. Declare the hooks
+with `defineBlockEdit`, an identity function with no runtime weight and no
+editor import, in a `*.edit.ts` or `*.edit.tsx` file next to the block:
+
+```ts
+// accordion.edit.ts
+import { defineBlockEdit } from '@plakboek/render';
+
+export default defineBlockEdit<{ readonly items: readonly unknown[] }>({
+  blockType: 'accordion',
+  hooks: {
+    // open the item that holds the selected block
+    reveal: ({ element, targetId }) => {
+      element
+        .querySelector(`[data-pk-block="${targetId}"]`)
+        ?.closest('details')
+        ?.setAttribute('open', '');
+    },
+    // the editor replaced the element: re-run the block's own init on it
+    rendered: ({ element }) => {
+      element.dispatchEvent(new CustomEvent('accordion:init'));
+    },
+  },
+});
+```
+
+- **Hooks.** `enter`, `leave`, `select`, `deselect`, `reveal` and `rendered`.
+  Each receives the block id and type, its element, the frame document and
+  window, its props and the current mode (`edit` or `interact`).
+- **When they run.** `enter` on every block with hooks when Edit mode starts
+  (frame load in Edit, switching from Interact, and after `rendered` while in
+  Edit); `leave` on switching to Interact; `select` and `deselect` when the
+  selection moves; `reveal` on the selected block and each ancestor with
+  hooks, outermost first, with `targetId` naming the selected block;
+  `rendered` after the editor or the dev swap replaced the block's element.
+- **Contained.** A hook that throws is logged by name and never blocks
+  selection.
+- **Delivery.** The CMS's Vite plugin loads `*.edit.ts` and `*.edit.tsx` files
+  only into the editor's own chunk, and the build fails if a visitor-facing
+  chunk reaches one.
+
 ## Block fragments
 
 `renderBlockFragments` renders any block of a live tree, with its subtree, to
@@ -351,6 +395,7 @@ updating them.
 | `isLiveEdit`            | function | Whether an edit proxy is a live one rather than `NOOP_EDIT`                      |
 | `Columns`               | function | The CSS grid a host section renders around its children                          |
 | `ColumnBlock`           | function | The core column cell component                                                   |
+| `defineBlockEdit`       | function | Declares a block's editor lifecycle hooks; returns its argument unchanged        |
 | `columnTracks`          | function | The `grid-template-columns` value for a ratio and a live column count            |
 | `BlockIdentity`         | type     | `id`, `blockType` and `schemaVersion` of a rendered block                        |
 | `BlockComponentProps`   | type     | What the renderer passes a block: `block`, `props`, `layout`, `children`, `edit` |
@@ -358,6 +403,11 @@ updating them.
 | `BlockLayout`           | type     | A node's stored layout: `columns`, `align` and `fill`                            |
 | `ColumnAlign`           | type     | `'stretch' \| 'start' \| 'center' \| 'end'`: cross-axis column alignment         |
 | `ColumnsProps`          | type     | `{ layout, children, className? }`: what `Columns` receives                      |
+| `BlockEditHooks`        | type     | The hooks a block can declare: enter, leave, select, deselect, reveal, rendered  |
+| `BlockEditContext`      | type     | What a hook receives: id, type, element, frame document and window, props, mode  |
+| `BlockRevealContext`    | type     | `BlockEditContext` plus the `targetId` being revealed                            |
+| `BlockEditModule`       | type     | `{ blockType, hooks }`: what `defineBlockEdit` takes and returns                 |
+| `BlockEditMode`         | type     | `'edit' \| 'interact'`: which editor mode is active                              |
 | `EditAttributes`        | type     | `data-` attributes the editor binds to                                           |
 | `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes               |
 | `PageHead`              | type     | What a document composer needs to write a page's `<head>`                        |

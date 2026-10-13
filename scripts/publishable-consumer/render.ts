@@ -2,6 +2,7 @@ import {
   CMS_LOGIN_PATH,
   Columns,
   columnTracks,
+  defineBlockEdit,
   EDIT_ATTRIBUTE,
   EDIT_PARAM,
   EDITOR_FLAG_KEY,
@@ -88,6 +89,15 @@ expectEqual(
     ? Reflect.get(gridStyle, '--plakboek-columns-tracks')
     : undefined,
   'minmax(0, 2fr) minmax(0, 1fr)',
+);
+const probeEdit = {
+  blockType: 'accordion',
+  hooks: { select: () => undefined },
+};
+expectEqual(
+  'defineBlockEdit is an identity',
+  defineBlockEdit(probeEdit),
+  probeEdit,
 );
 expectEqual('NOOP_EDIT keys', Object.keys(NOOP_EDIT).length, 0);
 expectEqual(

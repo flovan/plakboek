@@ -40,6 +40,8 @@ const ROOT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   columnTracks: 'function',
   // column-block
   ColumnBlock: 'function',
+  // edit-hooks
+  defineBlockEdit: 'function',
 });
 
 const ROOT_TYPES: readonly string[] = Object.freeze([
@@ -52,6 +54,12 @@ const ROOT_TYPES: readonly string[] = Object.freeze([
   'ColumnAlign',
   // columns
   'ColumnsProps',
+  // edit-hooks
+  'BlockEditContext',
+  'BlockEditHooks',
+  'BlockEditMode',
+  'BlockEditModule',
+  'BlockRevealContext',
   // head
   'DocumentInput',
   'DocumentMode',
@@ -262,6 +270,7 @@ describe('the published subpaths', () => {
       'constants',
       'block-component',
       'edit-proxy',
+      'edit-hooks',
     ]) {
       const source = readFileSync(pathOf(`../../src/${file}.ts`), 'utf8');
       expect(source).not.toMatch(

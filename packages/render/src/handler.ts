@@ -303,7 +303,10 @@ function toResponse(
     if (cacheControl !== null) notModified.set('Cache-Control', cacheControl);
     return new Response(null, { status: 304, headers: notModified });
   }
-  return new Response(outcome.body, { status: 200, headers });
+  // The copy gives the bytes an ArrayBuffer backing, which is what the DOM
+  // typings require of a response body; a cached body is only known as
+  // ArrayBufferLike.
+  return new Response(new Uint8Array(outcome.body), { status: 200, headers });
 }
 
 /** Builds a visitor request handler over frozen dependencies. */

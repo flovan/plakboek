@@ -33,6 +33,16 @@ export type { ColumnsProps } from './columns.js';
 // column-block
 export { ColumnBlock } from './column-block.js';
 
+// edit-hooks
+export { defineBlockEdit } from './edit-hooks.js';
+export type {
+  BlockEditContext,
+  BlockEditHooks,
+  BlockEditMode,
+  BlockEditModule,
+  BlockRevealContext,
+} from './edit-hooks.js';
+
 // head
 export type {
   DocumentInput,
