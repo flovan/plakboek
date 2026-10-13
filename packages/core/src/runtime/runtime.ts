@@ -43,7 +43,7 @@ import {
   type SiteHooks,
 } from '../site.js';
 import type { HostModule, PlakboekConfig } from '../types.js';
-import { getDb } from './db.js';
+import { getDb, runInBackground } from './db.js';
 import { readRuntimeEnv, type RuntimeEnv } from './env.js';
 import { createLazyMailSender, type LazyMailSender } from './mail.js';
 
@@ -287,39 +287,45 @@ const runtimes = new WeakMap<object, Runtime>();
  * Starts, without waiting for it, the boot-time report of pages that already
  * sit at an address the CMS reserves (`/cms`, `/api`): they are kept and
  * flagged through the pages hook, never changed (D-23). A failure costs one
- * line naming only the error type and never reaches a request.
+ * line naming only the error type and never reaches a request. It runs as
+ * background work of the runtime's database handle, which shutdown waits for.
  */
 function reportReservedPagePaths(runtime: Runtime): void {
-  void pagesPackage
-    .checkReservedPagePaths(runtime.db.db)
-    .then((rows) => {
+  runInBackground(runtime.db, async () => {
+    try {
+      const rows = await pagesPackage.checkReservedPagePaths(runtime.db.db);
       pagesPackage.reportReservedPagePaths(runtime.pages, rows);
-    })
-    .catch((error: unknown) => {
+    } catch (error: unknown) {
       process.stderr.write(
         `[@plakboek/core] The check for pages at reserved addresses failed: ${error instanceof Error ? error.name : typeof error}\n`,
       );
-    });
+    }
+  });
 }
 
 /**
  * Starts, without waiting for it, the upgrade of stored flat trees to the
  * column shape (D-03), a few pages per call until none is left. A request
- * never waits for it, and a page's upgrade is its own transaction. A failure
- * costs one line naming only the error type.
+ * never waits for it, and a page's upgrade is its own transaction. It runs as
+ * background work of the runtime's database handle: once the handle starts
+ * closing, the loop stops after the batch in hand, without a report, and
+ * shutdown waits for that batch. A failure costs one line naming only the
+ * error type.
  */
 function upgradeColumnsInBackground(runtime: Runtime): void {
-  void (async () => {
-    let upgraded = 0;
-    do {
-      ({ upgraded } = await pagesPackage.upgradeAllSectionColumns(
-        runtime.pages,
-      ));
-    } while (upgraded > 0);
-  })().catch((error: unknown) => {
-    process.stderr.write(
-      `[@plakboek/core] The column-shape upgrade failed: ${error instanceof Error ? error.name : typeof error}\n`,
-    );
+  runInBackground(runtime.db, async (closing) => {
+    try {
+      let upgraded = 0;
+      do {
+        ({ upgraded } = await pagesPackage.upgradeAllSectionColumns(
+          runtime.pages,
+        ));
+      } while (upgraded > 0 && !closing.aborted);
+    } catch (error: unknown) {
+      process.stderr.write(
+        `[@plakboek/core] The column-shape upgrade failed: ${error instanceof Error ? error.name : typeof error}\n`,
+      );
+    }
   });
 }
 

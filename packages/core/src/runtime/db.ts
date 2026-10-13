@@ -30,12 +30,86 @@ export function getDb(connectionString: string): Db {
   return handle;
 }
 
-/** Closes every pooled handle and forgets them (shutdown and tests). */
+/** What is still running against one handle on nobody's request. */
+type Background = {
+  /** Aborted when the handle starts closing. */
+  readonly closing: AbortController;
+  readonly running: Set<Promise<void>>;
+};
+
+const BACKGROUND_KEY = Symbol.for('plakboek.db.background');
+
+/** Held on `globalThis` beside the handle registry, so a re-evaluated module
+ * still finds, and can stop, the work an earlier evaluation started. */
+function backgrounds(): WeakMap<Db, Background> {
+  const holder = globalThis as unknown as Record<
+    symbol,
+    WeakMap<Db, Background> | undefined
+  >;
+  let existing = holder[BACKGROUND_KEY];
+  if (existing === undefined) {
+    existing = new WeakMap();
+    holder[BACKGROUND_KEY] = existing;
+  }
+  return existing;
+}
+
+function backgroundOf(handle: Db): Background {
+  const all = backgrounds();
+  let background = all.get(handle);
+  if (background === undefined) {
+    background = { closing: new AbortController(), running: new Set() };
+    all.set(handle, background);
+  }
+  return background;
+}
+
+/**
+ * Starts, without waiting for it, work that queries `handle` for the process
+ * rather than for a request. `closeAllDbs` aborts the signal and waits for the
+ * work to finish before it closes the handle: queries still queued in the
+ * pool when it closes would open fresh connections after the close.
+ *
+ * `work` reports its own failures and should return soon after the signal is
+ * aborted; a rejection is swallowed so it can never reach a request or crash
+ * the process. Nothing starts on a handle that is already closing.
+ */
+export function runInBackground(
+  handle: Db,
+  work: (closing: AbortSignal) => Promise<void>,
+): void {
+  const background = backgroundOf(handle);
+  if (background.closing.signal.aborted) return;
+  const task: Promise<void> = work(background.closing.signal)
+    .catch(() => undefined)
+    .finally(() => {
+      background.running.delete(task);
+    });
+  background.running.add(task);
+}
+
+/** Tells a handle's background work to stop and waits until it has. */
+async function stopBackground(handle: Db): Promise<void> {
+  const background = backgroundOf(handle);
+  background.closing.abort();
+  await Promise.all(background.running);
+}
+
+/**
+ * Closes every pooled handle and forgets them (shutdown and tests). Each
+ * handle's background work stops first, so nothing queries it, or reopens a
+ * connection to it, once the pool is closed.
+ */
 export async function closeAllDbs(): Promise<void> {
   const handles = registry();
   const open = [...handles.values()];
   handles.clear();
-  await Promise.all(open.map((handle) => handle.close()));
+  await Promise.all(
+    open.map(async (handle) => {
+      await stopBackground(handle);
+      await handle.close();
+    }),
+  );
 }
 
 /** Postgres error codes that mean "the database is not usable yet". */
