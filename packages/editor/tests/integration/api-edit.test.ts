@@ -9,6 +9,7 @@ import type {
   ApiError,
   EditOp,
   EditResponse,
+  PreviewResponse,
   TreeResponse,
 } from '../../src/api-types.js';
 import { createEditorApi } from '../../src/server/api/handler.js';
@@ -328,5 +329,85 @@ describe('the edit route', () => {
       ops: [{ op: 'delete', blockId: randomUUID(), baseVersion: 1 }],
     });
     expect(response.status).toBe(404);
+  });
+});
+
+describe('the preview route', () => {
+  async function preview(
+    user: SignedIn,
+    pageId: string,
+    body: unknown,
+  ): Promise<Response> {
+    return await post(user, `/cms/api/pages/${pageId}/preview`, body);
+  }
+
+  async function readPreview(response: Response): Promise<PreviewResponse> {
+    expect(response.status).toBe(200);
+    return (await response.json()) as PreviewResponse;
+  }
+
+  it('renders candidate values without writing anything', async () => {
+    const page = await twoSectionPage('Preview');
+    const before = await readTree(harness.editor, page.seeded.pageId);
+    const answer = await readPreview(
+      await preview(harness.editor, page.seeded.pageId, {
+        blockId: page.seeded.headingId,
+        props: { text: 'Candidate heading' },
+      }),
+    );
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(answer.html).toContain('Candidate heading');
+    expect(answer.needsInput).toEqual([]);
+
+    const after = await readTree(harness.editor, page.seeded.pageId);
+    expect(after.pageVersion).toBe(before.pageVersion);
+    expect(
+      after.tree.find((node) => node.id === page.seeded.headingId),
+    ).toEqual(before.tree.find((node) => node.id === page.seeded.headingId));
+  });
+
+  it('reports a required property that is still empty', async () => {
+    const page = await twoSectionPage('Needs input');
+    const answer = await readPreview(
+      await preview(harness.editor, page.seeded.pageId, {
+        blockId: page.seeded.headingId,
+        props: { text: '' },
+      }),
+    );
+    expect(answer).toMatchObject({ ok: true, needsInput: ['text'] });
+  });
+
+  it('refuses a value of the wrong type with the key and code only', async () => {
+    const page = await twoSectionPage('Invalid');
+    const response = await preview(harness.editor, page.seeded.pageId, {
+      blockId: page.seeded.headingId,
+      props: { text: 12345 },
+    });
+    const answer = await readPreview(response);
+    expect(answer).toEqual({
+      ok: false,
+      issues: [{ key: 'text', code: 'INVALID' }],
+    });
+  });
+
+  it('answers 404 for a block of another page', async () => {
+    const mine = await twoSectionPage('Preview mine');
+    const theirs = await createColumnPage(harness, {
+      title: 'Preview theirs',
+      text: 'Other',
+    });
+    const response = await preview(harness.editor, mine.seeded.pageId, {
+      blockId: theirs.headingId,
+    });
+    expect(response.status).toBe(404);
+  });
+
+  it('is refused for a viewer', async () => {
+    const page = await twoSectionPage('Preview viewer');
+    const response = await preview(harness.viewer, page.seeded.pageId, {
+      blockId: page.seeded.headingId,
+    });
+    expect(response.status).toBe(403);
   });
 });

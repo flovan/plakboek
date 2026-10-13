@@ -208,15 +208,17 @@ catalogue is built on the server from the resolved block properties, which means
 a property an installation hides never leaves the server, and a fixed or
 narrowed one carries its constraint.
 
-| Route                                    | Answer                                                                                                                                                        |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /cms/api/open` `{ path }`          | The page at that visitor path: id, version, locale, the catalogue, the flat tree, the lock, the column presets, whether the caller may delete, and the limits |
-| `GET /cms/api/pages/:id/tree`            | The page's current version and flat tree                                                                                                                      |
-| `GET /cms/api/pages/:id/lock`            | The lock as the caller may see it                                                                                                                             |
-| `POST /cms/api/pages/:id/lock/acquire`   | Takes the lock when it is free or already the caller's                                                                                                        |
-| `POST /cms/api/pages/:id/lock/renew`     | The heartbeat; takes the lock again when nobody holds it any more                                                                                             |
-| `POST /cms/api/pages/:id/lock/release`   | Releases the caller's lock                                                                                                                                    |
-| `POST /cms/api/pages/:id/lock/take-over` | Takes the lock from its holder, allowed only when the caller's permissions are a superset of the holder's role, and audited                                   |
+| Route                                                                 | Answer                                                                                                                                                                                                                    |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /cms/api/open` `{ path }`                                       | The page at that visitor path: id, version, locale, the catalogue, the flat tree, the lock, the column presets, whether the caller may delete, and the limits                                                             |
+| `GET /cms/api/pages/:id/tree`                                         | The page's current version and flat tree                                                                                                                                                                                  |
+| `GET /cms/api/pages/:id/lock`                                         | The lock as the caller may see it                                                                                                                                                                                         |
+| `POST /cms/api/pages/:id/lock/acquire`                                | Takes the lock when it is free or already the caller's                                                                                                                                                                    |
+| `POST /cms/api/pages/:id/lock/renew`                                  | The heartbeat; takes the lock again when nobody holds it any more                                                                                                                                                         |
+| `POST /cms/api/pages/:id/lock/release`                                | Releases the caller's lock                                                                                                                                                                                                |
+| `POST /cms/api/pages/:id/lock/take-over`                              | Takes the lock from its holder, allowed only when the caller's permissions are a superset of the holder's role, and audited                                                                                               |
+| `POST /cms/api/pages/:id/edit` `{ basePageVersion, ops, fragments? }` | One batch of insert, update, move, delete and duplicate ops, applied together or not at all: the new page version, the flat tree, the created and deleted ids and, unless `fragments` is `false`, the patch for the frame |
+| `POST /cms/api/pages/:id/preview` `{ blockId, props?, layout? }`      | One block's subtree rendered with candidate values, or the issues (keys and codes) a write would refuse them with. Writes nothing and takes no lock                                                                       |
 
 Opening takes the edit lock when locking is on and the page is free, and brings
 a page that predates columns into the column shape first. When someone else
@@ -224,6 +226,30 @@ holds a live lock, opening still answers with the session: its lock state is
 `other`, with the holder's display name, when they were last active and whether
 the caller may take over, and nothing is taken. A lock view never carries the
 holder's email address, role or user id.
+
+### Editing and previewing
+
+An edit is one request. `ops` holds one to 50 operations against the page
+version the client last saw (`basePageVersion`) and, per block, the version it
+saw (`baseVersion`); a client may name the ids of blocks it inserts, so an undo
+puts a deleted block back under its original id. The batch is checked against
+the page it is posted to: a block of another page answers `404`. A batch with a
+delete needs `pages:delete` on top of `pages:edit`. Props are a whole-object
+replacement on `update`.
+
+The answer's `patch` is what the frame needs to follow the change, rendered by
+the blocks' own components. A batch of property updates patches only the updated
+blocks. Any structural batch patches every top level section that held a
+touched block before or after the change, lists the top level sections that are
+gone in `removed`, and sends `rootOrder` when the order of the top level
+changed. A fragment the server could not render is left out, and the client
+reloads for it.
+
+A preview checks the candidate values exactly as a write would, leniently for
+required properties, and answers either `{ ok: true, html, needsInput }`, with
+`needsInput` naming the required properties still empty, or `{ ok: false,
+issues }`. Nothing is stored, no lock is taken and the page version does not
+move, so a client can preview on every pause in typing.
 
 ### The request gate
 

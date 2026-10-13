@@ -20,6 +20,7 @@ import { buildCatalogue } from '../catalogue.js';
 import { buildBlockMeta } from '../frame-document.js';
 import { readEditorIdentity } from '../identity.js';
 import { editPage } from './edit.js';
+import { previewPage } from './preview.js';
 import {
   apiErrorFor,
   ApiHttpError,
@@ -33,6 +34,7 @@ import {
   openBody,
   pageIdParam,
   parseWith,
+  previewBody,
 } from './schemas.js';
 import {
   acquireLock,
@@ -72,9 +74,9 @@ type Route = {
   readonly run: (context: ApiContext, body: unknown) => Promise<unknown>;
 };
 
-/** `/pages/<id>/{tree,edit}` and `/pages/<id>/lock[/<action>]`. */
+/** `/pages/<id>/{tree,edit,preview}` and `/pages/<id>/lock[/<action>]`. */
 const PAGE_ROUTE =
-  /^\/pages\/([^/]+)\/(tree|edit|lock|lock\/acquire|lock\/renew|lock\/release|lock\/take-over)$/;
+  /^\/pages\/([^/]+)\/(tree|edit|preview|lock|lock\/acquire|lock\/renew|lock\/release|lock\/take-over)$/;
 
 function pageRoute(rawId: string, action: string): Route | null {
   const pageId = (): string => parseWith(pageIdParam, rawId);
@@ -99,6 +101,12 @@ function pageRoute(rawId: string, action: string): Route | null {
         method: 'POST',
         run: async (context, body) =>
           await editPage(context, pageId(), parseWith(editBody, body)),
+      };
+    case 'preview':
+      return {
+        method: 'POST',
+        run: async (context, body) =>
+          await previewPage(context, pageId(), parseWith(previewBody, body)),
       };
     case 'tree':
       return get(readTree);
