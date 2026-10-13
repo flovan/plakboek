@@ -177,6 +177,202 @@ export const STRINGS = Object.freeze({
 
   // Login-to-edit transition
   'transition.opening': 'Opening the page',
+
+  // Edit tools: mode, undo and redo, save status, lock countdown
+  'tools.mode.label': 'Mode',
+  'tools.mode.edit': 'Edit',
+  'tools.mode.interact': 'Interact',
+  'tools.mode.interactHint':
+    "You're using the site as a visitor would. Switch to Edit to select and change things.",
+  'tools.mode.railLabel': 'Interact mode',
+  'tools.mode.railTooltip': 'Interact mode (I)',
+  'tools.undo': 'Undo',
+  'tools.redo': 'Redo',
+  'save.saved': 'All changes saved',
+  'save.saving': 'Saving',
+  'save.failed': 'Could not save your changes',
+  'save.paused': 'Saving is paused',
+  'save.retry': 'Retry',
+  'lock.expiring': 'Editing access ends in {time}',
+  'lock.keepEditing': 'Keep editing',
+  'lock.renewing': 'Renewing',
+
+  // Announcements (visually hidden live region). `announce.needsInput` is
+  // appended to a selection announcement, so it keeps its leading space.
+  'announce.selected': 'Selected {label}, {position} of {total} in {parent}.',
+  'announce.selectedSection':
+    'Selected {label}, section {position} of {total}.',
+  'announce.needsInput': ' Needs input.',
+  'announce.editMode': 'Edit mode.',
+  'announce.interactMode': 'Interact mode.',
+  'announce.added': 'Added {label}.',
+  'announce.moved':
+    'Moved {label} to position {position} of {total} in {parent}.',
+  'announce.restored': 'Restored {label}.',
+  'announce.undone': 'Undone: {action}.',
+  'announce.redone': 'Redone: {action}.',
+  'announce.drag.pickedUp':
+    'Picked up {label}. Use the arrow keys to choose a position, Space to drop, Escape to cancel.',
+  'announce.drag.position': 'Position {position} of {total} in {parent}.',
+  'announce.drag.dropped':
+    'Dropped {label} at position {position} of {total} in {parent}.',
+  'announce.drag.cancelled': 'Move cancelled.',
+
+  // What an undo or redo announces it undid or redid
+  'action.added': 'Added {label}',
+  'action.moved': 'Moved {label}',
+  'action.deleted': 'Deleted {label}',
+  'action.duplicated': 'Duplicated {label}',
+  'action.changed': 'Changed {property} of {label}',
+
+  // Names for structure that has no label of its own
+  'label.section': 'Section',
+  'label.column': 'Column {n}',
+  'label.page': 'Page',
+  'kind.section': 'section',
+  'kind.column': 'column',
+
+  // Floating toolbar: tooltip, then the accessible name
+  'toolbar.label': 'Actions for {label}',
+  'toolbar.drag.tooltip': 'Drag to move',
+  'toolbar.drag.label': 'Move {label}. Press Space to pick up.',
+  'toolbar.moveLeft': 'Move left',
+  'toolbar.moveLeft.label': 'Move {label} left',
+  'toolbar.moveRight': 'Move right',
+  'toolbar.moveRight.label': 'Move {label} right',
+  'toolbar.moveUp': 'Move up',
+  'toolbar.moveUp.label': 'Move {label} up',
+  'toolbar.moveDown': 'Move down',
+  'toolbar.moveDown.label': 'Move {label} down',
+  'toolbar.addAfter': 'Add after',
+  'toolbar.addAfter.label': 'Add after {label}',
+  'toolbar.duplicate': 'Duplicate',
+  'toolbar.duplicate.label': 'Duplicate {label}',
+  'toolbar.properties': 'Properties',
+  'toolbar.properties.label': 'Properties of {label}',
+  'toolbar.delete': 'Delete',
+  'toolbar.delete.label': 'Delete {label}',
+  'toolbar.more': '…',
+  'toolbar.reason.atStart': 'Already at the start',
+  'toolbar.reason.atEnd': 'Already at the end',
+  'toolbar.reason.lastColumn': 'A section needs at least one column.',
+  'toolbar.reason.noDuplicate': "This can't be placed here a second time.",
+  'toolbar.reason.noDeletePermission':
+    "Your role can't delete content on this page.",
+
+  // Insert points, picker, empty states
+  'insert.blockAfter': 'Add block after {label}',
+  'insert.blockHere': 'Add block here',
+  'insert.section': 'Add section here',
+  'insert.column': 'Add column here',
+  'picker.block': 'Add a block',
+  'picker.section': 'Add a section',
+  'picker.search': 'Search blocks',
+  'picker.other': 'Other',
+  'picker.noMatch': 'No blocks match "{query}".',
+  'picker.nothing.heading': 'Nothing can be added here',
+  'picker.nothing.body':
+    'The page structure does not allow another block in this spot.',
+  'empty.column.add': 'Add block',
+  'empty.page.heading': 'This page has no sections yet',
+  'empty.page.body': 'Add a section to start building the page.',
+  'empty.page.add': 'Add a section',
+
+  // Delete confirmation, undo toast, leaving with unsaved changes
+  'delete.heading': 'Delete this {kind}?',
+  'delete.body.one': 'This removes 1 block inside it.',
+  'delete.body.other': 'This removes {count} blocks inside it.',
+  'delete.note': 'You can undo this right after.',
+  'delete.cancel': 'Cancel',
+  'delete.confirm': 'Delete {kind}',
+  'toast.deleted': '{label} deleted',
+  'toast.undo': 'Undo',
+  'leave.heading': 'Leave without saving?',
+  'leave.body': 'Your latest changes could not be saved.',
+  'leave.stay': 'Stay',
+  'leave.confirm': 'Leave anyway',
+
+  // Side panel: tabs, empty states, Columns, Layout, Placement, controls
+  'panel.tab.blocks': 'Blocks',
+  'panel.tab.properties': 'Properties',
+  'panel.empty.heading': 'Nothing selected',
+  'panel.empty.body': 'Select a block on the page to change its properties.',
+  'panel.noProperties': 'This block has no properties.',
+  'panel.unavailable':
+    "This block's type is unavailable, so its properties can't be edited. You can move or delete it.",
+  'panel.group.columns': 'Columns',
+  'panel.group.layout': 'Layout',
+  'panel.group.settings': 'Settings',
+  'panel.group.placement': 'Placement',
+  'panel.columnWidths': 'Column widths',
+  'panel.columnsEqual': 'Columns are equal width.',
+  'panel.columnAlignment': 'Column alignment',
+  'panel.align.stretch': 'Stretch',
+  'panel.align.start': 'Top',
+  'panel.align.center': 'Center',
+  'panel.align.end': 'Bottom',
+  // Joins the terms of a column ratio into its name ("1 to 2"), so it keeps
+  // its surrounding spaces.
+  'panel.preset.separator': ' to ',
+  'panel.column.empty': 'Empty',
+  'panel.column.count.one': '1 block',
+  'panel.column.count.other': '{count} blocks',
+  'panel.addColumn': 'Add column',
+  'panel.fill.label': 'Fill column height',
+  'panel.fill.hint': 'Stretches this block to the full height of its column.',
+  'panel.needsInput': 'Needs input',
+  'panel.openSectionLayout': 'Open section layout',
+  'panel.columnWidthNote': "Column width comes from the section's layout.",
+  'panel.fixedHint': "Set by the site. It can't be changed here.",
+  'panel.allowedHint': 'Allowed: {values}.',
+  'panel.allowedError': 'Choose one of the allowed values.',
+  'panel.slugHint': 'Lowercase letters, numbers and hyphens.',
+  'panel.jsonError': 'Enter valid JSON.',
+  'panel.invalid': 'This value is not valid.',
+  'panel.richTextNote':
+    'Formatted text is edited on the page. Editing it there arrives in the next release.',
+  'panel.mediaNote':
+    'Choosing a file is available once the media library ships.',
+  'panel.entryNote': 'Choosing an entry is available once entry editing ships.',
+  'panel.customWidgetNote':
+    'This property uses a custom control the editor does not have yet.',
+  'panel.none': 'None',
+  'panel.repeater.add': 'Add item',
+  'panel.repeater.moveEarlier': 'Move earlier',
+  'panel.repeater.moveLater': 'Move later',
+  'panel.repeater.remove': 'Remove',
+  'panel.palette.selectFirst': 'Select a place on the page first',
+  'panel.palette.notHere': "Can't be added here",
+
+  // Page lock, conflict and session notices
+  'notice.locked.heading': '{name} is editing this page',
+  'notice.locked.body':
+    'Last active {time}. You can look around. This page opens for editing automatically when they are done.',
+  'notice.locked.takeOver': 'Take over',
+  'notice.lapsed': '{name} stopped editing. You can edit this page now.',
+  'notice.takenOver.heading': '{name} took over this page',
+  'notice.takenOver.body':
+    'Everything saved so far is kept. Anything you changed in the last few seconds may not have been saved.',
+  'notice.stale.heading': 'This page changed elsewhere',
+  'notice.stale.body':
+    'It was edited in another tab or window. Reload to continue with the latest version.',
+  'notice.stale.reload': 'Reload page',
+  'notice.session.heading': 'Your session ended',
+  'notice.session.body':
+    'Sign in again to keep editing. Your saved changes are kept.',
+  'notice.session.signIn': 'Sign in',
+  'notice.retryFailed': "That didn't work. Try again.",
+  'takeover.heading': 'Take over editing?',
+  'takeover.body':
+    '{name} will lose editing access to this page. Everything they already saved is kept.',
+  'takeover.cancel': 'Cancel',
+  'takeover.confirm': 'Take over',
+  'takeover.inFlight': 'Taking over',
+
+  // The page region in Edit mode, and the rail's panel buttons
+  'landmark.editRegion': 'Page being edited',
+  'rail.blocks': 'Blocks',
+  'rail.properties': 'Properties',
 });
 
 /** A key of `STRINGS`. */
