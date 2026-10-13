@@ -262,6 +262,22 @@ renders.
 - **Paths.** `normalizeVisitorPath` is exported from the server entry so the
   editor canonicalises a frame request exactly like the visitor handler.
 
+## Block fragments
+
+`renderBlockFragments` renders any block of a live tree, with its subtree, to
+the markup the frame document shows for it. The editor server uses it for live
+property rendering and structural patches.
+
+- **Same recursion.** It walks the same `BlockHost` recursion, live edit proxy
+  and edit placeholders as `renderPageTree`, so a fragment is byte-identical to
+  that block's markup in a full frame render.
+- **Input.** The page's whole live forest, the ids to render and the same
+  component and block metadata maps; fragments come back in the order the ids
+  were requested.
+- **Unknown ids.** An id that is not in the tree is listed in `missing`, never
+  thrown. A block that throws becomes the same inert `data-pk-unavailable`
+  placeholder the frame shows and sets `degraded`.
+
 ## Columns
 
 A section divides its children into columns. The CMS owns the column cells; a
@@ -362,6 +378,7 @@ updating them.
 | `createComponentMap`         | function | Builds the block-type to component map from the host's block definitions |
 | `createLiveEdit`             | function | One block's live edit proxy: the `data-pk-*` identity attributes         |
 | `renderPageTree`             | function | Renders a live working tree for the editor, in `live` or `plain` mode    |
+| `renderBlockFragments`       | function | Renders chosen blocks of a live tree, subtree included, as frame markup  |
 | `normalizeVisitorPath`       | function | Canonicalises a request path exactly like the visitor handler            |
 | `PageHeadInput`              | type     | Input to `buildPageHead`                                                 |
 | `PageSeoInput`               | type     | The stored SEO set as a structural type                                  |
@@ -378,6 +395,9 @@ updating them.
 | `RenderPageTreeInput`        | type     | Input to `renderPageTree`                                                |
 | `BlockMeta`                  | type     | A block type's overlay label and its `section` or `block` kind           |
 | `RenderedTree`               | type     | The head, body and degraded flag of a rendered working tree              |
+| `RenderBlockFragmentsInput`  | type     | Input to `renderBlockFragments`                                          |
+| `RenderedFragment`           | type     | One block's `id` and its `html`                                          |
+| `RenderedFragments`          | type     | The fragments, the missing ids and the degraded flag                     |
 | `VisitorPathResult`          | type     | `ok`, `redirect` or `not-found`: what `normalizeVisitorPath` returns     |
 | `RenderedPage`               | type     | The head, body, cache tags and degraded flag of a rendered page          |
 | `RenderHooks`                | type     | Optional host hooks: unknown block, render error, cache error and more   |

@@ -76,6 +76,8 @@ const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   createLiveEdit: 'function',
   // render-tree
   renderPageTree: 'function',
+  // render-fragment
+  renderBlockFragments: 'function',
   // path
   normalizeVisitorPath: 'function',
   // handler
@@ -108,6 +110,10 @@ const SERVER_TYPES: readonly string[] = Object.freeze([
   'BlockMeta',
   'RenderedTree',
   'RenderPageTreeInput',
+  // render-fragment
+  'RenderBlockFragmentsInput',
+  'RenderedFragment',
+  'RenderedFragments',
   // path
   'VisitorPathResult',
   // handler

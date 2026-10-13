@@ -44,6 +44,14 @@ export type {
   RenderPageTreeInput,
 } from './render-tree.js';
 
+// render-fragment
+export { renderBlockFragments } from './render-fragment.js';
+export type {
+  RenderBlockFragmentsInput,
+  RenderedFragment,
+  RenderedFragments,
+} from './render-fragment.js';
+
 // path
 export { normalizeVisitorPath } from './path.js';
 export type { VisitorPathResult } from './path.js';
