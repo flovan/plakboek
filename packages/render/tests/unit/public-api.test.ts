@@ -34,6 +34,12 @@ const ROOT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   NOOP_EDIT: 'constant',
   // live-edit
   EDIT_ATTRIBUTE: 'constant',
+  isLiveEdit: 'function',
+  // columns
+  Columns: 'function',
+  columnTracks: 'function',
+  // column-block
+  ColumnBlock: 'function',
 });
 
 const ROOT_TYPES: readonly string[] = Object.freeze([
@@ -41,6 +47,11 @@ const ROOT_TYPES: readonly string[] = Object.freeze([
   'BlockComponent',
   'BlockComponentProps',
   'BlockIdentity',
+  // layout
+  'BlockLayout',
+  'ColumnAlign',
+  // columns
+  'ColumnsProps',
   // head
   'DocumentInput',
   'DocumentMode',

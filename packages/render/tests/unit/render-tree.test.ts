@@ -62,6 +62,7 @@ const components: ComponentMap = new Map<string, BlockComponent>([
 const blockMeta: ReadonlyMap<string, BlockMeta> = new Map([
   ['section', { label: 'Section', kind: 'section' }],
   ['heading', { label: 'Heading', kind: 'block' }],
+  ['column', { label: 'Column', kind: 'column' }],
 ]);
 
 function render(
@@ -163,6 +164,23 @@ describe('live mode attributes', () => {
     ]);
     expect(body).not.toContain('<img');
     expect(body).not.toContain('<script>');
+  });
+});
+
+describe('column kind', () => {
+  it('reaches the attributes of a rendering column and of its placeholder', () => {
+    silenceConsole();
+    const { body } = render([
+      node('s1', 'section', {}, [
+        node('c1', 'column', {}, [node('h1', 'heading', { text: 'One' })]),
+        node('c2', 'column'),
+      ]),
+    ]);
+    // c1 has no component here, so it falls back to a placeholder that still
+    // carries the column kind from the block metadata.
+    expect(body).toContain('data-pk-block="c1"');
+    expect(body).toContain('data-pk-kind="column"');
+    expect(body).toContain('data-pk-label="Column"');
   });
 });
 

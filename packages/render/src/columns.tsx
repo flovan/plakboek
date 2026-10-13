@@ -3,9 +3,9 @@
  * the column cells; the section's stored layout supplies the ratio and
  * alignment, and the gap comes from a theme token (D-07).
  *
- * The inline grid never needs `!important` to be overridden: tracks are read
- * through `--plakboek-columns-stack`, so a host theme stacks the columns by
- * setting that one custom property inside a container query.
+ * The inline grid needs no priority escalation to be overridden: tracks are
+ * read through `--plakboek-columns-stack`, so a host theme stacks the columns
+ * by setting that one custom property inside a container query.
  */
 import {
   Children,

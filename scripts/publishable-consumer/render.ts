@@ -1,5 +1,7 @@
 import {
   CMS_LOGIN_PATH,
+  Columns,
+  columnTracks,
   EDIT_ATTRIBUTE,
   EDIT_PARAM,
   EDITOR_FLAG_KEY,
@@ -9,6 +11,7 @@ import {
   type BlockComponent,
   type BlockComponentProps,
   type BlockIdentity,
+  type BlockLayout,
   type DocumentInput,
   type EditAttributes,
   type EditProxy,
@@ -58,6 +61,33 @@ expectEqual(
   'normalizeVisitorPath',
   normalizeVisitorPath('/About').kind,
   'redirect',
+);
+const probeLayout: BlockLayout = { columns: '2:1' };
+expectEqual(
+  'columnTracks',
+  columnTracks(probeLayout.columns, 2),
+  'minmax(0, 2fr) minmax(0, 1fr)',
+);
+// The element is read through its props rather than rendered: the probe
+// installs no React type packages, and `Columns` is a plain function.
+const gridElement: unknown = Columns({
+  layout: probeLayout,
+  children: ['one', 'two'],
+});
+const gridProps: unknown =
+  typeof gridElement === 'object' && gridElement !== null
+    ? Reflect.get(gridElement, 'props')
+    : undefined;
+const gridStyle: unknown =
+  typeof gridProps === 'object' && gridProps !== null
+    ? Reflect.get(gridProps, 'style')
+    : undefined;
+expectEqual(
+  'Columns grid tracks',
+  typeof gridStyle === 'object' && gridStyle !== null
+    ? Reflect.get(gridStyle, '--plakboek-columns-tracks')
+    : undefined,
+  'minmax(0, 2fr) minmax(0, 1fr)',
 );
 expectEqual('NOOP_EDIT keys', Object.keys(NOOP_EDIT).length, 0);
 expectEqual(

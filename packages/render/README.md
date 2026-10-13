@@ -239,7 +239,7 @@ renders.
 
 - **The attribute contract.** In `live` mode each block's `edit` proxy
   (`createLiveEdit`) spreads `data-pk-block` (the block id), `data-pk-type`
-  (the type key), `data-pk-kind` (`section` or `block`) and `data-pk-label`
+  (the type key), `data-pk-kind` (`section`, `column` or `block`) and `data-pk-label`
   (the label from the block definition, else the type key). `edit.field(name)`
   yields `data-pk-field`; `field` is not enumerable, so spreading `{...edit}`
   never carries it. The names are exported as `EDIT_ATTRIBUTE`; the overlay
@@ -262,6 +262,47 @@ renders.
 - **Paths.** `normalizeVisitorPath` is exported from the server entry so the
   editor canonicalises a frame request exactly like the visitor handler.
 
+## Columns
+
+A section divides its children into columns. The CMS owns the column cells; a
+host section only draws the grid around them (D-06).
+
+- **Render the helper inside your section's own markup:**
+  `<Columns layout={layout}>{children}</Columns>`. `layout` is the prop every
+  block component receives (`BlockLayout`: `columns`, `align`, `fill`); it is
+  the node's stored layout, an empty object when there is none, and never part
+  of `props`.
+- **What it renders.** One CSS grid. The tracks come from the stored ratio
+  (for example `2:1`) when its term count equals the live column count, and are
+  equal otherwise. `align-items` comes from `align` (`stretch` by default). The
+  gap is `var(--plakboek-column-gap, 24px)`, so a host theme sets one token
+  (D-07).
+- **Stacking.** The grid reads its tracks through `--plakboek-columns-stack`,
+  so one container-query rule in the host theme stacks the columns, and the
+  inline style never needs `!important` to be overridden:
+
+  ```css
+  @container (max-width: 640px) {
+    [data-plakboek-columns] {
+      --plakboek-columns-stack: 1fr;
+    }
+  }
+  ```
+
+- **The column cell.** `ColumnBlock` is the core column component: one
+  flex-column element that spreads `{...edit}`. In a live edit render an empty
+  column carries `data-pk-empty` and a 96px minimum height so it stays a drop
+  target; a visitor render adds nothing beyond the grid cell.
+- **Fill.** A block that declares `layout: { fill: true }` applies its own
+  full-height style when `layout.fill` is true (D-08). The renderer sets no
+  style for it.
+- **Inline editing.** `data-pk-inline-editing` (`EDIT_ATTRIBUTE.inlineEditing`)
+  on a block element means its text is being edited in place; a fragment
+  patcher must not replace that element (D-30).
+- `columnTracks(ratio, count)` is the pure function behind the tracks. A ratio
+  is used only when it is digits joined by colons; anything else yields equal
+  tracks, so a stored value can never inject CSS.
+
 ## Root versus server entry
 
 The package publishes two subpaths.
@@ -282,24 +323,31 @@ updating them.
 
 ### Root entry: `@plakboek/render`
 
-| Export                  | Kind     | Purpose                                                                   |
-| ----------------------- | -------- | ------------------------------------------------------------------------- |
-| `CMS_LOGIN_PATH`        | constant | `/cms`: where the Edit pill sends a browser; the server decides there     |
-| `EDIT_PARAM`            | constant | `_edit`: the query parameter that asks for the editor entry               |
-| `EDITOR_FLAG_KEY`       | constant | The localStorage key marking a signed-in editor                           |
-| `NEXT_PARAM`            | constant | `next`: the query parameter carrying the page to return to after login    |
-| `TOOLBAR_DISMISSED_KEY` | constant | The localStorage key marking a dismissed toolbar                          |
-| `NOOP_EDIT`             | constant | The visitor-side edit proxy: spreads to nothing, costs nothing            |
-| `EDIT_ATTRIBUTE`        | constant | The `data-pk-*` attribute names the renderer writes and the overlay reads |
-| `BlockIdentity`         | type     | `id`, `blockType` and `schemaVersion` of a rendered block                 |
-| `BlockComponentProps`   | type     | What the renderer passes a block: `block`, `props`, `children`, `edit`    |
-| `BlockComponent`        | type     | A block's render function: a plain function of `BlockComponentProps`      |
-| `EditAttributes`        | type     | `data-` attributes the editor binds to                                    |
-| `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes        |
-| `PageHead`              | type     | What a document composer needs to write a page's `<head>`                 |
-| `DocumentInput`         | type     | `{ head, body, publicPath, mode }`: what a document composer receives     |
-| `DocumentMode`          | type     | `'visitor' \| 'edit'`: which rendering a document composer is producing   |
-| `RenderDocument`        | type     | A host's document composer: `(input) => string \| Promise<string>`        |
+| Export                  | Kind     | Purpose                                                                          |
+| ----------------------- | -------- | -------------------------------------------------------------------------------- |
+| `CMS_LOGIN_PATH`        | constant | `/cms`: where the Edit pill sends a browser; the server decides there            |
+| `EDIT_PARAM`            | constant | `_edit`: the query parameter that asks for the editor entry                      |
+| `EDITOR_FLAG_KEY`       | constant | The localStorage key marking a signed-in editor                                  |
+| `NEXT_PARAM`            | constant | `next`: the query parameter carrying the page to return to after login           |
+| `TOOLBAR_DISMISSED_KEY` | constant | The localStorage key marking a dismissed toolbar                                 |
+| `NOOP_EDIT`             | constant | The visitor-side edit proxy: spreads to nothing, costs nothing                   |
+| `EDIT_ATTRIBUTE`        | constant | The `data-pk-*` attribute names the renderer writes and the overlay reads        |
+| `isLiveEdit`            | function | Whether an edit proxy is a live one rather than `NOOP_EDIT`                      |
+| `Columns`               | function | The CSS grid a host section renders around its children                          |
+| `ColumnBlock`           | function | The core column cell component                                                   |
+| `columnTracks`          | function | The `grid-template-columns` value for a ratio and a live column count            |
+| `BlockIdentity`         | type     | `id`, `blockType` and `schemaVersion` of a rendered block                        |
+| `BlockComponentProps`   | type     | What the renderer passes a block: `block`, `props`, `layout`, `children`, `edit` |
+| `BlockComponent`        | type     | A block's render function: a plain function of `BlockComponentProps`             |
+| `BlockLayout`           | type     | A node's stored layout: `columns`, `align` and `fill`                            |
+| `ColumnAlign`           | type     | `'stretch' \| 'start' \| 'center' \| 'end'`: cross-axis column alignment         |
+| `ColumnsProps`          | type     | `{ layout, children, className? }`: what `Columns` receives                      |
+| `EditAttributes`        | type     | `data-` attributes the editor binds to                                           |
+| `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes               |
+| `PageHead`              | type     | What a document composer needs to write a page's `<head>`                        |
+| `DocumentInput`         | type     | `{ head, body, publicPath, mode }`: what a document composer receives            |
+| `DocumentMode`          | type     | `'visitor' \| 'edit'`: which rendering a document composer is producing          |
+| `RenderDocument`        | type     | A host's document composer: `(input) => string \| Promise<string>`               |
 
 ### Server entry: `@plakboek/render/server`
 
