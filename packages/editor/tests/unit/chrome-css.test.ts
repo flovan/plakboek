@@ -76,6 +76,68 @@ describe('the built chrome stylesheet', () => {
     expect(missing).toEqual([]);
   });
 
+  it('defines the five editing tokens for light, dark, both data-theme values and forced colours', () => {
+    const block = (pattern: RegExp): string => {
+      const match = css.match(pattern);
+      expect(match, `no block for ${String(pattern)}`).not.toBeNull();
+      return match![1]!;
+    };
+    const light = block(/:host\{[^}]*?all:initial([^}]*)\}/);
+    const dark = block(
+      /@media \(prefers-color-scheme:dark\)\{:host\{([^}]*)\}/,
+    );
+    const themeLight = block(
+      /:host\(\[data-theme=["']?light["']?\]\)\{([^}]*)\}/,
+    );
+    const themeDark = block(
+      /:host\(\[data-theme=["']?dark["']?\]\)\{([^}]*)\}/,
+    );
+    const forced = block(/@media \(forced-colors:active\)\{:host\{([^}]*)\}/);
+
+    // The minifier may rewrite an rgba() value as 8-digit hex; accept either.
+    expect(light).toMatch(
+      /--pk-overlay-selected-fill:(rgba\(79,70,229,\.08\)|#4f46e514)/,
+    );
+    expect(light).toMatch(
+      /--pk-overlay-drag-source:(rgba\(24,24,27,\.16\)|#18181b29)/,
+    );
+    expect(light).toContain('--pk-attention:#b45309');
+    expect(light).toContain('--pk-attention-marker:#b45309');
+    expect(light).toContain('--pk-destructive-contrast:#fff');
+
+    for (const scheme of [dark, themeDark]) {
+      expect(scheme).toContain('--pk-attention:#fbbf24');
+      expect(scheme).toContain('--pk-destructive-contrast:#09090b');
+      // The overlay tokens are drawn over the site, so they do not change.
+      expect(scheme).not.toContain('--pk-overlay-selected-fill');
+      expect(scheme).not.toContain('--pk-overlay-drag-source');
+      expect(scheme).not.toContain('--pk-attention-marker');
+    }
+
+    expect(themeLight).toContain('--pk-attention:#b45309');
+    expect(themeLight).toContain('--pk-destructive-contrast:#fff');
+
+    expect(forced).toContain('--pk-overlay-selected-fill:transparent');
+    expect(forced).toContain('--pk-attention-marker:Highlight');
+  });
+
+  it('maps the five editing tokens into the Tailwind colour theme', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const source = await readFile(
+      new URL('../../src/styles/chrome.css', import.meta.url),
+      'utf8',
+    );
+    for (const name of [
+      'overlay-selected-fill',
+      'overlay-drag-source',
+      'attention',
+      'attention-marker',
+      'destructive-contrast',
+    ]) {
+      expect(source).toContain(`--color-${name}: var(--pk-${name});`);
+    }
+  });
+
   it('declares colour-scheme on the host only, so native controls match', () => {
     expect(css).toContain('color-scheme:light dark');
   });

@@ -88,6 +88,11 @@
   --color-input-fill: var(--pk-input-fill);
   --color-focus-ring: var(--pk-focus-ring);
   --color-frame-border: var(--pk-frame-border);
+  --color-overlay-selected-fill: var(--pk-overlay-selected-fill);
+  --color-overlay-drag-source: var(--pk-overlay-drag-source);
+  --color-attention: var(--pk-attention);
+  --color-attention-marker: var(--pk-attention-marker);
+  --color-destructive-contrast: var(--pk-destructive-contrast);
 }
 
 /*
@@ -125,6 +130,17 @@
   --pk-input-fill: #ffffff;
   --pk-focus-ring: var(--pk-accent);
   --pk-frame-border: var(--pk-border);
+
+  /*
+   * Editing tokens. The tint, the drag dim and the marker fill are drawn over
+   * the site, so they are the same in both schemes; attention and the
+   * destructive contrast text sit on chrome and follow the scheme.
+   */
+  --pk-overlay-selected-fill: rgba(79, 70, 229, 0.08);
+  --pk-overlay-drag-source: rgba(24, 24, 27, 0.16);
+  --pk-attention: #b45309;
+  --pk-attention-marker: #b45309;
+  --pk-destructive-contrast: #ffffff;
 }
 
 /* Tokens, dark, when the browser prefers it. */
@@ -142,6 +158,8 @@
     --pk-border: #3f3f46;
     --pk-scrim: rgba(0, 0, 0, 0.6);
     --pk-input-fill: #18181b;
+    --pk-attention: #fbbf24;
+    --pk-destructive-contrast: #09090b;
   }
 }
 
@@ -165,6 +183,8 @@
   --pk-border: #e4e4e7;
   --pk-scrim: rgba(24, 24, 27, 0.4);
   --pk-input-fill: #ffffff;
+  --pk-attention: #b45309;
+  --pk-destructive-contrast: #ffffff;
 }
 
 :host([data-theme='dark']) {
@@ -182,6 +202,8 @@
   --pk-border: #3f3f46;
   --pk-scrim: rgba(0, 0, 0, 0.6);
   --pk-input-fill: #18181b;
+  --pk-attention: #fbbf24;
+  --pk-destructive-contrast: #09090b;
 }
 
 /*
@@ -196,6 +218,8 @@
     --pk-overlay-halo: transparent;
     --pk-focus-ring: Highlight;
     --pk-frame-border: CanvasText;
+    --pk-overlay-selected-fill: transparent;
+    --pk-attention-marker: Highlight;
   }
 }
 
