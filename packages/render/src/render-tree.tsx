@@ -28,7 +28,7 @@ import type { ReactNode } from 'react';
 /** What the overlay needs to know about a block type. */
 export type BlockMeta = {
   readonly label: string;
-  readonly kind: 'section' | 'block';
+  readonly kind: 'section' | 'column' | 'block';
 };
 
 export type RenderPageTreeInput = {

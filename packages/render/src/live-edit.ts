@@ -21,6 +21,11 @@ export const EDIT_ATTRIBUTE = Object.freeze({
   label: 'data-pk-label',
   field: 'data-pk-field',
   unavailable: 'data-pk-unavailable',
+  /** Set on a column that holds no blocks, in a live edit render only. */
+  empty: 'data-pk-empty',
+  /** Set by the editor on a block element whose text is being edited in
+   * place; a fragment patcher must not replace such an element. */
+  inlineEditing: 'data-pk-inline-editing',
 } as const);
 
 export type LiveEditInput = {
@@ -28,8 +33,8 @@ export type LiveEditInput = {
   readonly id: string;
   /** The block's type key. */
   readonly blockType: string;
-  /** Whether the overlay treats it as a section or a plain block. */
-  readonly kind: 'section' | 'block';
+  /** Whether the overlay treats it as a section, a column or a plain block. */
+  readonly kind: 'section' | 'column' | 'block';
   /** What the overlay's chip shows. */
   readonly label: string;
 };
@@ -55,4 +60,9 @@ export function createLiveEdit(input: LiveEditInput): EditProxy {
       configurable: false,
     }) as EditProxy,
   );
+}
+
+/** Whether a proxy is a live one, as opposed to the visitor's `NOOP_EDIT`. */
+export function isLiveEdit(edit: EditProxy): boolean {
+  return Object.hasOwn(edit, EDIT_ATTRIBUTE.block);
 }

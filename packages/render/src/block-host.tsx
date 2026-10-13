@@ -29,6 +29,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { ComponentMap } from './components.js';
 import type { EditProxy } from './edit-proxy.js';
 import { reportRenderEvent, type RenderHooks } from './hooks.js';
+import { toBlockLayout } from './layout.js';
 
 /** The node shape both a snapshot block and a live tree node satisfy. */
 export type HostNode<N> = {
@@ -36,6 +37,8 @@ export type HostNode<N> = {
   readonly blockType: string;
   readonly schemaVersion: number;
   readonly props: unknown;
+  /** The node's stored layout, when the source carries one. */
+  readonly layout?: unknown;
   readonly children: readonly N[];
 };
 
@@ -142,6 +145,7 @@ function BlockHost<N extends HostNode<N>>({
         schemaVersion: block.schemaVersion,
       },
       props: isRecord(block.props) ? block.props : NO_PROPS,
+      layout: toBlockLayout(block.layout),
       children,
       edit: context.editFor(block),
     });
