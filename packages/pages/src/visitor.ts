@@ -29,11 +29,15 @@
  * - Only the enabled locales passed in are candidates, so a removed locale
  *   (rows kept, 03 D-25 / 04 D-37) can never match.
  * - Only pages resolve; content-entry URLs are not matched here (D-25).
+ * - A published snapshot in the flat shape (blocks directly under sections)
+ *   is normalised to the column shape when resolved (D-03); stored snapshots
+ *   are immutable and never rewritten.
  * - The previous-address history is never consulted: redirects over it are a
  *   later phase's (D-24).
  */
 import type { AuditDatabase } from '@plakboek/auth';
 import { and, eq } from 'drizzle-orm';
+import { normaliseSnapshotColumns } from './columns.js';
 import {
   PageUrlPatternError,
   parsePageUrlPattern,
@@ -132,7 +136,12 @@ export async function resolvePublishedPage(
     .limit(1);
   if (row === undefined) return null;
 
-  const snapshot = asPageSnapshot(row.snapshot);
+  const stored = asPageSnapshot(row.snapshot);
+  // A snapshot published before the column kind existed has blocks directly
+  // under its sections; wrap them on read so every page renders on the column
+  // grid. The stored snapshot and its manifest hash are never rewritten.
+  const blocks = normaliseSnapshotColumns(stored.blocks);
+  const snapshot = blocks === stored.blocks ? stored : { ...stored, blocks };
   const meta = readSnapshotPageMeta(snapshot);
   return {
     page: {
