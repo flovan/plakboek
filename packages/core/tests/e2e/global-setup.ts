@@ -8,7 +8,13 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer as createNetServer } from 'node:net';
 import { SUPERADMIN_ROLE_KEY, createUserWithRole } from '@plakboek/auth';
 import { runMigrations } from '@plakboek/db';
-import { createPage, getPage, insertBlock, publishPage } from '@plakboek/pages';
+import {
+  createPage,
+  getPage,
+  insertBlock,
+  publishPage,
+  readBlockTree,
+} from '@plakboek/pages';
 import { Client } from 'pg';
 import { bootstrapInstallation } from '../../src/runtime/bootstrap.ts';
 import { closeAllDbs } from '../../src/runtime/db.ts';
@@ -91,7 +97,11 @@ type PageSpec = {
 };
 
 function section(...children: readonly SeedBlock[]): SeedBlock {
-  return { type: 'section', props: { variant: 'plain' }, children };
+  return {
+    type: 'section',
+    props: { variant: 'plain' },
+    children: [{ type: 'column', children }],
+  };
 }
 
 function heading(text: string): SeedBlock {
@@ -226,14 +236,15 @@ async function seedPages(
     ],
   });
   await publish(runtime, actor, about);
-  const sectionId = about.rootIds[0];
-  if (sectionId === undefined) {
-    throw new Error('The e2e about page has no section to extend');
+  const columnId = (await readBlockTree(runtime.db.db, about.owner))[0]
+    ?.children[0]?.id;
+  if (columnId === undefined) {
+    throw new Error('The e2e about page has no column to extend');
   }
   const unpublished = await insertBlock(runtime.pages, actor, {
     owner: about.owner,
     blockType: 'heading',
-    parentBlockId: sectionId,
+    parentBlockId: columnId,
     props: { text: 'Unpublished change' },
     basePageVersion: await about.currentVersion(),
   });

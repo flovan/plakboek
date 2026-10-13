@@ -1,7 +1,11 @@
 import { defineBlock } from '@plakboek/core';
-import type { BlockComponent } from '@plakboek/render';
+import { Columns, type BlockComponent } from '@plakboek/render';
 
-const Section: BlockComponent = ({ children }) => <section>{children}</section>;
+const Section: BlockComponent = ({ children, layout }) => (
+  <section>
+    <Columns layout={layout}>{children}</Columns>
+  </section>
+);
 
 const Heading: BlockComponent<{ text: string }> = ({ props }) => (
   <h2>{props.text}</h2>

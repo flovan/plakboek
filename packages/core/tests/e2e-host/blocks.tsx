@@ -1,5 +1,5 @@
 import { defineBlock } from '@plakboek/core';
-import type { BlockComponent } from '@plakboek/render';
+import { Columns, type BlockComponent } from '@plakboek/render';
 
 const VARIANTS = ['plain', 'transform', 'filter', 'contain', 'isolation'];
 
@@ -7,9 +7,10 @@ const Section: BlockComponent<{ variant?: string }> = ({
   props,
   children,
   edit,
+  layout,
 }) => (
   <section {...edit} className={`section variant-${props.variant ?? 'plain'}`}>
-    {children}
+    <Columns layout={layout}>{children}</Columns>
   </section>
 );
 

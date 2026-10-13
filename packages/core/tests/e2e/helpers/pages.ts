@@ -20,9 +20,13 @@ export type FactoryBlock = {
   readonly children?: readonly FactoryBlock[];
 };
 
-/** A section holding `children`, in the shape global setup seeds. */
+/** A section holding `children` in one column, in the shape global setup seeds. */
 export function section(...children: readonly FactoryBlock[]): FactoryBlock {
-  return { type: 'section', props: { variant: 'plain' }, children };
+  return {
+    type: 'section',
+    props: { variant: 'plain' },
+    children: [{ type: 'column', children }],
+  };
 }
 
 export function heading(text: string): FactoryBlock {

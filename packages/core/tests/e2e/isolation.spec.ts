@@ -297,7 +297,11 @@ test.describe('the editor adds nothing to the site document', () => {
         lastChildIsDialog:
           document.body.lastElementChild?.localName === 'dialog',
         outlined,
-        inlineStyles: document.querySelectorAll('[style]').length,
+        // the column grids and their cells are the CMS's own visitor markup
+        // and carry their layout inline; anything else is host or editor
+        inlineStyles: document.querySelectorAll(
+          '[style]:not([data-plakboek-columns]):not([data-plakboek-columns] > *)',
+        ).length,
       };
     });
 
