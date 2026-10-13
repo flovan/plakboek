@@ -9,8 +9,10 @@ import type {
   ApiError,
   EditorSession,
   LockResponse,
+  TreeResponse,
 } from '../../src/api-types.js';
 import { createEditorApi } from '../../src/server/api/handler.js';
+import { createEditEntrypoint } from '../../src/server/entrypoint.js';
 import {
   apiConfig,
   apiRequest,
@@ -63,6 +65,17 @@ async function open(
   path: string,
 ): Promise<Response> {
   return await call('/cms/api/open', { user, method: 'POST', body: { path } });
+}
+
+async function lockCall(
+  user: SignedIn,
+  pageId: string,
+  action: 'acquire' | 'renew' | 'release' | 'take-over',
+): Promise<Response> {
+  return await call(`/cms/api/pages/${pageId}/lock/${action}`, {
+    user,
+    method: 'POST',
+  });
 }
 
 async function readSession(response: Response): Promise<EditorSession> {
@@ -263,5 +276,145 @@ describe('the request gate', () => {
     const response = await call('/cms/api/unknown', { user: harness.editor });
     expect(response.status).toBe(404);
     expect((await readError(response)).code).toBe('not-found');
+  });
+});
+
+describe('the lock endpoints', () => {
+  it('shows a second editor a renewed heartbeat', async () => {
+    const seeded = await createColumnPage(harness, {
+      title: 'Beat',
+      text: 'x',
+    });
+    await open(harness.editor, '/beat');
+    const before = (await (
+      await call(`/cms/api/pages/${seeded.pageId}/lock`, {
+        user: harness.editor2,
+      })
+    ).json()) as LockResponse;
+
+    harness.clock.advance(30_000);
+    const renewed = await lockCall(harness.editor, seeded.pageId, 'renew');
+    expect(((await renewed.json()) as LockResponse).lock.state).toBe('mine');
+
+    const after = (await (
+      await call(`/cms/api/pages/${seeded.pageId}/lock`, {
+        user: harness.editor2,
+      })
+    ).json()) as LockResponse;
+    expect(after.lock.holder?.lastActiveAt).not.toBe(
+      before.lock.holder?.lastActiveAt,
+    );
+    expect(Date.parse(after.lock.holder?.lastActiveAt ?? '')).toBeGreaterThan(
+      Date.parse(before.lock.holder?.lastActiveAt ?? ''),
+    );
+  });
+
+  it('frees the page on release so a second editor can take it', async () => {
+    const seeded = await createColumnPage(harness, {
+      title: 'Handover',
+      text: 'x',
+    });
+    await open(harness.editor, '/handover');
+    const released = await lockCall(harness.editor, seeded.pageId, 'release');
+    expect(((await released.json()) as LockResponse).lock.state).toBe('free');
+
+    const acquired = await lockCall(harness.editor2, seeded.pageId, 'acquire');
+    expect(((await acquired.json()) as LockResponse).lock.state).toBe('mine');
+    const blocked = await lockCall(harness.editor, seeded.pageId, 'acquire');
+    expect(blocked.status).toBe(423);
+    const error = await readError(blocked);
+    expect(error.code).toBe('locked');
+    expect(error.lock?.state).toBe('other');
+    expect(error.lock?.holder?.name).toBe('Editor2');
+  });
+
+  it('lets a superadmin take over from an editor, who then finds the page locked', async () => {
+    const seeded = await createColumnPage(harness, {
+      title: 'Takeover',
+      text: 'x',
+    });
+    await open(harness.editor, '/takeover');
+
+    const taken = await lockCall(
+      harness.superadmin,
+      seeded.pageId,
+      'take-over',
+    );
+    expect(taken.status).toBe(200);
+    expect(((await taken.json()) as LockResponse).lock.state).toBe('mine');
+
+    const renewed = await lockCall(harness.editor, seeded.pageId, 'renew');
+    expect(renewed.status).toBe(423);
+    const error = await readError(renewed);
+    expect(error.code).toBe('locked');
+    expect(error.lock?.holder?.name).toBe('Owner');
+  });
+
+  it('refuses a takeover by a role that is not a superset of the holder', async () => {
+    const seeded = await createColumnPage(harness, {
+      title: 'Refused',
+      text: 'x',
+    });
+    await open(harness.superadmin, '/refused');
+    const response = await lockCall(harness.editor, seeded.pageId, 'take-over');
+    expect(response.status).toBe(403);
+    expect((await readError(response)).code).toBe('forbidden');
+  });
+
+  it('reads the current tree', async () => {
+    const seeded = await createColumnPage(harness, {
+      title: 'Tree read',
+      text: 'Now',
+    });
+    const response = await call(`/cms/api/pages/${seeded.pageId}/tree`, {
+      user: harness.editor,
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as TreeResponse;
+    expect(body.ok).toBe(true);
+    expect(body.tree.map((node) => node.type)).toEqual([
+      'section',
+      'column',
+      'heading',
+    ]);
+    expect(body.tree[2]?.props).toEqual({ text: 'Now' });
+  });
+
+  it('answers 404 for a page id that does not exist and 400 for one that is not an id', async () => {
+    const missing = await call(
+      '/cms/api/pages/00000000-0000-4000-8000-000000000000/tree',
+      { user: harness.editor },
+    );
+    expect(missing.status).toBe(404);
+    const malformed = await call('/cms/api/pages/not-an-id/tree', {
+      user: harness.editor,
+    });
+    expect(malformed.status).toBe(400);
+  });
+});
+
+describe('the frame', () => {
+  it('marks a column cell as a column for an editor', async () => {
+    await createColumnPage(harness, { title: 'Framed', text: 'x' });
+    const entrypoint = createEditEntrypoint({
+      auth: harness.auth,
+      resolver: harness.resolver,
+      db: harness.handle.db,
+      pages: { config: apiConfig, homeSlug: 'home' },
+      components,
+      renderDocument: (input) =>
+        `<!DOCTYPE html><html><head></head><body>${input.body}</body></html>`,
+      assets: { entry: '/assets/editor.js', preload: [], css: [] },
+      csp: true,
+    });
+    const url = new URL(`${SITE_ORIGIN}/framed?_edit=frame`);
+    const response = await entrypoint(
+      new Request(url, { headers: { cookie: harness.editor.cookie } }),
+      { url, visitorLocation: '/framed' },
+    );
+    expect(response?.status).toBe(200);
+    const html = (await response?.text()) ?? '';
+    expect(html).toContain('data-pk-kind="column"');
+    expect(html).toContain('data-pk-kind="section"');
   });
 });
