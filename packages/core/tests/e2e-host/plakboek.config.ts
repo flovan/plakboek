@@ -5,6 +5,7 @@ import {
   carousel,
   heading,
   section,
+  siteForm,
   spacer,
   text,
 } from './blocks.tsx';
@@ -15,7 +16,16 @@ export default defineConfig({
   defaultLocale: 'en',
   timezone: 'Europe/Brussels',
   roles: { ...defaultRoles, viewer: ['pages:read'] },
-  blocks: [section, heading, text, accordion, carousel, badge, spacer],
+  blocks: [
+    section,
+    heading,
+    text,
+    accordion,
+    carousel,
+    badge,
+    spacer,
+    siteForm,
+  ],
   seed: {
     title: 'Home',
     blocks: [

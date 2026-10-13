@@ -1,14 +1,21 @@
 /**
- * The hover overlay on the real shell, over the adversarial theme, in three
- * engines.
+ * The hover overlay on the real shell, over the adversarial theme.
  *
  * The overlay draws an outline, a dashed outline for the section around it
- * and a label chip over the block under the pointer in the framed site. It is
+ * and a label chip over the block the pointer is on, restricted to what a click
+ * would select at the current scope: at page scope that is a section, and
+ * after drilling into a section's column it is the blocks inside it. It is
  * measured, not looked at: each outline's box is compared with the box the
  * site element has inside the frame, moved by where the frame's content box
  * sits in the shell.
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
+import {
+  expectSelectedOver,
+  framedSite,
+  openEditor,
+  waitForShell,
+} from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
 import { signIn } from './helpers/session.ts';
 
@@ -26,25 +33,23 @@ type Rect = {
   readonly height: number;
 };
 
-async function openShell(page: Page, path: string): Promise<void> {
-  const response = await page.goto(path);
-  expect(response?.status()).toBe(200);
-  await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
+/**
+ * Opens the page for editing. With `scope`, also drills the selection down to
+ * that block (a double-click takes it from the section to its column, a second
+ * one to the block), so blocks inside the section are what the pointer hovers.
+ */
+async function openShell(
+  page: Page,
+  path: string,
+  scope?: string,
+): Promise<void> {
+  await openEditor(page, path.replace('?_edit=1', ''));
+  if (scope === undefined) return;
   const frame = await framedSite(page);
-  await frame.waitForFunction(
-    () =>
-      (window as Window & { __siteScriptsReady?: boolean })
-        .__siteScriptsReady === true,
-  );
-}
-
-async function framedSite(page: Page): Promise<Frame> {
-  const handle = await page.locator(FRAME).elementHandle();
-  const frame = await handle?.contentFrame();
-  if (frame === null || frame === undefined) {
-    throw new Error('The shell has no framed document');
-  }
-  return frame;
+  const target = frame.locator(scope).first();
+  await target.dblclick();
+  await target.dblclick();
+  await expectSelectedOver(page, frame, scope);
 }
 
 /** A frame element's box in the page's coordinates. */
@@ -111,7 +116,7 @@ test.describe('hovering a block in the framed site', () => {
   test('outlines a heading exactly over its box and labels it above', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.variant-plain h2');
     const frame = await framedSite(page);
     const selector = '.variant-plain h2';
 
@@ -136,7 +141,7 @@ test.describe('hovering a block in the framed site', () => {
   test('draws the 2px outline and its 1px halo, and a chip in the outline colour', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.variant-plain h2');
     await hover(page, '.variant-plain h2');
     await expect(page.locator(OUTLINE)).toHaveCount(1);
 
@@ -189,7 +194,7 @@ test.describe('hovering a block in the framed site', () => {
   test('also draws the dashed outline of the section around a block in it, without a chip of its own', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.variant-plain h2');
     const frame = await framedSite(page);
     await hover(page, '.variant-plain h2');
     await expect(page.locator(SECTION_OUTLINE)).toHaveCount(1);
@@ -225,6 +230,32 @@ test.describe('hovering a block in the framed site', () => {
     await expect(page.locator(CHIP)).toHaveText('Section');
     await expect(page.locator(SECTION_OUTLINE)).toHaveCount(0);
     expectNear(await overlayBox(page, OUTLINE), section);
+  });
+});
+
+test.describe('hover follows the scope', () => {
+  test('at page scope a heading hover outlines its section, and after drilling into the section it outlines the heading', async ({
+    page,
+  }) => {
+    await openShell(page, '/?_edit=1');
+    const frame = await framedSite(page);
+    await hover(page, '.variant-plain h2');
+    await expect(page.locator(CHIP)).toHaveText('Section');
+    expectNear(
+      await overlayBox(page, OUTLINE),
+      await boxOf(frame, 'section.variant-plain'),
+    );
+
+    // a double-click takes the selection from the section to its column
+    // and a second one to the heading, so the heading is what a click selects
+    await frame.locator('.variant-plain h2').dblclick();
+    await frame.locator('.variant-plain h2').dblclick();
+    await expectSelectedOver(page, frame, '.variant-plain h2');
+    await expect(page.locator(CHIP)).toHaveText('Heading');
+    expectNear(
+      await overlayBox(page, OUTLINE),
+      await boxOf(frame, '.variant-plain h2'),
+    );
   });
 });
 
@@ -322,7 +353,7 @@ test.describe('over the adversarial theme', () => {
 
   for (const [name, selector, label] of CASES) {
     test(`outlines ${name} at its real position`, async ({ page }) => {
-      await openShell(page, '/?_edit=1');
+      await openShell(page, '/?_edit=1', selector);
       const frame = await framedSite(page);
       await hover(page, selector);
       await expect(page.locator(CHIP)).toHaveText(label);
@@ -333,7 +364,7 @@ test.describe('over the adversarial theme', () => {
   test('draws the layer above the frame, over exactly its content box and clipped to it', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.spacer');
     const frame = await framedSite(page);
     await hoverSpacer(page);
 
@@ -382,7 +413,7 @@ test.describe('over the adversarial theme', () => {
 
 test.describe('the outline follows its element', () => {
   test('through a scroll of the frame', async ({ page }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.spacer');
     const frame = await framedSite(page);
     await hoverSpacer(page);
     await expectOutlineOver(page, frame, '.spacer');
@@ -397,7 +428,7 @@ test.describe('the outline follows its element', () => {
   });
 
   test('through a resize of the window', async ({ page }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.spacer');
     const frame = await framedSite(page);
     await hoverSpacer(page);
     const before = await frameContentBox(page);
@@ -411,7 +442,7 @@ test.describe('the outline follows its element', () => {
   });
 
   test('through the layout toggle, both ways', async ({ page }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.spacer');
     const frame = await framedSite(page);
     await hoverSpacer(page);
     const framed = await overlayBox(page, OUTLINE);
@@ -433,14 +464,15 @@ test.describe('the outline follows its element', () => {
   });
 
   test('through a change of the page above it', async ({ page }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.spacer');
     const frame = await framedSite(page);
     await hoverSpacer(page);
     const before = await overlayBox(page, OUTLINE);
     const spacerBefore = await boxOf(frame, '.spacer');
 
-    // the site's own script opens the second accordion (the first sits in a
-    // section of fixed height), which pushes everything below it down
+    // the page above the spacer grows, as when the site's own script opens
+    // the second accordion (the first sits in a section of fixed height),
+    // which pushes everything below it down
     await frame.evaluate(() => {
       // a browser keeps what is on screen in place when content above it
       // grows (scroll anchoring); switch that off so the page really moves.
@@ -450,9 +482,17 @@ test.describe('the outline follows its element', () => {
       // panel grew
       document.documentElement.style.overflowAnchor = 'none';
       document.body.style.overflowAnchor = 'none';
-      const trigger = document.querySelectorAll('[data-accordion] button')[1];
-      if (!(trigger instanceof HTMLElement)) throw new Error('no accordion');
-      trigger.click();
+      const accordion = document.querySelectorAll('[data-accordion]')[1];
+      const trigger = accordion?.querySelector('button');
+      const panel = accordion?.querySelector('[role="region"]');
+      if (
+        !(trigger instanceof HTMLElement) ||
+        !(panel instanceof HTMLElement)
+      ) {
+        throw new Error('no accordion');
+      }
+      trigger.setAttribute('aria-expanded', 'true');
+      panel.hidden = false;
     });
     await expect(
       frame.locator('[data-accordion] button').nth(1),
@@ -469,7 +509,7 @@ test.describe('the outline follows its element', () => {
   });
 
   test('after the frame reloads', async ({ page }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.variant-plain h2');
     const before = await framedSite(page);
     await before.evaluate(() => {
       (window as Window & { __beforeReload?: boolean }).__beforeReload = true;
@@ -505,7 +545,7 @@ test.describe('the chip', () => {
   test('rests above the outline, moves inside it near the frame top, and pins to the frame top once the element top scrolls out', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.spacer');
     const frame = await framedSite(page);
     await hoverSpacer(page);
     const content = await frameContentBox(page);
@@ -543,7 +583,7 @@ test.describe('the chip', () => {
   test('labels a block the host no longer declares "{type} (unavailable)"', async ({
     page,
   }) => {
-    await openShell(page, '/about?_edit=1');
+    await openShell(page, '/about?_edit=1', '.variant-plain h2');
     const frame = await framedSite(page);
     await hover(page, '[data-pk-unavailable]');
     await expect(page.locator(CHIP)).toHaveText('retired-widget (unavailable)');
@@ -553,7 +593,7 @@ test.describe('the chip', () => {
   test('is one line with an ellipsis when its text is long', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.variant-plain h2');
     const frame = await framedSite(page);
     // a stand-in label too long for 240px, set on the frame element the
     // overlay reads
@@ -582,7 +622,7 @@ test.describe('the pointer', () => {
   test('hides the outline when it moves onto the sidebar or the stage around the frame', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.variant-plain h2');
     await hover(page, '.variant-plain h2');
     await expect(page.locator(OUTLINE)).toHaveCount(1);
 
@@ -601,7 +641,7 @@ test.describe('the pointer', () => {
   test('moves the outline to the block under it, and looks the pointer up again after the frame scrolls under it', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.spacer');
     const frame = await framedSite(page);
     await hoverSpacer(page);
 
@@ -616,10 +656,10 @@ test.describe('the pointer', () => {
 });
 
 test.describe('the site stays untouched', () => {
-  test('keeps its clicks, keyboard and scrolling, and receives every pointer event', async ({
+  test('keeps its scrolling, and receives every pointer move', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.variant-plain h2');
     const frame = await framedSite(page);
     await frame.evaluate(() => {
       const probe = window as Window & { __pointerMoves?: number };
@@ -629,22 +669,13 @@ test.describe('the site stays untouched', () => {
       });
     });
 
-    // hover the accordion's trigger with the overlay drawn, then click it
+    // hover the accordion's trigger with the overlay drawn
     await hover(page, '[data-accordion] button');
     await expect(page.locator(OUTLINE)).toHaveCount(1);
     await expect(page.locator(CHIP)).toHaveText('Accordion');
-    const trigger = frame.locator('[data-accordion] button').first();
-    await trigger.click();
-    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.locator(OUTLINE)).toHaveCount(1);
-
-    // the keyboard reaches the site too
-    await trigger.focus();
-    await page.keyboard.press('Enter');
-    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
 
     // and the wheel scrolls the frame, not the window around it
-    await hoverSpacer(page);
+    await hover(page, '.variant-plain h2');
     const before = await frame.evaluate(() => window.scrollY);
     await page.mouse.wheel(0, 300);
     await expect
@@ -665,7 +696,7 @@ test.describe('the site stays untouched', () => {
   test('gets no class, style, attribute or element from hovering', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.variant-plain h2');
     const frame = await framedSite(page);
     const snapshot = async () =>
       await frame.evaluate(() => ({
@@ -691,7 +722,8 @@ test.describe('who gets the overlay', () => {
   test('a read-only session has no overlay layer at all', async ({ page }) => {
     await page.context().clearCookies();
     await signIn(page, e2eUsers().viewer);
-    await openShell(page, '/?_edit=1');
+    await page.goto('/?_edit=1');
+    await waitForShell(page);
     await expect(page.locator(`${HOST} [role="note"]`)).toBeVisible();
     await expect(page.locator(LAYER)).toHaveCount(0);
 
@@ -716,7 +748,7 @@ test.describe('motion', () => {
       });
 
     await page.emulateMedia({ reducedMotion: 'no-preference' });
-    await openShell(page, '/?_edit=1');
+    await openShell(page, '/?_edit=1', '.variant-plain h2');
     await hover(page, '.variant-plain h2');
     await expect(page.locator(OUTLINE)).toHaveCount(1);
     expect(await animation()).toEqual({

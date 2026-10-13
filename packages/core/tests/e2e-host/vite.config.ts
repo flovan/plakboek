@@ -21,6 +21,14 @@ function refreshProbe(): Plugin {
 
 // No `edit` option: the real editor is composed here once it exists.
 export default defineConfig({
+  // The editor package is linked from this workspace, so Vite treats it as
+  // source and meets its client dependencies only when the first edit page
+  // loads. Optimizing one of them then reloads the page mid-hydration, which
+  // the dev specs cannot wait out, so it is optimized at startup. An installed
+  // editor is optimized as a whole and needs no such line.
+  optimizeDeps: {
+    include: ['@plakboek/core > @plakboek/editor > @tanstack/react-query'],
+  },
   plugins: [
     plakboek({
       config: './plakboek.config.ts',

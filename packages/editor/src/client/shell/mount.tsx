@@ -239,8 +239,8 @@ function Shell(props: {
 
   // Tests and tools read where the session stands from the host.
   useEffect(() => {
-    host.dataset.session = status;
-  }, [host, status]);
+    if (editable) host.dataset.session = status;
+  }, [host, editable, status]);
 
   const changeMode = useCallback(
     (next: EditorMode) => {

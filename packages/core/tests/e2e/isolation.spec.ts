@@ -100,6 +100,17 @@ async function openShell(page: Page, path: string): Promise<void> {
   );
 }
 
+/**
+ * Hands the site back to the user with the `I` key. In Edit mode the editor
+ * claims the frame's clicks, so the site's own interactive components are
+ * exercised in Interact.
+ */
+async function switchToInteract(page: Page): Promise<void> {
+  await expect(page.locator(HOST)).toHaveAttribute('data-session', 'editing');
+  await page.keyboard.press('i');
+  await expect(page.locator(FRAME)).not.toHaveAttribute('tabindex');
+}
+
 async function framedSite(page: Page): Promise<Frame> {
   const handle = await page.locator(FRAME).elementHandle();
   const frame = await handle?.contentFrame();
@@ -241,6 +252,7 @@ test.describe('the site is not changed by the chrome around it', () => {
     page,
   }) => {
     await openShell(page, '/?_edit=1');
+    await switchToInteract(page);
     await assertSiteBehaviour(await framedSite(page));
     // the window around the frame never moved
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
@@ -256,6 +268,7 @@ test.describe('the site is not changed by the chrome around it', () => {
     await openShell(page, '/?_edit=1');
     await page.locator(`${HOST} [data-sidebar] button[aria-pressed]`).click();
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
+    await switchToInteract(page);
     await assertSiteBehaviour(await framedSite(page));
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
   });

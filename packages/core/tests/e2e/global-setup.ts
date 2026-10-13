@@ -14,6 +14,7 @@ import {
   insertBlock,
   publishPage,
   readBlockTree,
+  upgradeAllSectionColumns,
 } from '@plakboek/pages';
 import { Client } from 'pg';
 import { bootstrapInstallation } from '../../src/runtime/bootstrap.ts';
@@ -337,6 +338,12 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       { userId: bootstrapped.userId, roleKey: SUPERADMIN_ROLE_KEY },
       database.connectionString,
     );
+    // Seeded trees may predate columns. Upgrading them now, as the server
+    // would in the background, keeps the first edit page a spec opens from
+    // being reloaded by the editor once the upgrade lands.
+    while ((await upgradeAllSectionColumns(runtime.pages)).upgraded > 0) {
+      // another batch
+    }
 
     server = await createServer({
       buildPath: E2E_SERVER_ENTRY,

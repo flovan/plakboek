@@ -32,6 +32,19 @@ async function openShell(page: Page, path: string): Promise<void> {
   await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
 }
 
+/**
+ * Opens the page and hands the site back to the user with the `I` key: in Edit
+ * mode a click on the framed site selects instead of following a link, so the
+ * specs that click the site's own links work in Interact.
+ */
+async function openInteract(page: Page, path: string): Promise<void> {
+  await openShell(page, path);
+  await expect(page.locator(HOST)).toHaveAttribute('data-session', 'editing');
+  await expect(page.locator(FRAME)).toHaveAttribute('tabindex', '-1');
+  await page.keyboard.press('i');
+  await expect(page.locator(FRAME)).not.toHaveAttribute('tabindex');
+}
+
 /** Marks the shell document, so a later check can tell it was not reloaded. */
 async function markShell(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -55,7 +68,7 @@ test.describe('a link clicked in the framed site', () => {
   test('to another page of the site navigates the whole page, still in edit mode', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openInteract(page, '/?_edit=1');
     const framed = page.frameLocator(FRAME);
 
     await framed.getByRole('link', { name: 'About', exact: true }).click();
@@ -79,7 +92,7 @@ test.describe('a link clicked in the framed site', () => {
         body: '<!DOCTYPE html><title>Elsewhere</title><p>Elsewhere</p>',
       }),
     );
-    await openShell(page, '/?_edit=1');
+    await openInteract(page, '/?_edit=1');
     await markShell(page);
 
     const popupOpened = page.waitForEvent('popup');
@@ -105,7 +118,7 @@ test.describe('a link clicked in the framed site', () => {
       reached.push(route.request().url());
       return route.abort();
     });
-    await openShell(page, '/?_edit=1');
+    await openInteract(page, '/?_edit=1');
     const origin = new URL(page.url()).origin;
 
     await page
@@ -132,7 +145,7 @@ test.describe('a link clicked in the framed site', () => {
         body: '<!DOCTYPE html><title>Report</title><p>Report</p>',
       }),
     );
-    await openShell(page, '/?_edit=1');
+    await openInteract(page, '/?_edit=1');
     await markShell(page);
 
     const popupOpened = page.waitForEvent('popup');
@@ -151,7 +164,7 @@ test.describe('a link clicked in the framed site', () => {
   test('to the page already shown reloads the frame instead of doing nothing', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openInteract(page, '/?_edit=1');
     await markShell(page);
     const handle = await page.locator(FRAME).elementHandle();
     const frame = await handle?.contentFrame();
@@ -182,7 +195,7 @@ test.describe('a link clicked in the framed site', () => {
   test('to a spot on the same page scrolls the frame and leaves the page alone', async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openInteract(page, '/?_edit=1');
     await markShell(page);
     const handle = await page.locator(FRAME).elementHandle();
     const frame = await handle?.contentFrame();
@@ -207,7 +220,7 @@ test.describe('a link clicked in the framed site', () => {
   test("that the site's own script handles is left to the site", async ({
     page,
   }) => {
-    await openShell(page, '/?_edit=1');
+    await openInteract(page, '/?_edit=1');
     await markShell(page);
     const framed = page.frameLocator(FRAME);
 
@@ -308,7 +321,7 @@ test.describe('a window narrower than 1024px', () => {
     await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
     await markShell(page);
 
-    const panel = page.locator(`${HOST} [role="status"]`);
+    const panel = page.locator(`${HOST} .pk-stage [role="status"]`);
     await expect(panel).toBeVisible();
     await expect(panel).toContainText('Editing needs a wider window');
     await expect(panel).toContainText('at least 1024 pixels wide');
@@ -340,7 +353,9 @@ test.describe('a window narrower than 1024px', () => {
     await page.goto('/about?_edit=1');
 
     await expect(page.locator(HOST)).not.toHaveAttribute('data-hydrated', '');
-    await expect(page.locator(`${HOST} [role="status"]`)).toBeVisible();
+    await expect(
+      page.locator(`${HOST} .pk-stage [role="status"]`),
+    ).toBeVisible();
     await expect(page.locator(FRAME)).toBeHidden();
   });
 });

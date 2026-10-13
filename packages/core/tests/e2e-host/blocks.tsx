@@ -95,6 +95,15 @@ const Spacer: BlockComponent<{ size?: string }> = ({ props, edit }) => (
   />
 );
 
+/** A form that would leave for another page if it were submitted. */
+const SiteForm: BlockComponent<{ label: string }> = ({ props, edit }) => (
+  <form {...edit} id="site-form" action="/about" method="get">
+    <button type="submit" id="site-form-submit">
+      {props.label}
+    </button>
+  </form>
+);
+
 export const section = defineBlock({
   key: 'section',
   kind: 'section',
@@ -213,4 +222,19 @@ export const spacer = defineBlock({
     },
   },
   component: Spacer,
+});
+
+export const siteForm = defineBlock({
+  key: 'siteForm',
+  editor: { label: 'Form' },
+  schemaVersion: 1,
+  properties: {
+    label: {
+      fieldType: 'short_text',
+      label: 'Label',
+      required: true,
+      options: { maxLength: 200 },
+    },
+  },
+  component: SiteForm,
 });
