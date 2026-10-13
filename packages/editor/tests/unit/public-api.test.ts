@@ -53,6 +53,10 @@ const CLIENT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
 });
 
 const CLIENT_TYPES: readonly string[] = Object.freeze([
+  // client/boot
+  'BootEditorOptions',
+  // client/frame/block-edit-loader
+  'BlockEditLoaders',
   // chrome/shell
   'SidebarSlots',
   // chrome/strings

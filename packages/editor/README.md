@@ -267,12 +267,22 @@ updating them.
 
 ### Client entry: `@plakboek/editor/client`
 
-| Export              | Kind     | Purpose                                                                       |
-| ------------------- | -------- | ----------------------------------------------------------------------------- |
-| `bootEditor`        | function | Hydrates the shell the server rendered inside the `plakboek-editor` host      |
-| `chromeStyleSheet`  | function | The chrome stylesheet for one document, built with that document's window     |
-| `adoptChromeStyles` | function | Adopts the chrome stylesheet into a shadow root, once                         |
-| `STRINGS`           | constant | Every edit-mode string, by stable dotted key, in English                      |
-| `formatString`      | function | A string with its `{name}` placeholders filled; the compiler checks the names |
-| `SidebarSlots`      | type     | The slots a later release fills the sidebar with                              |
-| `StringKey`         | type     | A key of `STRINGS`                                                            |
+| Export              | Kind     | Purpose                                                                                         |
+| ------------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `bootEditor`        | function | Hydrates the shell the server rendered inside the `plakboek-editor` host; takes `{ blockEdit }` |
+| `chromeStyleSheet`  | function | The chrome stylesheet for one document, built with that document's window                       |
+| `adoptChromeStyles` | function | Adopts the chrome stylesheet into a shadow root, once                                           |
+| `STRINGS`           | constant | Every edit-mode string, by stable dotted key, in English                                        |
+| `formatString`      | function | A string with its `{name}` placeholders filled; the compiler checks the names                   |
+| `SidebarSlots`      | type     | The slots a later release fills the sidebar with                                                |
+| `StringKey`         | type     | A key of `STRINGS`                                                                              |
+| `BootEditorOptions` | type     | The options of `bootEditor`: `blockEdit`, the host's block edit module loaders                  |
+| `BlockEditLoaders`  | type     | One lazy import per `*.edit.ts` block edit module, keyed by project path                        |
+
+`bootEditor(document, { blockEdit })` is called by the editor chunk the
+`plakboek()` Vite plugin builds, not by a host. `blockEdit` holds one lazy
+loader per `*.edit.ts` or `*.edit.tsx` module (the plugin's `blockEdit` option
+says where to look). After the shell hydrates it loads them once and keeps each
+module whose default export is `{ blockType, hooks }` with function hooks. A
+module that fails to load, has another shape, or repeats a block type is
+reported once by file key and skipped, and the first module per block type wins.

@@ -3,6 +3,9 @@ import { hydrateRoot as hydrate, type Root } from 'react-dom/client';
 import type { SidebarLayout } from '../../chrome/controls.js';
 import { ShellApp } from '../../chrome/shell.js';
 import { SHELL_ROOT_ID, type ShellIsland } from '../../chrome/island.js';
+import type { BlockEditHooks } from '@plakboek/render';
+import type { BootEditorOptions } from '../boot.js';
+import { loadBlockEditModules } from '../frame/block-edit-loader.js';
 import { watchFrame } from './frame-watch.js';
 import { applyLayout, readLayout, writeLayout } from './layout.js';
 
@@ -41,8 +44,9 @@ function focusShownToggle(host: HTMLElement, shown: SidebarLayout): void {
 function ShellRoot(props: {
   readonly host: HTMLElement;
   readonly island: ShellIsland;
+  readonly options: BootEditorOptions;
 }): ReactElement {
-  const { host, island } = props;
+  const { host, island, options } = props;
   // The first client render must match the server markup, which was rendered
   // before hydration and always in the framed state, so `hydrated` and
   // `layout` change only after it.
@@ -58,6 +62,23 @@ function ShellRoot(props: {
     setHydrated(true);
     host.dataset.hydrated = '';
   }, [host]);
+
+  // The host's block edit modules load once, after hydration and in edit mode
+  // only. The map waits here for the frame runtime that calls the hooks.
+  const [, setBlockHooks] = useState<ReadonlyMap<string, BlockEditHooks>>(
+    () => new Map(),
+  );
+  const blockEdit = options.blockEdit;
+  useEffect(() => {
+    if (!hydrated || blockEdit === undefined) return undefined;
+    let cancelled = false;
+    void loadBlockEditModules(blockEdit).then((loaded) => {
+      if (!cancelled) setBlockHooks(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, blockEdit]);
 
   // Follow the document in the frame: its links, its title, a failed render
   // and a navigation that took it somewhere else.
@@ -105,8 +126,12 @@ export function mountShell(
   host: HTMLElement,
   shadowRoot: ShadowRoot,
   island: ShellIsland,
+  options: BootEditorOptions = {},
 ): Root | null {
   const container = shadowRoot.getElementById(SHELL_ROOT_ID);
   if (container === null) return null;
-  return hydrate(container, <ShellRoot host={host} island={island} />);
+  return hydrate(
+    container,
+    <ShellRoot host={host} island={island} options={options} />,
+  );
 }
