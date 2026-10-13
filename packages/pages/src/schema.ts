@@ -137,6 +137,7 @@ export const pageBlocks = pgTable(
       .$type<Record<string, unknown>>()
       .notNull()
       .default({}),
+    layout: jsonb('layout').$type<Record<string, unknown>>(),
     schemaVersion: integer('schema_version').notNull(),
     depth: integer('depth').notNull(),
     sortOrder: integer('sort_order').notNull(),
@@ -151,6 +152,10 @@ export const pageBlocks = pgTable(
     check(
       'page_blocks_props_object_check',
       sql`jsonb_typeof(${table.props}) = 'object'`,
+    ),
+    check(
+      'page_blocks_layout_object_check',
+      sql`${table.layout} IS NULL OR jsonb_typeof(${table.layout}) = 'object'`,
     ),
     check('page_blocks_schema_version_check', sql`${table.schemaVersion} >= 1`),
     check('page_blocks_depth_check', sql`${table.depth} >= 0`),
@@ -188,6 +193,7 @@ export const blockRevisions = pgTable(
     sortOrder: integer('sort_order').notNull(),
     depth: integer('depth').notNull(),
     props: jsonb('props').notNull(),
+    layout: jsonb('layout').$type<Record<string, unknown>>(),
     schemaVersion: integer('schema_version').notNull(),
     authorId: text('author_id'),
     createdAt: timestamptz('created_at').notNull(),
@@ -204,6 +210,10 @@ export const blockRevisions = pgTable(
     check(
       'block_revisions_props_object_check',
       sql`jsonb_typeof(${table.props}) = 'object'`,
+    ),
+    check(
+      'block_revisions_layout_object_check',
+      sql`${table.layout} IS NULL OR jsonb_typeof(${table.layout}) = 'object'`,
     ),
     index('block_revisions_owner_created_idx').on(
       table.ownerType,

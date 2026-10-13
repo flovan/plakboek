@@ -347,6 +347,7 @@ describe('definePagesConfig re-registers constrained definitions (registry wirin
       locale: 'en',
       parentBlockId: null,
       blockType: 'wiredCard',
+      layout: null,
       // Raw stored props still carry a value for the now-hidden `image`
       // property (a row written before the constraint existed, or by a
       // caller that reached storage some other way) -- `buildSnapshotTree`

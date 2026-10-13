@@ -23,6 +23,7 @@ import {
 } from './compatibility.js';
 import type { PagesDeps } from './config.js';
 import { reportPagesWarning } from './config.js';
+import { readStoredLayout } from './layout.js';
 import {
   BlockPropsValidationError,
   getBlockDefinition,
@@ -216,6 +217,7 @@ export async function compactBlockType(
           .select({
             id: pageBlocks.id,
             props: pageBlocks.props,
+            layout: pageBlocks.layout,
             schemaVersion: pageBlocks.schemaVersion,
             ownerType: pageBlocks.ownerType,
             ownerId: pageBlocks.ownerId,
@@ -290,6 +292,7 @@ export async function compactBlockType(
             sortOrder: row.sortOrder,
             depth: row.depth,
             props: validated,
+            layout: readStoredLayout(row.layout),
             schemaVersion: definition.schemaVersion,
             authorId: actor.userId,
             createdAt: updatedAt,

@@ -3,6 +3,7 @@
  * (and the frozen const tuples their unions derive from) only -- no
  * runtime logic lives here.
  */
+import type { BlockLayout } from './layout.js';
 
 export const PAGE_STATUSES = Object.freeze([
   'draft',
@@ -74,6 +75,9 @@ export type BlockRecord = {
   readonly parentBlockId: string | null;
   readonly blockType: string;
   readonly props: unknown;
+  /** Section column ratio and alignment, or a fill-capable block's fill
+   * flag (D-33). Stored apart from `props`; null when no layout is set. */
+  readonly layout: BlockLayout | null;
   readonly schemaVersion: number;
   readonly depth: number;
   readonly sortOrder: number;

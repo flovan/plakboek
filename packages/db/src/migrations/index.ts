@@ -2,6 +2,7 @@ import type { Migration } from '../migrate.js';
 import { migration as m0001 } from './0001_auth_core.js';
 import { migration as m0002 } from './0002_content_engine.js';
 import { migration as m0003 } from './0003_page_block_engine.js';
+import { migration as m0004 } from './0004_block_layout.js';
 
 /**
  * The static migration registry for @plakboek/db (D-03).
@@ -21,6 +22,8 @@ import { migration as m0003 } from './0003_page_block_engine.js';
  * and the audit log. `0002_content_engine` is the second: the content-type,
  * field and entry tables `@plakboek/content` builds on. `0003_page_block_engine`
  * is the third: the page and block-tree tables `@plakboek/pages` builds on.
+ * `0004_block_layout` is the fourth: the nullable `layout` column on
+ * `page_blocks` and `block_revisions`.
  * The runner's failure modes (ordering, checksums, partial application,
  * locking) are exercised through fixture registries in this package's own
  * tests (tests/fixtures/migrations.ts).
@@ -29,4 +32,5 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
   m0001,
   m0002,
   m0003,
+  m0004,
 ]);

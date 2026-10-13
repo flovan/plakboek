@@ -24,6 +24,11 @@ import type {
 import { getRevisionCap } from '@plakboek/content';
 import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { PagesDeps, PagesHooks } from './config.js';
+import {
+  readStoredLayout,
+  validateBlockLayout,
+  type BlockLayout,
+} from './layout.js';
 import { assertPageWritable } from './locks.js';
 import {
   needsRebalance,
@@ -136,6 +141,7 @@ function toBlockRecordFromRow(
     parentBlockId: row.parentBlockId,
     blockType: row.blockType,
     props: row.props,
+    layout: readStoredLayout(row.layout),
     schemaVersion: row.schemaVersion,
     depth: row.depth,
     sortOrder: row.sortOrder,
@@ -203,6 +209,7 @@ type TreeRow = {
   readonly locale: string;
   readonly blockType: string;
   readonly props: unknown;
+  readonly layout: BlockLayout | null;
   readonly schemaVersion: number;
   readonly depth: number;
   readonly sortOrder: number;
@@ -220,6 +227,7 @@ function toTreeRow(row: Record<string, unknown>): TreeRow {
     locale: asString(row.locale, 'locale'),
     blockType: asString(row.blockType, 'blockType'),
     props: row.props,
+    layout: readStoredLayout(row.layout),
     schemaVersion: asNumber(row.schemaVersion, 'schemaVersion'),
     depth: asNumber(row.depth, 'depth'),
     sortOrder: asNumber(row.sortOrder, 'sortOrder'),
@@ -267,6 +275,7 @@ function toBlockNode(
     parentBlockId: raw.row.parentBlockId,
     blockType: raw.row.blockType,
     props: raw.row.props,
+    layout: raw.row.layout,
     schemaVersion: raw.row.schemaVersion,
     depth: raw.row.depth,
     sortOrder: raw.row.sortOrder,
@@ -344,7 +353,7 @@ export async function readBlockTree(
     WITH RECURSIVE tree AS (
       SELECT
         id, parent_block_id, owner_type, owner_id, locale, block_type,
-        props, schema_version, depth, sort_order, version, created_at,
+        props, layout, schema_version, depth, sort_order, version, created_at,
         updated_at, ARRAY[sort_order] AS sort_path
       FROM page_blocks
       WHERE owner_type = ${owner.ownerType}
@@ -356,15 +365,15 @@ export async function readBlockTree(
 
       SELECT
         pb.id, pb.parent_block_id, pb.owner_type, pb.owner_id, pb.locale,
-        pb.block_type, pb.props, pb.schema_version, pb.depth, pb.sort_order,
-        pb.version, pb.created_at, pb.updated_at,
+        pb.block_type, pb.props, pb.layout, pb.schema_version, pb.depth,
+        pb.sort_order, pb.version, pb.created_at, pb.updated_at,
         tree.sort_path || pb.sort_order
       FROM page_blocks pb
       JOIN tree ON pb.parent_block_id = tree.id
     )
     SELECT
       id, parent_block_id AS "parentBlockId", owner_type AS "ownerType",
-      owner_id AS "ownerId", locale, block_type AS "blockType", props,
+      owner_id AS "ownerId", locale, block_type AS "blockType", props, layout,
       schema_version AS "schemaVersion", depth, sort_order AS "sortOrder",
       version, created_at AS "createdAt", updated_at AS "updatedAt"
     FROM tree
@@ -382,6 +391,9 @@ export type InsertBlockInput = {
   readonly parentBlockId: string | null;
   readonly sortOrder?: number;
   readonly props?: unknown;
+  /** Section ratio/alignment or a fill flag (D-33), validated against the
+   * block's declaration and the configured column presets. */
+  readonly layout?: unknown;
   readonly basePageVersion: number;
 };
 
@@ -466,6 +478,11 @@ export async function insertBlock(
       });
 
       const validatedProps = validateBlockProps(definition, input.props ?? {});
+      const validatedLayout = validateBlockLayout(
+        definition,
+        input.layout,
+        deps.config.columnPresets,
+      );
 
       let sortOrder = input.sortOrder;
       if (sortOrder === undefined) {
@@ -495,6 +512,7 @@ export async function insertBlock(
           parentBlockId: input.parentBlockId,
           blockType: input.blockType,
           props: validatedProps,
+          layout: validatedLayout,
           schemaVersion: definition.schemaVersion,
           depth,
           sortOrder,
@@ -521,6 +539,7 @@ export async function insertBlock(
         sortOrder: record.sortOrder,
         depth: record.depth,
         props: record.props,
+        layout: record.layout,
         schemaVersion: record.schemaVersion,
         authorId: actor.userId,
         createdAt,
@@ -546,6 +565,9 @@ export type UpdateBlockPropsInput = {
   readonly blockId: string;
   readonly baseVersion: number;
   readonly props: unknown;
+  /** Undefined keeps the stored layout, null clears it, anything else is
+   * validated and replaces it (D-33). */
+  readonly layout?: unknown;
 };
 
 /**
@@ -614,12 +636,21 @@ export async function updateBlockProps(
 
       const definition = getBlockDefinition(current.blockType);
       const validatedProps = validateBlockProps(definition, input.props);
+      const validatedLayout =
+        input.layout === undefined
+          ? undefined
+          : validateBlockLayout(
+              definition,
+              input.layout,
+              deps.config.columnPresets,
+            );
 
       const updatedAt = now();
       const [row] = await tx
         .update(pageBlocks)
         .set({
           props: validatedProps,
+          ...(validatedLayout === undefined ? {} : { layout: validatedLayout }),
           version: sql`${pageBlocks.version} + 1`,
           updatedAt,
           updatedBy: actor.userId,
@@ -655,6 +686,7 @@ export async function updateBlockProps(
         sortOrder: record.sortOrder,
         depth: record.depth,
         props: record.props,
+        layout: record.layout,
         schemaVersion: record.schemaVersion,
         authorId: actor.userId,
         createdAt: updatedAt,
@@ -1045,6 +1077,7 @@ export async function moveBlock(
         sortOrder: current.sortOrder,
         depth: current.depth,
         props: current.props,
+        layout: readStoredLayout(current.layout),
         schemaVersion: current.schemaVersion,
         authorId: actor.userId,
         createdAt: updatedAt,
@@ -1072,6 +1105,7 @@ type DeleteSubtreeRow = {
   readonly parentBlockId: string | null;
   readonly blockType: string;
   readonly props: unknown;
+  readonly layout: BlockLayout | null;
   readonly schemaVersion: number;
   readonly depth: number;
   readonly sortOrder: number;
@@ -1088,21 +1122,21 @@ async function loadSubtreeForDelete(
 ): Promise<readonly DeleteSubtreeRow[]> {
   const result = await db.execute(sql`
     WITH RECURSIVE subtree AS (
-      SELECT id, parent_block_id, block_type, props, schema_version, depth,
-        sort_order, ARRAY[sort_order] AS sort_path
+      SELECT id, parent_block_id, block_type, props, layout, schema_version,
+        depth, sort_order, ARRAY[sort_order] AS sort_path
       FROM page_blocks
       WHERE id = ${rootBlockId}
 
       UNION ALL
 
-      SELECT pb.id, pb.parent_block_id, pb.block_type, pb.props,
+      SELECT pb.id, pb.parent_block_id, pb.block_type, pb.props, pb.layout,
         pb.schema_version, pb.depth, pb.sort_order,
         subtree.sort_path || pb.sort_order
       FROM page_blocks pb
       JOIN subtree ON pb.parent_block_id = subtree.id
     )
     SELECT id, parent_block_id AS "parentBlockId", block_type AS "blockType",
-      props, schema_version AS "schemaVersion", depth,
+      props, layout, schema_version AS "schemaVersion", depth,
       sort_order AS "sortOrder"
     FROM subtree
     ORDER BY sort_path
@@ -1112,6 +1146,7 @@ async function loadSubtreeForDelete(
     parentBlockId: asNullableString(row.parentBlockId),
     blockType: asString(row.blockType, 'blockType'),
     props: row.props,
+    layout: readStoredLayout(row.layout),
     schemaVersion: asNumber(row.schemaVersion, 'schemaVersion'),
     depth: asNumber(row.depth, 'depth'),
     sortOrder: asNumber(row.sortOrder, 'sortOrder'),
@@ -1278,6 +1313,7 @@ export async function deleteBlock(
           sortOrder: row.sortOrder,
           depth: row.depth,
           props: row.props,
+          layout: row.layout,
           schemaVersion: row.schemaVersion,
           authorId: actor.userId,
           createdAt: deletedAt,

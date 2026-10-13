@@ -21,6 +21,7 @@ import type {
 import { normalizeEntrySeo } from '@plakboek/content';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { PagesDeps, PagesHooks } from './config.js';
+import type { BlockLayout } from './layout.js';
 import { assertPageWritable } from './locks.js';
 import { getPage, loadPageForUpdate, PageNotFoundError } from './pages.js';
 import {
@@ -55,6 +56,9 @@ export type SnapshotBlock = {
   readonly blockType: string;
   readonly schemaVersion: number;
   readonly props: Readonly<Record<string, unknown>>;
+  /** Present only when the block has a layout (D-33); a block without one
+   * serialises exactly as it did before layout existed. */
+  readonly layout?: BlockLayout;
   readonly children: readonly SnapshotBlock[];
 };
 
@@ -149,6 +153,7 @@ export function buildSnapshotTree(nodes: readonly BlockNode[]): PageSnapshot {
       blockType: node.blockType,
       schemaVersion: node.schemaVersion,
       props: Object.freeze(orderedProps),
+      ...(node.layout === null ? {} : { layout: node.layout }),
       children: Object.freeze(node.children.map(toSnapshotBlock)),
     };
   }
@@ -407,6 +412,7 @@ async function materialisePublication(
         sortOrder: node.sortOrder,
         depth: node.depth,
         props: node.props,
+        layout: node.layout,
         schemaVersion: node.schemaVersion,
         authorId: actor.userId,
         createdAt: publishedAt,

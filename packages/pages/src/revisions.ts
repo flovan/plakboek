@@ -25,6 +25,7 @@ import {
   loadParentForPlacement,
   SectionNestingDepthExceededError,
 } from './placement.js';
+import { readStoredLayout, type BlockLayout } from './layout.js';
 import {
   BlockPropsValidationError,
   getBlockDefinition,
@@ -60,6 +61,8 @@ export type RecordBlockRevisionInput = {
   readonly sortOrder: number;
   readonly depth: number;
   readonly props: unknown;
+  /** The block's layout at the moment of this revision (D-33). */
+  readonly layout: BlockLayout | null;
   readonly schemaVersion: number;
   readonly authorId: string | null;
   readonly createdAt: Date;
@@ -99,6 +102,7 @@ export async function recordBlockRevision(
       sortOrder: input.sortOrder,
       depth: input.depth,
       props: input.props,
+      layout: input.layout,
       schemaVersion: input.schemaVersion,
       authorId: input.authorId,
       createdAt: input.createdAt,
@@ -911,6 +915,7 @@ export async function restoreRevisionBatch(
             parentBlockId: raw.parentBlockId,
             blockType: block.blockType,
             props: validatedProps,
+            layout: readStoredLayout(raw.layout),
             schemaVersion: definition.schemaVersion,
             depth: raw.depth,
             sortOrder: raw.sortOrder,
@@ -932,6 +937,7 @@ export async function restoreRevisionBatch(
             sortOrder: raw.sortOrder,
             depth: raw.depth,
             props: validatedProps,
+            layout: readStoredLayout(raw.layout),
             schemaVersion: definition.schemaVersion,
             authorId: actor.userId,
             createdAt: restoredAt,
@@ -1016,6 +1022,7 @@ export async function restoreRevisionBatch(
             sortOrder: current.sortOrder,
             depth: current.depth,
             props: current.props,
+            layout: readStoredLayout(current.layout),
             schemaVersion: current.schemaVersion,
             authorId: actor.userId,
             createdAt: restoredAt,
@@ -1061,6 +1068,7 @@ export async function restoreRevisionBatch(
             sortOrder: updated.sortOrder,
             depth: updated.depth,
             props: updated.props,
+            layout: readStoredLayout(updated.layout),
             schemaVersion: updated.schemaVersion,
             authorId: actor.userId,
             createdAt: restoredAt,
