@@ -26,6 +26,9 @@ const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   createEditEntrypoint: 'function',
   // server/cms-pages
   createCmsPages: 'function',
+  // server/api
+  createEditorApi: 'function',
+  EDITOR_API_BODY_LIMIT_BYTES: 'constant',
   // chrome/styles
   chromeStyleElement: 'function',
   CHROME_STYLE_CSP_HASH: 'constant',
@@ -37,6 +40,9 @@ const SERVER_TYPES: readonly string[] = Object.freeze([
   // server/cms-pages
   'CmsPages',
   'CmsPagesDeps',
+  // server/api/handler
+  'EditorApi',
+  'EditorApiDeps',
   // server/assets
   'EditorAssets',
   'EditorDevScript',
