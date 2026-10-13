@@ -25,6 +25,7 @@ import {
   type EditablePage,
 } from './helpers/pages.ts';
 import { signIn } from './helpers/session.ts';
+import { createTestUser } from './helpers/users.ts';
 
 const SECTION_A = 'section.section >> nth=0';
 const SECTION_B = 'section.section >> nth=1';
@@ -284,5 +285,56 @@ test.describe('a user who cannot edit', () => {
       'true',
     );
     await expect(page.locator(SELECTED)).toHaveCount(0);
+  });
+});
+
+test.describe('the page lock while editing', () => {
+  test('a second editor gets the page without the tools while the first holds it, and gets the lock once the first leaves', async ({
+    page,
+    browser,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+
+    const second = await browser.newContext({
+      baseURL: process.env.E2E_BASE_URL,
+      viewport: { width: 1400, height: 900 },
+    });
+    try {
+      const other = await createTestUser({ roleKey: 'editor' });
+      const page2 = await second.newPage();
+      await signIn(page2, other);
+      await page2.goto(`${created.path}?_edit=1`);
+      await waitForShell(page2);
+
+      // the page is shown as a visitor would see it: no tools, no claim
+      await expect(page2.locator(HOST)).toHaveAttribute(
+        'data-session',
+        'locked',
+      );
+      await expect(page2.locator(`${HOST} [data-tools]`)).toHaveCount(0);
+      await expect(page2.locator(FRAME)).not.toHaveAttribute('tabindex');
+      // and the first editor keeps editing
+      await expect(page.locator(HOST)).toHaveAttribute(
+        'data-session',
+        'editing',
+      );
+      await expect(page.locator(MODE_GROUP)).toBeVisible();
+
+      // the first editor leaves the page: its lock is released
+      await page.goto('/about');
+      await expect(async () => {
+        await page2.reload();
+        await waitForShell(page2);
+        await expect(page2.locator(HOST)).toHaveAttribute(
+          'data-session',
+          'editing',
+          { timeout: 2000 },
+        );
+      }).toPass({ timeout: 20_000 });
+      await expect(page2.locator(MODE_GROUP)).toBeVisible();
+    } finally {
+      await second.close();
+    }
   });
 });

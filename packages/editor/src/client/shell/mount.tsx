@@ -23,6 +23,7 @@ import { loadBlockEditModules } from '../frame/block-edit-loader.js';
 import { hitChain } from '../frame/hit-test.js';
 import { createHooksRuntime } from '../frame/hooks-runtime.js';
 import { createApiClient } from '../session/api-client.js';
+import { startLockClient } from '../session/lock-client.js';
 import { createEditorQueryClient } from '../session/query-client.js';
 import {
   climb,
@@ -123,6 +124,7 @@ function Shell(props: {
   const [store] = useState(createEditorStore);
   const [api] = useState(() => createApiClient());
   const status = useEditorStore(store, (state) => state.status);
+  const session = useEditorStore(store, (state) => state.session);
   // The first client render must match the server markup, which was rendered
   // before hydration and always in the framed state, so `hydrated` and
   // `layout` change only after it.
@@ -359,6 +361,31 @@ function Shell(props: {
       frame.removeAttribute('tabindex');
     };
   }, [host, hydrated, editable, status, store, changeMode, climbSelection]);
+
+  // The lock is held while editing: renewed on a heartbeat, again when the tab
+  // is shown, and released when the page goes away.
+  useEffect(() => {
+    if (
+      !hydrated ||
+      session === null ||
+      status !== 'editing' ||
+      !session.lock.enabled ||
+      session.lock.state !== 'mine'
+    ) {
+      return undefined;
+    }
+    return startLockClient({
+      api,
+      pageId: session.pageId,
+      heartbeatSeconds: session.limits.heartbeatSeconds,
+      onLock: (view) => {
+        store.setLock(view);
+      },
+      onLost: (view) => {
+        store.setLock(view);
+      },
+    });
+  }, [hydrated, session, status, api, store]);
 
   // Follow the document in the frame: its links, its title, a failed render
   // and a navigation that took it somewhere else.
