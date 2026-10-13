@@ -1,4 +1,8 @@
-import type { ModelKind, ModelNode } from '../../../src/api-types.js';
+import type {
+  CatalogueEntry,
+  ModelKind,
+  ModelNode,
+} from '../../../src/api-types.js';
 
 /** A nested description of a page tree, flattened into model nodes by `buildNodes`. */
 export type Spec = {
@@ -62,4 +66,26 @@ export function buildNodes(roots: readonly Spec[]): ModelNode[] {
   };
   visit(roots, null, 0);
   return nodes;
+}
+
+/** A catalogue entry with the placement defaults a plain declaration gets. */
+export function catalogueEntry(
+  key: string,
+  kind: ModelKind,
+  placement: Partial<CatalogueEntry['placement']> = {},
+): CatalogueEntry {
+  return {
+    key,
+    kind,
+    editor: { label: key },
+    placement: {
+      ownerTypes: ['page'],
+      allowedParents: 'any',
+      allowedChildren: kind === 'block' ? 'none' : 'any',
+      ...placement,
+    },
+    supportsFill: false,
+    starterChildren: [],
+    properties: [],
+  };
 }
