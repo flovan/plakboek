@@ -474,19 +474,46 @@ batch is limited to `BLOCK_EDIT_MAX_OPS` operations and
 it never publishes, never changes what visitors receive and never purges a
 cache.
 
-| Export                 | Kind     | Purpose                                                                                                   |
-| ---------------------- | -------- | --------------------------------------------------------------------------------------------------------- |
-| `applyBlockEdit`       | function | Applies a batch of insert, update, move and delete operations to one page atomically                      |
-| `BLOCK_EDIT_MAX_NODES` | constant | `500`: the most blocks one batch may insert, subtrees included                                            |
-| `BLOCK_EDIT_MAX_OPS`   | constant | `50`: the most operations one batch may hold                                                              |
-| `BlockEditLimitError`  | class    | A batch is empty, holds too many operations or inserts too many blocks (`limit`: `empty`, `ops`, `nodes`) |
-| `BlockIdConflictError` | class    | An inserted node supplies an id that is already in use                                                    |
-| `BlockOwnershipError`  | class    | A batch names a block that belongs to another page, locale or owner                                       |
-| `BlockEditInput`       | type     | Input to `applyBlockEdit`: page id, base page version and the operations                                  |
-| `BlockEditNode`        | type     | One block to insert, with an optional client id and subtree                                               |
-| `BlockEditOp`          | type     | One insert, update, move or delete operation                                                              |
-| `BlockEditPosition`    | type     | A parent and the siblings a block goes between                                                            |
-| `BlockEditResult`      | type     | The new page version, the revision batch id and the created, updated, moved and deleted ids               |
+| Export                       | Kind     | Purpose                                                                                                   |
+| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------- |
+| `applyBlockEdit`             | function | Applies a batch of insert, update, move, delete and duplicate operations to one page atomically           |
+| `BLOCK_EDIT_MAX_NODES`       | constant | `500`: the most blocks one batch may insert, subtrees included                                            |
+| `BLOCK_EDIT_MAX_OPS`         | constant | `50`: the most operations one batch may hold                                                              |
+| `BlockEditLimitError`        | class    | A batch is empty, holds too many operations or inserts too many blocks (`limit`: `empty`, `ops`, `nodes`) |
+| `BlockIdConflictError`       | class    | An inserted node supplies an id that is already in use                                                    |
+| `BlockOwnershipError`        | class    | A batch names a block that belongs to another page, locale or owner                                       |
+| `SectionColumnRequiredError` | class    | A batch would leave a section without a column                                                            |
+| `BlockEditInput`             | type     | Input to `applyBlockEdit`: page id, base page version and the operations                                  |
+| `BlockEditNode`              | type     | One block to insert, with an optional client id and subtree                                               |
+| `BlockEditOp`                | type     | One insert, update, move, delete or duplicate operation                                                   |
+| `BlockEditPosition`          | type     | A parent and the siblings a block goes between                                                            |
+| `BlockEditResult`            | type     | The new page version, the revision batch id and the created, updated, moved and deleted ids               |
+
+### Column shape upgrade (D-03)
+
+Trees written before the column kind existed have blocks directly under their
+sections. `upgradeSectionColumns` brings one page's working tree into the
+column shape without losing anything: each section holding a non-column child
+(or no child) gets one new column, the non-column children move into it in
+their existing order, every block below them sits one level deeper, the page
+version is bumped once and the change is recorded as one revision batch with no
+author (a create for each new column, a move for each re-parented child). It
+runs once per page: a second run changes nothing, and two runs racing on one
+page serialise on an advisory lock. It is a system data migration, so it writes
+no audit row, never publishes and never purges a cache. It runs in the
+background at boot (`upgradeAllSectionColumns`, at most 50 pages per call) and
+when an editor opens a page; there is no guarantee beyond that. Published
+snapshots are immutable and never rewritten: `resolvePublishedPage` wraps a
+flat snapshot's section children in a synthetic column
+(`normaliseSnapshotColumns`) so old publications render on the column grid
+until the page is published again. All three are no-ops when the registry has
+no column kind.
+
+| Export                     | Kind     | Purpose                                                                             |
+| -------------------------- | -------- | ----------------------------------------------------------------------------------- |
+| `upgradeSectionColumns`    | function | Upgrades one page's flat tree to the column shape; idempotent and race-safe         |
+| `upgradeAllSectionColumns` | function | Upgrades pages that still need it, in bounded batches                               |
+| `normaliseSnapshotColumns` | function | Wraps a flat published snapshot's section children in a synthetic column, in memory |
 
 ### Block revisions and restore (D-26..D-29, D-13)
 
@@ -610,26 +637,36 @@ it is republished too (redirects over `page_url_history` arrive in Phase 16).
 
 ### Page+locale edit locking (D-39..D-41, D-44)
 
-| Export                             | Kind     | Purpose                                                              |
-| ---------------------------------- | -------- | -------------------------------------------------------------------- |
-| `acquirePageLock`                  | function | Acquires the lock on one page locale row -- the open call            |
-| `isPageLockLive`                   | function | Whether a lock is still live, given its holder, `lockedAt` and now   |
-| `PAGE_EDIT_LOCK_HEARTBEAT_SECONDS` | constant | `30`: how often a holder should renew                                |
-| `PAGE_EDIT_LOCK_TTL_SECONDS`       | constant | `120`: how long a lock stays live with no renewal                    |
-| `PageLockedError`                  | class    | A write, acquire or renew refused by another user's live lock        |
-| `PageLockingDisabledError`         | class    | `acquirePageLock` called while the project-wide toggle is off        |
-| `PageLockNotFoundError`            | class    | A lock operation names a page id that no longer exists               |
-| `PageLockStateChangedError`        | class    | A takeover's decision went stale between the pre-check and the write |
-| `PageLockTakeoverForbiddenError`   | class    | The caller's permissions are not a superset of the current holder's  |
-| `releasePageLock`                  | function | Releases the lock on one page locale row -- the navigate-away call   |
-| `renewPageLock`                    | function | Renews the current holder's lock -- the heartbeat call               |
-| `takeOverPageLock`                 | function | Takes over another user's live lock; needs a permission superset     |
-| `AcquirePageLockInput`             | type     | Input to `acquirePageLock`                                           |
-| `PageLockGrant`                    | type     | The result of `acquirePageLock`                                      |
-| `PageLockState`                    | type     | The lock's shape on a page row -- what `takeOverPageLock` returns    |
-| `ReleasePageLockInput`             | type     | Input to `releasePageLock`                                           |
-| `RenewPageLockInput`               | type     | Input to `renewPageLock`                                             |
-| `TakeOverPageLockInput`            | type     | Input to `takeOverPageLock`                                          |
+| Export                             | Kind     | Purpose                                                                 |
+| ---------------------------------- | -------- | ----------------------------------------------------------------------- |
+| `acquirePageLock`                  | function | Acquires the lock on one page locale row -- the open call               |
+| `isPageLockLive`                   | function | Whether a lock is still live, given its holder, `lockedAt` and now      |
+| `PAGE_EDIT_LOCK_HEARTBEAT_SECONDS` | constant | `30`: how often a holder should renew                                   |
+| `PAGE_EDIT_LOCK_TTL_SECONDS`       | constant | `120`: how long a lock stays live with no renewal                       |
+| `PageLockedError`                  | class    | A write, acquire or renew refused by another user's live lock           |
+| `PageLockingDisabledError`         | class    | `acquirePageLock` called while the project-wide toggle is off           |
+| `PageLockNotFoundError`            | class    | A lock operation names a page id that no longer exists                  |
+| `PageLockStateChangedError`        | class    | A takeover's decision went stale between the pre-check and the write    |
+| `PageLockTakeoverForbiddenError`   | class    | The caller's permissions are not a superset of the current holder's     |
+| `readPageLockView`                 | function | Reads a page's lock for the banner: state, holder name, takeover right  |
+| `releasePageLock`                  | function | Releases the lock on one page locale row -- the navigate-away call      |
+| `renewPageLock`                    | function | Renews the current holder's lock -- the heartbeat call                  |
+| `takeOverPageLock`                 | function | Takes over another user's live lock; needs a permission superset        |
+| `AcquirePageLockInput`             | type     | Input to `acquirePageLock`                                              |
+| `PageLockGrant`                    | type     | The result of `acquirePageLock`                                         |
+| `PageLockState`                    | type     | The lock's shape on a page row -- what `takeOverPageLock` returns       |
+| `PageLockView`                     | type     | What the editor may see of a lock: state, holder name and last activity |
+| `ReleasePageLockInput`             | type     | Input to `releasePageLock`                                              |
+| `RenewPageLockInput`               | type     | Input to `renewPageLock`                                                |
+| `TakeOverPageLockInput`            | type     | Input to `takeOverPageLock`                                             |
+
+**The lock view.** `readPageLockView` tells an editor whether locking is on,
+whether the page is free, theirs or someone else's, the holder's display name
+and last activity (`locked_at`, renewed by every heartbeat), when their own
+lock expires and whether they may take it over (their permissions are a
+superset of the holder's current role's). It needs `pages:edit`, like
+`acquirePageLock`. The holder is only ever a name and a last-active time: no
+email address, role or user id reaches another editor.
 
 **Deliberately lock-exempt.** `compactBlockType` (schema compaction),
 `setPageUrlPattern` (the project-wide URL pattern change) and `purgeLocale`

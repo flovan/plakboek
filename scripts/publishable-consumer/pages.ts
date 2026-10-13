@@ -7,6 +7,12 @@ import {
   BlockEditLimitError,
   BlockIdConflictError,
   BlockOwnershipError,
+  normaliseSnapshotColumns,
+  readPageLockView,
+  SectionColumnRequiredError,
+  upgradeAllSectionColumns,
+  upgradeSectionColumns,
+  type PageLockView,
   type BlockEditInput,
   type BlockEditNode,
   type BlockEditOp,
@@ -287,6 +293,10 @@ import * as pages from '@plakboek/pages';
 const functions: Record<string, unknown> = {
   acquirePageLock,
   applyBlockEdit,
+  normaliseSnapshotColumns,
+  readPageLockView,
+  upgradeAllSectionColumns,
+  upgradeSectionColumns,
   findMissingRequiredProps,
   previewBlockValues,
   resolveColumnPresets,
@@ -371,6 +381,7 @@ const errorClasses: Record<string, unknown> = {
   BlockEditLimitError,
   BlockIdConflictError,
   BlockOwnershipError,
+  SectionColumnRequiredError,
   BlockLayoutValidationError,
   BlockCompatibilityError,
   BlockConfigError,
@@ -1243,6 +1254,13 @@ const pageLockState: PageLockState = {
   lockedBy: null,
   lockedAt: null,
 };
+const pageLockView: PageLockView = {
+  enabled: true,
+  state: 'other',
+  holder: { name: 'Editor', lastActiveAt: new Date(0) },
+  canTakeOver: false,
+  expiresAt: null,
+};
 const releasePageLockInput: ReleasePageLockInput = { pageId: 'page-id' };
 const renewPageLockInput: RenewPageLockInput = { pageId: 'page-id' };
 const takeOverPageLockInput: TakeOverPageLockInput = { pageId: 'page-id' };
@@ -1431,6 +1449,7 @@ const typeProofs: unknown[] = [
   acquirePageLockInput,
   pageLockGrant,
   pageLockState,
+  pageLockView,
   releasePageLockInput,
   renewPageLockInput,
   takeOverPageLockInput,

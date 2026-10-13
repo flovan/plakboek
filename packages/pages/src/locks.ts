@@ -569,3 +569,119 @@ export async function takeOverPageLock(
     },
   );
 }
+
+/**
+ * What an editor is shown about a page's lock: whether locking is on at all,
+ * whether the page is free, held by the viewer (`mine`) or held by someone
+ * else (`other`), who holds it and when they were last active, whether the
+ * viewer may take it over, and when the viewer's own lock runs out.
+ *
+ * Deliberately a closed shape: the holder is only ever a display name and a
+ * last-active time. Their email address, role and user id never leave this
+ * function, so one editor cannot learn more about another than the banner
+ * needs.
+ */
+export type PageLockView = {
+  /** The project-wide page edit-lock toggle (D-40). When off, every other
+   * field reads as "free". */
+  readonly enabled: boolean;
+  readonly state: 'free' | 'mine' | 'other';
+  /** The holder of a live lock that is not the viewer's; null otherwise.
+   * `lastActiveAt` is `locked_at`, which every heartbeat renews. */
+  readonly holder: {
+    readonly name: string;
+    readonly lastActiveAt: Date;
+  } | null;
+  /** True when the viewer's permissions are a superset of the holder's
+   * current role's (D-44); always false unless `state` is `other`. */
+  readonly canTakeOver: boolean;
+  /** When the viewer's own live lock lapses without another heartbeat; null
+   * unless `state` is `mine`. */
+  readonly expiresAt: Date | null;
+};
+
+/**
+ * Reads a page's lock for the editor's banner and takeover button (D-27,
+ * D-32). Needs `pages:edit` exactly like `acquirePageLock` (a refusal is
+ * recorded through `recordDenied` and throws `PermissionDeniedError`); a
+ * read-only viewer does not see who is editing. Read-only: it takes no lock
+ * and writes nothing besides a denial. Liveness is derived at read time from
+ * `locked_at` and the TTL, so a lapsed lock reads as free. The holder's name
+ * comes from `"user"` (an empty string when that user is gone) and
+ * `canTakeOver` from the same superset rule `takeOverPageLock` enforces
+ * against the holder's current role, which that function re-checks on the
+ * write itself.
+ */
+export async function readPageLockView(
+  deps: PagesDeps,
+  actor: AuditActor,
+  input: { readonly pageId: string },
+): Promise<PageLockView> {
+  const actorPermissions = deps.resolver.resolve(actor.roleKey, {
+    userId: actor.userId,
+  });
+  if (!actorPermissions.has('pages:edit')) {
+    await deps.recorder.recordDenied(actor, {
+      permission: 'pages:edit',
+      action: 'page.lock-view',
+      entityType: 'page',
+      entityId: input.pageId,
+    });
+    throw new PermissionDeniedError('pages:edit', actor.roleKey);
+  }
+
+  const [row] = await deps.db
+    .select({
+      lockedBy: pages.lockedBy,
+      lockedAt: pages.lockedAt,
+      holderName: sql<
+        string | null
+      >`(SELECT name FROM "user" WHERE id = ${pages.lockedBy})`,
+    })
+    .from(pages)
+    .where(eq(pages.id, input.pageId))
+    .limit(1);
+  if (row === undefined) {
+    throw new PageLockNotFoundError(input.pageId);
+  }
+
+  const free: PageLockView = {
+    enabled: true,
+    state: 'free',
+    holder: null,
+    canTakeOver: false,
+    expiresAt: null,
+  };
+  if (!(await getPageEditLocking(deps.db))) {
+    return { ...free, enabled: false };
+  }
+
+  const now = (deps.now ?? (() => new Date()))();
+  if (
+    row.lockedBy === null ||
+    row.lockedAt === null ||
+    !isPageLockLive(row.lockedBy, row.lockedAt, now)
+  ) {
+    return free;
+  }
+  if (row.lockedBy === actor.userId) {
+    return {
+      ...free,
+      state: 'mine',
+      expiresAt: new Date(
+        row.lockedAt.getTime() + PAGE_EDIT_LOCK_TTL_SECONDS * 1000,
+      ),
+    };
+  }
+
+  const holderRoleKey = await readUserRoleKey(deps.db, row.lockedBy);
+  return {
+    ...free,
+    state: 'other',
+    holder: { name: row.holderName ?? '', lastActiveAt: row.lockedAt },
+    canTakeOver: permissionsIncludeAll(
+      actorPermissions,
+      deps.resolver.resolve(holderRoleKey ?? ''),
+    ),
+  };
+}

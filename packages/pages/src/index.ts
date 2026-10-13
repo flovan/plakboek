@@ -379,6 +379,7 @@ export {
   BlockEditLimitError,
   BlockIdConflictError,
   BlockOwnershipError,
+  SectionColumnRequiredError,
 } from './edit-batch.js';
 export type {
   BlockEditInput,
@@ -387,6 +388,13 @@ export type {
   BlockEditPosition,
   BlockEditResult,
 } from './edit-batch.js';
+
+// columns.ts
+export {
+  normaliseSnapshotColumns,
+  upgradeAllSectionColumns,
+  upgradeSectionColumns,
+} from './columns.js';
 
 // revisions.ts
 export {
@@ -478,6 +486,7 @@ export {
   PageLockNotFoundError,
   PageLockStateChangedError,
   PageLockTakeoverForbiddenError,
+  readPageLockView,
   releasePageLock,
   renewPageLock,
   takeOverPageLock,
@@ -486,6 +495,7 @@ export type {
   AcquirePageLockInput,
   PageLockGrant,
   PageLockState,
+  PageLockView,
   ReleasePageLockInput,
   RenewPageLockInput,
   TakeOverPageLockInput,

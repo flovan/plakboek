@@ -145,6 +145,11 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   BlockEditLimitError: 'class',
   BlockIdConflictError: 'class',
   BlockOwnershipError: 'class',
+  SectionColumnRequiredError: 'class',
+  // columns
+  normaliseSnapshotColumns: 'function',
+  upgradeAllSectionColumns: 'function',
+  upgradeSectionColumns: 'function',
   // revisions
   computeBlockRestorePreview: 'function',
   DegradedRestoreError: 'class',
@@ -188,6 +193,7 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   PageLockNotFoundError: 'class',
   PageLockStateChangedError: 'class',
   PageLockTakeoverForbiddenError: 'class',
+  readPageLockView: 'function',
   releasePageLock: 'function',
   renewPageLock: 'function',
   takeOverPageLock: 'function',
@@ -347,6 +353,7 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'AcquirePageLockInput',
   'PageLockGrant',
   'PageLockState',
+  'PageLockView',
   'ReleasePageLockInput',
   'RenewPageLockInput',
   'TakeOverPageLockInput',
@@ -535,6 +542,8 @@ const ERROR_FACTORIES: Readonly<
     new (K as new (id: string) => unknown)('block-id'),
   BlockIdConflictError: (K) =>
     new (K as new (id: string) => unknown)('block-id'),
+  SectionColumnRequiredError: (K) =>
+    new (K as new (id: string) => unknown)('section-id'),
   BlockEditLimitError: (K) => new (K as new (l: string) => unknown)('ops'),
   DegradedRestoreError: (K) =>
     new (K as new (o: unknown[]) => unknown)([

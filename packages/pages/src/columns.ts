@@ -52,13 +52,6 @@ function kindOf(blockType: string): BlockDefinition['kind'] | null {
   }
 }
 
-export type SectionColumnUpgrade = {
-  /** True when this call changed the page's tree. */
-  readonly upgraded: boolean;
-  /** The page's version after the upgrade; null when nothing changed. */
-  readonly pageVersion: number | null;
-};
-
 type StoredBlock = typeof pageBlocks.$inferSelect;
 
 /**
@@ -85,7 +78,12 @@ type StoredBlock = typeof pageBlocks.$inferSelect;
 export async function upgradeSectionColumns(
   deps: PagesDeps,
   input: { readonly pageId: string },
-): Promise<SectionColumnUpgrade> {
+): Promise<{
+  /** True when this call changed the page's tree. */
+  readonly upgraded: boolean;
+  /** The page's version after the upgrade; null when nothing changed. */
+  readonly pageVersion: number | null;
+}> {
   const column = getColumnDefinition();
   if (column === null) return { upgraded: false, pageVersion: null };
 
