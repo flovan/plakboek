@@ -11,7 +11,10 @@
  * block (the head, the document composer) still fails the whole render, which
  * the handler turns into an uncached 500.
  *
- * A visitor page always passes `NOOP_EDIT` and no placeholder.
+ * A visitor page passes `NOOP_EDIT` and no placeholder. The one exception is
+ * the development server, which passes `blockMeta` so blocks carry the live
+ * edit markers the dev block swap looks for; it never reaches a cache or a
+ * production response.
  */
 import { GLOBAL_TAG, pageTag } from '@plakboek/cache';
 import type { PublishedPageView } from '@plakboek/pages';
@@ -20,6 +23,7 @@ import { renderBlocks } from './block-host.js';
 import type { ComponentMap } from './components.js';
 import { buildPageHead, type PageHead } from './head.js';
 import type { RenderHooks } from './hooks.js';
+import { liveEditFor, type BlockMeta } from './render-tree.js';
 
 export type RenderPageSnapshotInput = {
   readonly view: PublishedPageView;
@@ -28,6 +32,12 @@ export type RenderPageSnapshotInput = {
   readonly hooks?: RenderHooks;
   readonly siteUrl?: string;
   readonly resolveAssetUrl?: (assetId: string) => string | null;
+  /**
+   * Development only. When set, every block gets a live edit proxy built from
+   * this metadata (no placeholders), so its root carries the `data-pk-*`
+   * markers. Left out, the output is the visitor markup.
+   */
+  readonly blockMeta?: ReadonlyMap<string, BlockMeta>;
 };
 
 export type RenderedPage = {
@@ -53,11 +63,13 @@ export function renderPageSnapshot(
     siteUrl: input.siteUrl,
     resolveAssetUrl: input.resolveAssetUrl,
   });
+  const liveProxy =
+    input.blockMeta === undefined ? undefined : liveEditFor(input.blockMeta);
   const { body, degraded } = renderBlocks(view.publication.snapshot.blocks, {
     components,
     hooks,
     pageId,
-    editFor: () => NOOP_EDIT,
+    editFor: (node) => liveProxy?.(node) ?? NOOP_EDIT,
   });
   return {
     head,

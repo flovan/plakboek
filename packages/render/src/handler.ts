@@ -35,6 +35,7 @@ import type { RenderDocument } from './head.js';
 import { reportRenderEvent, type RenderHooks } from './hooks.js';
 import { MAX_VISITOR_PATH_LENGTH, normalizeVisitorPath } from './path.js';
 import { renderPageSnapshot } from './render-snapshot.js';
+import type { BlockMeta } from './render-tree.js';
 import { createSingleFlight } from './single-flight.js';
 
 export type VisitorHandler = (request: Request) => Promise<Response>;
@@ -90,6 +91,14 @@ export type VisitorHandlerDeps = {
    * is bounced.
    */
   readonly edit?: EditEntrypoint;
+  /**
+   * Development only: render every block with the live edit markers
+   * (`data-pk-*`) so the development server's block swap can find blocks on a
+   * visitor page. The host sets it under the Vite dev server and never in a
+   * production build; the handler writes such pages only when no cache is
+   * configured, which is what development runs.
+   */
+  readonly devBlockMarkers?: boolean;
 };
 
 export type VisitorHandlerConfigIssue = {
@@ -208,6 +217,18 @@ function validate(deps: VisitorHandlerDeps): void {
   if (issues.length > 0) throw new VisitorHandlerConfigError(issues);
 }
 
+/** Label and kind per block type, for the development markers. */
+function devBlockMeta(
+  config: Pick<PagesConfig, 'blocks'>,
+): ReadonlyMap<string, BlockMeta> {
+  return new Map(
+    config.blocks.map((block) => [
+      block.key,
+      { label: block.editor.label, kind: block.kind } satisfies BlockMeta,
+    ]),
+  );
+}
+
 function etagOf(bytes: Uint8Array): string {
   return `"${createHash('sha256').update(bytes).digest('base64url')}"`;
 }
@@ -319,6 +340,10 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
   const renderDocument = deps.renderDocument ?? renderDefaultDocument;
   const homeSlug = deps.homeSlug ?? DEFAULT_HOME_SLUG;
   const components = createComponentMap(config.blocks, hooks);
+  const blockMeta =
+    deps.devBlockMarkers === true && cache === undefined
+      ? devBlockMeta(config)
+      : undefined;
   const encoder = new TextEncoder();
   const flights = createSingleFlight<Outcome>();
 
@@ -385,6 +410,7 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
         hooks,
         siteUrl,
         resolveAssetUrl,
+        ...(blockMeta === undefined ? {} : { blockMeta }),
       });
       // The one script a visitor page carries is part of the cached bytes.
       const html = await renderDocument({

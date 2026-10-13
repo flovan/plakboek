@@ -142,4 +142,10 @@ export type HostModule = {
   readonly edit?: EditEntrypoint | undefined;
   /** The built editor client, from the `plakboek()` Vite plugin. */
   readonly editorAssets?: EditorAssets | undefined;
+  /**
+   * Whether the host runs under the Vite dev server, from the `plakboek()`
+   * plugin. Visitor pages then carry block markers for the development block
+   * swap; it is `false` in every build.
+   */
+  readonly devMode?: boolean | undefined;
 };

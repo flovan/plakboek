@@ -11,4 +11,5 @@ declare module 'virtual:plakboek/host' {
   export const editorAssets:
     | import('@plakboek/editor/server').EditorAssets
     | undefined;
+  export const devMode: boolean;
 }

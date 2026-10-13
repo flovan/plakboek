@@ -226,6 +226,7 @@ export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
     ...(cache === undefined ? {} : { cache }),
     ...(env.buildId === undefined ? {} : { buildId: env.buildId }),
     ...siteHooks,
+    ...(host.devMode === true ? { devBlockMarkers: true } : {}),
     edit:
       host.edit ??
       composeEditor(host, { env, db, auth, resolver, siteHooks }, loadEditor),
