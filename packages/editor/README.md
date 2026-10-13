@@ -286,3 +286,24 @@ says where to look). After the shell hydrates it loads them once and keeps each
 module whose default export is `{ blockType, hooks }` with function hooks. A
 module that fails to load, has another shape, or repeats a block type is
 reported once by file key and skipped, and the first module per block type wins.
+
+### Hot entry: `@plakboek/editor/hot`
+
+| Export               | Kind     | Purpose                                                                                         |
+| -------------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `createDevBlockSwap` | function | Swaps the blocks whose own markup changed between two server renders, or reloads the page       |
+| `readSignatures`     | function | Every block of a document by id: its parent block and its own markup, nested blocks stood in    |
+| `diffSignatures`     | function | The outermost changed blocks between two signature maps, and whether the set or nesting changed |
+| `SignatureMap`       | type     | What `readSignatures` returns                                                                   |
+
+Development only, and loaded by the core dev client, never by a host or by
+the editor client. It has no React, server or chrome code in its graph. A swap
+fetches the page again and compares each block's own markup, with the blocks
+nested in it replaced by placeholders, so a change inside a child does not mark
+its parent. Only the outermost changed blocks are replaced, through the same
+fragment patch the editor uses: scripts in the new markup stay inert (a block
+re-binds through its `rendered` hook), the scroll position is put back, and a
+block that is being edited in place is left alone and tried again by the next
+swap. A change in which blocks exist or how they nest reloads the page. Each
+swap that replaces something fires `plakboek:blocks-swapped` on the document,
+with the swapped ids in `detail.ids`.
