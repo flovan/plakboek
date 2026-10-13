@@ -22,7 +22,7 @@ import type {
   AuditTransaction,
 } from '@plakboek/auth';
 import { getRevisionCap } from '@plakboek/content';
-import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm';
 import type { PagesDeps, PagesHooks } from './config.js';
 import {
   readStoredLayout,
@@ -72,6 +72,7 @@ import {
   type BlockRecord,
   type OwnerRef,
   type OwnerType,
+  type PageRecord,
 } from './types.js';
 import {
   createUpcastSession,
@@ -385,6 +386,192 @@ export async function readBlockTree(
   return Object.freeze(rawRoots.map((raw) => toBlockNode(raw, session, hooks)));
 }
 
+/**
+ * What every transactional write body below needs, already loaded by its
+ * caller: the locked page, the owner tuple the tree belongs to, the one
+ * revision batch id every revision of the call shares (D-26) and the one
+ * timestamp the call stamps its rows with. The bodies never bump the page
+ * version, never prune revisions and never open a transaction themselves:
+ * the public single-operation functions below and `applyBlockEdit`
+ * (edit-batch.ts) each do those once per call. Internal wiring, withheld
+ * from the barrel.
+ */
+export type WriteContext = {
+  readonly deps: PagesDeps;
+  readonly actor: AuditActor;
+  readonly page: PageRecord;
+  readonly ownerRef: OwnerRef;
+  readonly revisionBatchId: string;
+  readonly now: Date;
+};
+
+type PageBlockRow = typeof pageBlocks.$inferSelect;
+
+/** Loads and locks one block `FOR UPDATE`. A non-null `expectedVersion`
+ * must equal the stored version (`StaleBlockVersionError` otherwise);
+ * `null` skips the comparison, for a batch operation on a block an earlier
+ * operation of the same batch already version-checked and bumped. */
+export async function loadBlockForUpdate(
+  tx: AuditTransaction,
+  blockId: string,
+  expectedVersion: number | null,
+): Promise<PageBlockRow> {
+  const [current] = await tx
+    .select()
+    .from(pageBlocks)
+    .where(eq(pageBlocks.id, blockId))
+    .for('update');
+  if (current === undefined) {
+    throw new BlockNotFoundError(blockId);
+  }
+  if (expectedVersion !== null && current.version !== expectedVersion) {
+    throw new StaleBlockVersionError(blockId, expectedVersion, current.version);
+  }
+  return current;
+}
+
+/** The condition selecting one sibling list: every child of a block, or the
+ * roots of one owner's tree. */
+function siblingListCondition(
+  owner: OwnerRef,
+  parentBlockId: string | null,
+): SQL | undefined {
+  return parentBlockId === null
+    ? and(
+        eq(pageBlocks.ownerType, owner.ownerType),
+        eq(pageBlocks.ownerId, owner.ownerId),
+        eq(pageBlocks.locale, owner.locale),
+        isNull(pageBlocks.parentBlockId),
+      )
+    : eq(pageBlocks.parentBlockId, parentBlockId);
+}
+
+/** Always throws: a named sibling is not in the destination list, which is
+ * either because it does not exist or because it belongs to another parent
+ * (code review WR-02). */
+async function refuseSiblingReference(
+  tx: AuditTransaction,
+  siblingId: string,
+  expectedParentBlockId: string | null,
+): Promise<never> {
+  const [row] = await tx
+    .select({ parentBlockId: pageBlocks.parentBlockId })
+    .from(pageBlocks)
+    .where(eq(pageBlocks.id, siblingId));
+  if (row === undefined) {
+    throw new BlockNotFoundError(siblingId);
+  }
+  throw new InvalidSiblingReferenceError(
+    siblingId,
+    expectedParentBlockId,
+    row.parentBlockId,
+  );
+}
+
+/**
+ * Resolves the `sort_order` a block takes under `parentBlockId`, from the
+ * siblings that end up directly before and after it. With neither named it
+ * goes last. With one named, the missing neighbour is read from the stored
+ * list, so "after X" lands directly after X and never on top of whatever
+ * follows it. Every named id must belong to that exact sibling list
+ * (`BlockNotFoundError` / `InvalidSiblingReferenceError`). `excludeId` is
+ * the block being moved, left out of the list so it never counts as its own
+ * neighbour. When no integer fits between the two orders, the whole list is
+ * renumbered in one statement first (`rebalancedOrders`), and the position
+ * is computed against the fresh numbers. Shared by insert and move so the
+ * ordering arithmetic exists once.
+ */
+export async function resolvePositionSortOrder(
+  tx: AuditTransaction,
+  owner: OwnerRef,
+  parentBlockId: string | null,
+  previousSiblingId: string | null | undefined,
+  nextSiblingId: string | null | undefined,
+  excludeId: string | null,
+): Promise<number> {
+  const listCondition = siblingListCondition(owner, parentBlockId);
+  const condition =
+    excludeId === null
+      ? listCondition
+      : and(listCondition, ne(pageBlocks.id, excludeId));
+  const previousId = previousSiblingId ?? null;
+  const nextId = nextSiblingId ?? null;
+
+  if (previousId === null && nextId === null) {
+    const [siblingMax] = await tx
+      .select({ max: sql<number | null>`max(${pageBlocks.sortOrder})` })
+      .from(pageBlocks)
+      .where(condition);
+    return nextSortOrder(siblingMax?.max ?? null);
+  }
+
+  const siblings = await tx
+    .select({ id: pageBlocks.id, sortOrder: pageBlocks.sortOrder })
+    .from(pageBlocks)
+    .where(condition)
+    .orderBy(asc(pageBlocks.sortOrder), asc(pageBlocks.id))
+    .for('update');
+
+  const indexOfNamed = async (siblingId: string): Promise<number> => {
+    const index = siblings.findIndex((sibling) => sibling.id === siblingId);
+    if (index < 0) {
+      return await refuseSiblingReference(tx, siblingId, parentBlockId);
+    }
+    return index;
+  };
+  const previousIndex =
+    previousId === null ? -1 : await indexOfNamed(previousId);
+  const nextIndex = nextId === null ? -1 : await indexOfNamed(nextId);
+
+  let beforeIndex: number;
+  let afterIndex: number;
+  if (previousId !== null && nextId !== null) {
+    beforeIndex = previousIndex;
+    afterIndex = nextIndex;
+  } else if (previousId !== null) {
+    beforeIndex = previousIndex;
+    afterIndex = previousIndex + 1;
+  } else {
+    afterIndex = nextIndex;
+    beforeIndex = nextIndex - 1;
+  }
+
+  const orderAt = (index: number, orders: readonly number[]): number | null =>
+    index >= 0 && index < orders.length ? (orders[index] ?? null) : null;
+  const before = orderAt(
+    beforeIndex,
+    siblings.map((sibling) => sibling.sortOrder),
+  );
+  const after = orderAt(
+    afterIndex,
+    siblings.map((sibling) => sibling.sortOrder),
+  );
+  // Placing before a first sibling whose order is 0 has no integer left
+  // below it either.
+  const gapClosed =
+    needsRebalance(before, after) ||
+    (before === null && after !== null && after < 1);
+  if (!gapClosed) return sortOrderBetween(before, after);
+
+  const rebalanced = rebalancedOrders(siblings.length);
+  const valuesClause = sql.join(
+    siblings.map(
+      (sibling, index) =>
+        sql`(${sibling.id}::uuid, ${rebalanced[index]}::integer)`,
+    ),
+    sql`, `,
+  );
+  await tx.execute(sql`
+    UPDATE page_blocks SET sort_order = v.new_order
+    FROM (VALUES ${valuesClause}) AS v(id, new_order)
+    WHERE page_blocks.id = v.id
+  `);
+  return sortOrderBetween(
+    orderAt(beforeIndex, rebalanced),
+    orderAt(afterIndex, rebalanced),
+  );
+}
+
 export type InsertBlockInput = {
   readonly owner: OwnerRef;
   readonly blockType: string;
@@ -397,24 +584,145 @@ export type InsertBlockInput = {
   readonly basePageVersion: number;
 };
 
+/** What one insert needs once the page and owner are settled. A supplied
+ * `id` is inserted as given (a client-chosen uuid, so an undo can restore a
+ * block under its original id); otherwise the database picks one. Position
+ * is, in order of precedence, an explicit `sortOrder`, the named neighbours,
+ * or last. */
+export type InsertInTransactionInput = {
+  readonly id?: string;
+  readonly blockType: string;
+  readonly parentBlockId: string | null;
+  readonly props?: unknown;
+  readonly layout?: unknown;
+  readonly sortOrder?: number;
+  readonly previousSiblingId?: string | null;
+  readonly nextSiblingId?: string | null;
+};
+
+/**
+ * The body of one insert, inside the caller's transaction: resolves the
+ * block definition, loads and locks the parent when given and derives
+ * `depth` as `parent.depth + 1` (`0` at the root), calls
+ * `assertPlacementAllowed` (placement.ts, BLOCK-05, D-08, D-18, D-19) before
+ * any write, validates `props` leniently (a required property may still be
+ * empty in the working tree, D-21) and `layout` against the column presets,
+ * inserts with `schema_version` set to the registry's current version and
+ * records a `'create'` revision under the context's batch id. Does not
+ * bump the page version or prune.
+ */
+export async function insertBlockInTransaction(
+  tx: AuditTransaction,
+  ctx: WriteContext,
+  input: InsertInTransactionInput,
+): Promise<BlockRecord> {
+  const { deps, actor, ownerRef } = ctx;
+  const definition = getBlockDefinition(input.blockType);
+
+  let parentDefinition: BlockDefinition | null = null;
+  let sectionDefinition: BlockDefinition | null = null;
+  let parentDepth: number | null = null;
+  let parentSectionDepth = 0;
+  if (input.parentBlockId !== null) {
+    const loaded = await loadParentForPlacement(tx, input.parentBlockId);
+    if (loaded === null) {
+      throw new BlockNotFoundError(input.parentBlockId);
+    }
+    parentDepth = loaded.parentDepth;
+    parentDefinition = loaded.parentDefinition;
+    sectionDefinition = loaded.sectionDefinition;
+    parentSectionDepth = loaded.parentSectionDepth;
+  }
+  const depth = (parentDepth ?? -1) + 1;
+
+  assertPlacementAllowed({
+    owner: ownerRef,
+    child: definition,
+    parent: parentDefinition,
+    section: sectionDefinition,
+    columnsEnabled: getColumnDefinition() !== null,
+    parentDepth,
+    parentSectionDepth,
+    sectionNestingDepth: deps.config.sectionNestingDepth,
+    blockDepthCeiling: deps.config.blockDepthCeiling,
+  });
+
+  const validatedProps = validateBlockProps(definition, input.props ?? {}, {
+    allowMissingRequired: true,
+  });
+  const validatedLayout = validateBlockLayout(
+    definition,
+    input.layout,
+    deps.config.columnPresets,
+  );
+
+  const sortOrder =
+    input.sortOrder ??
+    (await resolvePositionSortOrder(
+      tx,
+      ownerRef,
+      input.parentBlockId,
+      input.previousSiblingId,
+      input.nextSiblingId,
+      null,
+    ));
+
+  const [row] = await tx
+    .insert(pageBlocks)
+    .values({
+      ...(input.id === undefined ? {} : { id: input.id }),
+      ownerType: ownerRef.ownerType,
+      ownerId: ownerRef.ownerId,
+      locale: ownerRef.locale,
+      parentBlockId: input.parentBlockId,
+      blockType: input.blockType,
+      props: validatedProps,
+      layout: validatedLayout,
+      schemaVersion: definition.schemaVersion,
+      depth,
+      sortOrder,
+      version: 1,
+      createdBy: actor.userId,
+      updatedBy: actor.userId,
+      createdAt: ctx.now,
+      updatedAt: ctx.now,
+    })
+    .returning();
+  if (row === undefined) {
+    throw new Error('@plakboek/pages: block insert returned no row');
+  }
+  const record = toBlockRecordFromRow(row);
+
+  await recordBlockRevision(tx, {
+    blockId: record.id,
+    owner: ownerRef,
+    revisionBatchId: ctx.revisionBatchId,
+    changeType: 'create',
+    kind: 'save',
+    blockType: record.blockType,
+    parentBlockId: record.parentBlockId,
+    sortOrder: record.sortOrder,
+    depth: record.depth,
+    props: record.props,
+    layout: record.layout,
+    schemaVersion: record.schemaVersion,
+    authorId: actor.userId,
+    createdAt: ctx.now,
+  });
+
+  return record;
+}
+
 /**
  * Inserts a block (a structural change, D-38). Through `deps.recorder.run`
  * (`pages:edit` / `block.insert`): resolves `input.blockType`'s definition
  * first, before any row is loaded, so an unregistered type refuses
  * immediately (`UnknownBlockTypeError`); loads and locks the owning page
  * `FOR UPDATE`, throwing `StalePageVersionError` when `page.version !==
- * input.basePageVersion`; loads and locks the parent block `FOR UPDATE`
- * when given and derives `depth` as `parent.depth + 1` (`0` at the root);
- * calls `assertPlacementAllowed` (placement.ts, BLOCK-05, D-08, D-18, D-19)
- * -- the section rule, the parent/child placement declarations and both
- * depth caps -- before any write; validates `props` through
- * `validateBlockProps` (leniently: a required property may still be empty
- * in the working tree, D-21 -- publishing refuses it); computes `sortOrder`
- * as `max(sort_order) + 1000`
- * among siblings when not supplied; inserts with `schema_version` set to
- * the registry's current `schemaVersion` for that block type -- never a
- * default, never null; records a `'create'` block revision; bumps the
- * owning page's `version`.
+ * input.basePageVersion`; then runs `insertBlockInTransaction` (parent
+ * load, placement, lenient props validation, `sortOrder` as `max(sort_order)
+ * + 1000` among siblings when not supplied, the `'create'` revision) and
+ * bumps the owning page's `version`.
  */
 export async function insertBlock(
   deps: PagesDeps,
@@ -434,7 +742,7 @@ export async function insertBlock(
       entityType: 'page_block',
     },
     async (tx) => {
-      const definition = getBlockDefinition(input.blockType);
+      getBlockDefinition(input.blockType);
 
       const page = await loadPageForUpdate(tx, input.owner.ownerId);
       if (page.version !== input.basePageVersion) {
@@ -451,103 +759,26 @@ export async function insertBlock(
         now(),
       );
 
-      let parentDefinition: BlockDefinition | null = null;
-      let sectionDefinition: BlockDefinition | null = null;
-      let parentDepth: number | null = null;
-      let parentSectionDepth = 0;
-      if (input.parentBlockId !== null) {
-        const loaded = await loadParentForPlacement(tx, input.parentBlockId);
-        if (loaded === null) {
-          throw new BlockNotFoundError(input.parentBlockId);
-        }
-        parentDepth = loaded.parentDepth;
-        parentDefinition = loaded.parentDefinition;
-        sectionDefinition = loaded.sectionDefinition;
-        parentSectionDepth = loaded.parentSectionDepth;
-      }
-      const depth = (parentDepth ?? -1) + 1;
-
-      assertPlacementAllowed({
-        owner: input.owner,
-        child: definition,
-        parent: parentDefinition,
-        section: sectionDefinition,
-        columnsEnabled: getColumnDefinition() !== null,
-        parentDepth,
-        parentSectionDepth,
-        sectionNestingDepth: deps.config.sectionNestingDepth,
-        blockDepthCeiling: deps.config.blockDepthCeiling,
-      });
-
-      const validatedProps = validateBlockProps(definition, input.props ?? {}, {
-        allowMissingRequired: true,
-      });
-      const validatedLayout = validateBlockLayout(
-        definition,
-        input.layout,
-        deps.config.columnPresets,
-      );
-
-      let sortOrder = input.sortOrder;
-      if (sortOrder === undefined) {
-        const siblingCondition =
-          input.parentBlockId === null
-            ? and(
-                eq(pageBlocks.ownerType, input.owner.ownerType),
-                eq(pageBlocks.ownerId, input.owner.ownerId),
-                eq(pageBlocks.locale, input.owner.locale),
-                isNull(pageBlocks.parentBlockId),
-              )
-            : eq(pageBlocks.parentBlockId, input.parentBlockId);
-        const [siblingMax] = await tx
-          .select({ max: sql<number | null>`max(${pageBlocks.sortOrder})` })
-          .from(pageBlocks)
-          .where(siblingCondition);
-        sortOrder = nextSortOrder(siblingMax?.max ?? null);
-      }
-
-      const createdAt = now();
-      const [row] = await tx
-        .insert(pageBlocks)
-        .values({
-          ownerType: input.owner.ownerType,
-          ownerId: input.owner.ownerId,
-          locale: input.owner.locale,
-          parentBlockId: input.parentBlockId,
+      const record = await insertBlockInTransaction(
+        tx,
+        {
+          deps,
+          actor,
+          page,
+          ownerRef: input.owner,
+          revisionBatchId: newRevisionBatchId(),
+          now: now(),
+        },
+        {
           blockType: input.blockType,
-          props: validatedProps,
-          layout: validatedLayout,
-          schemaVersion: definition.schemaVersion,
-          depth,
-          sortOrder,
-          version: 1,
-          createdBy: actor.userId,
-          updatedBy: actor.userId,
-          createdAt,
-          updatedAt: createdAt,
-        })
-        .returning();
-      if (row === undefined) {
-        throw new Error('@plakboek/pages: block insert returned no row');
-      }
-      const record = toBlockRecordFromRow(row);
-
-      await recordBlockRevision(tx, {
-        blockId: record.id,
-        owner: input.owner,
-        revisionBatchId: newRevisionBatchId(),
-        changeType: 'create',
-        kind: 'save',
-        blockType: record.blockType,
-        parentBlockId: record.parentBlockId,
-        sortOrder: record.sortOrder,
-        depth: record.depth,
-        props: record.props,
-        layout: record.layout,
-        schemaVersion: record.schemaVersion,
-        authorId: actor.userId,
-        createdAt,
-      });
+          parentBlockId: input.parentBlockId,
+          ...(input.sortOrder === undefined
+            ? {}
+            : { sortOrder: input.sortOrder }),
+          ...(input.props === undefined ? {} : { props: input.props }),
+          ...(input.layout === undefined ? {} : { layout: input.layout }),
+        },
+      );
 
       await tx
         .update(pages)
@@ -574,16 +805,100 @@ export type UpdateBlockPropsInput = {
   readonly layout?: unknown;
 };
 
+/** What one update needs once the block is loaded and locked. When the
+ * `props` key is present the stored props are replaced by the validated
+ * value; when it is absent they are left alone. `layout` follows the same
+ * rule as `UpdateBlockPropsInput.layout`. */
+export type UpdateInTransactionInput = {
+  readonly current: PageBlockRow;
+  readonly props?: unknown;
+  readonly layout?: unknown;
+};
+
+/**
+ * The body of one property/layout edit, inside the caller's transaction,
+ * for a block the caller has already loaded `FOR UPDATE` and version-
+ * checked: validates leniently (D-21), writes the new values with
+ * `version + 1` and records an `'update'` revision under the context's
+ * batch id. Never touches the page version.
+ */
+export async function updateBlockInTransaction(
+  tx: AuditTransaction,
+  ctx: WriteContext,
+  input: UpdateInTransactionInput,
+): Promise<BlockRecord> {
+  const { deps, actor, ownerRef } = ctx;
+  const { current } = input;
+
+  const definition = getBlockDefinition(current.blockType);
+  const validatedProps =
+    'props' in input
+      ? validateBlockProps(definition, input.props, {
+          allowMissingRequired: true,
+        })
+      : undefined;
+  const validatedLayout =
+    input.layout === undefined
+      ? undefined
+      : validateBlockLayout(
+          definition,
+          input.layout,
+          deps.config.columnPresets,
+        );
+
+  const [row] = await tx
+    .update(pageBlocks)
+    .set({
+      ...(validatedProps === undefined ? {} : { props: validatedProps }),
+      ...(validatedLayout === undefined ? {} : { layout: validatedLayout }),
+      version: sql`${pageBlocks.version} + 1`,
+      updatedAt: ctx.now,
+      updatedBy: actor.userId,
+    })
+    .where(
+      and(
+        eq(pageBlocks.id, current.id),
+        eq(pageBlocks.version, current.version),
+      ),
+    )
+    .returning();
+  if (row === undefined) {
+    throw new StaleBlockVersionError(
+      current.id,
+      current.version,
+      current.version,
+    );
+  }
+  const record = toBlockRecordFromRow(row);
+
+  await recordBlockRevision(tx, {
+    blockId: record.id,
+    owner: ownerRef,
+    revisionBatchId: ctx.revisionBatchId,
+    changeType: 'update',
+    kind: 'save',
+    blockType: record.blockType,
+    parentBlockId: record.parentBlockId,
+    sortOrder: record.sortOrder,
+    depth: record.depth,
+    props: record.props,
+    layout: record.layout,
+    schemaVersion: record.schemaVersion,
+    authorId: actor.userId,
+    createdAt: ctx.now,
+  });
+
+  return record;
+}
+
 /**
  * Edits a block's properties (a property-only change, D-38 -- does *not*
  * touch the owning page's `version`). Through `deps.recorder.run`
  * (`pages:edit` / `block.update`): loads and locks the block `FOR UPDATE`,
- * throwing `StaleBlockVersionError` when the version differs; validates
- * `props` through `validateBlockProps`; `UPDATE ... SET props, version =
- * version + 1, updated_at, updated_by WHERE id = ? AND version = ?` (zero
- * rows returned also throws `StaleBlockVersionError`, the same
- * belt-and-braces double-check `@plakboek/content`'s `save.ts` uses);
- * records an `'update'` block revision.
+ * throwing `StaleBlockVersionError` when the version differs; checks the
+ * page lock; then runs `updateBlockInTransaction` (validation through
+ * `validateBlockProps`, the version-guarded `UPDATE ... SET props, version
+ * = version + 1, updated_at, updated_by`, the `'update'` revision).
  */
 export async function updateBlockProps(
   deps: PagesDeps,
@@ -602,21 +917,11 @@ export async function updateBlockProps(
       entityId: input.blockId,
     },
     async (tx) => {
-      const [current] = await tx
-        .select()
-        .from(pageBlocks)
-        .where(eq(pageBlocks.id, input.blockId))
-        .for('update');
-      if (current === undefined) {
-        throw new BlockNotFoundError(input.blockId);
-      }
-      if (current.version !== input.baseVersion) {
-        throw new StaleBlockVersionError(
-          input.blockId,
-          input.baseVersion,
-          current.version,
-        );
-      }
+      const current = await loadBlockForUpdate(
+        tx,
+        input.blockId,
+        input.baseVersion,
+      );
 
       // A property edit takes no `basePageVersion` (D-38) -- it never
       // checks or bumps the owning page's version -- but it is still an
@@ -631,72 +936,35 @@ export async function updateBlockProps(
       if (page === null) {
         throw new PageNotFoundError(current.ownerId);
       }
+      const checkedAt = now();
       assertPageWritable(
         [page],
         await getPageEditLocking(tx),
         actor.userId,
-        now(),
+        checkedAt,
       );
 
-      const definition = getBlockDefinition(current.blockType);
-      const validatedProps = validateBlockProps(definition, input.props, {
-        allowMissingRequired: true,
-      });
-      const validatedLayout =
-        input.layout === undefined
-          ? undefined
-          : validateBlockLayout(
-              definition,
-              input.layout,
-              deps.config.columnPresets,
-            );
-
-      const updatedAt = now();
-      const [row] = await tx
-        .update(pageBlocks)
-        .set({
-          props: validatedProps,
-          ...(validatedLayout === undefined ? {} : { layout: validatedLayout }),
-          version: sql`${pageBlocks.version} + 1`,
-          updatedAt,
-          updatedBy: actor.userId,
-        })
-        .where(
-          and(
-            eq(pageBlocks.id, input.blockId),
-            eq(pageBlocks.version, input.baseVersion),
-          ),
-        )
-        .returning();
-      if (row === undefined) {
-        throw new StaleBlockVersionError(
-          input.blockId,
-          input.baseVersion,
-          current.version,
-        );
-      }
-      const record = toBlockRecordFromRow(row);
-
-      await recordBlockRevision(tx, {
-        blockId: record.id,
-        owner: {
-          ownerType: record.ownerType,
-          ownerId: record.ownerId,
-          locale: record.locale,
+      const ownerRef: OwnerRef = {
+        ownerType: asOwnerType(current.ownerType),
+        ownerId: current.ownerId,
+        locale: current.locale,
+      };
+      const record = await updateBlockInTransaction(
+        tx,
+        {
+          deps,
+          actor,
+          page,
+          ownerRef,
+          revisionBatchId: newRevisionBatchId(),
+          now: now(),
         },
-        revisionBatchId: newRevisionBatchId(),
-        changeType: 'update',
-        kind: 'save',
-        blockType: record.blockType,
-        parentBlockId: record.parentBlockId,
-        sortOrder: record.sortOrder,
-        depth: record.depth,
-        props: record.props,
-        layout: record.layout,
-        schemaVersion: record.schemaVersion,
-        authorId: actor.userId,
-        createdAt: updatedAt,
-      });
+        {
+          current,
+          props: input.props,
+          ...(input.layout === undefined ? {} : { layout: input.layout }),
+        },
+      );
 
       await pruneBlockRevisions(tx, {
         pageId: record.ownerId,
@@ -727,12 +995,12 @@ export class CircularMoveError extends Error {
   }
 }
 
-/** Thrown by `moveBlock` when `beforeSiblingId`/`afterSiblingId` names a
- * block that does not actually belong to the destination parent -- e.g. a
+/** Thrown by `moveBlock` (and a batch insert or move) when a named
+ * neighbour does not actually belong to the destination parent -- e.g. a
  * caller-supplied id left over from an unrelated parent's sibling list.
- * Without this check the id would still resolve (`resolveSiblingSortOrder`
- * loads purely by id), and the moved block's `sort_order` would be computed
- * relative to a block outside its real sibling list (code review WR-02). */
+ * Without this check the id would still resolve (it is loaded purely by
+ * id), and the block's `sort_order` would be computed relative to a block
+ * outside its real sibling list (code review WR-02). */
 export class InvalidSiblingReferenceError extends Error {
   readonly siblingId: string;
   readonly expectedParentBlockId: string | null;
@@ -785,80 +1053,180 @@ async function loadBlockSnapshot(
   return row ?? null;
 }
 
-/** Loads the `sort_order` of an optional named sibling, `FOR UPDATE`-locked
- * from the destination sibling list -- `moveBlock`'s `beforeSiblingId`/
- * `afterSiblingId` inputs resolve through this. `null` when the input
- * itself is `null`/`undefined` (an end-of-list placement); throws
- * `BlockNotFoundError` when a named sibling id no longer exists, and
- * `InvalidSiblingReferenceError` when it exists but its own
- * `parent_block_id` does not match `expectedParentBlockId` -- otherwise a
- * caller-supplied id belonging to an unrelated parent would still be
- * accepted, and the moved block's `sort_order` computed relative to it
- * (code review WR-02). */
-async function resolveSiblingSortOrder(
-  tx: AuditTransaction,
-  siblingId: string | null | undefined,
-  expectedParentBlockId: string | null,
-): Promise<number | null> {
-  if (siblingId === null || siblingId === undefined) return null;
-  const [row] = await tx
-    .select({
-      sortOrder: pageBlocks.sortOrder,
-      parentBlockId: pageBlocks.parentBlockId,
-    })
-    .from(pageBlocks)
-    .where(eq(pageBlocks.id, siblingId))
-    .for('update');
-  if (row === undefined) {
-    throw new BlockNotFoundError(siblingId);
-  }
-  if (row.parentBlockId !== expectedParentBlockId) {
-    throw new InvalidSiblingReferenceError(
-      siblingId,
-      expectedParentBlockId,
-      row.parentBlockId,
-    );
-  }
-  return row.sortOrder;
-}
-
 export type MoveBlockInput = {
   readonly blockId: string;
   readonly baseVersion: number;
   readonly pageId: string;
   readonly basePageVersion: number;
   readonly newParentBlockId: string | null;
+  /** The sibling that ends up directly before the moved block. */
   readonly beforeSiblingId?: string | null;
+  /** The sibling that ends up directly after the moved block. */
   readonly afterSiblingId?: string | null;
 };
 
+/** What one move needs once the block is loaded and locked. */
+export type MoveInTransactionInput = {
+  readonly current: PageBlockRow;
+  readonly newParentBlockId: string | null;
+  readonly previousSiblingId?: string | null;
+  readonly nextSiblingId?: string | null;
+};
+
 /**
- * Moves a block and its whole subtree to a new parent and a new position
- * among its siblings, in one transaction (a structural change, D-38). Every
- * descendant's stored `depth` is recomputed in the same transaction
- * (RESEARCH Pitfall 6). Through `deps.recorder.run` (`pages:edit` /
- * `block.move`), in order: loads and locks the owning page `FOR UPDATE`,
- * throwing `StalePageVersionError` on a base-version mismatch (a move is a
- * structural change, so it takes the page version as well as the block's
- * own); loads and locks the moved block `FOR UPDATE`, throwing
- * `StaleBlockVersionError` on a mismatch; loads and locks the destination
- * parent `FOR UPDATE` when non-null; walks the moved block's descendants in
- * one recursive CTE query, collecting the subtree's own height and its
- * section-only height (counting only rows whose registry `kind` is
- * `'section'`); refuses `CircularMoveError` when the destination is the
- * moved block itself or one of its own descendants; re-runs
- * `assertPlacementAllowed` against the destination exactly as `insertBlock`
- * does, then additionally refuses when the destination depth plus the
- * moved subtree's own height would exceed `blockDepthCeiling`, or the
+ * The body of one move, inside the caller's transaction, for a block the
+ * caller has already loaded `FOR UPDATE` and version-checked. Loads and
+ * locks the destination parent when non-null; walks the moved block's
+ * descendants in one recursive CTE query, collecting the subtree's own
+ * height and its section-only height; refuses `CircularMoveError` when the
+ * destination is the moved block itself or one of its own descendants;
+ * re-runs `assertPlacementAllowed` against the destination exactly as an
+ * insert does, then additionally refuses when the destination depth plus
+ * the moved subtree's own height would exceed `blockDepthCeiling`, or the
  * destination section depth plus the subtree's own section height would
  * exceed `sectionNestingDepth` -- the moved subtree's own height is what
  * makes a move stricter than an insert (D-08, D-18). Resolves the new
- * `sort_order` via `sortOrderBetween`, rebalancing the destination sibling
- * list with `rebalancedOrders` first when `needsRebalance` says the gap has
- * closed. Recomputes every descendant's `depth` in one batched statement.
- * Records one `'move'`-kind revision for the moved block, capturing its
- * pre-move `block_type`, `parent_block_id` and `sort_order` (D-27); bumps
- * the owning page's `version`.
+ * `sort_order` through `resolvePositionSortOrder`, recomputes every
+ * descendant's `depth` in one batched statement (RESEARCH Pitfall 6) and
+ * records one `'move'`-kind revision capturing the block's pre-move
+ * `parent_block_id` and `sort_order` (D-27). Does not bump the page version
+ * or prune.
+ */
+export async function moveBlockInTransaction(
+  tx: AuditTransaction,
+  ctx: WriteContext,
+  input: MoveInTransactionInput,
+): Promise<BlockRecord> {
+  const { deps, actor, ownerRef, now: updatedAt } = ctx;
+  const { current } = input;
+  const blockId = current.id;
+
+  let parentDefinition: BlockDefinition | null = null;
+  let sectionDefinition: BlockDefinition | null = null;
+  let parentDepth: number | null = null;
+  let parentSectionDepth = 0;
+  if (input.newParentBlockId !== null) {
+    const loaded = await loadParentForPlacement(tx, input.newParentBlockId);
+    if (loaded === null) {
+      throw new BlockNotFoundError(input.newParentBlockId);
+    }
+    parentDepth = loaded.parentDepth;
+    parentDefinition = loaded.parentDefinition;
+    sectionDefinition = loaded.sectionDefinition;
+    parentSectionDepth = loaded.parentSectionDepth;
+  }
+
+  const subtreeRows = await walkSubtree(tx, blockId);
+  const subtreeIds = new Set(subtreeRows.map((row) => row.id));
+
+  if (
+    input.newParentBlockId !== null &&
+    subtreeIds.has(input.newParentBlockId)
+  ) {
+    throw new CircularMoveError(blockId, input.newParentBlockId);
+  }
+
+  const { height: subtreeHeight, sectionHeight: subtreeSectionHeight } =
+    computeSubtreeShape(subtreeRows, blockId);
+
+  const definition = getBlockDefinition(current.blockType);
+  assertPlacementAllowed({
+    owner: ownerRef,
+    child: definition,
+    parent: parentDefinition,
+    section: sectionDefinition,
+    columnsEnabled: getColumnDefinition() !== null,
+    parentDepth,
+    parentSectionDepth,
+    sectionNestingDepth: deps.config.sectionNestingDepth,
+    blockDepthCeiling: deps.config.blockDepthCeiling,
+  });
+
+  const movedBlockNewDepth = (parentDepth ?? -1) + 1;
+  const finalDepth = movedBlockNewDepth + subtreeHeight;
+  if (finalDepth > deps.config.blockDepthCeiling) {
+    throw new BlockDepthExceededError(
+      deps.config.blockDepthCeiling,
+      finalDepth,
+    );
+  }
+  const finalSectionDepth = parentSectionDepth + subtreeSectionHeight;
+  if (finalSectionDepth > deps.config.sectionNestingDepth) {
+    throw new SectionNestingDepthExceededError(
+      deps.config.sectionNestingDepth,
+      finalSectionDepth,
+    );
+  }
+
+  const newSortOrder = await resolvePositionSortOrder(
+    tx,
+    ownerRef,
+    input.newParentBlockId,
+    input.previousSiblingId,
+    input.nextSiblingId,
+    blockId,
+  );
+
+  const [movedRow] = await tx
+    .update(pageBlocks)
+    .set({
+      parentBlockId: input.newParentBlockId,
+      sortOrder: newSortOrder,
+      depth: movedBlockNewDepth,
+      version: sql`${pageBlocks.version} + 1`,
+      updatedAt,
+      updatedBy: actor.userId,
+    })
+    .where(
+      and(eq(pageBlocks.id, blockId), eq(pageBlocks.version, current.version)),
+    )
+    .returning();
+  if (movedRow === undefined) {
+    throw new StaleBlockVersionError(blockId, current.version, current.version);
+  }
+
+  // Recomputes every descendant's `depth` in ONE batched statement, keyed
+  // on the descendant ids and their depth relative to the moved block
+  // (already collected above) -- never a query per row. Extracted to
+  // `subtree.ts`'s `rewriteDescendantDepths` (code review CR-02) so
+  // `moveBlock` and `restoreRevisionBatch`'s `'move'`-kind replay share
+  // one implementation; mirrors `pages.ts`'s `applySubtreeRewrite`, the
+  // identical one-statement multi-row rewrite shape one level up the
+  // tree.
+  const descendantRows = subtreeRows.filter((row) => row.id !== blockId);
+  await rewriteDescendantDepths(tx, movedBlockNewDepth, descendantRows);
+
+  await recordBlockRevision(tx, {
+    blockId: current.id,
+    owner: ownerRef,
+    revisionBatchId: ctx.revisionBatchId,
+    changeType: 'move',
+    kind: 'save',
+    blockType: current.blockType,
+    parentBlockId: current.parentBlockId,
+    sortOrder: current.sortOrder,
+    depth: current.depth,
+    props: current.props,
+    layout: readStoredLayout(current.layout),
+    schemaVersion: current.schemaVersion,
+    authorId: actor.userId,
+    createdAt: updatedAt,
+  });
+
+  return toBlockRecordFromRow(movedRow);
+}
+
+/**
+ * Moves a block and its whole subtree to a new parent and a new position
+ * among its siblings, in one transaction (a structural change, D-38). Through
+ * `deps.recorder.run` (`pages:edit` / `block.move`), in order: loads and
+ * locks the owning page `FOR UPDATE`, throwing `StalePageVersionError` on a
+ * base-version mismatch (a move is a structural change, so it takes the page
+ * version as well as the block's own); checks the page lock; loads and locks
+ * the moved block `FOR UPDATE`, throwing `StaleBlockVersionError` on a
+ * mismatch; runs `moveBlockInTransaction` (destination, placement, subtree
+ * height checks, ordering with rebalancing, descendant depth rewrite, the
+ * `'move'` revision); bumps the owning page's `version`.
  */
 export async function moveBlock(
   deps: PagesDeps,
@@ -894,200 +1262,34 @@ export async function moveBlock(
         now(),
       );
 
-      const [current] = await tx
-        .select()
-        .from(pageBlocks)
-        .where(eq(pageBlocks.id, input.blockId))
-        .for('update');
-      if (current === undefined) {
-        throw new BlockNotFoundError(input.blockId);
-      }
-      if (current.version !== input.baseVersion) {
-        throw new StaleBlockVersionError(
-          input.blockId,
-          input.baseVersion,
-          current.version,
-        );
-      }
-
-      let parentDefinition: BlockDefinition | null = null;
-      let sectionDefinition: BlockDefinition | null = null;
-      let parentDepth: number | null = null;
-      let parentSectionDepth = 0;
-      if (input.newParentBlockId !== null) {
-        const loaded = await loadParentForPlacement(tx, input.newParentBlockId);
-        if (loaded === null) {
-          throw new BlockNotFoundError(input.newParentBlockId);
-        }
-        parentDepth = loaded.parentDepth;
-        parentDefinition = loaded.parentDefinition;
-        sectionDefinition = loaded.sectionDefinition;
-        parentSectionDepth = loaded.parentSectionDepth;
-      }
-
-      const subtreeRows = await walkSubtree(tx, input.blockId);
-      const subtreeIds = new Set(subtreeRows.map((row) => row.id));
-
-      if (
-        input.newParentBlockId !== null &&
-        subtreeIds.has(input.newParentBlockId)
-      ) {
-        throw new CircularMoveError(input.blockId, input.newParentBlockId);
-      }
-
-      const { height: subtreeHeight, sectionHeight: subtreeSectionHeight } =
-        computeSubtreeShape(subtreeRows, input.blockId);
-
-      const definition = getBlockDefinition(current.blockType);
+      const current = await loadBlockForUpdate(
+        tx,
+        input.blockId,
+        input.baseVersion,
+      );
       const ownerRef: OwnerRef = {
         ownerType: asOwnerType(current.ownerType),
         ownerId: current.ownerId,
         locale: current.locale,
       };
-      assertPlacementAllowed({
-        owner: ownerRef,
-        child: definition,
-        parent: parentDefinition,
-        section: sectionDefinition,
-        columnsEnabled: getColumnDefinition() !== null,
-        parentDepth,
-        parentSectionDepth,
-        sectionNestingDepth: deps.config.sectionNestingDepth,
-        blockDepthCeiling: deps.config.blockDepthCeiling,
-      });
 
-      const movedBlockNewDepth = (parentDepth ?? -1) + 1;
-      const finalDepth = movedBlockNewDepth + subtreeHeight;
-      if (finalDepth > deps.config.blockDepthCeiling) {
-        throw new BlockDepthExceededError(
-          deps.config.blockDepthCeiling,
-          finalDepth,
-        );
-      }
-      const finalSectionDepth = parentSectionDepth + subtreeSectionHeight;
-      if (finalSectionDepth > deps.config.sectionNestingDepth) {
-        throw new SectionNestingDepthExceededError(
-          deps.config.sectionNestingDepth,
-          finalSectionDepth,
-        );
-      }
-
-      const beforeOrder = await resolveSiblingSortOrder(
+      const record = await moveBlockInTransaction(
         tx,
-        input.beforeSiblingId,
-        input.newParentBlockId,
+        {
+          deps,
+          actor,
+          page,
+          ownerRef,
+          revisionBatchId: newRevisionBatchId(),
+          now: now(),
+        },
+        {
+          current,
+          newParentBlockId: input.newParentBlockId,
+          previousSiblingId: input.beforeSiblingId,
+          nextSiblingId: input.afterSiblingId,
+        },
       );
-      const afterOrder = await resolveSiblingSortOrder(
-        tx,
-        input.afterSiblingId,
-        input.newParentBlockId,
-      );
-      let newSortOrder = sortOrderBetween(beforeOrder, afterOrder);
-      if (needsRebalance(beforeOrder, afterOrder)) {
-        const siblingCondition =
-          input.newParentBlockId === null
-            ? and(
-                eq(pageBlocks.ownerType, current.ownerType),
-                eq(pageBlocks.ownerId, current.ownerId),
-                eq(pageBlocks.locale, current.locale),
-                isNull(pageBlocks.parentBlockId),
-              )
-            : eq(pageBlocks.parentBlockId, input.newParentBlockId);
-        const siblings = await tx
-          .select({ id: pageBlocks.id })
-          .from(pageBlocks)
-          .where(and(siblingCondition, ne(pageBlocks.id, input.blockId)))
-          .orderBy(asc(pageBlocks.sortOrder), asc(pageBlocks.id))
-          .for('update');
-        const rebalanced = rebalancedOrders(siblings.length);
-        if (siblings.length > 0) {
-          const valuesClause = sql.join(
-            siblings.map(
-              (sibling, index) =>
-                sql`(${sibling.id}::uuid, ${rebalanced[index]}::integer)`,
-            ),
-            sql`, `,
-          );
-          await tx.execute(sql`
-            UPDATE page_blocks SET sort_order = v.new_order
-            FROM (VALUES ${valuesClause}) AS v(id, new_order)
-            WHERE page_blocks.id = v.id
-          `);
-        }
-        const beforeIndex =
-          input.beforeSiblingId != null
-            ? siblings.findIndex(
-                (sibling) => sibling.id === input.beforeSiblingId,
-              )
-            : -1;
-        const afterIndex =
-          input.afterSiblingId != null
-            ? siblings.findIndex(
-                (sibling) => sibling.id === input.afterSiblingId,
-              )
-            : -1;
-        const rebalancedBefore =
-          beforeIndex >= 0 ? (rebalanced[beforeIndex] ?? null) : null;
-        const rebalancedAfter =
-          afterIndex >= 0 ? (rebalanced[afterIndex] ?? null) : null;
-        newSortOrder = sortOrderBetween(rebalancedBefore, rebalancedAfter);
-      }
-
-      const updatedAt = now();
-      const [movedRow] = await tx
-        .update(pageBlocks)
-        .set({
-          parentBlockId: input.newParentBlockId,
-          sortOrder: newSortOrder,
-          depth: movedBlockNewDepth,
-          version: sql`${pageBlocks.version} + 1`,
-          updatedAt,
-          updatedBy: actor.userId,
-        })
-        .where(
-          and(
-            eq(pageBlocks.id, input.blockId),
-            eq(pageBlocks.version, input.baseVersion),
-          ),
-        )
-        .returning();
-      if (movedRow === undefined) {
-        throw new StaleBlockVersionError(
-          input.blockId,
-          input.baseVersion,
-          current.version,
-        );
-      }
-
-      // Recomputes every descendant's `depth` in ONE batched statement, keyed
-      // on the descendant ids and their depth relative to the moved block
-      // (already collected above) -- never a query per row. Extracted to
-      // `subtree.ts`'s `rewriteDescendantDepths` (code review CR-02) so
-      // `moveBlock` and `restoreRevisionBatch`'s `'move'`-kind replay share
-      // one implementation; mirrors `pages.ts`'s `applySubtreeRewrite`, the
-      // identical one-statement multi-row rewrite shape one level up the
-      // tree.
-      const descendantRows = subtreeRows.filter(
-        (row) => row.id !== input.blockId,
-      );
-      await rewriteDescendantDepths(tx, movedBlockNewDepth, descendantRows);
-
-      await recordBlockRevision(tx, {
-        blockId: current.id,
-        owner: ownerRef,
-        revisionBatchId: newRevisionBatchId(),
-        changeType: 'move',
-        kind: 'save',
-        blockType: current.blockType,
-        parentBlockId: current.parentBlockId,
-        sortOrder: current.sortOrder,
-        depth: current.depth,
-        props: current.props,
-        layout: readStoredLayout(current.layout),
-        schemaVersion: current.schemaVersion,
-        authorId: actor.userId,
-        createdAt: updatedAt,
-      });
 
       await tx
         .update(pages)
@@ -1100,7 +1302,6 @@ export async function moveBlock(
         cap: revisionCap,
       });
 
-      const record = toBlockRecordFromRow(movedRow);
       return { result: record, after: record };
     },
   );
@@ -1223,25 +1424,73 @@ export type DeleteBlockInput = {
   readonly basePageVersion: number;
 };
 
+/** What a subtree delete removed: every row it recorded a `'delete'`
+ * revision for (root first, depth-first), and how many revisions already
+ * referenced those blocks before this call recorded its own. */
+export type DeleteSubtreeResult = {
+  readonly rows: readonly DeleteSubtreeRow[];
+  readonly existingRevisionCount: number;
+};
+
+/**
+ * The body of one subtree delete, inside the caller's transaction, for a
+ * block the caller has already loaded `FOR UPDATE` and version-checked
+ * (D-27): walks the block and every descendant in one recursive CTE query,
+ * records one `'delete'`-kind revision per row -- sharing the context's
+ * batch id, each capturing that row's `block_type`, `parent_block_id`,
+ * `sort_order`, `depth`, `props`, `layout` and `schema_version` as they
+ * were -- strictly BEFORE the delete statement runs, then removes the root
+ * with one `DELETE`, letting the `parent_block_id` cascade remove every
+ * descendant and `block_revisions.block_id`'s `ON DELETE SET NULL` keep
+ * every revision row readable. Does not bump the page version or prune.
+ */
+export async function deleteSubtreeInTransaction(
+  tx: AuditTransaction,
+  ctx: WriteContext,
+  input: { readonly current: PageBlockRow },
+): Promise<DeleteSubtreeResult> {
+  const { actor, ownerRef } = ctx;
+  const rows = await loadSubtreeForDelete(tx, input.current.id);
+  const existingRevisionCount = await countExistingRevisions(
+    tx,
+    rows.map((row) => row.id),
+  );
+
+  for (const row of rows) {
+    await recordBlockRevision(tx, {
+      blockId: row.id,
+      owner: ownerRef,
+      revisionBatchId: ctx.revisionBatchId,
+      changeType: 'delete',
+      kind: 'save',
+      blockType: row.blockType,
+      parentBlockId: row.parentBlockId,
+      sortOrder: row.sortOrder,
+      depth: row.depth,
+      props: row.props,
+      layout: row.layout,
+      schemaVersion: row.schemaVersion,
+      authorId: actor.userId,
+      createdAt: ctx.now,
+    });
+  }
+
+  await tx.delete(pageBlocks).where(eq(pageBlocks.id, input.current.id));
+
+  return { rows, existingRevisionCount };
+}
+
 /**
  * Deletes a block and its whole subtree, keeping its history (a structural
  * change, D-38, D-27). Through `deps.recorder.run` (`pages:delete` /
  * `block.delete`): loads and locks the owning page `FOR UPDATE`, throwing
- * `StalePageVersionError` on a base-version mismatch; loads and locks the
- * block itself `FOR UPDATE`, throwing `StaleBlockVersionError` on a
- * mismatch; walks the block and every descendant in one recursive CTE
- * query (depth-first, recomputing the delete impact inside this same
- * transaction rather than trusting a caller's earlier
- * `computeBlockDeleteImpact` preview); records one `'delete'`-kind block
- * revision per collected row -- sharing one `revision_batch_id`, each
- * capturing that row's `block_type`, `parent_block_id`, `sort_order`,
- * `depth`, `props` and `schema_version` as they were -- strictly BEFORE the
- * delete statement runs; then a single `DELETE FROM page_blocks WHERE id =
- * ?` on the subtree's root, letting the `parent_block_id` cascade remove
- * every descendant and `block_revisions.block_id`'s `ON DELETE SET NULL`
- * keep every revision row readable with `block_id` null; bumps the owning
- * page's `version`. Returns the impact counts as both the result and the
- * audit `after` payload.
+ * `StalePageVersionError` on a base-version mismatch; checks the page lock;
+ * loads and locks the block itself `FOR UPDATE`, throwing
+ * `StaleBlockVersionError` on a mismatch; runs `deleteSubtreeInTransaction`
+ * (recomputing the delete impact inside this same transaction rather than
+ * trusting a caller's earlier `computeBlockDeleteImpact` preview); bumps the
+ * owning page's `version`. Returns the impact counts as both the result and
+ * the audit `after` payload.
  */
 export async function deleteBlock(
   deps: PagesDeps,
@@ -1275,58 +1524,32 @@ export async function deleteBlock(
         now(),
       );
 
-      const [current] = await tx
-        .select()
-        .from(pageBlocks)
-        .where(eq(pageBlocks.id, input.blockId))
-        .for('update');
-      if (current === undefined) {
-        throw new BlockNotFoundError(input.blockId);
-      }
-      if (current.version !== input.baseVersion) {
-        throw new StaleBlockVersionError(
-          input.blockId,
-          input.baseVersion,
-          current.version,
-        );
-      }
-
-      const rows = await loadSubtreeForDelete(tx, input.blockId);
-      const blockTypes = Object.freeze([
-        ...new Set(rows.map((row) => row.blockType)),
-      ]);
-      const revisionCount = await countExistingRevisions(
+      const current = await loadBlockForUpdate(
         tx,
-        rows.map((row) => row.id),
+        input.blockId,
+        input.baseVersion,
       );
-
       const ownerRef: OwnerRef = {
         ownerType: asOwnerType(current.ownerType),
         ownerId: current.ownerId,
         locale: current.locale,
       };
-      const revisionBatchId = newRevisionBatchId();
-      const deletedAt = now();
-      for (const row of rows) {
-        await recordBlockRevision(tx, {
-          blockId: row.id,
-          owner: ownerRef,
-          revisionBatchId,
-          changeType: 'delete',
-          kind: 'save',
-          blockType: row.blockType,
-          parentBlockId: row.parentBlockId,
-          sortOrder: row.sortOrder,
-          depth: row.depth,
-          props: row.props,
-          layout: row.layout,
-          schemaVersion: row.schemaVersion,
-          authorId: actor.userId,
-          createdAt: deletedAt,
-        });
-      }
 
-      await tx.delete(pageBlocks).where(eq(pageBlocks.id, input.blockId));
+      const { rows, existingRevisionCount } = await deleteSubtreeInTransaction(
+        tx,
+        {
+          deps,
+          actor,
+          page,
+          ownerRef,
+          revisionBatchId: newRevisionBatchId(),
+          now: now(),
+        },
+        { current },
+      );
+      const blockTypes = Object.freeze([
+        ...new Set(rows.map((row) => row.blockType)),
+      ]);
 
       await tx
         .update(pages)
@@ -1343,7 +1566,7 @@ export async function deleteBlock(
         blockId: input.blockId,
         blockCount: rows.length,
         blockTypes,
-        revisionCount,
+        revisionCount: existingRevisionCount,
       };
       return { result: impact, after: impact };
     },
