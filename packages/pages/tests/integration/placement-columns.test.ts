@@ -30,7 +30,7 @@ import {
 } from '../../src/placement.js';
 import { defineBlocks } from '../../src/registry.js';
 import type { BlockRecord, OwnerRef, PageRecord } from '../../src/types.js';
-import { insertBlock } from '../../src/tree.js';
+import { insertBlock, moveBlock } from '../../src/tree.js';
 import { createTestDatabase } from './test-database.js';
 
 describe('column placement through insertBlock (D-01, D-02, D-03, D-15, D-18)', () => {
@@ -158,6 +158,35 @@ describe('column placement through insertBlock (D-01, D-02, D-03, D-15, D-18)', 
     );
   }
 
+  async function move(
+    page: PageRecord,
+    block: BlockRecord,
+    newParentBlockId: string,
+  ): Promise<BlockRecord> {
+    const current = await getPage(db, page.id);
+    if (current === null) throw new Error('page vanished mid-test');
+    const [row] = await handle.sql<{ version: number }[]>`
+      SELECT version FROM page_blocks WHERE id = ${block.id}
+    `;
+    return await moveBlock(deps, actor, {
+      blockId: block.id,
+      baseVersion: row?.version ?? block.version,
+      pageId: page.id,
+      basePageVersion: current.version,
+      newParentBlockId,
+    });
+  }
+
+  async function moveRefusal(
+    page: PageRecord,
+    block: BlockRecord,
+    newParentBlockId: string,
+  ): Promise<unknown> {
+    return await move(page, block, newParentBlockId).catch(
+      (caught: unknown) => caught,
+    );
+  }
+
   it('accepts a section, then a column under it, then a text under the column', async () => {
     const page = await freshPage('Column happy path');
     const section = await add(page, 'section', null);
@@ -232,5 +261,50 @@ describe('column placement through insertBlock (D-01, D-02, D-03, D-15, D-18)', 
     const error = await refusal(page, 'section', innerColumn.id);
     expect(error).toBeInstanceOf(SectionNestingDepthExceededError);
     expect((error as SectionNestingDepthExceededError).attempted).toBe(3);
+  });
+
+  it('moves a text between columns of different sections', async () => {
+    const page = await freshPage('Move between columns');
+    const first = await add(page, 'section', null);
+    const firstColumn = await add(page, 'column', first.id);
+    const second = await add(page, 'section', null);
+    const secondColumn = await add(page, 'column', second.id);
+    const text = await add(page, 'text', firstColumn.id);
+
+    const moved = await move(page, text, secondColumn.id);
+    expect(moved.parentBlockId).toBe(secondColumn.id);
+    expect(moved.depth).toBe(2);
+  });
+
+  it('refuses moving a text directly under a section', async () => {
+    const page = await freshPage('Move bare block under section');
+    const section = await add(page, 'section', null);
+    const column = await add(page, 'column', section.id);
+    const text = await add(page, 'text', column.id);
+
+    const error = await moveRefusal(page, text, section.id);
+    expect(error).toBeInstanceOf(BlockPlacementError);
+    expect((error as BlockPlacementError).reason).toBe(
+      'section-requires-columns',
+    );
+  });
+
+  it('moves a column into another section and rewrites its own and its descendants depths', async () => {
+    const page = await freshPage('Move a column');
+    const outer = await add(page, 'section', null);
+    const outerColumn = await add(page, 'column', outer.id);
+    const target = await add(page, 'section', outerColumn.id);
+    const source = await add(page, 'section', null);
+    const sourceColumn = await add(page, 'column', source.id);
+    const text = await add(page, 'text', sourceColumn.id);
+
+    const moved = await move(page, sourceColumn, target.id);
+    expect(moved.parentBlockId).toBe(target.id);
+    expect(moved.depth).toBe(3);
+
+    const [textRow] = await handle.sql<{ depth: number }[]>`
+      SELECT depth FROM page_blocks WHERE id = ${text.id}
+    `;
+    expect(textRow?.depth).toBe(4);
   });
 });

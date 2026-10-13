@@ -20,10 +20,12 @@
  *   history row is written inside the transaction that changed the address;
  *   a caller reaching either directly could lock a page row or write history
  *   outside any audited mutation.
- * - The write-time placement, depth and section guards (`placement.ts`) and
- *   the ancestor walk behind them -- reachable only through the write paths
- *   that must obey them, never callable standalone to pre-check a write a
- *   caller then performs some other way.
+ * - The throwing write-time placement, depth and section guard
+ *   (`assertPlacementAllowed`, `placement.ts`) and the ancestor walk and
+ *   parent loader behind it -- reachable only through the write paths that
+ *   must obey them. The pure, non-throwing `checkPlacement` is public so an
+ *   editor can draw legal drop targets from the same rule; it is advisory,
+ *   and every write still enforces the rule itself inside its transaction.
  * - Transaction-scoped slug generation and availability, and the
  *   address-availability check (`page-slug.ts`, `page-routing.ts`) -- the
  *   advisory-lock-serialised search a concurrent write must go through, not
@@ -140,6 +142,7 @@ export type {
   ResolvedBlockPlacement,
   ResolvedBlockProperty,
   ResolvedPropertyConstraint,
+  StarterNode,
 } from './registry.js';
 
 // constraints.ts
@@ -180,11 +183,16 @@ export type {
 export {
   BlockDepthExceededError,
   BlockPlacementError,
+  checkPlacement,
   ROOT_PARENT_SENTINEL,
   SectionNestingDepthExceededError,
   SectionRequiredError,
 } from './placement.js';
-export type { BlockPlacementReason } from './placement.js';
+export type {
+  BlockPlacementReason,
+  PlacementCheckInput,
+  PlacementRefusalReason,
+} from './placement.js';
 
 // versioning.ts
 export {

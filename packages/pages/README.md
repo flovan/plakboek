@@ -71,15 +71,31 @@ to spread the core blocks into its own array at all loses them entirely --
 this is the cost of a rule with no hidden behaviour, and it is deliberate
 (EXT-02, ROADMAP criterion 5).
 
-**A block declaration** carries a `key`, a `kind` (`'block'` or
-`'section'`), `editor` metadata (label, description, icon, category),
+**A block declaration** carries a `key`, a `kind` (`'block'`, `'section'`
+or `'column'`), `editor` metadata (label, description, icon, category),
 typed `properties`, a `placement` (which owner types, parents and children
 it accepts), a `schemaVersion`, an optional `minSupportedVersion`, and its
 `upcasters` (one function per version step). A property's `fieldType`
 reuses `@plakboek/content`'s field-type registry -- the same options
 schema, value schema and widget system content fields use -- so a host
 field type registered through `registerHostFieldType` (`@plakboek/content`)
-works in a block property with no further wiring.
+works in a block property with no further wiring. A `kind: 'block'` may
+also declare `layout: { fill: true }` (it stretches to fill its column) and
+`starterChildren`, a nested list of registered block types the editor
+inserts under it; a starter naming an unregistered type, or nesting deeper
+than eight levels, fails `defineBlocks` with `INVALID_STARTER_CHILDREN`.
+
+**Columns.** `column` is a third block kind. A registry holds at most one
+column kind and it declares no properties. When the registry holds a column
+kind, a section accepts only columns and a column sits only directly under a
+section; a block under a column is placement-checked against the column's
+_section_ (that section's `allowedChildren` and the block's `allowedParents`
+decide), so host sections never declare `column` themselves. Columns never
+count toward `sectionNestingDepth`, while a section nested in a column counts
+as before. A registry with no column kind behaves exactly as it did before
+columns existed. Every write path (insert, move and restore) enforces this,
+and `checkPlacement` exposes the same pure decision so an editor can draw
+legal drop targets; it is advisory only.
 
 **Constraining a built-in block:** an installation narrows a block it did
 not write, without editing core, by declaring a per-property constraint and
@@ -176,30 +192,31 @@ point, so an export cannot be added or removed without updating them.
 
 ### Block registry
 
-| Export                       | Kind     | Purpose                                                                   |
-| ---------------------------- | -------- | ------------------------------------------------------------------------- |
-| `BLOCK_KEY_PATTERN`          | constant | Allowed shape of a block's `key`                                          |
-| `BLOCK_PROPERTY_KEY_PATTERN` | constant | Allowed shape of a block property's key                                   |
-| `BlockConfigError`           | class    | Thrown by `defineBlocks` with every problem found                         |
-| `BlockPropsValidationError`  | class    | Thrown when a block instance's props fail validation on write             |
-| `defineBlocks`               | function | Validates and registers a host's block declarations, collect-then-throw   |
-| `getBlockDefinition`         | function | The registered `BlockDefinition` for a block type, or throws              |
-| `listBlockDefinitions`       | function | Every currently registered `BlockDefinition`                              |
-| `resolveBlockProperties`     | function | A block's real, currently-applicable properties with constraints resolved |
-| `UnknownBlockTypeError`      | class    | A block type string has no registered definition                          |
-| `BlockConfigIssue`           | type     | One `defineBlocks` problem                                                |
-| `BlockConfigIssueCode`       | type     | One `defineBlocks` problem code                                           |
-| `BlockDefinition`            | type     | A block declaration's frozen, normalised form                             |
-| `BlockDefinitionInput`       | type     | Input to `defineBlocks`, one entry per block                              |
-| `BlockEditorMetadata`        | type     | A block's editor-facing label/description/icon/category                   |
-| `BlockKind`                  | type     | `'block'` or `'section'`                                                  |
-| `BlockPlacement`             | type     | Where a block may sit: owner types, allowed parents, allowed children     |
-| `BlockPropertyDefinition`    | type     | One typed block property                                                  |
-| `BlockPropsValidationIssue`  | type     | One `BlockPropsValidationError` problem                                   |
-| `BlockUpcaster`              | type     | A function upcasting one version step's props                             |
-| `ResolvedBlockPlacement`     | type     | The frozen, defaulted form of `BlockPlacement`                            |
-| `ResolvedBlockProperty`      | type     | A property as resolved for the editor/write path, with its constraint     |
-| `ResolvedPropertyConstraint` | type     | One property's resolved `hidden`/`fixed`/`narrowed` constraint            |
+| Export                       | Kind     | Purpose                                                                     |
+| ---------------------------- | -------- | --------------------------------------------------------------------------- |
+| `BLOCK_KEY_PATTERN`          | constant | Allowed shape of a block's `key`                                            |
+| `BLOCK_PROPERTY_KEY_PATTERN` | constant | Allowed shape of a block property's key                                     |
+| `BlockConfigError`           | class    | Thrown by `defineBlocks` with every problem found                           |
+| `BlockPropsValidationError`  | class    | Thrown when a block instance's props fail validation on write               |
+| `defineBlocks`               | function | Validates and registers a host's block declarations, collect-then-throw     |
+| `getBlockDefinition`         | function | The registered `BlockDefinition` for a block type, or throws                |
+| `listBlockDefinitions`       | function | Every currently registered `BlockDefinition`                                |
+| `resolveBlockProperties`     | function | A block's real, currently-applicable properties with constraints resolved   |
+| `UnknownBlockTypeError`      | class    | A block type string has no registered definition                            |
+| `BlockConfigIssue`           | type     | One `defineBlocks` problem                                                  |
+| `BlockConfigIssueCode`       | type     | One `defineBlocks` problem code                                             |
+| `BlockDefinition`            | type     | A block declaration's frozen, normalised form                               |
+| `BlockDefinitionInput`       | type     | Input to `defineBlocks`, one entry per block                                |
+| `BlockEditorMetadata`        | type     | A block's editor-facing label/description/icon/category                     |
+| `BlockKind`                  | type     | `'block'`, `'section'` or `'column'`                                        |
+| `BlockPlacement`             | type     | Where a block may sit: owner types, allowed parents, allowed children       |
+| `BlockPropertyDefinition`    | type     | One typed block property                                                    |
+| `BlockPropsValidationIssue`  | type     | One `BlockPropsValidationError` problem                                     |
+| `BlockUpcaster`              | type     | A function upcasting one version step's props                               |
+| `ResolvedBlockPlacement`     | type     | The frozen, defaulted form of `BlockPlacement`                              |
+| `ResolvedBlockProperty`      | type     | A property as resolved for the editor/write path, with its constraint       |
+| `ResolvedPropertyConstraint` | type     | One property's resolved `hidden`/`fixed`/`narrowed` constraint              |
+| `StarterNode`                | type     | One node of a block's `starterChildren`: a registered type, props, children |
 
 ### Installation constraints (BLOCK-08)
 
@@ -235,16 +252,19 @@ point, so an export cannot be added or removed without updating them.
 | `SectionLintFinding`               | type     | One `lintSectionProperties` finding                                                      |
 | `SectionLintReason`                | type     | `'content-field-type'`, `'content-property-name'` or `'exempt'`                          |
 
-### Placement refusals (BLOCK-05, D-08, D-18, D-19)
+### Placement (BLOCK-05, D-08, D-18, D-19, EDIT-11)
 
-| Export                             | Kind     | Purpose                                                                 |
-| ---------------------------------- | -------- | ----------------------------------------------------------------------- |
-| `BlockDepthExceededError`          | class    | A write would exceed `blockDepthCeiling`                                |
-| `BlockPlacementError`              | class    | An owner-type/parent/child placement rule refused a write               |
-| `ROOT_PARENT_SENTINEL`             | constant | The `allowedParents`/`allowedChildren` key naming "the page's own root" |
-| `SectionNestingDepthExceededError` | class    | A write would exceed `sectionNestingDepth`                              |
-| `SectionRequiredError`             | class    | A non-section block was inserted with no parent directly under a page   |
-| `BlockPlacementReason`             | type     | `'owner-type'`, `'parent-rejects-child'` or `'child-rejects-parent'`    |
+| Export                             | Kind     | Purpose                                                                  |
+| ---------------------------------- | -------- | ------------------------------------------------------------------------ |
+| `BlockDepthExceededError`          | class    | A write would exceed `blockDepthCeiling`                                 |
+| `BlockPlacementError`              | class    | An owner-type/parent/child placement rule refused a write                |
+| `checkPlacement`                   | function | The pure placement decision: the refusal reason or `null`, never throws  |
+| `ROOT_PARENT_SENTINEL`             | constant | The `allowedParents`/`allowedChildren` key naming "the page's own root"  |
+| `SectionNestingDepthExceededError` | class    | A write would exceed `sectionNestingDepth`                               |
+| `SectionRequiredError`             | class    | A non-section block was inserted with no parent directly under a page    |
+| `BlockPlacementReason`             | type     | The reasons `BlockPlacementError` carries, including the two column ones |
+| `PlacementCheckInput`              | type     | What `checkPlacement` takes: child, parent, column section, depths       |
+| `PlacementRefusalReason`           | type     | Every reason `checkPlacement` can return                                 |
 
 ### Schema versioning and upcast-on-read (BLOCK-12, D-10..D-15)
 
@@ -612,8 +632,8 @@ URLs and the previous-address history are not consulted.
 
 Nothing else is reachable from the entry point. In particular the block-
 revision writer and its cap-pruning sweep, the row-locking page read and the
-append-only URL-history writer, the write-time placement/depth/section
-guards and the ancestor walk behind them, transaction-scoped slug
+append-only URL-history writer, the throwing write-time placement/depth/section
+guard and the ancestor walk behind it, transaction-scoped slug
 generation and availability and the address-availability check, the
 edit-lock write guard every single-page mutation calls internally (see the
 lock-exempt bulk operations above), the shared

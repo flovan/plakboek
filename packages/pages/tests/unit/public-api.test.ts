@@ -60,6 +60,7 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   // placement
   BlockDepthExceededError: 'class',
   BlockPlacementError: 'class',
+  checkPlacement: 'function',
   ROOT_PARENT_SENTINEL: 'constant',
   SectionNestingDepthExceededError: 'class',
   SectionRequiredError: 'class',
@@ -224,6 +225,7 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'ResolvedBlockPlacement',
   'ResolvedBlockProperty',
   'ResolvedPropertyConstraint',
+  'StarterNode',
   // constraints
   'BlockConstraintIssue',
   'BlockConstraintIssueCode',
@@ -240,6 +242,8 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'SectionLintReason',
   // placement
   'BlockPlacementReason',
+  'PlacementCheckInput',
+  'PlacementRefusalReason',
   // versioning
   'DegradedBlockEvent',
   'DegradedReason',
@@ -358,6 +362,7 @@ const WITHHELD: readonly string[] = Object.freeze([
   // placement.ts
   'assertPlacementAllowed',
   'countAncestorSections',
+  'loadParentForPlacement',
   // reserved.ts
   'assertNotReservedFirstSegment',
   'isReservedPageSlug',

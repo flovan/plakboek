@@ -27,6 +27,7 @@ import {
   BlockNotFoundError,
   type BlockNode,
   BlockPlacementError,
+  type BlockDefinition,
   type BlockPlacementReason,
   type BlockPropertyDefinition,
   BlockPropsValidationError,
@@ -37,6 +38,7 @@ import {
   type BlockUpcaster,
   checkBlockCompatibility,
   checkPageLocales,
+  checkPlacement,
   checkReservedPagePaths,
   CircularMoveError,
   CircularPageMoveError,
@@ -213,6 +215,8 @@ import {
   RestoreTargetNotFoundError,
   RevisionBatchNotFoundError,
   type RevisionBatchSummary,
+  type PlacementCheckInput,
+  type PlacementRefusalReason,
   ROOT_PARENT_SENTINEL,
   schedulePage,
   type SchedulePageInput,
@@ -233,6 +237,7 @@ import {
   sortOrderBetween,
   StaleBlockVersionError,
   StalePageVersionError,
+  type StarterNode,
   takeOverPageLock,
   type TakeOverPageLockInput,
   toPublicPagePath,
@@ -261,6 +266,7 @@ const functions: Record<string, unknown> = {
   assertBlockCompatibility,
   checkBlockCompatibility,
   checkPageLocales,
+  checkPlacement,
   checkReservedPagePaths,
   compactBlockType,
   computeBlockDeleteImpact,
@@ -528,6 +534,42 @@ if (listBlockDefinitions().length !== 1) {
   fail('listBlockDefinitions did not return the one registered block');
 }
 
+const probeColumn: BlockDefinition = {
+  key: 'column',
+  kind: 'column',
+  editor: { label: 'Column' },
+  properties: {},
+  placement: {
+    ownerTypes: OWNER_TYPES,
+    allowedParents: 'any',
+    allowedChildren: 'any',
+  },
+  schemaVersion: 1,
+  upcasters: {},
+  layoutSupport: { fill: false },
+  starterChildren: [],
+};
+const probeText: BlockDefinition = {
+  ...probeColumn,
+  key: 'text',
+  kind: 'block',
+  editor: { label: 'Text' },
+};
+const probeRefusal = checkPlacement({
+  ownerType: 'page',
+  child: probeColumn,
+  parent: probeText,
+  section: null,
+  parentDepth: 1,
+  parentSectionDepth: 1,
+  sectionNestingDepth: 2,
+  blockDepthCeiling: 12,
+  columnsEnabled: true,
+});
+if (probeRefusal !== 'column-requires-section') {
+  fail('checkPlacement did not refuse a column under a non-section');
+}
+
 const resolvedProperties = resolveBlockProperties(heroDefinition);
 const resolvedTitleProperty = resolvedProperties.title;
 if (resolvedTitleProperty === undefined) {
@@ -782,6 +824,22 @@ const sectionLintFinding: SectionLintFinding = {
 const sectionLintReason: SectionLintReason = 'exempt';
 
 const blockPlacementReason: BlockPlacementReason = 'owner-type';
+const placementRefusalReason: PlacementRefusalReason = 'section-nesting';
+const placementCheckInput: PlacementCheckInput = {
+  ownerType: 'page',
+  child: probeText,
+  parent: null,
+  section: null,
+  parentDepth: null,
+  parentSectionDepth: 0,
+  sectionNestingDepth: 2,
+  blockDepthCeiling: 12,
+  columnsEnabled: false,
+};
+const starterNode: StarterNode = {
+  type: 'text',
+  children: [{ type: 'text', props: {} }],
+};
 
 const degradedBlockEvent: DegradedBlockEvent = {
   blockId: 'block-id',
@@ -1199,6 +1257,9 @@ const typeProofs: unknown[] = [
   sectionLintFinding,
   sectionLintReason,
   blockPlacementReason,
+  placementRefusalReason,
+  placementCheckInput,
+  starterNode,
   degradedBlockEvent,
   degradedReason,
   upcastOutcome,
