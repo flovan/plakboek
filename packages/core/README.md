@@ -77,6 +77,20 @@ is declared in this file and checked when it is evaluated, so a bad
 configuration fails the process at start. A block file imports `defineBlock`
 from the package root, which stays safe for a client bundle.
 
+### Sections and columns
+
+The CMS owns one block, the column, and registers it for every installation
+after your own blocks; a block of yours with the key or kind `column` is
+refused when the config is evaluated. A section's children are always columns,
+and a column holds the page's other blocks. Your section component renders
+`<Columns layout={layout}>{children}</Columns>` from `@plakboek/render`, which
+lays the columns out on a CSS grid from the section's stored ratio and
+alignment; the gap comes from the `--plakboek-column-gap` custom property.
+A seed may stay flat: a seed section that lists blocks directly gets them
+wrapped in one column when the home page is created. To narrow or extend the
+ratios an editor can pick, pass `columnPresets` to `defineConfig`, for
+example `columnPresets: { add: ['3:1'] }`.
+
 The site module (`app/site/index.ts` in the starter) exports `renderDocument`
 and, optionally, `renderNotFound` and `renderError`; each receives a site
 context with the site name, locale, current path and `getMenu(name)`.

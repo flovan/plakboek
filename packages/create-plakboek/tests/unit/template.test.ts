@@ -361,6 +361,14 @@ describe('starter template host code', () => {
     expect(text).toContain('max-w-[1120px]');
   });
 
+  it('renders the section children on the column grid', async () => {
+    const text = await read('blocks/section.tsx');
+    expect(text).toContain(
+      "Columns, type BlockComponent } from '@plakboek/render'",
+    );
+    expect(text).toContain('<Columns layout={layout}>{children}</Columns>');
+  });
+
   it('declares heading with a required text and a level of 1 to 3', async () => {
     const text = await read('blocks/heading.tsx');
     expect(text).toContain("key: 'heading'");
@@ -421,6 +429,14 @@ describe('starter theme and root template', () => {
     const css = await read('app/app.css');
     expect(css.trimStart().startsWith("@import 'tailwindcss';")).toBe(true);
     expect(css.match(/@theme/g)).toHaveLength(1);
+  });
+
+  it('sets the column gap token and stacks columns in a narrow container', async () => {
+    const css = await read('app/app.css');
+    expect(css).toContain('--plakboek-column-gap: 24px;');
+    expect(css).toMatch(
+      /@container \(max-width: 640px\) \{\s*\[data-plakboek-columns\] \{\s*--plakboek-columns-stack: 1fr;/,
+    );
   });
 
   it('resets the colour and text namespaces so no other value exists', async () => {

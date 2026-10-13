@@ -38,4 +38,19 @@
   html {
     color-scheme: light;
   }
+
+  :root {
+    /* The space between the columns of a section. */
+    --plakboek-column-gap: 24px;
+  }
+}
+
+/*
+ * Columns stack below 640px of container width. Change the width here, or
+ * remove the rule to keep columns side by side at every width.
+ */
+@container (max-width: 640px) {
+  [data-plakboek-columns] {
+    --plakboek-columns-stack: 1fr;
+  }
 }
