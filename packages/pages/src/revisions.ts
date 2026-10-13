@@ -22,12 +22,13 @@ import { loadPageForUpdate, StalePageVersionError } from './pages.js';
 import {
   assertPlacementAllowed,
   BlockDepthExceededError,
-  countAncestorSections,
+  loadParentForPlacement,
   SectionNestingDepthExceededError,
 } from './placement.js';
 import {
   BlockPropsValidationError,
   getBlockDefinition,
+  getColumnDefinition,
   resolveBlockProperties,
   validateBlockProps,
   type BlockDefinition,
@@ -863,35 +864,29 @@ export async function restoreRevisionBatch(
         const restoredProps = buildRestoredProps(block.properties);
 
         let parentDefinition: BlockDefinition | null = null;
+        let sectionDefinition: BlockDefinition | null = null;
         let parentDepth: number | null = null;
         let parentSectionDepth = 0;
         if (raw.parentBlockId !== null) {
-          const [parentRow] = await tx
-            .select({
-              depth: pageBlocks.depth,
-              blockType: pageBlocks.blockType,
-            })
-            .from(pageBlocks)
-            .where(eq(pageBlocks.id, raw.parentBlockId))
-            .for('update');
-          if (parentRow === undefined) {
+          const loaded = await loadParentForPlacement(tx, raw.parentBlockId);
+          if (loaded === null) {
             throw new RestoreParentNotFoundError(
               block.revisionId,
               raw.parentBlockId,
             );
           }
-          parentDepth = parentRow.depth;
-          parentDefinition = getBlockDefinition(parentRow.blockType);
-          parentSectionDepth = await countAncestorSections(
-            tx,
-            raw.parentBlockId,
-          );
+          parentDepth = loaded.parentDepth;
+          parentDefinition = loaded.parentDefinition;
+          sectionDefinition = loaded.sectionDefinition;
+          parentSectionDepth = loaded.parentSectionDepth;
         }
 
         assertPlacementAllowed({
           owner: ownerRef,
           child: definition,
           parent: parentDefinition,
+          section: sectionDefinition,
+          columnsEnabled: getColumnDefinition() !== null,
           parentDepth,
           parentSectionDepth,
           sectionNestingDepth: deps.config.sectionNestingDepth,

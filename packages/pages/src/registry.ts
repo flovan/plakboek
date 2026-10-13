@@ -69,7 +69,19 @@ export type ResolvedBlockPlacement = {
  * version 1 to version 2). */
 export type BlockUpcaster = (props: unknown, fromVersion: number) => unknown;
 
-export type BlockKind = 'block' | 'section';
+export type BlockKind = 'block' | 'section' | 'column';
+
+/** One node of a block's starter content (D-20): what the editor inserts
+ * under a freshly inserted block. Types must be registered keys; nesting is
+ * bounded at define time. */
+export type StarterNode = {
+  readonly type: string;
+  readonly props?: Readonly<Record<string, unknown>>;
+  readonly children?: readonly StarterNode[];
+};
+
+/** The deepest starter nesting `defineBlocks` accepts (T-08-09). */
+export const MAX_STARTER_DEPTH = 8;
 
 export type BlockDefinitionInput = {
   readonly key: string;
@@ -86,6 +98,11 @@ export type BlockDefinitionInput = {
   /** The section layout-lint opt-out plan 04-05's boot-time lint honours
    * (04-RESEARCH.md's D-17 discretion). */
   readonly lintExempt?: boolean;
+  /** Layout support the editor reads (D-08). `fill` marks a block that
+   * stretches to fill its column; only a `kind: 'block'` may declare it. */
+  readonly layout?: { readonly fill?: boolean };
+  /** Content inserted under this block when an editor adds it (D-20). */
+  readonly starterChildren?: readonly StarterNode[];
 };
 
 /** One property's resolved installation constraint (D-04), attached to a
@@ -113,6 +130,8 @@ export type BlockDefinition = {
   readonly upcasters: Readonly<Record<number, BlockUpcaster>>;
   readonly component?: unknown;
   readonly lintExempt?: boolean;
+  readonly layoutSupport: { readonly fill: boolean };
+  readonly starterChildren: readonly StarterNode[];
   readonly constraints?: Readonly<Record<string, ResolvedPropertyConstraint>>;
 };
 
@@ -131,7 +150,11 @@ export type BlockConfigIssueCode =
   | 'UPCASTER_OUT_OF_RANGE'
   | 'INVALID_DEFAULT_VALUE'
   | 'UNKNOWN_PLACEMENT_KEY'
-  | 'EMPTY_LABEL';
+  | 'EMPTY_LABEL'
+  | 'COLUMN_PROPERTIES'
+  | 'MULTIPLE_COLUMN_KINDS'
+  | 'INVALID_LAYOUT_SUPPORT'
+  | 'INVALID_STARTER_CHILDREN';
 
 export type BlockConfigIssue = {
   readonly code: BlockConfigIssueCode;
@@ -224,7 +247,8 @@ function resolvePlacement(
   const ownerTypes = placement?.ownerTypes ?? OWNER_TYPES;
   const allowedParents = placement?.allowedParents ?? 'any';
   const allowedChildren =
-    placement?.allowedChildren ?? (kind === 'section' ? 'any' : 'none');
+    placement?.allowedChildren ??
+    (kind === 'section' || kind === 'column' ? 'any' : 'none');
   return Object.freeze({
     ownerTypes: Object.freeze([...ownerTypes]),
     allowedParents:
@@ -248,6 +272,18 @@ function resolveProperty(
   });
 }
 
+function freezeStarter(node: StarterNode): StarterNode {
+  return Object.freeze({
+    type: node.type,
+    ...(node.props !== undefined
+      ? { props: Object.freeze({ ...node.props }) }
+      : {}),
+    ...(node.children !== undefined
+      ? { children: Object.freeze(node.children.map(freezeStarter)) }
+      : {}),
+  });
+}
+
 function toDefinition(entry: BlockDefinitionInput): BlockDefinition {
   const kind = entry.kind ?? 'block';
   const properties: Record<string, BlockPropertyDefinition> = {};
@@ -267,6 +303,10 @@ function toDefinition(entry: BlockDefinitionInput): BlockDefinition {
       : {}),
     ...(entry.component !== undefined ? { component: entry.component } : {}),
     ...(entry.lintExempt !== undefined ? { lintExempt: entry.lintExempt } : {}),
+    layoutSupport: Object.freeze({ fill: entry.layout?.fill === true }),
+    starterChildren: Object.freeze(
+      (entry.starterChildren ?? []).map(freezeStarter),
+    ),
   });
 }
 
@@ -402,6 +442,73 @@ function validatePlacementKeys(
   checkKeys(placement.allowedChildren, 'allowedChildren');
 }
 
+function validateColumnShape(
+  entry: BlockDefinitionInput,
+  issues: BlockConfigIssue[],
+): void {
+  if (entry.kind === 'column' && Object.keys(entry.properties).length > 0) {
+    issues.push({
+      code: 'COLUMN_PROPERTIES',
+      blockKey: entry.key,
+      message: `column block "${entry.key}" must not declare properties`,
+    });
+  }
+  if (entry.layout?.fill !== undefined && (entry.kind ?? 'block') !== 'block') {
+    issues.push({
+      code: 'INVALID_LAYOUT_SUPPORT',
+      blockKey: entry.key,
+      message: `block "${entry.key}" declares layout.fill but only a block of kind "block" may`,
+    });
+  }
+}
+
+/** Starter nesting depth: a flat list is depth 1. */
+function starterDepth(nodes: readonly StarterNode[]): number {
+  let deepest = 0;
+  for (const node of nodes) {
+    deepest = Math.max(deepest, 1 + starterDepth(node.children ?? []));
+  }
+  return deepest;
+}
+
+function collectStarterTypes(
+  nodes: readonly StarterNode[],
+  into: string[],
+): void {
+  for (const node of nodes) {
+    into.push(node.type);
+    collectStarterTypes(node.children ?? [], into);
+  }
+}
+
+function validateStarterChildren(
+  entry: BlockDefinitionInput,
+  knownKeys: ReadonlySet<string>,
+  issues: BlockConfigIssue[],
+): void {
+  const starters = entry.starterChildren;
+  if (starters === undefined) return;
+  if (starterDepth(starters) > MAX_STARTER_DEPTH) {
+    issues.push({
+      code: 'INVALID_STARTER_CHILDREN',
+      blockKey: entry.key,
+      message: `block "${entry.key}" starterChildren nest deeper than ${MAX_STARTER_DEPTH} levels`,
+    });
+    return;
+  }
+  const types: string[] = [];
+  collectStarterTypes(starters, types);
+  for (const type of types) {
+    if (!knownKeys.has(type)) {
+      issues.push({
+        code: 'INVALID_STARTER_CHILDREN',
+        blockKey: entry.key,
+        message: `block "${entry.key}" starterChildren references unknown block key "${type}"`,
+      });
+    }
+  }
+}
+
 /**
  * Validates every block declaration and registers it (D-01, D-05, D-16).
  * Collects every problem across every entry -- never fails on the first
@@ -457,6 +564,21 @@ export function defineBlocks(
     validateUpcasters(entry, issues);
     validateProperties(entry, issues);
     validatePlacementKeys(entry, knownKeys, issues);
+    validateColumnShape(entry, issues);
+    validateStarterChildren(entry, knownKeys, issues);
+  }
+
+  const columnKeys = [
+    ...new Set(
+      entries.filter((entry) => entry.kind === 'column').map((e) => e.key),
+    ),
+  ];
+  if (columnKeys.length > 1) {
+    issues.push({
+      code: 'MULTIPLE_COLUMN_KINDS',
+      blockKey: columnKeys[1] ?? '',
+      message: `a registry may hold at most one column kind, found ${columnKeys.map((key) => `"${key}"`).join(', ')}`,
+    });
   }
 
   if (issues.length > 0) {
@@ -513,6 +635,15 @@ export function getBlockDefinition(key: string): BlockDefinition {
     throw new UnknownBlockTypeError(key);
   }
   return definition;
+}
+
+/** The registry's column-kind definition, or null when it holds none. The
+ * column rules in placement are gated on this being non-null. */
+export function getColumnDefinition(): BlockDefinition | null {
+  for (const definition of registry.values()) {
+    if (definition.kind === 'column') return definition;
+  }
+  return null;
 }
 
 export function listBlockDefinitions(): readonly BlockDefinition[] {

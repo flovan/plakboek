@@ -29,6 +29,8 @@ function definition(overrides: Partial<BlockDefinition> = {}): BlockDefinition {
     }),
     schemaVersion: 1,
     upcasters: Object.freeze({}),
+    layoutSupport: Object.freeze({ fill: false }),
+    starterChildren: Object.freeze([]),
     ...overrides,
   });
 }
@@ -51,10 +53,12 @@ function baseContext(overrides: Partial<PlacementContext>): PlacementContext {
     owner: { ownerType: 'page', ownerId: 'owner-1', locale: 'en' },
     child: definition(),
     parent: null,
+    section: null,
     parentDepth: null,
     parentSectionDepth: 0,
     sectionNestingDepth: 2,
     blockDepthCeiling: 12,
+    columnsEnabled: false,
     ...overrides,
   };
 }

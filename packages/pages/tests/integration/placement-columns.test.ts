@@ -1,0 +1,236 @@
+/**
+ * The column block kind wired into insertBlock (D-01, D-02, D-03, D-15,
+ * D-18), proven end to end against real Postgres: a section holds only
+ * columns, a block under a column is judged against the column's section,
+ * and a column never counts toward the section nesting cap.
+ */
+import { randomUUID } from 'node:crypto';
+import {
+  createAuditRecorder,
+  createUserWithRole,
+  SUPERADMIN_ROLE_KEY,
+  type AuditActor,
+  type AuditDatabase,
+  type AuditRecorder,
+} from '@plakboek/auth';
+import { defineContentConfig } from '@plakboek/content';
+import { createDb, runMigrations, type Db } from '@plakboek/db';
+import {
+  createPermissionResolver,
+  defaultRoles,
+  type PermissionResolver,
+} from '@plakboek/permissions';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { definePagesConfig, type PagesDeps } from '../../src/config.js';
+import { createPage, getPage } from '../../src/pages.js';
+import {
+  BlockPlacementError,
+  SectionNestingDepthExceededError,
+  SectionRequiredError,
+} from '../../src/placement.js';
+import { defineBlocks } from '../../src/registry.js';
+import type { BlockRecord, OwnerRef, PageRecord } from '../../src/types.js';
+import { insertBlock } from '../../src/tree.js';
+import { createTestDatabase } from './test-database.js';
+
+describe('column placement through insertBlock (D-01, D-02, D-03, D-15, D-18)', () => {
+  let testDatabase: Awaited<ReturnType<typeof createTestDatabase>>;
+  let handle: Db;
+  let db: AuditDatabase;
+  let deps: PagesDeps;
+  let actor: AuditActor;
+  const clock = (): Date => new Date('2026-10-13T11:00:00.000Z');
+
+  beforeAll(async () => {
+    testDatabase = await createTestDatabase();
+    await runMigrations({ connectionString: testDatabase.connectionString });
+    handle = createDb({ connectionString: testDatabase.connectionString });
+    db = handle.db;
+
+    const resolver: PermissionResolver = createPermissionResolver(defaultRoles);
+    const recorder: AuditRecorder = createAuditRecorder({ db, resolver });
+
+    const config = definePagesConfig({
+      content: defineContentConfig({
+        locales: ['en'],
+        defaultLocale: 'en',
+        timezone: 'UTC',
+      }),
+      blocks: defineBlocks([
+        {
+          key: 'column',
+          kind: 'column',
+          editor: { label: 'Column' },
+          schemaVersion: 1,
+          properties: {},
+        },
+        {
+          key: 'section',
+          kind: 'section',
+          editor: { label: 'Section' },
+          schemaVersion: 1,
+          properties: {},
+        },
+        {
+          key: 'text',
+          editor: { label: 'Text' },
+          schemaVersion: 1,
+          properties: {},
+        },
+        {
+          key: 'quote',
+          editor: { label: 'Quote' },
+          schemaVersion: 1,
+          properties: {},
+          layout: { fill: true },
+        },
+        {
+          key: 'card',
+          editor: { label: 'Card' },
+          schemaVersion: 1,
+          properties: {},
+          placement: { allowedParents: ['section'] },
+        },
+        {
+          key: 'accordionList',
+          editor: { label: 'Accordion list' },
+          schemaVersion: 1,
+          properties: {},
+          placement: { allowedChildren: ['accordionItem'] },
+        },
+        {
+          key: 'accordionItem',
+          editor: { label: 'Accordion item' },
+          schemaVersion: 1,
+          properties: {},
+          placement: { allowedParents: ['accordionList'] },
+        },
+      ]),
+      sectionNestingDepth: 2,
+      blockDepthCeiling: 12,
+    });
+
+    const user = await createUserWithRole(db, {
+      id: randomUUID(),
+      email: 'columns@example.com',
+      name: 'Columns',
+      roleKey: SUPERADMIN_ROLE_KEY,
+    });
+    actor = { userId: user.userId, roleKey: user.roleKey };
+    deps = { db, recorder, resolver, config, now: clock };
+  });
+
+  afterAll(async () => {
+    await handle.close();
+    await testDatabase.drop();
+  });
+
+  async function freshPage(title: string): Promise<PageRecord> {
+    return await createPage(deps, actor, { locale: 'en', title });
+  }
+
+  function ownerOf(page: PageRecord): OwnerRef {
+    return { ownerType: 'page', ownerId: page.id, locale: page.locale };
+  }
+
+  async function add(
+    page: PageRecord,
+    blockType: string,
+    parentBlockId: string | null,
+  ): Promise<BlockRecord> {
+    const current = await getPage(db, page.id);
+    if (current === null) throw new Error('page vanished mid-test');
+    return await insertBlock(deps, actor, {
+      owner: ownerOf(page),
+      blockType,
+      parentBlockId,
+      basePageVersion: current.version,
+    });
+  }
+
+  async function refusal(
+    page: PageRecord,
+    blockType: string,
+    parentBlockId: string | null,
+  ): Promise<unknown> {
+    return await add(page, blockType, parentBlockId).catch(
+      (caught: unknown) => caught,
+    );
+  }
+
+  it('accepts a section, then a column under it, then a text under the column', async () => {
+    const page = await freshPage('Column happy path');
+    const section = await add(page, 'section', null);
+    const column = await add(page, 'column', section.id);
+    const text = await add(page, 'text', column.id);
+    expect(column.depth).toBe(1);
+    expect(text.parentBlockId).toBe(column.id);
+    expect(text.depth).toBe(2);
+  });
+
+  it('refuses a bare block directly under a section', async () => {
+    const page = await freshPage('Bare block under section');
+    const section = await add(page, 'section', null);
+    const error = await refusal(page, 'text', section.id);
+    expect(error).toBeInstanceOf(BlockPlacementError);
+    expect((error as BlockPlacementError).reason).toBe(
+      'section-requires-columns',
+    );
+  });
+
+  it('refuses a column at the page root and a column under a non-section', async () => {
+    const page = await freshPage('Misplaced columns');
+    const rootError = await refusal(page, 'column', null);
+    expect(rootError).toBeInstanceOf(SectionRequiredError);
+
+    const section = await add(page, 'section', null);
+    const column = await add(page, 'column', section.id);
+    const text = await add(page, 'text', column.id);
+
+    const underBlock = await refusal(page, 'column', text.id);
+    expect(underBlock).toBeInstanceOf(BlockPlacementError);
+    expect((underBlock as BlockPlacementError).reason).toBe(
+      'column-requires-section',
+    );
+
+    const underColumn = await refusal(page, 'column', column.id);
+    expect(underColumn).toBeInstanceOf(BlockPlacementError);
+    expect((underColumn as BlockPlacementError).reason).toBe(
+      'column-requires-section',
+    );
+  });
+
+  it('judges a block under a column against the column section: allowedParents naming the section is accepted', async () => {
+    const page = await freshPage('Card under a column');
+    const section = await add(page, 'section', null);
+    const column = await add(page, 'column', section.id);
+    const card = await add(page, 'card', column.id);
+    expect(card.parentBlockId).toBe(column.id);
+
+    const error = await refusal(page, 'accordionItem', column.id);
+    expect(error).toBeInstanceOf(BlockPlacementError);
+    expect((error as BlockPlacementError).reason).toBe('child-rejects-parent');
+    expect((error as BlockPlacementError).parentKey).toBe('section');
+  });
+
+  it('accepts an accordion item under an accordion list inside a column (D-15)', async () => {
+    const page = await freshPage('Accordion in a column');
+    const section = await add(page, 'section', null);
+    const column = await add(page, 'column', section.id);
+    const list = await add(page, 'accordionList', column.id);
+    const item = await add(page, 'accordionItem', list.id);
+    expect(item.parentBlockId).toBe(list.id);
+  });
+
+  it('counts a section nested in a column as section depth 2 and refuses a third level', async () => {
+    const page = await freshPage('Section nesting through columns');
+    const outer = await add(page, 'section', null);
+    const outerColumn = await add(page, 'column', outer.id);
+    const inner = await add(page, 'section', outerColumn.id);
+    const innerColumn = await add(page, 'column', inner.id);
+
+    const error = await refusal(page, 'section', innerColumn.id);
+    expect(error).toBeInstanceOf(SectionNestingDepthExceededError);
+    expect((error as SectionNestingDepthExceededError).attempted).toBe(3);
+  });
+});

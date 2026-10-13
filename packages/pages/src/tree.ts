@@ -40,11 +40,12 @@ import {
 import {
   assertPlacementAllowed,
   BlockDepthExceededError,
-  countAncestorSections,
+  loadParentForPlacement,
   SectionNestingDepthExceededError,
 } from './placement.js';
 import {
   getBlockDefinition,
+  getColumnDefinition,
   validateBlockProps,
   type BlockDefinition,
 } from './registry.js';
@@ -437,23 +438,18 @@ export async function insertBlock(
       );
 
       let parentDefinition: BlockDefinition | null = null;
+      let sectionDefinition: BlockDefinition | null = null;
       let parentDepth: number | null = null;
       let parentSectionDepth = 0;
       if (input.parentBlockId !== null) {
-        const [parentRow] = await tx
-          .select({ depth: pageBlocks.depth, blockType: pageBlocks.blockType })
-          .from(pageBlocks)
-          .where(eq(pageBlocks.id, input.parentBlockId))
-          .for('update');
-        if (parentRow === undefined) {
+        const loaded = await loadParentForPlacement(tx, input.parentBlockId);
+        if (loaded === null) {
           throw new BlockNotFoundError(input.parentBlockId);
         }
-        parentDepth = parentRow.depth;
-        parentDefinition = getBlockDefinition(parentRow.blockType);
-        parentSectionDepth = await countAncestorSections(
-          tx,
-          input.parentBlockId,
-        );
+        parentDepth = loaded.parentDepth;
+        parentDefinition = loaded.parentDefinition;
+        sectionDefinition = loaded.sectionDefinition;
+        parentSectionDepth = loaded.parentSectionDepth;
       }
       const depth = (parentDepth ?? -1) + 1;
 
@@ -461,6 +457,8 @@ export async function insertBlock(
         owner: input.owner,
         child: definition,
         parent: parentDefinition,
+        section: sectionDefinition,
+        columnsEnabled: getColumnDefinition() !== null,
         parentDepth,
         parentSectionDepth,
         sectionNestingDepth: deps.config.sectionNestingDepth,
@@ -875,23 +873,18 @@ export async function moveBlock(
       }
 
       let parentDefinition: BlockDefinition | null = null;
+      let sectionDefinition: BlockDefinition | null = null;
       let parentDepth: number | null = null;
       let parentSectionDepth = 0;
       if (input.newParentBlockId !== null) {
-        const [parentRow] = await tx
-          .select({ depth: pageBlocks.depth, blockType: pageBlocks.blockType })
-          .from(pageBlocks)
-          .where(eq(pageBlocks.id, input.newParentBlockId))
-          .for('update');
-        if (parentRow === undefined) {
+        const loaded = await loadParentForPlacement(tx, input.newParentBlockId);
+        if (loaded === null) {
           throw new BlockNotFoundError(input.newParentBlockId);
         }
-        parentDepth = parentRow.depth;
-        parentDefinition = getBlockDefinition(parentRow.blockType);
-        parentSectionDepth = await countAncestorSections(
-          tx,
-          input.newParentBlockId,
-        );
+        parentDepth = loaded.parentDepth;
+        parentDefinition = loaded.parentDefinition;
+        sectionDefinition = loaded.sectionDefinition;
+        parentSectionDepth = loaded.parentSectionDepth;
       }
 
       const subtreeRows = await walkSubtree(tx, input.blockId);
@@ -917,6 +910,8 @@ export async function moveBlock(
         owner: ownerRef,
         child: definition,
         parent: parentDefinition,
+        section: sectionDefinition,
+        columnsEnabled: getColumnDefinition() !== null,
         parentDepth,
         parentSectionDepth,
         sectionNestingDepth: deps.config.sectionNestingDepth,
