@@ -69,6 +69,11 @@ export type Runtime = {
    */
   cmsPages(): Promise<CmsPages>;
   /**
+   * The editor's JSON API (`/cms/api`), composed on first use so the editor's
+   * server code loads only when the first API request arrives.
+   */
+  editorApi(): Promise<EditorServer.EditorApi>;
+  /**
    * The visitor handler's sealed 404 (host page or default, status 404,
    * `no-store`) for routes outside the handler, such as the setup page.
    */
@@ -182,6 +187,29 @@ function composeCmsPages(
   });
 }
 
+/** The editor API, built on first use from the same dependencies. */
+function composeEditorApi(
+  host: HostModule,
+  parts: Pick<EditorParts, 'env' | 'auth' | 'resolver'> & {
+    readonly pages: PagesDeps;
+  },
+  loadEditor: EditorLoader,
+): () => Promise<EditorServer.EditorApi> {
+  const { config } = host;
+  const { env, auth, resolver, pages } = parts;
+  return lazily(async () => {
+    const { createEditorApi } = await loadEditor();
+    return createEditorApi({
+      auth,
+      resolver,
+      pages,
+      homeSlug: config.homeSlug,
+      components: createComponentMap(config.pages.blocks),
+      siteOrigin: new URL(env.siteUrl).origin,
+    });
+  });
+}
+
 export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
   const { config, site } = host;
   const db = getDb(env.databaseUrl);
@@ -244,6 +272,11 @@ export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
     pages,
     visitor,
     cmsPages: composeCmsPages(host, { env, auth, resolver }, loadEditor),
+    editorApi: composeEditorApi(
+      host,
+      { env, auth, resolver, pages },
+      loadEditor,
+    ),
     notFoundResponse: (request) => sealedNotFoundResponse(siteHooks, request),
   };
 }
