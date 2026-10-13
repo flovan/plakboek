@@ -1,6 +1,6 @@
 /**
- * The editor's one compound write (D-25): a batch of insert, update, move
- * and delete operations against a single page, applied in one transaction
+ * The editor's one compound write (D-25): a batch of insert, update, move,
+ * delete and duplicate operations against a single page, applied in one transaction
  * with one revision batch id, one audit row and one page version bump -- or
  * not at all. Each autosave is one call here, so an action made of several
  * steps (add a column and reset the layout, delete a section and later undo
@@ -28,13 +28,21 @@ import {
   type AuditTransaction,
 } from '@plakboek/auth';
 import { getRevisionCap } from '@plakboek/content';
-import { eq, inArray, sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { PagesDeps } from './config.js';
 import { assertPageWritable } from './locks.js';
 import { loadPageForUpdate, StalePageVersionError } from './pages.js';
 import { newRevisionBatchId, pruneBlockRevisions } from './revisions.js';
+import {
+  getBlockDefinition,
+  getColumnDefinition,
+  type BlockDefinition,
+  type StarterNode,
+} from './registry.js';
 import { pageBlocks, pages } from './schema.js';
 import { getPageEditLocking } from './settings.js';
+import { loadSubtreeRows } from './subtree.js';
 import {
   BlockNotFoundError,
   deleteSubtreeInTransaction,
@@ -96,6 +104,14 @@ export type BlockEditOp =
       readonly op: 'delete';
       readonly blockId: string;
       readonly baseVersion: number;
+    }
+  | {
+      /** Copies a block and its whole subtree directly after it (D-22). The
+       * copy's root takes `newId` when given (a lowercase uuid no block
+       * uses), every other copied block a fresh id. */
+      readonly op: 'duplicate';
+      readonly blockId: string;
+      readonly newId?: string;
     };
 
 export type BlockEditInput = {
@@ -143,6 +159,20 @@ export class BlockIdConflictError extends Error {
     super(`@plakboek/pages: a block with id "${blockId}" already exists`);
     this.name = 'BlockIdConflictError';
     this.blockId = blockId;
+  }
+}
+
+/** Thrown when a batch would leave a section without a column (D-03): a
+ * section always holds at least one column. Nothing has been written. */
+export class SectionColumnRequiredError extends Error {
+  readonly sectionId: string;
+
+  constructor(sectionId: string) {
+    super(
+      `@plakboek/pages: section "${sectionId}" must keep at least one column`,
+    );
+    this.name = 'SectionColumnRequiredError';
+    this.sectionId = sectionId;
   }
 }
 
@@ -229,6 +259,15 @@ function scanBatch(input: BlockEditInput): BatchScan {
       if (!UUID_PATTERN.test(id)) throw new BlockNotFoundError(id);
       if (!suppliedIds.has(id)) externalIds.add(id);
     }
+    if (op.op === 'duplicate' && op.newId !== undefined) {
+      if (!UUID_PATTERN.test(op.newId)) {
+        throw new TypeError(
+          '@plakboek/pages: a supplied block id must be a lowercase uuid',
+        );
+      }
+      if (suppliedIds.has(op.newId)) throw new BlockIdConflictError(op.newId);
+      suppliedIds.add(op.newId);
+    }
     if (op.op !== 'insert') continue;
 
     const pending: BlockEditNode[] = [op.node];
@@ -296,6 +335,9 @@ type BatchState = {
   readonly updatedIds: Set<string>;
   readonly movedIds: Set<string>;
   readonly touchedParentIds: Set<string | null>;
+  /** Sections the batch created, or whose column was moved or deleted: the
+   * ones that must still hold a column when the batch ends. */
+  readonly sectionCandidates: Set<string>;
   /** The version each touched block was checked against the first time an
    * operation of this batch touched it. */
   readonly firstBaseVersions: Map<string, number>;
@@ -359,8 +401,143 @@ async function insertNode(
     throw error;
   }
   state.createdIds.push(created.id);
-  for (const child of node.children ?? []) {
+  const definition = getBlockDefinition(node.type);
+  if (definition.kind === 'section') state.sectionCandidates.add(created.id);
+  // A node sent without children starts with its definition's starter
+  // content (D-20); one sent with children, even none, is taken as is.
+  for (const child of node.children ?? starterNodesFor(definition)) {
     await insertNode(tx, ctx, state, child, created.id, undefined, undefined);
+  }
+}
+
+/** One starter node as an insertable node under a fresh id. Its own
+ * children are the declared ones; a section with none gets a column, so a
+ * starter never builds a section the invariant would refuse. */
+function expandStarter(node: StarterNode): BlockEditNode {
+  const definition = getBlockDefinition(node.type);
+  return {
+    id: randomUUID(),
+    type: node.type,
+    ...(node.props === undefined ? {} : { props: node.props }),
+    children:
+      node.children === undefined
+        ? columnStarters(definition)
+        : node.children.map(expandStarter),
+  };
+}
+
+/** The column a section starts with, when the registry has a column kind. */
+function columnStarters(definition: BlockDefinition): readonly BlockEditNode[] {
+  const column = getColumnDefinition();
+  return definition.kind === 'section' && column !== null
+    ? [{ id: randomUUID(), type: column.key, children: [] }]
+    : [];
+}
+
+/** What a freshly inserted block holds under it: its declared starter
+ * children, or for a section with none the one column it always has. */
+function starterNodesFor(
+  definition: BlockDefinition,
+): readonly BlockEditNode[] {
+  return definition.starterChildren.length > 0
+    ? definition.starterChildren.map(expandStarter)
+    : columnStarters(definition);
+}
+
+/** The kind of a stored block type, or null when it is no longer
+ * registered (a degraded block never blocks a structural write). */
+function kindOf(blockType: string): BlockDefinition['kind'] | null {
+  try {
+    return getBlockDefinition(blockType).kind;
+  } catch {
+    return null;
+  }
+}
+
+/** Copies a block and its whole subtree under fresh ids directly after the
+ * original: same parent, props, layout and schema versions unchanged, every
+ * copy a create revision of the batch. The root takes `newId` when given. */
+async function duplicateSubtree(
+  tx: AuditTransaction,
+  ctx: WriteContext,
+  state: BatchState,
+  blockId: string,
+  newId: string | undefined,
+): Promise<void> {
+  const original = await loadBlockForUpdate(tx, blockId, null);
+  const rows = await loadSubtreeRows(tx, blockId);
+  if (state.createdIds.length + rows.length > BLOCK_EDIT_MAX_NODES) {
+    throw new BlockEditLimitError('nodes');
+  }
+  const copyIds = new Map<string, string>();
+  for (const row of rows) {
+    const isRoot = row.id === blockId;
+    const id = isRoot ? (newId ?? randomUUID()) : randomUUID();
+    copyIds.set(row.id, id);
+    const parentId = isRoot
+      ? original.parentBlockId
+      : (copyIds.get(row.parentBlockId ?? '') ?? null);
+    let created: Awaited<ReturnType<typeof insertBlockInTransaction>>;
+    try {
+      created = await insertBlockInTransaction(tx, ctx, {
+        id,
+        blockType: row.blockType,
+        parentBlockId: parentId,
+        props: row.props,
+        layout: row.layout,
+        verbatim: { schemaVersion: row.schemaVersion },
+        ...(isRoot ? { previousSiblingId: blockId } : {}),
+      });
+    } catch (error) {
+      if (isRoot && newId !== undefined && isBlockPrimaryKeyViolation(error)) {
+        throw new BlockIdConflictError(newId);
+      }
+      throw error;
+    }
+    state.createdIds.push(created.id);
+    if (kindOf(row.blockType) === 'section') {
+      state.sectionCandidates.add(created.id);
+    }
+  }
+  state.touchedParentIds.add(original.parentBlockId);
+}
+
+/** Refuses the batch when a section it created, or whose column it moved or
+ * deleted, ends without a column (D-03). Runs under the page lock, so the
+ * answer cannot change before the commit. */
+async function assertSectionsHaveColumns(
+  tx: AuditTransaction,
+  state: BatchState,
+): Promise<void> {
+  const column = getColumnDefinition();
+  if (column === null) return;
+  const candidates = [...state.sectionCandidates].filter(
+    (id) => !state.deletedIds.has(id),
+  );
+  if (candidates.length === 0) return;
+
+  const withColumn = new Set(
+    (
+      await tx
+        .select({ parentId: pageBlocks.parentBlockId })
+        .from(pageBlocks)
+        .where(
+          and(
+            inArray(pageBlocks.parentBlockId, candidates),
+            eq(pageBlocks.blockType, column.key),
+          ),
+        )
+    ).map((row) => row.parentId),
+  );
+  const existing = await tx
+    .select({ id: pageBlocks.id })
+    .from(pageBlocks)
+    .where(inArray(pageBlocks.id, candidates));
+  const existingIds = new Set(existing.map((row) => row.id));
+  for (const id of candidates) {
+    if (existingIds.has(id) && !withColumn.has(id)) {
+      throw new SectionColumnRequiredError(id);
+    }
   }
 }
 
@@ -406,6 +583,12 @@ async function applyOperation(
       state.movedIds.add(op.blockId);
       state.touchedParentIds.add(current.parentBlockId);
       state.touchedParentIds.add(op.position.parentId);
+      if (
+        current.parentBlockId !== null &&
+        kindOf(current.blockType) === 'column'
+      ) {
+        state.sectionCandidates.add(current.parentBlockId);
+      }
       return;
     }
     case 'delete': {
@@ -413,6 +596,16 @@ async function applyOperation(
       const { rows } = await deleteSubtreeInTransaction(tx, ctx, { current });
       for (const row of rows) state.deletedIds.add(row.id);
       state.touchedParentIds.add(current.parentBlockId);
+      if (
+        current.parentBlockId !== null &&
+        kindOf(current.blockType) === 'column'
+      ) {
+        state.sectionCandidates.add(current.parentBlockId);
+      }
+      return;
+    }
+    case 'duplicate': {
+      await duplicateSubtree(tx, ctx, state, op.blockId, op.newId);
       return;
     }
   }
@@ -440,6 +633,14 @@ async function applyOperation(
  * delete revision, props and layout included, for every block of the
  * removed subtree before the rows go; an operation naming a block an
  * earlier operation of the batch deleted is `BlockNotFoundError`.
+ *
+ * Structure (D-03, D-20, D-22): an inserted node sent without children gets
+ * its definition's starter children, and a section with none gets one
+ * column; a `duplicate` copies a block's whole subtree directly after it
+ * under fresh ids, as create revisions of the batch. Before the commit, a
+ * section the batch created, or whose column it moved or deleted, must still
+ * hold a column: otherwise `SectionColumnRequiredError` rolls the whole
+ * batch back.
  */
 export async function applyBlockEdit(
   deps: PagesDeps,
@@ -515,11 +716,13 @@ export async function applyBlockEdit(
         updatedIds: new Set(),
         movedIds: new Set(),
         touchedParentIds: new Set(),
+        sectionCandidates: new Set(),
         firstBaseVersions: new Map(),
       };
       for (const op of input.ops) {
         await applyOperation(tx, ctx, state, op);
       }
+      await assertSectionsHaveColumns(tx, state);
 
       await tx
         .update(pages)

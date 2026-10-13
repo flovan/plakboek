@@ -838,7 +838,8 @@ describe('applyBlockEdit (D-25)', () => {
     );
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     expect(rejected[0]?.reason).toBeInstanceOf(StalePageVersionError);
-    expect(await blockCount(page.id)).toBe(blocksBefore + 1);
+    // One committed section plus the column every new section starts with.
+    expect(await blockCount(page.id)).toBe(blocksBefore + 2);
     expect((await currentPage(page.id)).version).toBe(page.version + 1);
   });
 

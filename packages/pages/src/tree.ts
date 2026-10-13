@@ -598,7 +598,26 @@ export type InsertInTransactionInput = {
   readonly sortOrder?: number;
   readonly previousSiblingId?: string | null;
   readonly nextSiblingId?: string | null;
+  /** Set when the row copies an already stored block (a duplicate, D-22):
+   * `props` and `layout` are stored as given, unvalidated, and the row keeps
+   * the stored schema version instead of the registry's current one, so a
+   * copy never changes the shape of data it did not touch. */
+  readonly verbatim?: { readonly schemaVersion: number };
 };
+
+/** Stored props of a block being copied: a plain object, kept as is. */
+function verbatimProps(props: unknown): Record<string, unknown> {
+  return typeof props === 'object' && props !== null && !Array.isArray(props)
+    ? { ...props }
+    : {};
+}
+
+/** Stored layout of a block being copied: a plain object or null. */
+function verbatimLayout(layout: unknown): Record<string, unknown> | null {
+  return typeof layout === 'object' && layout !== null && !Array.isArray(layout)
+    ? { ...layout }
+    : null;
+}
 
 /**
  * The body of one insert, inside the caller's transaction: resolves the
@@ -647,14 +666,16 @@ export async function insertBlockInTransaction(
     blockDepthCeiling: deps.config.blockDepthCeiling,
   });
 
-  const validatedProps = validateBlockProps(definition, input.props ?? {}, {
-    allowMissingRequired: true,
-  });
-  const validatedLayout = validateBlockLayout(
-    definition,
-    input.layout,
-    deps.config.columnPresets,
-  );
+  const validatedProps =
+    input.verbatim === undefined
+      ? validateBlockProps(definition, input.props ?? {}, {
+          allowMissingRequired: true,
+        })
+      : verbatimProps(input.props);
+  const validatedLayout =
+    input.verbatim === undefined
+      ? validateBlockLayout(definition, input.layout, deps.config.columnPresets)
+      : verbatimLayout(input.layout);
 
   const sortOrder =
     input.sortOrder ??
@@ -678,7 +699,7 @@ export async function insertBlockInTransaction(
       blockType: input.blockType,
       props: validatedProps,
       layout: validatedLayout,
-      schemaVersion: definition.schemaVersion,
+      schemaVersion: input.verbatim?.schemaVersion ?? definition.schemaVersion,
       depth,
       sortOrder,
       version: 1,
