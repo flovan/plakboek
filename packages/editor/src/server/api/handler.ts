@@ -17,7 +17,9 @@ import type { PermissionResolver } from '@plakboek/permissions';
 import type { ComponentMap, RenderHooks } from '@plakboek/render/server';
 import { EDITOR_API_BASE, type LockView } from '../../api-types.js';
 import { buildCatalogue } from '../catalogue.js';
+import { buildBlockMeta } from '../frame-document.js';
 import { readEditorIdentity } from '../identity.js';
+import { editPage } from './edit.js';
 import {
   apiErrorFor,
   ApiHttpError,
@@ -25,7 +27,13 @@ import {
   jsonResponse,
   readJsonBody,
 } from './http.js';
-import { emptyBody, openBody, pageIdParam, parseWith } from './schemas.js';
+import {
+  editBody,
+  emptyBody,
+  openBody,
+  pageIdParam,
+  parseWith,
+} from './schemas.js';
 import {
   acquireLock,
   lockViewOf,
@@ -64,9 +72,9 @@ type Route = {
   readonly run: (context: ApiContext, body: unknown) => Promise<unknown>;
 };
 
-/** `/pages/<id>/tree` and `/pages/<id>/lock[/<action>]`. */
+/** `/pages/<id>/{tree,edit}` and `/pages/<id>/lock[/<action>]`. */
 const PAGE_ROUTE =
-  /^\/pages\/([^/]+)\/(tree|lock|lock\/acquire|lock\/renew|lock\/release|lock\/take-over)$/;
+  /^\/pages\/([^/]+)\/(tree|edit|lock|lock\/acquire|lock\/renew|lock\/release|lock\/take-over)$/;
 
 function pageRoute(rawId: string, action: string): Route | null {
   const pageId = (): string => parseWith(pageIdParam, rawId);
@@ -86,6 +94,12 @@ function pageRoute(rawId: string, action: string): Route | null {
     run: async (context) => await run(context, pageId()),
   });
   switch (action) {
+    case 'edit':
+      return {
+        method: 'POST',
+        run: async (context, body) =>
+          await editPage(context, pageId(), parseWith(editBody, body)),
+      };
     case 'tree':
       return get(readTree);
     case 'lock':
@@ -135,6 +149,7 @@ function apiPath(url: string): string | null {
 export function createEditorApi(deps: EditorApiDeps): EditorApi {
   // Computed once: the declared blocks do not change while the server runs.
   const catalogue = buildCatalogue(deps.pages.config);
+  const blockMeta = buildBlockMeta(deps.pages.config);
 
   return {
     async handle(request) {
@@ -169,6 +184,7 @@ export function createEditorApi(deps: EditorApiDeps): EditorApi {
         context = {
           deps,
           catalogue,
+          blockMeta,
           identity,
           actor: { userId: identity.userId, roleKey: identity.roleKey },
         };

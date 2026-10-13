@@ -30,9 +30,11 @@ import {
   resolveEditablePage,
   takeOverPageLock,
   upgradeSectionColumns,
+  type BlockNode,
   type PageLockView,
+  type PageRecord,
 } from '@plakboek/pages';
-import { normalizeVisitorPath } from '@plakboek/render/server';
+import { normalizeVisitorPath, type BlockMeta } from '@plakboek/render/server';
 import type {
   CatalogueEntry,
   EditorSession,
@@ -49,6 +51,8 @@ import { ApiHttpError } from './http.js';
 export type ApiContext = {
   readonly deps: EditorApiDeps;
   readonly catalogue: readonly CatalogueEntry[];
+  /** Label and kind per block type, for rendering fragments. */
+  readonly blockMeta: ReadonlyMap<string, BlockMeta>;
   readonly identity: EditorIdentity;
   readonly actor: AuditActor;
 };
@@ -80,7 +84,7 @@ export async function lockViewOf(
   );
 }
 
-function notFound(): ApiHttpError {
+export function notFound(): ApiHttpError {
   return new ApiHttpError(404, 'not-found');
 }
 
@@ -172,12 +176,16 @@ export async function openPage(
   };
 }
 
-/** The page's current version and tree. 404 when the page is gone or in the
- * trash. */
-export async function readTree(
+/** A page that is there and not in the trash, with its working tree. 404
+ * otherwise. The page row is read before the tree, so the version never
+ * claims to be newer than the tree it comes with. */
+export async function readPageForest(
   context: ApiContext,
   pageId: string,
-): Promise<TreeResponse> {
+): Promise<{
+  readonly page: PageRecord;
+  readonly blocks: readonly BlockNode[];
+}> {
   const { deps } = context;
   const page = await getPage(deps.pages.db, pageId);
   if (page === null || page.status === 'trashed') throw notFound();
@@ -186,10 +194,20 @@ export async function readTree(
     { ownerType: 'page', ownerId: pageId, locale: page.locale },
     deps.pages.hooks,
   );
+  return { page, blocks };
+}
+
+/** The page's current version and tree. 404 when the page is gone or in the
+ * trash. */
+export async function readTree(
+  context: ApiContext,
+  pageId: string,
+): Promise<TreeResponse> {
+  const { page, blocks } = await readPageForest(context, pageId);
   return {
     ok: true,
     pageVersion: page.version,
-    tree: toModelNodes(blocks, deps.pages.config),
+    tree: toModelNodes(blocks, context.deps.pages.config),
   };
 }
 
