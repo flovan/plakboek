@@ -4,6 +4,7 @@ import {
   displayNameOf,
   forgetEditorFlag,
   skipToPage,
+  type SidebarEditing,
   type SidebarLayout,
   type SidebarSlots,
 } from './controls.js';
@@ -14,11 +15,17 @@ import { STAGE_ID } from './stage.js';
 import { STRINGS } from './strings.js';
 import { Tooltip } from './tooltip.js';
 
-export type { SidebarLayout, SidebarSlots } from './controls.js';
+export type {
+  SidebarEditing,
+  SidebarLayout,
+  SidebarSlots,
+} from './controls.js';
 
 export type SidebarProps = {
   readonly island: ShellIsland;
   readonly slots?: SidebarSlots;
+  /** The editing regions; absent for a user who cannot edit. */
+  readonly editing?: SidebarEditing;
   /** The toggle only works once the client has hydrated. */
   readonly hydrated: boolean;
   /** The layout the shell is in now, for the toggle's pressed state. */
@@ -63,7 +70,7 @@ function UserName(props: { readonly name: string }): ReactElement {
  * come from classes.
  */
 export function Sidebar(props: SidebarProps): ReactElement {
-  const { island, slots, hydrated, layout, onToggleLayout } = props;
+  const { island, slots, editing, hydrated, layout, onToggleLayout } = props;
   const displayName = displayNameOf(island.user);
   const pressed = layout === 'full';
   return (
@@ -90,7 +97,12 @@ export function Sidebar(props: SidebarProps): ReactElement {
             {STRINGS['sidebar.readOnly']}
           </div>
         ) : null}
-        <div data-slot="nav" className="min-h-0 flex-1 overflow-y-auto">
+        {editing?.notice}
+        {editing?.tools}
+        <div data-slot="panel" className="min-h-0 flex-1 overflow-y-auto">
+          {editing?.panel}
+        </div>
+        <div data-slot="nav" className="max-h-[40%] shrink-0 overflow-y-auto">
           {slots?.nav?.({ layout: 'framed' })}
         </div>
         <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-4">

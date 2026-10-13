@@ -1,5 +1,8 @@
 import type { ReactElement } from 'react';
 import { OverlayLayer } from '../client/overlay/overlay-layer.js';
+import type { EditorMode, EditorStore } from '../client/session/store.js';
+import { LiveRegion } from './editing/live-region.js';
+import { ToolGroup } from './editing/tool-group.js';
 import type { ShellIsland } from './island.js';
 import { Sidebar, type SidebarLayout, type SidebarSlots } from './sidebar.js';
 import { Stage } from './stage.js';
@@ -21,6 +24,14 @@ export type ShellAppProps = {
   readonly frameFailed?: boolean;
   /** Called by the failure panel's Reload page button. */
   readonly onReload?: () => void;
+  /** The editing session, for a user who can edit once the client runs. */
+  readonly editor?: {
+    readonly store: EditorStore;
+    /** Called by the mode toggle. */
+    readonly onMode: (mode: EditorMode) => void;
+    /** Called by the save status's Retry button. */
+    readonly onRetry?: () => void;
+  };
 };
 
 /**
@@ -39,12 +50,28 @@ export function ShellApp(props: ShellAppProps): ReactElement {
     onToggleLayout,
     frameFailed,
     onReload,
+    editor,
   } = props;
+  const editing =
+    editor === undefined || !hydrated
+      ? undefined
+      : {
+          notice: null,
+          tools: (
+            <ToolGroup
+              store={editor.store}
+              onMode={editor.onMode}
+              onRetry={editor.onRetry}
+            />
+          ),
+          panel: null,
+        };
   return (
     <>
       <Sidebar
         island={island}
         slots={slots}
+        editing={editing}
         hydrated={hydrated}
         layout={layout}
         onToggleLayout={onToggleLayout}
@@ -54,7 +81,12 @@ export function ShellApp(props: ShellAppProps): ReactElement {
         frameFailed={frameFailed}
         onReload={onReload}
       />
-      {hydrated && island.mode === 'edit' ? <OverlayLayer /> : null}
+      {hydrated && island.mode === 'edit' ? (
+        <OverlayLayer store={editor?.store} />
+      ) : null}
+      {hydrated && editor !== undefined ? (
+        <LiveRegion store={editor.store} />
+      ) : null}
     </>
   );
 }

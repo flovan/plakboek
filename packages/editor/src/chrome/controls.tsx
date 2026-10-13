@@ -14,6 +14,19 @@ export type SidebarSlots = {
   readonly nav?: (context: { readonly layout: SidebarLayout }) => ReactNode;
 };
 
+/**
+ * What the sidebar shows while a page is being edited, in this order between
+ * the product name and the navigation slot. A read-only shell has none.
+ */
+export type SidebarEditing = {
+  /** Banners about the page's state (lock, paused saving). */
+  readonly notice: ReactNode;
+  /** The mode toggle and the save status. */
+  readonly tools: ReactNode;
+  /** The side panel: blocks and properties. */
+  readonly panel: ReactNode;
+};
+
 /** The selector prefix that styles an element by the host's layout. It makes
  * a utility apply only while the host element carries `data-layout="full"`.
  * Tailwind reads class names as literal source text, so every use below

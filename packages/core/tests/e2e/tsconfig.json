@@ -23,6 +23,7 @@
     "helpers/site-behaviour.ts",
     "helpers/snapshots.ts",
     "helpers/host.ts",
+    "helpers/editing.ts",
     "**/*.spec.ts"
   ]
 }

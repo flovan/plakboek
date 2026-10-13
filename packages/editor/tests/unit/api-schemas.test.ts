@@ -129,7 +129,8 @@ describe('editBody', () => {
     expect(refuse).toThrow(ApiHttpError);
     const issues = (() => {
       try {
-        return refuse();
+        refuse();
+        return undefined;
       } catch (error) {
         return error instanceof ApiHttpError ? error.issues : undefined;
       }
