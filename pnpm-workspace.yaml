@@ -57,3 +57,5 @@ catalog:
   # Approved in phase 06 (starter) and reused for the editor chrome stylesheet build; no install script.
   tailwindcss: ^4.3.0
   '@tailwindcss/vite': ^4.3.0
+  # Approved at the phase 08 plan 02 legitimacy checkpoint (5.104.2, TanStack/query, provenance attested, no install script).
+  '@tanstack/react-query': ^5.104.2

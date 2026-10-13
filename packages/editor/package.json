@@ -45,7 +45,9 @@
     "@plakboek/pages": "workspace:*",
     "@plakboek/permissions": "workspace:*",
     "@plakboek/render": "workspace:*",
-    "better-auth": "catalog:"
+    "@tanstack/react-query": "catalog:",
+    "better-auth": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "catalog:",
