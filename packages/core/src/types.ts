@@ -6,6 +6,7 @@
 import type {
   BlockConstraintSet,
   BlockDefinitionInput,
+  ColumnPresetsInput,
   PagesConfig,
   PagesHooks,
 } from '@plakboek/pages';
@@ -85,6 +86,8 @@ export type PlakboekConfigInput = {
   readonly widgets?: readonly HostWidgetDefinition[];
   readonly sectionNestingDepth?: number;
   readonly blockDepthCeiling?: number;
+  /** Excludes non-equal built-in column ratios and adds host ratios. */
+  readonly columnPresets?: ColumnPresetsInput;
   readonly seed?: SeedPage | (() => SeedPage);
   readonly hooks?: PagesHooks;
 };

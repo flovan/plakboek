@@ -29,6 +29,7 @@ import {
   type PagesDeps,
 } from '@plakboek/pages';
 import { sql } from 'drizzle-orm';
+import { CORE_COLUMN_KEY } from '../column-block.js';
 import type { SeedBlock, SeedPage } from '../types.js';
 import { isDatabaseNotReady, isUniqueViolation } from './db.js';
 import type { Runtime } from './runtime.js';
@@ -145,6 +146,34 @@ export function validateBootstrapInput(
   return issues;
 }
 
+/**
+ * Hosts write seeds flat: a section holds its blocks directly. The engine
+ * keeps every section's children as columns, so each section whose children
+ * are not already columns gets them wrapped in one column (an empty section
+ * gets one empty column). `defineConfig` has already refused a section that
+ * mixes columns and plain blocks, so a section is either wrapped whole or
+ * left alone.
+ */
+export function wrapSeedColumns(
+  nodes: readonly SeedBlock[],
+  kinds: ReadonlyMap<string, string>,
+): readonly SeedBlock[] {
+  return nodes.map((node) => {
+    const children = node.children ?? [];
+    if (kinds.get(node.type) !== 'section') {
+      return children.length === 0
+        ? node
+        : { ...node, children: wrapSeedColumns(children, kinds) };
+    }
+    const wrapped = children.every((child) => child.type === CORE_COLUMN_KEY)
+      ? children.length === 0
+        ? [{ type: CORE_COLUMN_KEY }]
+        : children
+      : [{ type: CORE_COLUMN_KEY, children }];
+    return { ...node, children: wrapSeedColumns(wrapped, kinds) };
+  });
+}
+
 type Transaction = Parameters<
   Parameters<Runtime['db']['db']['transaction']>[0]
 >[0];
@@ -206,7 +235,8 @@ async function publishSeedHome(
     }
   }
 
-  await insertNodes(seed.blocks, null);
+  const kinds = new Map(config.pages.blocks.map((b) => [b.key, b.kind]));
+  await insertNodes(wrapSeedColumns(seed.blocks, kinds), null);
   await publishPage(deps, actor, {
     pageId: page.id,
     baseVersion: await currentVersion(),

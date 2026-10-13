@@ -4,6 +4,7 @@
  * an unready database, and the password working through better-auth.
  */
 import { runMigrations } from '@plakboek/db';
+import { readBlockTree } from '@plakboek/pages';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   BootstrapValidationError,
@@ -91,6 +92,24 @@ describe('bootstrapInstallation', () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('Hello world');
 
+    // The flat seed section was wrapped in one column.
+    const [home] = await runtime.db.sql`
+      SELECT id, locale FROM pages WHERE slug = 'home'`;
+    const tree = await readBlockTree(runtime.db.db, {
+      ownerType: 'page',
+      ownerId: String(home?.id),
+      locale: String(home?.locale),
+    });
+    expect(
+      tree.map((section) => [
+        section.blockType,
+        section.children.map((column) => [
+          column.blockType,
+          column.children.map((block) => block.blockType),
+        ]),
+      ]),
+    ).toEqual([['section', [['column', ['heading']]]]]);
+
     const audit = await runtime.db.sql`
       SELECT action, actor_user_id, actor_role_key, outcome
       FROM audit_log ORDER BY id`;
@@ -99,7 +118,7 @@ describe('bootstrapInstallation', () => {
       1,
     );
     expect(actions.filter((action) => action === 'block.insert')).toHaveLength(
-      2,
+      3,
     );
     expect(actions.filter((action) => action === 'page.publish')).toHaveLength(
       1,

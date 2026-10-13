@@ -74,6 +74,7 @@ describe('defineConfig: composition', () => {
 
     expect(Object.isFrozen(config)).toBe(true);
     expect(config.pages.blocks.map((block) => block.key).sort()).toEqual([
+      'column',
       'heading',
       'quote',
       'section',
@@ -82,7 +83,60 @@ describe('defineConfig: composition', () => {
       listBlockDefinitions()
         .map((block) => block.key)
         .sort(),
-    ).toEqual(['heading', 'quote', 'section']);
+    ).toEqual(['column', 'heading', 'quote', 'section']);
+  });
+
+  it('registers the core column after the host blocks', () => {
+    const config = defineConfig({ ...base, blocks: [section, heading, quote] });
+    const last = config.pages.blocks.at(-1);
+    expect(last?.key).toBe('column');
+    expect(last?.kind).toBe('column');
+    expect(last?.properties).toEqual({});
+  });
+
+  it('refuses a host block with the column key or the column kind', () => {
+    const sameKey = defineBlock({
+      key: 'column',
+      editor: { label: 'Mine' },
+      schemaVersion: 1,
+      properties: {},
+      component: Render,
+    });
+    const sameKind = defineBlock({
+      key: 'cell',
+      kind: 'column',
+      editor: { label: 'Cell' },
+      schemaVersion: 1,
+      properties: {},
+      component: Render,
+    });
+    const viaModule = defineModule({ name: 'grid', blocks: [sameKind] });
+
+    expect(
+      issueCodes(
+        catchError(() => defineConfig({ ...base, blocks: [section, sameKey] })),
+      ),
+    ).toEqual(['RESERVED_BLOCK_KEY']);
+    expect(
+      issueCodes(
+        catchError(() =>
+          defineConfig({ ...base, blocks: [section, sameKind] }),
+        ),
+      ),
+    ).toEqual(['RESERVED_BLOCK_KEY']);
+    expect(
+      issueCodes(
+        catchError(() => defineConfig({ ...base, modules: [viaModule] })),
+      ),
+    ).toEqual(['RESERVED_BLOCK_KEY']);
+  });
+
+  it('passes column presets through to the pages config', () => {
+    const config = defineConfig({
+      ...base,
+      columnPresets: { add: ['3:1'] },
+    });
+    expect(config.pages.columnPresets).toContain('3:1');
   });
 
   it('keeps the content config, module names and the home slug', () => {
@@ -342,6 +396,57 @@ describe('defineConfig: seed', () => {
     expect(defineConfig({ ...base, seed: () => page }).seed).toEqual(page);
   });
 
+  it('accepts a seed section that already holds an explicit column', () => {
+    const page = seed([
+      {
+        type: 'section',
+        children: [
+          {
+            type: 'column',
+            children: [{ type: 'heading', props: { text: 'Hello' } }],
+          },
+        ],
+      },
+    ]);
+    expect(defineConfig({ ...base, seed: page }).seed).toEqual(page);
+  });
+
+  it('refuses a column outside a section and a section mixing columns with blocks', () => {
+    const outside = catchError(() =>
+      defineConfig({
+        ...base,
+        seed: seed([
+          {
+            type: 'section',
+            children: [
+              {
+                type: 'column',
+                children: [{ type: 'column' }],
+              },
+            ],
+          },
+        ]),
+      }),
+    );
+    expect(issueCodes(outside)).toEqual(['INVALID_SEED']);
+
+    const mixed = catchError(() =>
+      defineConfig({
+        ...base,
+        seed: seed([
+          {
+            type: 'section',
+            children: [
+              { type: 'column' },
+              { type: 'heading', props: { text: 'x' } },
+            ],
+          },
+        ]),
+      }),
+    );
+    expect(issueCodes(mixed)).toEqual(['INVALID_SEED']);
+  });
+
   it('refuses a root block that is not a section', () => {
     const error = catchError(() =>
       defineConfig({
@@ -399,16 +504,16 @@ describe('defineConfig: re-evaluation (dev reload)', () => {
       listBlockDefinitions()
         .map((block) => block.key)
         .sort(),
-    ).toEqual(['heading', 'section']);
-    expect(first.pages.blocks).toHaveLength(3);
-    expect(second.pages.blocks).toHaveLength(2);
+    ).toEqual(['column', 'heading', 'section']);
+    expect(first.pages.blocks).toHaveLength(4);
+    expect(second.pages.blocks).toHaveLength(3);
   });
 
   it('is a no-op in effect when evaluated twice with the same input', () => {
     const one = defineConfig({ ...base });
     const two = defineConfig({ ...base });
     expect(one).not.toBe(two);
-    expect(listBlockDefinitions()).toHaveLength(2);
+    expect(listBlockDefinitions()).toHaveLength(3);
     expect(two.pages.blocks.map((b) => b.key)).toEqual(
       one.pages.blocks.map((b) => b.key),
     );

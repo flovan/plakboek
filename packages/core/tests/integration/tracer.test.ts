@@ -78,10 +78,16 @@ describe('Phase 6 tracer: a host app serves a published page through cmsRoutes()
         parentBlockId: null,
         basePageVersion: (await getPage(handle.db, page.id))?.version ?? -1,
       });
+      const column = await insertBlock(deps, actor, {
+        owner: target,
+        blockType: 'column',
+        parentBlockId: section.id,
+        basePageVersion: (await getPage(handle.db, page.id))?.version ?? -1,
+      });
       await insertBlock(deps, actor, {
         owner: target,
         blockType: 'heading',
-        parentBlockId: section.id,
+        parentBlockId: column.id,
         props: { text: 'Tracer works' },
         basePageVersion: (await getPage(handle.db, page.id))?.version ?? -1,
       });

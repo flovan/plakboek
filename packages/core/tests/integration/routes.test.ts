@@ -44,10 +44,16 @@ describe('the CMS route table inside a host app', () => {
       parentBlockId: null,
       basePageVersion: await version(),
     });
+    const column = await insertBlock(runtime.pages, actor, {
+      owner,
+      blockType: 'column',
+      parentBlockId: section.id,
+      basePageVersion: await version(),
+    });
     await insertBlock(runtime.pages, actor, {
       owner,
       blockType: 'heading',
-      parentBlockId: section.id,
+      parentBlockId: column.id,
       props: { text: 'About the CMS' },
       basePageVersion: await version(),
     });

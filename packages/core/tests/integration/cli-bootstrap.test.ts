@@ -124,7 +124,11 @@ describe('plakboek bootstrap', () => {
       database.connectionString,
       'SELECT block_type FROM page_blocks ORDER BY block_type',
     );
-    expect(blocks.map((row) => row.block_type)).toEqual(['heading', 'section']);
+    expect(blocks.map((row) => row.block_type)).toEqual([
+      'column',
+      'heading',
+      'section',
+    ]);
   });
 
   it('takes the password from PLAKBOEK_BOOTSTRAP_PASSWORD and refuses a second run', async () => {
