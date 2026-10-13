@@ -900,7 +900,9 @@ export async function restoreRevisionBatch(
         if (block.changeType === 'delete') {
           let validatedProps: Record<string, unknown>;
           try {
-            validatedProps = validateBlockProps(definition, restoredProps);
+            validatedProps = validateBlockProps(definition, restoredProps, {
+              allowMissingRequired: true,
+            });
           } catch (error) {
             if (!(error instanceof BlockPropsValidationError)) throw error;
             throw new DegradedRestoreError([block]);
@@ -1034,7 +1036,9 @@ export async function restoreRevisionBatch(
           }
           let validatedProps: Record<string, unknown>;
           try {
-            validatedProps = validateBlockProps(definition, restoredProps);
+            validatedProps = validateBlockProps(definition, restoredProps, {
+              allowMissingRequired: true,
+            });
           } catch (error) {
             if (!(error instanceof BlockPropsValidationError)) throw error;
             throw new DegradedRestoreError([block]);

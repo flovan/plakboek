@@ -42,10 +42,18 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   BlockConfigError: 'class',
   BlockPropsValidationError: 'class',
   defineBlocks: 'function',
+  findMissingRequiredProps: 'function',
   getBlockDefinition: 'function',
   listBlockDefinitions: 'function',
   resolveBlockProperties: 'function',
   UnknownBlockTypeError: 'class',
+  // layout
+  BlockLayoutValidationError: 'class',
+  BUILT_IN_COLUMN_PRESETS: 'constant',
+  COLUMN_ALIGN_VALUES: 'constant',
+  COLUMN_RATIO_PATTERN: 'constant',
+  previewBlockValues: 'function',
+  resolveColumnPresets: 'function',
   // constraints
   BlockConstraintError: 'class',
   constrainBlock: 'function',
@@ -226,6 +234,12 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'ResolvedBlockProperty',
   'ResolvedPropertyConstraint',
   'StarterNode',
+  // layout
+  'BlockLayout',
+  'BlockLayoutValidationIssue',
+  'ColumnAlign',
+  'ColumnPresetsInput',
+  'PreviewBlockValuesResult',
   // constraints
   'BlockConstraintIssue',
   'BlockConstraintIssueCode',
@@ -380,6 +394,10 @@ const WITHHELD: readonly string[] = Object.freeze([
   'assertPageWritable',
   // registry.ts
   'validateBlockProps',
+  // layout.ts
+  'validateBlockLayout',
+  'readStoredLayout',
+  'isEqualRatio',
   'registerResolvedBlocks',
   // constraints.ts
   'applyBlockConstraints',
@@ -418,6 +436,8 @@ const ERROR_FACTORIES: Readonly<
     new (K as new (i: unknown[]) => unknown)([]),
   UnknownBlockTypeError: (K) =>
     new (K as new (t: string) => unknown)('made_up'),
+  BlockLayoutValidationError: (K) =>
+    new (K as new (i: unknown[]) => unknown)([]),
   BlockConstraintError: (K) => new (K as new (i: unknown[]) => unknown)([]),
   BlockCompatibilityError: (K) =>
     new (K as new (r: unknown) => unknown)({

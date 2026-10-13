@@ -9,6 +9,9 @@ import {
   BLOCK_KEY_PATTERN,
   BLOCK_PROPERTY_KEY_PATTERN,
   BLOCK_REVISION_KINDS,
+  BUILT_IN_COLUMN_PRESETS,
+  COLUMN_ALIGN_VALUES,
+  COLUMN_RATIO_PATTERN,
   OWNER_TYPES,
   type BlockChangeType,
   BlockCompatibilityError,
@@ -24,6 +27,15 @@ import {
   type BlockDefinitionInput,
   type BlockDeleteImpact,
   type BlockEditorMetadata,
+  type BlockLayout,
+  BlockLayoutValidationError,
+  type BlockLayoutValidationIssue,
+  type ColumnAlign,
+  type ColumnPresetsInput,
+  findMissingRequiredProps,
+  previewBlockValues,
+  type PreviewBlockValuesResult,
+  resolveColumnPresets,
   BlockNotFoundError,
   type BlockNode,
   BlockPlacementError,
@@ -263,6 +275,9 @@ import * as pages from '@plakboek/pages';
 
 const functions: Record<string, unknown> = {
   acquirePageLock,
+  findMissingRequiredProps,
+  previewBlockValues,
+  resolveColumnPresets,
   assertBlockCompatibility,
   checkBlockCompatibility,
   checkPageLocales,
@@ -341,6 +356,7 @@ const functions: Record<string, unknown> = {
 
 const errorClasses: Record<string, unknown> = {
   AncestorTrashedError,
+  BlockLayoutValidationError,
   BlockCompatibilityError,
   BlockConfigError,
   BlockConstraintError,
@@ -396,6 +412,7 @@ const numbers: Record<string, unknown> = {
 };
 
 const regexPatterns: Record<string, unknown> = {
+  COLUMN_RATIO_PATTERN,
   BLOCK_KEY_PATTERN,
   BLOCK_PROPERTY_KEY_PATTERN,
 };
@@ -407,6 +424,8 @@ const strings: Record<string, unknown> = {
 };
 
 const frozenArrays: Record<string, unknown> = {
+  BUILT_IN_COLUMN_PRESETS,
+  COLUMN_ALIGN_VALUES,
   BLOCK_CHANGE_TYPES,
   BLOCK_REVISION_KINDS,
   DEGRADED_REASONS,
@@ -497,6 +516,8 @@ for (const internal of [
   'assertPageAddressAvailable',
   'assertPageWritable',
   'validateBlockProps',
+  'validateBlockLayout',
+  'readStoredLayout',
   'applyBlockConstraints',
   'buildSnapshotTree',
   'pages',
@@ -694,6 +715,30 @@ const config: PagesConfig = definePagesConfig(pagesConfigInput);
 if (!Object.isFrozen(config)) {
   fail('definePagesConfig did not return a frozen config');
 }
+const columnPresetsInput: ColumnPresetsInput = { exclude: ['2:1'] };
+if (resolveColumnPresets(columnPresetsInput).presets.includes('2:1')) {
+  fail('resolveColumnPresets did not drop an excluded preset');
+}
+const probeLayout: BlockLayout = { columns: '2:1', align: 'center' };
+const probeAlign: ColumnAlign = 'center';
+const probeLayoutIssue: BlockLayoutValidationIssue = {
+  key: 'columns',
+  code: 'INVALID',
+};
+const previewOutcome: PreviewBlockValuesResult = previewBlockValues(config, {
+  blockType: 'made_up_block',
+  props: {},
+  layout: probeLayout,
+});
+if (previewOutcome.ok) {
+  fail('previewBlockValues accepted an unregistered block type');
+}
+if (probeAlign !== probeLayout.align || probeLayoutIssue.key !== 'columns') {
+  fail('layout types did not round-trip');
+}
+if (findMissingRequiredProps(heroDefinition, {}).length < 0) {
+  fail('findMissingRequiredProps did not return a list');
+}
 const pagesConfigIssueCode: PagesConfigIssueCode = 'NO_BLOCKS';
 const pagesConfigIssue: PagesConfigIssue = {
   code: 'NO_BLOCKS',
@@ -710,6 +755,7 @@ const blockNode: BlockNode = {
   parentBlockId: null,
   blockType: 'hero',
   props: {},
+  layout: null,
   schemaVersion: 1,
   depth: 0,
   sortOrder: 1000,
@@ -727,6 +773,7 @@ const blockRecord: BlockRecord = {
   parentBlockId: null,
   blockType: 'hero',
   props: {},
+  layout: null,
   schemaVersion: 1,
   depth: 0,
   sortOrder: 1000,

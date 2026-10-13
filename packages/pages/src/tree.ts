@@ -408,7 +408,9 @@ export type InsertBlockInput = {
  * calls `assertPlacementAllowed` (placement.ts, BLOCK-05, D-08, D-18, D-19)
  * -- the section rule, the parent/child placement declarations and both
  * depth caps -- before any write; validates `props` through
- * `validateBlockProps`; computes `sortOrder` as `max(sort_order) + 1000`
+ * `validateBlockProps` (leniently: a required property may still be empty
+ * in the working tree, D-21 -- publishing refuses it); computes `sortOrder`
+ * as `max(sort_order) + 1000`
  * among siblings when not supplied; inserts with `schema_version` set to
  * the registry's current `schemaVersion` for that block type -- never a
  * default, never null; records a `'create'` block revision; bumps the
@@ -477,7 +479,9 @@ export async function insertBlock(
         blockDepthCeiling: deps.config.blockDepthCeiling,
       });
 
-      const validatedProps = validateBlockProps(definition, input.props ?? {});
+      const validatedProps = validateBlockProps(definition, input.props ?? {}, {
+        allowMissingRequired: true,
+      });
       const validatedLayout = validateBlockLayout(
         definition,
         input.layout,
@@ -635,7 +639,9 @@ export async function updateBlockProps(
       );
 
       const definition = getBlockDefinition(current.blockType);
-      const validatedProps = validateBlockProps(definition, input.props);
+      const validatedProps = validateBlockProps(definition, input.props, {
+        allowMissingRequired: true,
+      });
       const validatedLayout =
         input.layout === undefined
           ? undefined

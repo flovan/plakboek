@@ -23,6 +23,7 @@ function node(
     parentBlockId: null,
     blockType,
     props,
+    layout: null,
     schemaVersion: 1,
     depth: 0,
     sortOrder: 0,

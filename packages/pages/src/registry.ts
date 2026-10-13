@@ -744,10 +744,17 @@ function withinAllowedValues(
  * A key not among the resolved (non-hidden) properties -- including a
  * `hidden` property's own key -- is rejected as `UNKNOWN`, never silently
  * dropped: a hidden property can never be reached through this door either.
+ *
+ * `options.allowMissingRequired` is the working-tree write contract (D-21):
+ * a required property with no value is skipped instead of reported, so an
+ * editor can save a block it has not finished filling in. Type, shape,
+ * unknown-key, fixed and narrowed checks are unchanged. Publishing and
+ * compaction never pass it, so an unfinished block can never reach a visitor.
  */
 export function validateBlockProps(
   definition: BlockDefinition,
   props: unknown,
+  options: { readonly allowMissingRequired?: boolean } = {},
 ): Record<string, unknown> {
   const input = isPlainObject(props) ? props : {};
   const resolved = resolveBlockProperties(definition);
@@ -775,7 +782,11 @@ export function validateBlockProps(
 
     const fieldDefinition = getFieldTypeDefinition(property.fieldType);
 
-    if (property.required === true && fieldDefinition.isEmptyValue(value)) {
+    if (
+      property.required === true &&
+      options.allowMissingRequired !== true &&
+      fieldDefinition.isEmptyValue(value)
+    ) {
       issues.push({ propertyKey, code: 'REQUIRED' });
       continue;
     }
@@ -786,10 +797,12 @@ export function validateBlockProps(
     const optionsResult = fieldDefinition.optionsSchema.safeParse(
       property.options ?? {},
     );
-    const options = optionsResult.success
+    const fieldOptions = optionsResult.success
       ? optionsResult.data
       : (property.options ?? {});
-    const result = fieldDefinition.buildValueSchema(options).safeParse(value);
+    const result = fieldDefinition
+      .buildValueSchema(fieldOptions)
+      .safeParse(value);
     if (!result.success) {
       issues.push({ propertyKey, code: 'INVALID' });
       continue;
@@ -809,4 +822,31 @@ export function validateBlockProps(
     throw new BlockPropsValidationError(issues);
   }
   return validated;
+}
+
+/**
+ * The keys of the required, non-fixed, non-hidden properties whose value in
+ * `props` is empty, in declaration order. The editor's "needs input" flags
+ * read this; it names exactly what the strict (publish) validation would
+ * refuse as REQUIRED, so the editor and the engine cannot diverge (D-20).
+ */
+export function findMissingRequiredProps(
+  definition: BlockDefinition,
+  props: unknown,
+): readonly string[] {
+  const input = isPlainObject(props) ? props : {};
+  const missing: string[] = [];
+  for (const [propertyKey, property] of Object.entries(
+    resolveBlockProperties(definition),
+  )) {
+    if (property.required !== true || property.constraint === 'fixed') continue;
+    if (
+      getFieldTypeDefinition(property.fieldType).isEmptyValue(
+        input[propertyKey],
+      )
+    ) {
+      missing.push(propertyKey);
+    }
+  }
+  return Object.freeze(missing);
 }

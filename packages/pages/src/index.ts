@@ -42,10 +42,15 @@
  * - The shared publication materialiser (`publish.ts`) -- the single code
  *   path that makes a preview and a publish identical; a second caller could
  *   make them differ.
- * - The props validator and the constraint applier (`registry.ts`,
- *   `constraints.ts`) -- reachable only through `resolveBlockProperties` and
- *   the write paths; a caller validating props outside a real write could
- *   diverge from what the write path actually persists.
+ * - The props and layout validators and the constraint applier
+ *   (`registry.ts`, `layout.ts`, `constraints.ts`) -- reachable only through
+ *   `resolveBlockProperties` and the write paths; a caller validating
+ *   outside a real write could diverge from what the write path actually
+ *   persists. `previewBlockValues` is the read-only twin of those write-path
+ *   checks (props leniently, as the working tree accepts them, plus layout)
+ *   and `findMissingRequiredProps` names the required values still empty, so
+ *   an editor can show "needs input" and a live preview from the same rules
+ *   the engine enforces, without writing anything.
  * - The after-commit purge registration helpers (`purge.ts`) -- the single
  *   place every write path registers its cache purge; a caller reaching
  *   them could purge (or skip purging) for a write this package did not
@@ -123,6 +128,7 @@ export {
   BlockConfigError,
   BlockPropsValidationError,
   defineBlocks,
+  findMissingRequiredProps,
   getBlockDefinition,
   listBlockDefinitions,
   resolveBlockProperties,
@@ -144,6 +150,23 @@ export type {
   ResolvedPropertyConstraint,
   StarterNode,
 } from './registry.js';
+
+// layout.ts
+export {
+  BUILT_IN_COLUMN_PRESETS,
+  BlockLayoutValidationError,
+  COLUMN_ALIGN_VALUES,
+  COLUMN_RATIO_PATTERN,
+  previewBlockValues,
+  resolveColumnPresets,
+} from './layout.js';
+export type {
+  BlockLayout,
+  BlockLayoutValidationIssue,
+  ColumnAlign,
+  ColumnPresetsInput,
+  PreviewBlockValuesResult,
+} from './layout.js';
 
 // constraints.ts
 export { BlockConstraintError, constrainBlock } from './constraints.js';

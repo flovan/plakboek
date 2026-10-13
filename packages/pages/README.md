@@ -169,7 +169,7 @@ point, so an export cannot be added or removed without updating them.
 | `PagesConfig`                   | type     | The frozen, validated result of `definePagesConfig`                                                                           |
 | `PagesConfigInput`              | type     | Input to `definePagesConfig`                                                                                                  |
 | `PagesConfigIssue`              | type     | One `definePagesConfig` problem                                                                                               |
-| `PagesConfigIssueCode`          | type     | `NO_BLOCKS`, `INVALID_SECTION_NESTING_DEPTH`, `INVALID_BLOCK_DEPTH_CEILING`                                                   |
+| `PagesConfigIssueCode`          | type     | `NO_BLOCKS`, `INVALID_SECTION_NESTING_DEPTH`, `INVALID_BLOCK_DEPTH_CEILING`, `INVALID_COLUMN_PRESETS`                         |
 | `PagesDeps`                     | type     | The dependency bag every engine operation takes: `db`, `recorder`, `resolver`, `config`, optional `hooks`/`invalidator`/`now` |
 | `PagesHooks`                    | type     | Optional warning hooks a host passes on `PagesDeps`                                                                           |
 
@@ -199,6 +199,7 @@ point, so an export cannot be added or removed without updating them.
 | `BlockConfigError`           | class    | Thrown by `defineBlocks` with every problem found                           |
 | `BlockPropsValidationError`  | class    | Thrown when a block instance's props fail validation on write               |
 | `defineBlocks`               | function | Validates and registers a host's block declarations, collect-then-throw     |
+| `findMissingRequiredProps`   | function | The required properties still empty in a block's props, without writing     |
 | `getBlockDefinition`         | function | The registered `BlockDefinition` for a block type, or throws                |
 | `listBlockDefinitions`       | function | Every currently registered `BlockDefinition`                                |
 | `resolveBlockProperties`     | function | A block's real, currently-applicable properties with constraints resolved   |
@@ -217,6 +218,48 @@ point, so an export cannot be added or removed without updating them.
 | `ResolvedBlockProperty`      | type     | A property as resolved for the editor/write path, with its constraint       |
 | `ResolvedPropertyConstraint` | type     | One property's resolved `hidden`/`fixed`/`narrowed` constraint              |
 | `StarterNode`                | type     | One node of a block's `starterChildren`: a registered type, props, children |
+
+### Layout (D-33, D-04, D-05, D-08)
+
+| Export                       | Kind     | Purpose                                                                                     |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------------- |
+| `BlockLayoutValidationError` | class    | Thrown when a layout write names an unknown key or an invalid value; carries keys and codes |
+| `BUILT_IN_COLUMN_PRESETS`    | constant | The built-in column ratios, `'1'` through `'1:1:1:1'`                                       |
+| `COLUMN_ALIGN_VALUES`        | constant | Frozen `['stretch', 'start', 'center', 'end']`                                              |
+| `COLUMN_RATIO_PATTERN`       | constant | The only shape a column ratio may take: colon-separated positive integers                   |
+| `previewBlockValues`         | function | What a write would accept for a block's props and layout, plus its missing required values  |
+| `resolveColumnPresets`       | function | The built-ins minus a host's exclusions plus its additions, with every problem found        |
+| `BlockLayout`                | type     | A block's layout: `columns`, `align`, `fill`                                                |
+| `BlockLayoutValidationIssue` | type     | One `BlockLayoutValidationError` problem: a key and `UNKNOWN` or `INVALID`                  |
+| `ColumnAlign`                | type     | One of `COLUMN_ALIGN_VALUES`                                                                |
+| `ColumnPresetsInput`         | type     | `{ exclude, add }`, the host's `columnPresets` config                                       |
+| `PreviewBlockValuesResult`   | type     | The result of `previewBlockValues`                                                          |
+
+Section layout and a block's fill flag live in a `layout` column beside
+`props` (D-33), never inside it, so property validation, upcasters and the
+snapshot's property order never see them. A section accepts `columns` (a
+ratio preset such as `'2:1'`) and `align` (`stretch`, `start`, `center`,
+`end`); a block accepts `fill` only when its declaration sets `layout: { fill:
+true }`; a column accepts nothing. The built-in presets are `1`, `1:1`,
+`2:1`, `1:2`, `1:1:1`, `2:1:1`, `1:2:1`, `1:1:2` and `1:1:1:1`. A host
+excludes non-equal built-ins and adds its own ratios through
+`columnPresets: { exclude, add }` on `definePagesConfig`; an equal split for
+any column count is always allowed and is stored as no `columns` value at
+all, as is `stretch`. Presets only gate new writes: changing them never
+changes how an already stored layout reads. Errors name the key and a code,
+never the value. Published snapshots carry a block's `layout` when it has one.
+
+### Working tree leniency (D-21)
+
+`insertBlock`, `updateBlockProps` and the restore replays accept a block
+whose required property has no value yet, so an editor can save an
+unfinished block. Type, shape, unknown-key, fixed and narrowed checks still
+apply on every write. Publishing and compaction stay strict: `publishPage`
+refuses the tree with a `DegradedBlockPublishError` entry whose reason is
+`invalid-props` and whose detail names the key and `REQUIRED`.
+`findMissingRequiredProps` and `previewBlockValues` answer the same
+questions without writing, so an editor's "needs input" flags never diverge
+from what publishing will refuse.
 
 ### Installation constraints (BLOCK-08)
 

@@ -70,6 +70,7 @@ function configWith(blocks: readonly BlockDefinition[]): PagesConfig {
     blocks,
     sectionNestingDepth: 2,
     blockDepthCeiling: 12,
+    columnPresets: [],
   };
 }
 

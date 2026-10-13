@@ -12,8 +12,20 @@
  * an already stored layout reads. No column count is stored anywhere; it is
  * derived from the section's column children, and an equal split is stored
  * as an absent `columns` value.
+ *
+ * `previewBlockValues` is the read-only twin of the write-path checks: the
+ * editor asks it what a write would accept (and which required values are
+ * still empty) without anything being written.
  */
-import type { BlockDefinition } from './registry.js';
+import type { PagesConfig } from './config.js';
+import {
+  BlockPropsValidationError,
+  findMissingRequiredProps,
+  getBlockDefinition,
+  UnknownBlockTypeError,
+  validateBlockProps,
+  type BlockDefinition,
+} from './registry.js';
 
 export const COLUMN_ALIGN_VALUES = Object.freeze([
   'stretch',
@@ -255,4 +267,80 @@ export function readStoredLayout(value: unknown): BlockLayout | null {
   if (isColumnAlign(align)) result.align = align;
   if (fill === true) result.fill = true;
   return Object.keys(result).length === 0 ? null : Object.freeze(result);
+}
+
+export type PreviewBlockValuesIssue = {
+  readonly key: string;
+  readonly code: string;
+};
+
+export type PreviewBlockValuesResult =
+  | {
+      readonly ok: true;
+      readonly props: Record<string, unknown>;
+      readonly layout: BlockLayout | null;
+      readonly missingRequired: readonly string[];
+    }
+  | {
+      readonly ok: false;
+      readonly issues: readonly PreviewBlockValuesIssue[];
+    };
+
+/**
+ * Answers, without writing or reading the database, exactly what the write
+ * path would accept for a block's props and layout: the normalised values
+ * and the required properties still empty (which the write path tolerates
+ * and publishing refuses). Issues carry a key and a code, never a value.
+ */
+export function previewBlockValues(
+  config: PagesConfig,
+  input: {
+    readonly blockType: string;
+    readonly props: unknown;
+    readonly layout: unknown;
+  },
+): PreviewBlockValuesResult {
+  let definition: BlockDefinition;
+  try {
+    definition = getBlockDefinition(input.blockType);
+  } catch (error) {
+    if (!(error instanceof UnknownBlockTypeError)) throw error;
+    return { ok: false, issues: [{ key: '*', code: 'UNKNOWN_TYPE' }] };
+  }
+
+  const issues: PreviewBlockValuesIssue[] = [];
+  let props: Record<string, unknown> = {};
+  let layout: BlockLayout | null = null;
+
+  try {
+    props = validateBlockProps(definition, input.props ?? {}, {
+      allowMissingRequired: true,
+    });
+  } catch (error) {
+    if (!(error instanceof BlockPropsValidationError)) throw error;
+    for (const issue of error.issues) {
+      issues.push({ key: issue.propertyKey, code: issue.code });
+    }
+  }
+
+  try {
+    layout = validateBlockLayout(
+      definition,
+      input.layout,
+      config.columnPresets,
+    );
+  } catch (error) {
+    if (!(error instanceof BlockLayoutValidationError)) throw error;
+    for (const issue of error.issues) {
+      issues.push({ key: issue.key, code: issue.code });
+    }
+  }
+
+  if (issues.length > 0) return { ok: false, issues };
+  return {
+    ok: true,
+    props,
+    layout,
+    missingRequired: findMissingRequiredProps(definition, input.props),
+  };
 }

@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest';
 import {
   BLOCK_KEY_PATTERN,
   BlockConfigError,
+  BlockPropsValidationError,
   defineBlocks,
+  findMissingRequiredProps,
   getBlockDefinition,
   UnknownBlockTypeError,
   validateBlockProps,
@@ -342,5 +344,105 @@ describe('defineBlocks: column kind, layout support and starter children (D-01, 
     expect(issueCodes([{ ...plain('a'), starterChildren: [nested] }])).toEqual([
       'INVALID_STARTER_CHILDREN',
     ]);
+  });
+});
+
+describe('lenient required validation and findMissingRequiredProps (D-21, D-20)', () => {
+  const [definition] = defineBlocks([
+    {
+      key: 'leniencyProbe',
+      editor: { label: 'Leniency probe' },
+      schemaVersion: 1,
+      properties: {
+        title: {
+          fieldType: 'short_text',
+          label: 'Title',
+          required: true,
+          options: { maxLength: 40 },
+        },
+        subtitle: {
+          fieldType: 'short_text',
+          label: 'Subtitle',
+          options: { maxLength: 40 },
+        },
+        kicker: {
+          fieldType: 'short_text',
+          label: 'Kicker',
+          required: true,
+          options: { maxLength: 40 },
+        },
+        badge: {
+          fieldType: 'short_text',
+          label: 'Badge',
+          required: true,
+          options: { maxLength: 40 },
+        },
+      },
+    },
+  ]);
+  if (definition === undefined) throw new Error('fixture block missing');
+  const constrained = {
+    ...definition,
+    constraints: {
+      kicker: { kind: 'hidden' },
+      badge: { kind: 'fixed', value: 'new' },
+    },
+  } as const;
+
+  function codesOf(run: () => unknown): string[] {
+    try {
+      run();
+    } catch (error) {
+      if (error instanceof BlockPropsValidationError) {
+        return error.issues.map(
+          (issue) => `${issue.propertyKey}:${issue.code}`,
+        );
+      }
+      throw error;
+    }
+    return [];
+  }
+
+  it('refuses an empty required property by default and accepts it when asked to', () => {
+    expect(codesOf(() => validateBlockProps(definition, {}))).toEqual([
+      'title:REQUIRED',
+      'kicker:REQUIRED',
+      'badge:REQUIRED',
+    ]);
+    expect(
+      validateBlockProps(definition, {}, { allowMissingRequired: true }),
+    ).toEqual({});
+  });
+
+  it('still refuses a wrongly typed value, an unknown key and a too-long value when lenient', () => {
+    expect(
+      codesOf(() =>
+        validateBlockProps(
+          definition,
+          { title: 7, extra: 'x', subtitle: 'y'.repeat(41) },
+          { allowMissingRequired: true },
+        ),
+      ),
+    ).toEqual(['extra:UNKNOWN', 'title:INVALID', 'subtitle:INVALID']);
+  });
+
+  it('lists the required properties still empty, in declaration order', () => {
+    expect(findMissingRequiredProps(definition, {})).toEqual([
+      'title',
+      'kicker',
+      'badge',
+    ]);
+    expect(
+      findMissingRequiredProps(definition, { title: 'Hi', badge: 'x' }),
+    ).toEqual(['kicker']);
+    expect(findMissingRequiredProps(definition, 'not an object')).toEqual([
+      'title',
+      'kicker',
+      'badge',
+    ]);
+  });
+
+  it('never lists a fixed or a hidden property', () => {
+    expect(findMissingRequiredProps(constrained, {})).toEqual(['title']);
   });
 });
