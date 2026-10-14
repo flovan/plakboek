@@ -179,6 +179,8 @@ type EntryMeta = {
   readonly announceMove: boolean;
   /** The write brings back a deleted item: say so once it is there. */
   readonly announceRestored: boolean;
+  /** The write adds a new item: say so once it is there. */
+  readonly announceAdded: boolean;
   readonly undoEntry: UndoEntry | null;
 };
 
@@ -289,6 +291,15 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     };
     if (info?.announceRestored === true) {
       store.announce(formatString('announce.restored', { label: text(acted) }));
+    } else if (info?.announceAdded === true) {
+      // A new item that still lacks a required value says so, and the panel is asked for.
+      const needsInput = (model.get(acted)?.needsInput.length ?? 0) > 0;
+      store.announce(
+        `${formatString('announce.added', { label: text(acted) })}${
+          needsInput ? STRINGS['announce.needsInput'] : ''
+        }`,
+      );
+      if (needsInput) store.requestProperties(acted);
     } else if (info?.announceMove === true) {
       const place = model.siblingIndex(acted);
       const parent = model.parentOf(acted);
@@ -432,6 +443,7 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
         flash: extra.flash ?? true,
         announceMove: intent.kind === 'move' && extra.fromHistory !== true,
         announceRestored: extra.restored === true,
+        announceAdded: intent.kind === 'insert' && extra.fromHistory !== true,
         undoEntry,
       });
     }

@@ -327,6 +327,32 @@ describe('the save runner', () => {
     expect(state.announcement).toBe('Restored heading.');
   });
 
+  it('selects a new block, says it was added and asks for its properties when a required value is missing', async () => {
+    const added: ModelNode = {
+      ...buildNodes([block('h9', 'heading')])[0]!,
+      parentId: 'c1',
+      sortOrder: 2500,
+      needsInput: ['text'],
+    };
+    const ctx = setup(() => Promise.resolve(responseFor([...tree, added], 6)));
+    const model = ctx.store.getState().model;
+    if (model === null) throw new Error('not open');
+    const intent: Intent = {
+      kind: 'insert',
+      position: { parentId: 'c1', previousId: 'h2', nextId: null },
+      node: { id: 'h9', type: 'heading' },
+    };
+    ctx.runner.perform(
+      intent,
+      buildUndoEntry(intent, model, { kind: 'added', itemId: 'h9' }),
+    );
+    await ctx.runner.flush();
+    const state = ctx.store.getState();
+    expect(state.selection).toEqual({ scopeId: 'c1', selectedId: 'h9' });
+    expect(state.announcement).toBe('Added heading. Needs input.');
+    expect(state.propertiesRequest?.id).toBe('h9');
+  });
+
   describe('when a retry meets a stale version after the first attempt got no answer', () => {
     function staleAfterNetworkLoss(freshTree: readonly ModelNode[]): Setup {
       let attempts = 0;

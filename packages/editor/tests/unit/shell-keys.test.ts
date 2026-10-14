@@ -153,6 +153,20 @@ describe('structureKeyAction', () => {
     expect(structureKeyAction(key('d'), {}, region)).toBeNull();
   });
 
+  it('opens the picker with the plus key from the region only, shifted or not', () => {
+    expect(structureKeyAction(key('+'), {}, region)).toEqual({ kind: 'add' });
+    expect(
+      structureKeyAction(key('+', { shiftKey: true }), {}, region),
+    ).toEqual({ kind: 'add' });
+    expect(structureKeyAction(key('+'), {}, toolbar)).toBeNull();
+    expect(
+      structureKeyAction(key('+'), { tagName: 'INPUT' }, region),
+    ).toBeNull();
+    expect(
+      structureKeyAction(key('+', { ctrlKey: true }), {}, region),
+    ).toBeNull();
+  });
+
   it('does nothing while the user types, and ignores plain keys away from the region', () => {
     expect(
       structureKeyAction(

@@ -14,6 +14,7 @@ import {
   moveTargetReason,
   type MoveDirection,
 } from '../../client/session/move-targets.js';
+import { slotAfter, type InsertSlot } from '../../client/session/insertion.js';
 import { breadcrumb, selectCrumb } from '../../client/session/scope.js';
 import { selectAndAnnounce } from '../../client/session/selection-announcement.js';
 import {
@@ -31,6 +32,7 @@ import {
   ArrowRightIcon,
   ArrowUpIcon,
   DuplicateIcon,
+  PlusIcon,
   TrashIcon,
 } from '../icons.js';
 import { formatString, STRINGS } from '../strings.js';
@@ -88,18 +90,29 @@ export type ToolbarProps = {
   readonly onMove: (id: string, direction: MoveDirection) => void;
   readonly onDuplicate: (id: string) => void;
   readonly onDelete: (id: string) => void;
+  /** Called with the gap right after the selected item. */
+  readonly onAddAfter: (slot: InsertSlot) => void;
 };
 
 /**
  * The floating toolbar of the selected item: the path to it as a breadcrumb
- * and the buttons that move it one step earlier or later, duplicate it or
- * delete it. It is pinned to the
+ * and the buttons that move it one step earlier or later, add after it,
+ * duplicate it or delete it. It is pinned to the
  * item in the interaction plane, and is one tab stop with arrow keys roving
  * between its buttons. A button that cannot act stays focusable
  * (`aria-disabled`) so its reason can be read.
  */
 export function Toolbar(props: ToolbarProps): ReactElement | null {
-  const { store, item, frame, axis, onMove, onDuplicate, onDelete } = props;
+  const {
+    store,
+    item,
+    frame,
+    axis,
+    onMove,
+    onDuplicate,
+    onDelete,
+    onAddAfter,
+  } = props;
   const state = useEditorStore(store, (current) => current);
   const root = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 40 });
@@ -149,6 +162,8 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
   };
 
   const placement = toolbarPlacement({ item, frame, toolbar: size });
+  // A column's own Add after is the column tools' (columns are not added through the picker).
+  const addSlot = ctx === null ? null : slotAfter(ctx, selectedId);
   const keys = [
     ...shown.flatMap((entry) =>
       entry === 'more'
@@ -159,6 +174,7 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
     ),
     'earlier',
     'later',
+    ...(addSlot === null ? [] : ['add']),
     'duplicate',
     'delete',
   ];
@@ -335,6 +351,27 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
       <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
       {moveButton('earlier')}
       {moveButton('later')}
+      {addSlot === null ? null : (
+        <Tooltip
+          label={STRINGS['toolbar.addAfter']}
+          placement={placement.mode === 'below' ? 'top' : 'bottom'}
+        >
+          <button
+            type="button"
+            className={BUTTON}
+            aria-label={formatString('toolbar.addAfter.label', {
+              label: itemLabel,
+            })}
+            aria-haspopup="dialog"
+            onClick={() => {
+              onAddAfter(addSlot);
+            }}
+            {...rove('add')}
+          >
+            <PlusIcon />
+          </button>
+        </Tooltip>
+      )}
       <Tooltip
         label={duplicateReason ?? STRINGS['toolbar.duplicate']}
         placement={placement.mode === 'below' ? 'top' : 'bottom'}

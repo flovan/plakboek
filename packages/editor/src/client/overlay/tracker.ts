@@ -27,6 +27,7 @@
  * through their own callback.
  */
 import { EDIT_ATTRIBUTE } from '@plakboek/render';
+import { measureLoose } from './boxes.js';
 import { isMeasurable, sameBox, type Box, type Point } from './geometry.js';
 
 /** What the overlay draws. Element boxes are in the frame's own coordinates,
@@ -328,8 +329,10 @@ function track(
       scopeElement = nextScope;
       observe();
     }
+    // A selected item that takes up no room (a new block with no text yet) is
+    // still outlined, in a box big enough to see and to hang the toolbar from.
     const selected =
-      nextSelected === null ? null : measure(nextSelected, current.view);
+      nextSelected === null ? null : measureLoose(nextSelected, current.view);
     const scope = nextScope === null ? null : measure(nextScope, current.view);
     if (selected === null && scope === null) return null;
     return { selected, scope, frame: frameBox };

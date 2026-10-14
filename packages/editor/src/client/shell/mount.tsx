@@ -27,9 +27,18 @@ import {
   type HooksRuntime,
 } from '../frame/hooks-runtime.js';
 import { measureSiblingAxis } from '../frame/sibling-axis.js';
+import type { CatalogueEntry, EditPosition } from '../../api-types.js';
 import { createApiClient } from '../session/api-client.js';
+import {
+  insertActionFor,
+  slotAfter,
+  slotKey,
+  slotPosition,
+  soleSectionType,
+  type InsertSlot,
+} from '../session/insertion.js';
 import { startLockClient } from '../session/lock-client.js';
-import { moveActionFor } from '../session/move-action.js';
+import { legalityContextOf, moveActionFor } from '../session/move-action.js';
 import type { MoveDirection } from '../session/move-targets.js';
 import { createEditorQueryClient } from '../session/query-client.js';
 import { createSaveRunner, type SaveRunner } from '../session/save-runner.js';
@@ -54,6 +63,7 @@ import {
   createEditorStore,
   useEditorStore,
   type EditorMode,
+  type PickerOpener,
 } from '../session/store.js';
 import { watchFrame } from './frame-watch.js';
 import { keyAction, structureKeyAction } from './keys.js';
@@ -375,6 +385,93 @@ function Shell(props: {
     [store],
   );
 
+  /** Adds a new item of a type at a position; the runner selects it once it is saved. */
+  const insertEntry = useCallback(
+    (entry: CatalogueEntry, position: EditPosition, moveFocus: boolean) => {
+      const state = store.getState();
+      const { model } = state;
+      if (state.status !== 'editing' || state.mode !== 'edit') return;
+      if (model === null) return;
+      store.closePicker();
+      const action = insertActionFor(
+        model,
+        entry,
+        position,
+        crypto.randomUUID(),
+      );
+      runnerRef.current?.perform(action.intent, action.entry);
+      if (moveFocus) {
+        requestAnimationFrame(() => {
+          focusRegion(host);
+        });
+      }
+    },
+    [host, store],
+  );
+
+  /** Opens the picker for a gap; a section gap with only one legal type adds it at once. */
+  const openPicker = useCallback(
+    (slot: InsertSlot, opener: PickerOpener) => {
+      const state = store.getState();
+      const ctx = legalityContextOf(state);
+      if (state.status !== 'editing' || state.mode !== 'edit' || ctx === null) {
+        return;
+      }
+      const sole = soleSectionType(ctx, slot);
+      if (sole !== null) {
+        insertEntry(sole, slotPosition(slot), true);
+        return;
+      }
+      store.openPicker(slot, opener);
+    },
+    [insertEntry, store],
+  );
+
+  /** Escape: the picker closes and focus goes back to what opened it. */
+  const closePicker = useCallback(() => {
+    const picker = store.getState().picker;
+    store.closePicker();
+    if (picker === null) return;
+    requestAnimationFrame(() => {
+      const root = host.shadowRoot;
+      const selector =
+        picker.opener === 'insert-point'
+          ? `[data-slot="${slotKey(picker.slot)}"]`
+          : picker.opener === 'toolbar'
+            ? '[data-roving="add"]'
+            : picker.opener === 'empty-column'
+              ? `[data-empty-add="${picker.slot.parentId ?? ''}"]`
+              : picker.opener === 'empty-page'
+                ? '[data-empty-page-add]'
+                : null;
+      const trigger = selector === null ? null : root?.querySelector(selector);
+      if (trigger instanceof HTMLElement)
+        trigger.focus({ preventScroll: true });
+      else focusRegion(host);
+    });
+  }, [host, store]);
+
+  const dismissPicker = useCallback(() => {
+    store.closePicker();
+  }, [store]);
+
+  const pickEntry = useCallback(
+    (entry: CatalogueEntry) => {
+      const picker = store.getState().picker;
+      if (picker === null) return;
+      insertEntry(entry, slotPosition(picker.slot), true);
+    },
+    [insertEntry, store],
+  );
+
+  /** A palette row: focus stays on the row, as after any structural action from the sidebar. */
+  const insertFromPalette = useCallback(
+    (entry: CatalogueEntry, position: EditPosition) => {
+      insertEntry(entry, position, false);
+    },
+    [insertEntry],
+  );
+
   const retrySave = useCallback(() => {
     runnerRef.current?.retry();
   }, []);
@@ -508,6 +605,13 @@ function Shell(props: {
         case 'duplicate':
           if (selected !== undefined) duplicateItem(selected.id);
           break;
+        case 'add': {
+          const ctx = legalityContextOf(state);
+          const slot =
+            ctx === null ? null : slotAfter(ctx, selection.selectedId);
+          if (slot !== null) openPicker(slot, 'key');
+          break;
+        }
       }
     };
 
@@ -540,6 +644,7 @@ function Shell(props: {
         };
         releaseClaim = attachClaim(claimed, {
           onClick: (x, y) => {
+            store.closePicker();
             const hit = read(x, y);
             if (hit === null) return;
             selectAndAnnounce(
@@ -549,6 +654,7 @@ function Shell(props: {
             focusRegion(host);
           },
           onDoubleClick: (x, y) => {
+            store.closePicker();
             const hit = read(x, y);
             if (hit === null) return;
             selectAndAnnounce(
@@ -612,6 +718,7 @@ function Shell(props: {
     climbSelection,
     deleteItem,
     duplicateItem,
+    openPicker,
   ]);
 
   // The lock is held while editing: renewed on a heartbeat, again when the tab
@@ -685,6 +792,11 @@ function Shell(props: {
               onConfirmDelete: confirmDelete,
               onCancelDelete: cancelDelete,
               onToastUndo: undoFromToast,
+              onOpenPicker: openPicker,
+              onClosePicker: closePicker,
+              onDismissPicker: dismissPicker,
+              onPick: pickEntry,
+              onInsert: insertFromPalette,
             }
           : undefined
       }

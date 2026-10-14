@@ -46,7 +46,8 @@ export type StructureAction =
   | { readonly kind: 'undo' }
   | { readonly kind: 'redo' }
   | { readonly kind: 'delete' }
-  | { readonly kind: 'duplicate' };
+  | { readonly kind: 'duplicate' }
+  | { readonly kind: 'add' };
 
 /** Where focus was when the key was pressed. */
 export type StructureFocus = {
@@ -65,7 +66,8 @@ export type StructureKeyInput = KeyInput & { readonly shiftKey: boolean };
  * of the scope, Right or Enter drill in, Left climbs, Home and End jump, Alt
  * and an arrow along the siblings' axis move the selection, and Control or
  * Command with Z undoes (with Shift, redoes), Control or Command with D
- * duplicates and Delete or Backspace deletes the selection. Plain keys act
+ * duplicates and Delete or Backspace deletes the selection, and `+` opens the
+ * picker for the gap after it. Plain keys act
  * only with focus on the region, or for Up, Down, Delete and Backspace on the
  * toolbar, which keeps the left and right arrows and Home and End for itself.
  * Nothing fires while the user types.
@@ -101,6 +103,10 @@ export function structureKeyAction(
     if (key === along.earlier) return { kind: 'move', direction: 'earlier' };
     if (key === along.later) return { kind: 'move', direction: 'later' };
     return null;
+  }
+  // `+` is a shifted key on most layouts, so it is read before Shift rules the rest out.
+  if (key === '+' && focus.inRegion && !command && !input.altKey) {
+    return { kind: 'add' };
   }
   if (command || input.altKey || input.shiftKey) return null;
 

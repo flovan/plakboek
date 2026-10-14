@@ -1,14 +1,18 @@
 import type { ReactElement } from 'react';
+import type { CatalogueEntry, EditPosition } from '../api-types.js';
 import { OverlayLayer } from '../client/overlay/overlay-layer.js';
+import type { InsertSlot } from '../client/session/insertion.js';
 import type { MoveDirection } from '../client/session/move-targets.js';
 import {
   NO_STORE,
   useEditorStore,
   type EditorMode,
   type EditorStore,
+  type PickerOpener,
 } from '../client/session/store.js';
 import { DeleteDialog } from './editing/delete-dialog.js';
 import { LiveRegion } from './editing/live-region.js';
+import { Palette } from './editing/palette.js';
 import { UndoToast } from './editing/toast.js';
 import { ToolGroup } from './editing/tool-group.js';
 import type { ShellIsland } from './island.js';
@@ -57,6 +61,16 @@ export type ShellAppProps = {
     readonly onCancelDelete?: () => void;
     /** Called by the undo toast's button. */
     readonly onToastUndo?: () => void;
+    /** Called by an insert point, an empty prompt and the toolbar's Add after. */
+    readonly onOpenPicker?: (slot: InsertSlot, opener: PickerOpener) => void;
+    /** Called when the picker closes with Escape. */
+    readonly onClosePicker?: () => void;
+    /** Called when the picker closes because a press or focus went elsewhere. */
+    readonly onDismissPicker?: () => void;
+    /** Called when a type is chosen in the picker. */
+    readonly onPick?: (entry: CatalogueEntry) => void;
+    /** Called when a palette row is chosen. */
+    readonly onInsert?: (entry: CatalogueEntry, position: EditPosition) => void;
   };
 };
 
@@ -96,7 +110,9 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               onRedo={editor.onRedo}
             />
           ),
-          panel: null,
+          panel: (
+            <Palette store={editor.store} onInsert={editor.onInsert ?? noop} />
+          ),
         };
   return (
     <>
@@ -128,6 +144,10 @@ export function ShellApp(props: ShellAppProps): ReactElement {
           onMove={editor?.onMove}
           onDuplicate={editor?.onDuplicate}
           onDelete={editor?.onDelete}
+          onOpenPicker={editor?.onOpenPicker}
+          onClosePicker={editor?.onClosePicker}
+          onDismissPicker={editor?.onDismissPicker}
+          onPick={editor?.onPick}
         />
       ) : null}
       {hydrated && editor !== undefined ? (

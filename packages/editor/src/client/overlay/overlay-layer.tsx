@@ -1,20 +1,30 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
   type ReactElement,
 } from 'react';
+import type { CatalogueEntry } from '../../api-types.js';
+import { EmptyPrompts } from '../../chrome/editing/empty-prompts.js';
+import { InsertPoints } from '../../chrome/editing/insert-points.js';
+import { NeedsInputMarkers } from '../../chrome/editing/needs-input.js';
+import { Picker } from '../../chrome/editing/picker.js';
 import { Toolbar } from '../../chrome/editing/toolbar.js';
 import { formatString } from '../../chrome/strings.js';
 import { measureSiblingAxis } from '../frame/sibling-axis.js';
+import type { InsertSlot } from '../session/insertion.js';
 import type { MoveDirection } from '../session/move-targets.js';
 import { hoverTarget } from '../session/scope.js';
 import {
   NO_STORE,
   useEditorStore,
+  type EditorState,
   type EditorStore,
+  type PickerOpener,
 } from '../session/store.js';
+import { createBoxTracker, type BoxesState } from './boxes.js';
 import {
   chipPlacement,
   isVisibleIn,
@@ -22,6 +32,7 @@ import {
   type Box,
   type ChipPlacement,
 } from './geometry.js';
+import { slotAnchor } from './slot-geometry.js';
 import {
   createHoverTracker,
   type HoverState,
@@ -46,6 +57,41 @@ export function chipText(state: {
   return state.unavailable
     ? formatString('overlay.unavailable', { type: state.label })
     : state.label;
+}
+
+/**
+ * The ids whose boxes the overlay needs: the children of the scope (the gaps
+ * between them are the insert points) and their parent, the blocks that show a
+ * needs-input marker, and what an open picker hangs from.
+ */
+function wantedIds(state: EditorState): readonly string[] {
+  const { model, selection, picker } = state;
+  if (model === null) return [];
+  const ids = new Set<string>();
+  const addLevel = (parentId: string | null): void => {
+    if (parentId !== null) ids.add(parentId);
+    for (const child of model.childrenOf(parentId)) ids.add(child.id);
+  };
+  addLevel(selection.scopeId);
+  if (picker !== null) addLevel(picker.slot.parentId);
+  for (const node of model.documentOrder()) {
+    if (node.needsInput.length > 0) ids.add(node.id);
+  }
+  return [...ids];
+}
+
+/** The frame the layer sits over: the one passed, else the one in its own root. */
+function frameFor(
+  layer: HTMLDivElement | null,
+  frame: HTMLIFrameElement | null | undefined,
+): HTMLIFrameElement | null {
+  const root = layer?.getRootNode();
+  const target =
+    frame ??
+    (root instanceof ShadowRoot || root instanceof Document
+      ? root.querySelector('iframe')
+      : null);
+  return target instanceof HTMLIFrameElement ? target : null;
 }
 
 /**
@@ -77,12 +123,31 @@ export function OverlayLayer(props: {
   /** Called by the toolbar's Duplicate and Delete buttons. */
   readonly onDuplicate?: (id: string) => void;
   readonly onDelete?: (id: string) => void;
+  /** Called by an insert point, an empty prompt and the toolbar's Add after. */
+  readonly onOpenPicker?: (slot: InsertSlot, opener: PickerOpener) => void;
+  /** Called when the picker's Escape closes it. */
+  readonly onClosePicker?: () => void;
+  /** Called when a press or focus elsewhere closes the picker. */
+  readonly onDismissPicker?: () => void;
+  /** Called when a type is chosen in the picker. */
+  readonly onPick?: (entry: CatalogueEntry) => void;
 }): ReactElement {
-  const { frame, store, onMove, onDuplicate, onDelete } = props;
+  const {
+    frame,
+    store,
+    onMove,
+    onDuplicate,
+    onDelete,
+    onOpenPicker,
+    onClosePicker,
+    onDismissPicker,
+    onPick,
+  } = props;
   const layer = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<HoverState | null>(null);
   const [selection, setSelection] = useState<SelectionState | null>(null);
   const [axis, setAxis] = useState<'horizontal' | 'vertical'>('vertical');
+  const [measured, setMeasured] = useState<BoxesState | null>(null);
   const flash = useEditorStore(store ?? NO_STORE, (current) => current.flash);
   const selectedId = useEditorStore(
     store ?? NO_STORE,
@@ -101,13 +166,8 @@ export function OverlayLayer(props: {
       setSelection(null);
       return undefined;
     }
-    const root = layer.current?.getRootNode();
-    const target =
-      frame ??
-      (root instanceof ShadowRoot || root instanceof Document
-        ? root.querySelector('iframe')
-        : null);
-    if (!(target instanceof HTMLIFrameElement)) return undefined;
+    const target = frameFor(layer.current, frame);
+    if (target === null) return undefined;
     const created = createHoverTracker(
       target,
       setState,
@@ -163,6 +223,36 @@ export function OverlayLayer(props: {
     };
   }, [frame, store, active]);
 
+  // The boxes of the items the gaps, prompts and markers are drawn from.
+  useEffect(() => {
+    if (!active || store === undefined) {
+      setMeasured(null);
+      return undefined;
+    }
+    const target = frameFor(layer.current, frame);
+    if (target === null) return undefined;
+    const tracker = createBoxTracker(target, {
+      ids: () => wantedIds(store.getState()),
+      onChange: setMeasured,
+    });
+    let previous = store.getState();
+    const unsubscribe = store.subscribe(() => {
+      const next = store.getState();
+      if (
+        next.selection !== previous.selection ||
+        next.model !== previous.model ||
+        next.picker !== previous.picker
+      ) {
+        tracker.refresh();
+      }
+      previous = next;
+    });
+    return () => {
+      unsubscribe();
+      tracker.dispose();
+    };
+  }, [frame, store, active]);
+
   let drawn: {
     readonly outline: Box;
     readonly section: Box | null;
@@ -178,9 +268,17 @@ export function OverlayLayer(props: {
       chip: chipPlacement({ outline, frame: state.frame }),
     };
   }
-  const frameBox = state?.frame ?? selection?.frame ?? null;
+  const frameBox = measured?.frame ?? state?.frame ?? selection?.frame ?? null;
   const origin =
     frameBox === null ? null : { x: frameBox.left, y: frameBox.top };
+  const placed = useMemo((): ReadonlyMap<string, Box> => {
+    if (measured === null) return new Map();
+    const at = { x: measured.frame.left, y: measured.frame.top };
+    return new Map(
+      [...measured.boxes].map(([id, box]) => [id, outlineRect(box, at)]),
+    );
+  }, [measured]);
+  const picker = useEditorStore(store ?? NO_STORE, (current) => current.picker);
 
   // The toolbar gives way to the delete confirmation while it is open.
   const confirming = useEditorStore(
@@ -272,6 +370,13 @@ export function OverlayLayer(props: {
                 </div>
               </>
             )}
+            {store === undefined || measured === null ? null : (
+              <NeedsInputMarkers
+                store={store}
+                boxes={placed}
+                frame={measured.frame}
+              />
+            )}
           </div>
         ) : null}
       </div>
@@ -279,9 +384,12 @@ export function OverlayLayer(props: {
       onMove === undefined ||
       onDuplicate === undefined ||
       onDelete === undefined ||
+      onOpenPicker === undefined ||
+      onClosePicker === undefined ||
+      onDismissPicker === undefined ||
+      onPick === undefined ||
       !active ||
-      frameBox === null ||
-      toolbarItem === null ? null : (
+      frameBox === null ? null : (
         <div
           className="pk-overlay-interaction"
           data-overlay-interaction=""
@@ -291,15 +399,50 @@ export function OverlayLayer(props: {
             className="pk-overlay-plane"
             style={{ left: -frameBox.left, top: -frameBox.top }}
           >
-            <Toolbar
-              store={store}
-              item={toolbarItem}
-              frame={frameBox}
-              axis={axis}
-              onMove={onMove}
-              onDuplicate={onDuplicate}
-              onDelete={onDelete}
-            />
+            {confirming || measured === null ? null : (
+              <>
+                <InsertPoints
+                  store={store}
+                  boxes={placed}
+                  onOpen={(slot) => {
+                    onOpenPicker(slot, 'insert-point');
+                  }}
+                />
+                <EmptyPrompts
+                  store={store}
+                  empty={measured.empty}
+                  boxes={placed}
+                  frame={measured.frame}
+                  onOpen={onOpenPicker}
+                />
+              </>
+            )}
+            {toolbarItem === null ? null : (
+              <Toolbar
+                store={store}
+                item={toolbarItem}
+                frame={frameBox}
+                axis={axis}
+                onMove={onMove}
+                onDuplicate={onDuplicate}
+                onDelete={onDelete}
+                onAddAfter={(slot) => {
+                  onOpenPicker(slot, 'toolbar');
+                }}
+              />
+            )}
+            {picker === null || confirming ? null : (
+              <Picker
+                key={picker.token}
+                store={store}
+                slot={picker.slot}
+                anchor={slotAnchor(picker.slot, placed, frameBox)}
+                frame={frameBox}
+                onPick={onPick}
+                onClose={onClosePicker}
+                onDismiss={onDismissPicker}
+              />
+            )}
           </div>
         </div>
       )}

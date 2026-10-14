@@ -579,6 +579,182 @@
   }
 
   /*
+   * Insert points: a 16px band over the gap between siblings. It takes the
+   * pointer, and shows its line and its 24px round button (32px hit area)
+   * while hovered, holding focus or holding the open picker. The line and the
+   * button follow the accent colours; forced colours use the system ones.
+   */
+  .pk-insert {
+    position: absolute;
+    box-sizing: border-box;
+    opacity: 0;
+    pointer-events: auto;
+  }
+
+  .pk-insert:hover,
+  .pk-insert:focus-within,
+  .pk-insert[data-open] {
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .pk-insert {
+      transition: opacity 100ms linear;
+    }
+  }
+
+  .pk-insert-line {
+    position: absolute;
+    background: var(--pk-overlay-outline);
+    pointer-events: none;
+    forced-color-adjust: none;
+  }
+
+  .pk-insert[data-line='across'] .pk-insert-line {
+    top: 50%;
+    right: 0;
+    left: 0;
+    height: 2px;
+    margin-top: -1px;
+  }
+
+  .pk-insert[data-line='down'] .pk-insert-line {
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    margin-left: -1px;
+  }
+
+  .pk-insert-button {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin: -16px 0 0 -16px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .pk-insert-dot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--pk-accent);
+    color: var(--pk-accent-contrast);
+    forced-color-adjust: none;
+  }
+
+  .pk-insert-button:focus-visible .pk-insert-dot {
+    outline: 2px solid var(--pk-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /*
+   * The prompts of empty places: a dashed box over an empty column and a card
+   * in the middle of an empty page. Only the buttons and the card take the
+   * pointer, so a click on the cell still selects the column.
+   */
+  .pk-empty-box {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--pk-overlay-outline);
+    pointer-events: none;
+    forced-color-adjust: none;
+  }
+
+  .pk-empty-box > button {
+    pointer-events: auto;
+  }
+
+  .pk-empty-page {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    pointer-events: none;
+  }
+
+  .pk-empty-card {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 320px;
+    padding: 24px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    pointer-events: auto;
+  }
+
+  /* The picker: a non-modal popover over the interaction plane. */
+  .pk-picker {
+    position: absolute;
+    z-index: 1;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    width: 320px;
+    overflow: hidden;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+    pointer-events: auto;
+  }
+
+  /* The needs-input marker: attention colour, white text, never takes the pointer. */
+  .pk-marker {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 4px;
+    background: var(--pk-attention-marker);
+    color: var(--pk-overlay-chip-text);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    pointer-events: none;
+    forced-color-adjust: none;
+  }
+
+  @media (forced-colors: active) {
+    .pk-insert-dot {
+      background: Highlight;
+      color: HighlightText;
+    }
+
+    .pk-insert-line {
+      background: Highlight;
+    }
+
+    .pk-picker,
+    .pk-empty-card {
+      border-color: CanvasText;
+      background: Canvas;
+    }
+  }
+
+  /*
    * The undo toast: bottom centre of the frame, 16px above its bottom edge
    * (the stage keeps 24px around the frame, none in the full layout), above
    * the overlay and below the confirmation dialogs.

@@ -11,6 +11,7 @@
 import { useSyncExternalStore } from 'react';
 import type { EditorSession, LockView, ModelNode } from '../../api-types.js';
 import { createUndoStack, type UndoEntry, type UndoStack } from './inverse.js';
+import type { InsertSlot } from './insertion.js';
 import { createQueue, type QueueState } from './save-queue.js';
 import { NO_SELECTION, type Selection } from './scope.js';
 import { createTreeModel, type TreeModel } from './tree-model.js';
@@ -25,6 +26,14 @@ export type EditorMode = 'edit' | 'interact';
  * - `unavailable`: the page could not be opened for editing.
  */
 export type EditorStatus = 'opening' | 'editing' | 'locked' | 'unavailable';
+
+/** What opened the picker: focus returns to it when the picker closes with nothing added. */
+export type PickerOpener =
+  | 'insert-point'
+  | 'toolbar'
+  | 'empty-column'
+  | 'empty-page'
+  | 'key';
 
 export type EditorState = {
   readonly status: EditorStatus;
@@ -50,6 +59,12 @@ export type EditorState = {
   readonly toast: {
     readonly entry: UndoEntry;
     readonly label: string;
+    readonly token: number;
+  } | null;
+  /** The open picker: the gap it adds to and what opened it, so focus can go back. */
+  readonly picker: {
+    readonly slot: InsertSlot;
+    readonly opener: PickerOpener;
     readonly token: number;
   } | null;
   /** A delete waiting for the editor's confirmation, and what opened it. */
@@ -95,6 +110,9 @@ export type EditorStore = {
   /** Opens the delete confirmation for `id`. */
   askDelete(id: string, opener: 'toolbar' | 'region'): void;
   cancelDelete(): void;
+  /** Opens the picker for a gap, replacing any open one. */
+  openPicker(slot: InsertSlot, opener: PickerOpener): void;
+  closePicker(): void;
 };
 
 export function initialEditorState(): EditorState {
@@ -112,6 +130,7 @@ export function initialEditorState(): EditorState {
     flash: null,
     propertiesRequest: null,
     toast: null,
+    picker: null,
     deleteRequest: null,
   };
 }
@@ -134,6 +153,7 @@ export function openedState(
     lock: session.lock,
     undo: createUndoStack(),
     toast: null,
+    picker: null,
     deleteRequest: null,
   };
 }
@@ -172,6 +192,7 @@ export function createEditorStore(
         ...state,
         mode,
         selection: mode === 'interact' ? NO_SELECTION : state.selection,
+        picker: null,
       });
     },
     select(selection) {
@@ -180,7 +201,8 @@ export function createEditorStore(
         selection.scopeId === state.selection.scopeId &&
         selection.selectedId === state.selection.selectedId;
       if (same) return;
-      set({ ...state, selection });
+      // What the picker would add to belongs to the selection it was opened from.
+      set({ ...state, selection, picker: null });
     },
     announce(text) {
       if (text === state.announcement) return;
@@ -199,6 +221,7 @@ export function createEditorStore(
               selection: NO_SELECTION,
               undo: createUndoStack(),
               toast: null,
+              picker: null,
               deleteRequest: null,
             }
           : {}),
@@ -249,6 +272,15 @@ export function createEditorStore(
     cancelDelete() {
       if (state.deleteRequest === null) return;
       set({ ...state, deleteRequest: null });
+    },
+    openPicker(slot, opener) {
+      if (state.mode !== 'edit' || state.status !== 'editing') return;
+      token += 1;
+      set({ ...state, picker: { slot, opener, token } });
+    },
+    closePicker() {
+      if (state.picker === null) return;
+      set({ ...state, picker: null });
     },
   };
 }
