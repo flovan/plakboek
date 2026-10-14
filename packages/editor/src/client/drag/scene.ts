@@ -57,40 +57,71 @@ export function readScene(
 }
 
 export type SceneReader = {
-  /** The scene, read again only after the frame scrolled or resized or the model changed. */
+  /** The scene, read again after the frame scrolled or resized, was reloaded, or the model changed. */
   readonly read: () => DragScene | null;
   /** Forces the next `read` to measure again. */
   readonly invalidate: () => void;
   readonly dispose: () => void;
 };
 
-/** Follows the frame's scrolling so a drag measures once per change, not once per pointer move. */
+/**
+ * Follows the frame so a drag measures once per change, not once per pointer
+ * move. The frame's `scroll` event arrives on the next rendering step, after a
+ * scroll the drag's own auto-scroll just made, so `read` also compares the
+ * scroll position the scene was measured at with the one the frame has now:
+ * boxes from the old position are never paired with a hit test at the new one.
+ * A reloaded frame is a new window, so the listeners follow its document.
+ */
 export function createSceneReader(
   frame: HTMLIFrameElement,
   model: () => TreeModel | null,
 ): SceneReader {
   let cached: DragScene | null = null;
   let dirty = true;
-  const view = frame.contentWindow;
+  let measuredAt = { x: 0, y: 0 };
+  let followed: Document | null = null;
+  let followedView: Window | null = null;
   const invalidate = (): void => {
     dirty = true;
   };
-  view?.addEventListener('scroll', invalidate, { passive: true });
-  view?.addEventListener('resize', invalidate, { passive: true });
+  const unfollow = (): void => {
+    followedView?.removeEventListener('scroll', invalidate);
+    followedView?.removeEventListener('resize', invalidate);
+    followedView = null;
+    followed = null;
+  };
+  const follow = (): void => {
+    const doc = frame.contentDocument;
+    if (doc === followed && followedView !== null) return;
+    unfollow();
+    followed = doc;
+    followedView = frame.contentWindow;
+    followedView?.addEventListener('scroll', invalidate, { passive: true });
+    followedView?.addEventListener('resize', invalidate, { passive: true });
+    dirty = true;
+  };
+  follow();
   return {
     read: () => {
       const current = model();
       if (current === null) return null;
-      if (dirty || cached === null || cached.model !== current) {
+      follow();
+      const view = frame.contentWindow;
+      const scroll = { x: view?.scrollX ?? 0, y: view?.scrollY ?? 0 };
+      if (
+        dirty ||
+        cached === null ||
+        cached.model !== current ||
+        scroll.x !== measuredAt.x ||
+        scroll.y !== measuredAt.y
+      ) {
         cached = readScene(frame, current);
+        measuredAt = scroll;
         dirty = false;
       }
       return cached;
     },
     invalidate,
-    dispose: () => {
-      view?.removeEventListener('scroll', invalidate);
-      view?.removeEventListener('resize', invalidate);
-    },
+    dispose: unfollow,
   };
 }
