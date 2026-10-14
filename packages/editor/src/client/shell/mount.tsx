@@ -518,20 +518,23 @@ function Shell(props: {
   const addColumn = useCallback(
     (sectionId: string, afterColumnId: string | null) => {
       const state = store.getState();
-      const { model } = state;
       if (state.status !== 'editing' || state.mode !== 'edit') return;
-      if (model === null || model.get(sectionId)?.kind !== 'section') return;
       store.closePicker();
-      const newId = crypto.randomUUID();
-      const intent = addColumnIntent(model, sectionId, afterColumnId, newId);
-      runnerRef.current?.perform(
-        intent,
-        buildUndoEntry(intent, model, { kind: 'added', itemId: newId }),
-        { selectId: newId },
-      );
-      // The control that asked (the panel's button) is replaced by the new column's panel.
-      requestAnimationFrame(() => {
-        focusRegion(host);
+      // Built from the model once the writes before it are saved.
+      runnerRef.current?.whenSaved(() => {
+        const { model } = store.getState();
+        if (model === null || model.get(sectionId)?.kind !== 'section') return;
+        const newId = crypto.randomUUID();
+        const intent = addColumnIntent(model, sectionId, afterColumnId, newId);
+        runnerRef.current?.perform(
+          intent,
+          buildUndoEntry(intent, model, { kind: 'added', itemId: newId }),
+          { selectId: newId },
+        );
+        // The control that asked (the panel's button) is replaced by the new column's panel.
+        requestAnimationFrame(() => {
+          focusRegion(host);
+        });
       });
     },
     [host, store],
@@ -558,12 +561,14 @@ function Shell(props: {
   /** A column's move from its section's panel: the section stays selected, so more moves can follow. */
   const moveColumnFromPanel = useCallback(
     (id: string, direction: MoveDirection) => {
-      const state = store.getState();
-      const action = moveActionFor(state, id, direction);
-      if (action === null) return;
-      runnerRef.current?.perform(action.intent, action.entry, {
-        selectId: state.selection.selectedId,
-        flash: false,
+      runnerRef.current?.whenSaved(() => {
+        const state = store.getState();
+        const action = moveActionFor(state, id, direction);
+        if (action === null) return;
+        runnerRef.current?.perform(action.intent, action.entry, {
+          selectId: state.selection.selectedId,
+          flash: false,
+        });
       });
     },
     [store],
@@ -571,9 +576,11 @@ function Shell(props: {
 
   const moveItem = useCallback(
     (id: string, direction: MoveDirection) => {
-      const action = moveActionFor(store.getState(), id, direction);
-      if (action !== null)
-        runnerRef.current?.perform(action.intent, action.entry);
+      runnerRef.current?.whenSaved(() => {
+        const action = moveActionFor(store.getState(), id, direction);
+        if (action !== null)
+          runnerRef.current?.perform(action.intent, action.entry);
+      });
     },
     [store],
   );
@@ -582,20 +589,24 @@ function Shell(props: {
   const performDelete = useCallback(
     (id: string, opener: DeleteOpener) => {
       const runner = runnerRef.current;
-      const state = store.getState();
-      const action = deleteActionFor(state, id);
-      if (runner === null || action === null) return;
-      // Removing a column from its section's panel leaves the section selected, so more can follow.
-      const selectId =
-        opener === 'panel'
-          ? (state.model?.get(id)?.parentId ?? action.selectId)
-          : action.selectId;
-      runner.perform(action.intent, action.entry, { selectId, flash: false });
-      store.showToast(action.entry, action.label);
-      store.announce(formatString('action.deleted', { label: action.label }));
-      // After the confirmation (if any) has closed and handed the page back.
-      requestAnimationFrame(() => {
-        focusRegion(host);
+      if (runner === null) return;
+      // The undo captures the item as saved, so it is built once the writes before it are.
+      runner.whenSaved(() => {
+        const state = store.getState();
+        const action = deleteActionFor(state, id);
+        if (action === null) return;
+        // Removing a column from its section's panel leaves the section selected, so more can follow.
+        const selectId =
+          opener === 'panel'
+            ? (state.model?.get(id)?.parentId ?? action.selectId)
+            : action.selectId;
+        runner.perform(action.intent, action.entry, { selectId, flash: false });
+        store.showToast(action.entry, action.label);
+        store.announce(formatString('action.deleted', { label: action.label }));
+        // After the confirmation (if any) has closed and handed the page back.
+        requestAnimationFrame(() => {
+          focusRegion(host);
+        });
       });
     },
     [host, store],
@@ -663,17 +674,21 @@ function Shell(props: {
 
   const duplicateItem = useCallback(
     (id: string) => {
-      const state = store.getState();
-      if (state.status !== 'editing' || state.mode !== 'edit') return;
-      const newId = crypto.randomUUID();
-      const action = duplicateActionFor(state, id, newId);
-      if (action === null) {
-        store.announce(STRINGS['toolbar.reason.noDuplicate']);
-        return;
-      }
-      // A copied column also resets its section's ratio, so the copy is named.
-      runnerRef.current?.perform(action.intent, action.entry, {
-        selectId: newId,
+      const first = store.getState();
+      if (first.status !== 'editing' || first.mode !== 'edit') return;
+      runnerRef.current?.whenSaved(() => {
+        const state = store.getState();
+        if (state.status !== 'editing' || state.mode !== 'edit') return;
+        const newId = crypto.randomUUID();
+        const action = duplicateActionFor(state, id, newId);
+        if (action === null) {
+          store.announce(STRINGS['toolbar.reason.noDuplicate']);
+          return;
+        }
+        // A copied column also resets its section's ratio, so the copy is named.
+        runnerRef.current?.perform(action.intent, action.entry, {
+          selectId: newId,
+        });
       });
     },
     [store],
@@ -683,17 +698,20 @@ function Shell(props: {
   const insertEntry = useCallback(
     (entry: CatalogueEntry, position: EditPosition, moveFocus: boolean) => {
       const state = store.getState();
-      const { model } = state;
       if (state.status !== 'editing' || state.mode !== 'edit') return;
-      if (model === null) return;
+      if (state.model === null) return;
       store.closePicker();
-      const action = insertActionFor(
-        model,
-        entry,
-        position,
-        crypto.randomUUID(),
-      );
-      runnerRef.current?.perform(action.intent, action.entry);
+      runnerRef.current?.whenSaved(() => {
+        const { model } = store.getState();
+        if (model === null) return;
+        const action = insertActionFor(
+          model,
+          entry,
+          position,
+          crypto.randomUUID(),
+        );
+        runnerRef.current?.perform(action.intent, action.entry);
+      });
       if (moveFocus) {
         requestAnimationFrame(() => {
           focusRegion(host);
@@ -706,10 +724,12 @@ function Shell(props: {
   /** A drop of a dragged item: saved at once, like a move by the buttons. */
   const moveTo = useCallback(
     (id: string, position: EditPosition) => {
-      const action = moveToPositionFor(store.getState(), id, position);
-      if (action !== null) {
-        runnerRef.current?.perform(action.intent, action.entry);
-      }
+      runnerRef.current?.whenSaved(() => {
+        const action = moveToPositionFor(store.getState(), id, position);
+        if (action !== null) {
+          runnerRef.current?.perform(action.intent, action.entry);
+        }
+      });
     },
     [store],
   );
@@ -937,18 +957,22 @@ function Shell(props: {
           break;
         case 'move': {
           if (selected === undefined) break;
-          const move = moveActionFor(state, selected.id, action.direction);
-          if (move === null) {
-            store.announce(
-              STRINGS[
-                action.direction === 'earlier'
-                  ? 'toolbar.reason.atStart'
-                  : 'toolbar.reason.atEnd'
-              ],
-            );
-          } else {
-            runnerRef.current?.perform(move.intent, move.entry);
-          }
+          const { id } = selected;
+          // A held key makes presses faster than a save: each is built from the saved tree.
+          runnerRef.current?.whenSaved(() => {
+            const move = moveActionFor(store.getState(), id, action.direction);
+            if (move === null) {
+              store.announce(
+                STRINGS[
+                  action.direction === 'earlier'
+                    ? 'toolbar.reason.atStart'
+                    : 'toolbar.reason.atEnd'
+                ],
+              );
+            } else {
+              runnerRef.current?.perform(move.intent, move.entry);
+            }
+          });
           break;
         }
         case 'undo':

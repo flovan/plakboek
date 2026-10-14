@@ -92,6 +92,15 @@ export type SaveRunner = {
   /** Sends everything pending; true when all of it was saved. */
   readonly flush: () => Promise<boolean>;
   /**
+   * Runs `run` once every write queued or in flight has been saved, at once
+   * when nothing is. A structural action reads the model to say where an item
+   * is, what it holds and what undoes the action, and the model only follows a
+   * write when its answer arrives, so such an action must be built after the
+   * writes before it. Actions held this way run in the order they were made;
+   * when saving fails or pauses they are dropped, and the editor is told.
+   */
+  readonly whenSaved: (run: () => void) => void;
+  /**
    * A property field lost focus: that block's pending edit (and whatever was
    * queued before it) is sent now instead of after the idle wait, and the
    * undo entry collecting its keystrokes is closed.
@@ -216,6 +225,9 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
   let listeningTo: Document | null = null;
   const meta = new Map<number, EntryMeta>();
   let waiters: ((saved: boolean) => void)[] = [];
+  /** Actions waiting for the queue to empty, and the chain that runs them in order. */
+  let held = 0;
+  let heldChain: Promise<void> = Promise.resolve();
 
   const mutation = new QueryMutationObserver<
     EditResponse,
@@ -591,21 +603,59 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     });
   }
 
+  function flush(): Promise<boolean> {
+    if (idleTimer !== null) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+    store.setQueue(markReady(store.getState().queue));
+    return new Promise<boolean>((resolve) => {
+      waiters.push(resolve);
+      kick();
+      if (!running) settle();
+    });
+  }
+
+  async function runWhenSaved(run: () => void): Promise<void> {
+    try {
+      if (disposed) return;
+      if (await flush()) {
+        if (!disposed) run();
+        return;
+      }
+      if (disposed) return;
+      store.announce(
+        STRINGS[
+          store.getState().queue.status === 'paused'
+            ? 'save.paused'
+            : 'save.failed'
+        ],
+      );
+    } finally {
+      held -= 1;
+    }
+  }
+
   return {
     perform: (intent, entry, options = {}) => {
       enqueueIntent(intent, entry, options);
     },
     ready: readyBlock,
-    flush: () => {
-      if (idleTimer !== null) {
-        clearTimeout(idleTimer);
-        idleTimer = null;
+    flush,
+    whenSaved: (run) => {
+      if (held === 0 && !hasPending(store.getState().queue)) {
+        run();
+        return;
       }
-      store.setQueue(markReady(store.getState().queue));
-      return new Promise<boolean>((resolve) => {
-        waiters.push(resolve);
-        kick();
-        if (!running) settle();
+      held += 1;
+      const next = heldChain.then(async () => {
+        await runWhenSaved(run);
+      });
+      // A failing action is reported, and must not stop the ones queued behind it.
+      heldChain = next.catch((error: unknown) => {
+        queueMicrotask(() => {
+          throw error;
+        });
       });
     },
     retry: () => {

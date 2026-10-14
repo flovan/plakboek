@@ -464,6 +464,82 @@ describe('the save runner', () => {
   });
 });
 
+describe('actions held until the queue is saved', () => {
+  const withText = (text: string): ModelNode[] =>
+    tree.map((node) =>
+      node.id === 'h1'
+        ? { ...node, props: { text }, version: node.version + 1 }
+        : node,
+    );
+
+  it('runs an action at once when nothing is queued', () => {
+    const ctx = setup(() => Promise.resolve(responseFor(tree)));
+    let ran = false;
+    ctx.runner.whenSaved(() => {
+      ran = true;
+    });
+    expect(ran).toBe(true);
+  });
+
+  it('builds the undo of a delete from the block as saved, not as it was before a pending edit', async () => {
+    const ctx = setup(() => Promise.resolve(responseFor(withText('typed'))));
+    ctx.runner.perform(
+      { kind: 'update', blockId: 'h1', props: { text: 'typed' } },
+      null,
+    );
+    ctx.runner.ready('h1');
+    const del: Intent = { kind: 'delete', blockId: 'h1' };
+    let captured: unknown = null;
+    ctx.runner.whenSaved(() => {
+      const model = ctx.store.getState().model;
+      if (model === null) throw new Error('not open');
+      const entry = buildUndoEntry(del, model, {
+        kind: 'deleted',
+        itemId: 'h1',
+      });
+      captured = entry.inverse;
+    });
+    // the edit is still in flight: the action has not been built yet
+    expect(captured).toBeNull();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(captured).toMatchObject({
+      kind: 'insert',
+      node: { id: 'h1', props: { text: 'typed' } },
+    });
+  });
+
+  it('builds a second action after the first one has been saved, in order', async () => {
+    const ctx = setup(() =>
+      Promise.resolve(responseFor(movedToTop(tree, 'h2', 'c2'))),
+    );
+    const seen: (string | null | undefined)[] = [];
+    const action = (): void => {
+      seen.push(ctx.store.getState().model?.get('h2')?.parentId);
+      if (seen.length === 1) performMove(ctx);
+    };
+    ctx.runner.whenSaved(action);
+    // the first ran at once and its write is in flight; the second must wait for it
+    ctx.runner.whenSaved(action);
+    expect(seen).toEqual(['c1']);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen).toEqual(['c1', 'c2']);
+  });
+
+  it('drops a held action and says so when saving fails', async () => {
+    const ctx = setup(() => Promise.reject(new ApiRequestError(null, null)));
+    performMove(ctx);
+    let ran = false;
+    ctx.runner.whenSaved(() => {
+      ran = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ran).toBe(false);
+    expect(ctx.store.getState().announcement).toBe(
+      'Could not save your changes',
+    );
+  });
+});
+
 describe('selectionAfterWrite', () => {
   const model = createTreeModel(tree);
 
