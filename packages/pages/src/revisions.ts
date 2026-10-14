@@ -96,6 +96,7 @@ export async function recordBlockRevision(
     .insert(blockRevisions)
     .values({
       blockId: input.blockId,
+      subjectBlockId: input.blockId,
       ownerType: input.owner.ownerType,
       ownerId: input.owner.ownerId,
       locale: input.owner.locale,
@@ -810,8 +811,11 @@ export type RestoreBatchResult = {
  * batch's blocks in `created_at, id` order, each restored to the CURRENT
  * schema's shape (`buildRestoredProps` off the already-computed preview):
  * a `'delete'` revision re-creates the block with a fresh id and its
- * recorded `parent_block_id`/`sort_order`/`depth`, stamped with the
- * registry's current `schemaVersion`; a `'move'` revision re-parents the
+ * recorded `sort_order`, stamped with the registry's current
+ * `schemaVersion`, under its recorded parent -- or, when that parent was
+ * itself re-created by the same batch (a deleted subtree), under the
+ * parent's new id, matched through the revision's `subject_block_id` -- at
+ * `depth` one below the parent it lands under; a `'move'` revision re-parents the
  * still-live block to its recorded position, leaving its props untouched;
  * a `'create'`/`'update'` revision rewrites the still-live block's props.
  * Before each write, builds the `PlacementContext` for the recorded
@@ -898,6 +902,10 @@ export async function restoreRevisionBatch(
       const restoreBatchId = newRevisionBatchId();
       const restoredAt = now();
       let restoredBlocks = 0;
+      // A deleted block is re-created under a fresh id, so a child restored
+      // from the same batch has to be re-parented to its parent's NEW id.
+      // Keyed by the id the block had when it was deleted.
+      const restoredIds = new Map<string, string>();
 
       for (const block of orderedBlocks) {
         const raw = rawByRevisionId.get(block.revisionId);
@@ -905,16 +913,23 @@ export async function restoreRevisionBatch(
         const definition = getBlockDefinition(block.blockType);
         const restoredProps = buildRestoredProps(block.properties);
 
+        // The parent the block goes back under: the recorded one, or its
+        // re-created replacement when the parent was restored by this batch.
+        const parentBlockId =
+          raw.parentBlockId === null
+            ? null
+            : (restoredIds.get(raw.parentBlockId) ?? raw.parentBlockId);
+
         let parentDefinition: BlockDefinition | null = null;
         let sectionDefinition: BlockDefinition | null = null;
         let parentDepth: number | null = null;
         let parentSectionDepth = 0;
-        if (raw.parentBlockId !== null) {
-          const loaded = await loadParentForPlacement(tx, raw.parentBlockId);
+        if (parentBlockId !== null) {
+          const loaded = await loadParentForPlacement(tx, parentBlockId);
           if (loaded === null) {
             throw new RestoreParentNotFoundError(
               block.revisionId,
-              raw.parentBlockId,
+              parentBlockId,
             );
           }
           parentDepth = loaded.parentDepth;
@@ -953,17 +968,18 @@ export async function restoreRevisionBatch(
           }
 
           const newId = randomUUID();
+          const restoredDepth = (parentDepth ?? -1) + 1;
           await tx.insert(pageBlocks).values({
             id: newId,
             ownerType: ownerRef.ownerType,
             ownerId: ownerRef.ownerId,
             locale: ownerRef.locale,
-            parentBlockId: raw.parentBlockId,
+            parentBlockId,
             blockType: block.blockType,
             props: validatedProps,
             layout: restoredLayout,
             schemaVersion: definition.schemaVersion,
-            depth: raw.depth,
+            depth: restoredDepth,
             sortOrder: raw.sortOrder,
             version: 1,
             createdBy: actor.userId,
@@ -979,15 +995,17 @@ export async function restoreRevisionBatch(
             changeType: 'create',
             kind: 'save',
             blockType: block.blockType,
-            parentBlockId: raw.parentBlockId,
+            parentBlockId,
             sortOrder: raw.sortOrder,
-            depth: raw.depth,
+            depth: restoredDepth,
             props: validatedProps,
             layout: restoredLayout,
             schemaVersion: definition.schemaVersion,
             authorId: actor.userId,
             createdAt: restoredAt,
           });
+          const deletedId = raw.subjectBlockId ?? raw.blockId;
+          if (deletedId !== null) restoredIds.set(deletedId, newId);
           restoredBlocks += 1;
         } else if (block.changeType === 'move') {
           if (block.blockId === null) {
@@ -1039,7 +1057,7 @@ export async function restoreRevisionBatch(
           await tx
             .update(pageBlocks)
             .set({
-              parentBlockId: raw.parentBlockId,
+              parentBlockId,
               sortOrder: raw.sortOrder,
               depth: restoredDepth,
               version: sql`${pageBlocks.version} + 1`,

@@ -86,6 +86,9 @@ creates the page and block-tree tables (`pages`, `page_blocks`,
 `page_engine_settings`) used by `@plakboek/pages`. `0004_block_layout` adds
 a nullable `layout` column to `page_blocks` and `block_revisions`, holding
 section column ratios and alignment and block fill separately from `props`.
+`0005_revision_block_ref` adds `block_revisions.subject_block_id`, which keeps
+the revised block's id once the block row is deleted, so a deleted subtree can
+be restored with its parent links intact.
 See
 [`MIGRATIONS.md`](./MIGRATIONS.md) for how later migrations are added, the
 transactional-vs-existence-guarded-statement decision, and what each thrown

@@ -284,6 +284,7 @@ describe('schema parity: 0002_content_engine vs @plakboek/content schema.ts', ()
           '0002_content_engine',
           '0003_page_block_engine',
           '0004_block_layout',
+          '0005_revision_block_ref',
         ]);
 
         const secondRun = await runMigrations({
@@ -295,6 +296,7 @@ describe('schema parity: 0002_content_engine vs @plakboek/content schema.ts', ()
           '0002_content_engine',
           '0003_page_block_engine',
           '0004_block_layout',
+          '0005_revision_block_ref',
         ]);
 
         handle = createDb({ connectionString: testDatabase.connectionString });

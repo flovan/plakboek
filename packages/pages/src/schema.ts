@@ -182,6 +182,11 @@ export const blockRevisions = pgTable(
     blockId: uuid('block_id').references((): AnyPgColumn => pageBlocks.id, {
       onDelete: 'set null',
     }),
+    /** The id of the revised block, kept as plain data: unlike `blockId` it is
+     * not nulled when the block row is deleted, so a restore can tell which
+     * deleted block a child's `parentBlockId` named. Null on a revision of a
+     * block that was already deleted when this column was added. */
+    subjectBlockId: uuid('subject_block_id'),
     ownerType: text('owner_type').notNull(),
     ownerId: uuid('owner_id').notNull(),
     locale: text('locale').notNull(),

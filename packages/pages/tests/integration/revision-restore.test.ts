@@ -23,6 +23,7 @@ import {
 } from '@plakboek/permissions';
 import { describe, expect, it } from 'vitest';
 import { definePagesConfig, type PagesDeps } from '../../src/config.js';
+import { applyBlockEdit } from '../../src/edit-batch.js';
 import { createPage, getPage, StalePageVersionError } from '../../src/pages.js';
 import {
   BlockDepthExceededError,
@@ -41,6 +42,7 @@ import {
   deleteBlock,
   insertBlock,
   moveBlock,
+  readBlockTree,
   updateBlockProps,
 } from '../../src/tree.js';
 import { createTestDatabase } from './test-database.js';
@@ -969,7 +971,7 @@ describe("restoreRevisionBatch's 'move' replay enforces the same subtree-height-
 });
 
 describe('restoreRevisionBatch refuses a restore whose recorded parent block no longer exists, rather than crashing on the page_blocks foreign key (code review WR-01)', () => {
-  it('throws RestoreParentNotFoundError -- not a raw FK violation -- when a multi-level subtree delete-batch is restored and the parent row is recreated under a NEW id', async () => {
+  it('throws RestoreParentNotFoundError -- not a raw FK violation -- when a delete-batch is restored after the parent it names was removed', async () => {
     const testDatabase = await createTestDatabase();
     await runMigrations({ connectionString: testDatabase.connectionString });
     const handle = createDb({
@@ -1085,14 +1087,18 @@ describe('restoreRevisionBatch refuses a restore whose recorded parent block no 
       `;
       const revisionBatchId = batchRow!.revisionBatchId;
 
-      // A restored 'delete' revision always gets a FRESH id
-      // (`restoreRevisionBatch`'s `newId = randomUUID()`) -- restoring this
-      // batch recreates `wrapper` (depth 1, processed first) under a new
-      // id, then tries to recreate `note` (depth 2) under its recorded
-      // `parentBlockId` (wrapper's OLD id), which no longer resolves to any
-      // row. Before the fix this fell straight through to the
-      // `page_blocks.parent_block_id` foreign key and crashed with a raw,
-      // unmapped Postgres error.
+      // The parent the batch's children name has since been removed too
+      // (the section, here), so the re-created `wrapper` has nowhere to go:
+      // the restore refuses with a typed error rather than falling through
+      // to the `page_blocks.parent_block_id` foreign key.
+      fresh = await getPage(handle.db, page.id);
+      await deleteBlock(deps, superadmin, {
+        blockId: section.id,
+        baseVersion: section.version,
+        pageId: page.id,
+        basePageVersion: fresh!.version,
+      });
+
       const pageBeforeRestore = await getPage(handle.db, page.id);
       const error: unknown = await restoreRevisionBatch(deps, superadmin, {
         revisionBatchId,
@@ -1102,16 +1108,210 @@ describe('restoreRevisionBatch refuses a restore whose recorded parent block no 
 
       expect(error).toBeInstanceOf(RestoreParentNotFoundError);
       expect((error as RestoreParentNotFoundError).parentBlockId).toBe(
-        wrapper.id,
+        section.id,
       );
 
       // Nothing was written -- the whole restore is one transaction.
       const recreated = await handle.sql<{ id: string }[]>`
-        SELECT id FROM page_blocks WHERE parent_block_id = ${section.id}
+        SELECT id FROM page_blocks WHERE owner_id = ${page.id}
       `;
       expect(recreated).toHaveLength(0);
       const pageAfter = await getPage(handle.db, page.id);
       expect(pageAfter!.version).toBe(pageBeforeRestore!.version);
+    } finally {
+      await handle.close();
+      await testDatabase.drop();
+    }
+  });
+});
+
+describe('restoreRevisionBatch re-creates a deleted section, its columns and their blocks (code review WR-D-06)', () => {
+  it('re-parents every restored block to the new id of its restored parent, for two columns told apart only by what they hold', async () => {
+    const testDatabase = await createTestDatabase();
+    await runMigrations({ connectionString: testDatabase.connectionString });
+    const handle = createDb({
+      connectionString: testDatabase.connectionString,
+    });
+    try {
+      const resolver: PermissionResolver = createPermissionResolver(roles);
+      const recorder: AuditRecorder = createAuditRecorder({
+        db: handle.db,
+        resolver,
+      });
+      const superadminUser = await createUserWithRole(handle.db, {
+        id: randomUUID(),
+        email: `wr-d-06-${randomUUID()}@example.com`,
+        name: 'WR-D-06 Owner',
+        roleKey: SUPERADMIN_ROLE_KEY,
+      });
+      const superadmin: AuditActor = {
+        userId: superadminUser.userId,
+        roleKey: superadminUser.roleKey,
+      };
+      const config = definePagesConfig({
+        content: defineContentConfig({
+          locales: ['en'],
+          defaultLocale: 'en',
+          timezone: 'UTC',
+        }),
+        blocks: defineBlocks([
+          {
+            key: 'column',
+            kind: 'column',
+            editor: { label: 'Column' },
+            schemaVersion: 1,
+            properties: {},
+          },
+          {
+            key: 'section',
+            kind: 'section',
+            editor: { label: 'Section' },
+            schemaVersion: 1,
+            properties: {},
+          },
+          {
+            key: 'note',
+            editor: { label: 'Note' },
+            schemaVersion: 1,
+            properties: {
+              body: { fieldType: 'short_text', label: 'Body', required: false },
+            },
+          },
+        ]),
+      });
+      const deps: PagesDeps = {
+        db: handle.db,
+        recorder,
+        resolver,
+        config,
+        now: () => new Date('2026-10-14T12:00:00.000Z'),
+      };
+
+      const page = await createPage(deps, superadmin, {
+        locale: 'en',
+        title: 'WR-D-06 fixture',
+      });
+      const sectionId = randomUUID();
+      const leftColumnId = randomUUID();
+      const rightColumnId = randomUUID();
+      const leftNoteId = randomUUID();
+      const rightNoteId = randomUUID();
+      await applyBlockEdit(deps, superadmin, {
+        pageId: page.id,
+        basePageVersion: page.version,
+        ops: [
+          {
+            op: 'insert',
+            position: { parentId: null },
+            node: {
+              id: sectionId,
+              type: 'section',
+              layout: { columns: '2:1' },
+              children: [
+                {
+                  id: leftColumnId,
+                  type: 'column',
+                  children: [
+                    {
+                      id: leftNoteId,
+                      type: 'note',
+                      props: { body: 'left' },
+                    },
+                  ],
+                },
+                {
+                  id: rightColumnId,
+                  type: 'column',
+                  children: [
+                    {
+                      id: rightNoteId,
+                      type: 'note',
+                      props: { body: 'right' },
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      });
+
+      const beforeDelete = await getPage(handle.db, page.id);
+      const [sectionRow] = await handle.sql<{ version: number }[]>`
+        SELECT version FROM page_blocks WHERE id = ${sectionId}
+      `;
+      const deleted = await applyBlockEdit(deps, superadmin, {
+        pageId: page.id,
+        basePageVersion: beforeDelete!.version,
+        ops: [
+          {
+            op: 'delete',
+            blockId: sectionId,
+            baseVersion: sectionRow!.version,
+          },
+        ],
+      });
+      expect(deleted.deletedIds).toHaveLength(5);
+      expect(
+        await handle.sql`SELECT id FROM page_blocks WHERE owner_id = ${page.id}`,
+      ).toHaveLength(0);
+
+      const beforeRestore = await getPage(handle.db, page.id);
+      const restored = await restoreRevisionBatch(deps, superadmin, {
+        revisionBatchId: deleted.revisionBatchId,
+        pageId: page.id,
+        basePageVersion: beforeRestore!.version,
+      });
+      expect(restored.restoredBlocks).toBe(5);
+
+      const tree = await readBlockTree(handle.db, {
+        ownerType: 'page',
+        ownerId: page.id,
+        locale: 'en',
+      });
+      expect(tree).toHaveLength(1);
+      const [section] = tree;
+      expect(section?.blockType).toBe('section');
+      expect(section?.layout).toEqual({ columns: '2:1' });
+      expect(section?.children).toHaveLength(2);
+      const shape = section?.children.map((column) => ({
+        type: column.blockType,
+        depth: column.depth,
+        notes: column.children.map((note) => ({
+          body: Reflect.get(Object(note.props), 'body'),
+          depth: note.depth,
+          parent: note.parentBlockId === column.id,
+        })),
+      }));
+      expect(shape).toEqual([
+        {
+          type: 'column',
+          depth: 1,
+          notes: [{ body: 'left', depth: 2, parent: true }],
+        },
+        {
+          type: 'column',
+          depth: 1,
+          notes: [{ body: 'right', depth: 2, parent: true }],
+        },
+      ]);
+      // Fresh ids: nothing was put back under the deleted ones.
+      const restoredIds = [
+        section!.id,
+        ...section!.children.flatMap((column) => [
+          column.id,
+          ...column.children.map((note) => note.id),
+        ]),
+      ];
+      for (const id of [
+        sectionId,
+        leftColumnId,
+        rightColumnId,
+        leftNoteId,
+        rightNoteId,
+      ]) {
+        expect(restoredIds).not.toContain(id);
+      }
     } finally {
       await handle.close();
       await testDatabase.drop();
