@@ -27,8 +27,13 @@ import {
   type HooksRuntime,
 } from '../frame/hooks-runtime.js';
 import { measureSiblingAxis } from '../frame/sibling-axis.js';
-import type { CatalogueEntry, EditPosition } from '../../api-types.js';
+import type {
+  CatalogueEntry,
+  EditPosition,
+  PreviewResponse,
+} from '../../api-types.js';
 import { createApiClient } from '../session/api-client.js';
+import { buildUndoEntry } from '../session/inverse.js';
 import {
   insertActionFor,
   slotAfter,
@@ -40,7 +45,13 @@ import {
 import { startLockClient } from '../session/lock-client.js';
 import { legalityContextOf, moveActionFor } from '../session/move-action.js';
 import type { MoveDirection } from '../session/move-targets.js';
+import { withValues } from '../session/property-drafts.js';
+import {
+  createPreviewRunner,
+  type PreviewRunner,
+} from '../session/preview-runner.js';
 import { createEditorQueryClient } from '../session/query-client.js';
+import type { Intent } from '../session/save-queue.js';
 import { createSaveRunner, type SaveRunner } from '../session/save-runner.js';
 import {
   climb,
@@ -143,6 +154,7 @@ function Shell(props: {
   const queryClient = useQueryClient();
   const hooksRef = useRef<HooksRuntime | null>(null);
   const runnerRef = useRef<SaveRunner | null>(null);
+  const previewRef = useRef<PreviewRunner | null>(null);
   const status = useEditorStore(store, (state) => state.status);
   const session = useEditorStore(store, (state) => state.session);
   // The first client render must match the server markup, which was rendered
@@ -279,7 +291,17 @@ function Shell(props: {
       hooks: () => hooksRef.current,
     });
     runnerRef.current = runner;
+    // The live preview of a property change renders into the same frame.
+    const preview = createPreviewRunner({
+      api,
+      pageId: store.getState().session?.pageId ?? '',
+      frame: () => frameOf(host),
+      hooks: () => hooksRef.current,
+    });
+    previewRef.current = preview;
     return () => {
+      previewRef.current = null;
+      preview.cancel();
       runnerRef.current = null;
       runner.dispose();
     };
@@ -293,6 +315,73 @@ function Shell(props: {
     queryClient,
     island.frameUrl,
   ]);
+
+  /**
+   * A Properties control changed: render the block with the candidate values
+   * and, when the engine accepts them, queue the save as one edit that the
+   * keystrokes of this field share (one undo step, sent after a pause or on
+   * blur). A refusal queues nothing and leaves the frame on its last render.
+   */
+  const changeProperties = useCallback(
+    async (
+      blockId: string,
+      values: Readonly<Record<string, unknown>>,
+      changedKey: string,
+      immediate: boolean,
+    ): Promise<PreviewResponse | null> => {
+      const state = store.getState();
+      const node = state.model?.get(blockId);
+      const preview = previewRef.current;
+      if (
+        state.status !== 'editing' ||
+        node === undefined ||
+        preview === null
+      ) {
+        return null;
+      }
+      const response = await preview.change(
+        blockId,
+        { props: withValues(node.props, values) },
+        immediate,
+      );
+      if (response?.ok !== true) return response;
+      const latest = store.getState();
+      const { model, session } = latest;
+      const runner = runnerRef.current;
+      if (
+        latest.status !== 'editing' ||
+        model === null ||
+        model.get(blockId) === undefined ||
+        runner === null
+      ) {
+        return response;
+      }
+      const type = model.get(blockId)?.type;
+      const property = session?.catalogue
+        .find((entry) => entry.key === type)
+        ?.properties.find((item) => item.key === changedKey);
+      const intent: Intent = { kind: 'update', blockId, props: values };
+      runner.perform(
+        intent,
+        buildUndoEntry(
+          intent,
+          model,
+          {
+            kind: 'changed',
+            itemId: blockId,
+            property: property?.label ?? changedKey,
+          },
+          { coalesceKey: `${blockId}:${changedKey}`, open: true },
+        ),
+      );
+      return response;
+    },
+    [store],
+  );
+
+  const blurProperties = useCallback((blockId: string) => {
+    runnerRef.current?.ready(blockId);
+  }, []);
 
   const moveItem = useCallback(
     (id: string, direction: MoveDirection) => {
@@ -657,11 +746,20 @@ function Shell(props: {
             store.closePicker();
             const hit = read(x, y);
             if (hit === null) return;
-            selectAndAnnounce(
-              store,
-              drillByDoubleClick(hit.model, hit.selection, hit.chain).selection,
+            const drilled = drillByDoubleClick(
+              hit.model,
+              hit.selection,
+              hit.chain,
             );
+            selectAndAnnounce(store, drilled.selection);
             focusRegion(host);
+            // A double-click on a leaf is the explicit ask for its Properties.
+            if (
+              drilled.openProperties &&
+              drilled.selection.selectedId !== null
+            ) {
+              store.requestProperties(drilled.selection.selectedId);
+            }
           },
         });
       } else if (!wanted && releaseClaim !== null) {
@@ -797,6 +895,8 @@ function Shell(props: {
               onDismissPicker: dismissPicker,
               onPick: pickEntry,
               onInsert: insertFromPalette,
+              onPropertiesChange: changeProperties,
+              onPropertiesBlur: blurProperties,
             }
           : undefined
       }

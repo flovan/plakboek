@@ -33,6 +33,7 @@ import {
   ArrowUpIcon,
   DuplicateIcon,
   PlusIcon,
+  PropertiesIcon,
   TrashIcon,
 } from '../icons.js';
 import { formatString, STRINGS } from '../strings.js';
@@ -176,6 +177,7 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
     'later',
     ...(addSlot === null ? [] : ['add']),
     'duplicate',
+    ...(selected.kind === 'column' ? [] : ['properties']),
     'delete',
   ];
   const current = keys.includes(active) ? active : (keys[0] ?? '');
@@ -392,6 +394,26 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
           <DuplicateIcon />
         </button>
       </Tooltip>
+      {selected.kind === 'column' ? null : (
+        <Tooltip
+          label={STRINGS['toolbar.properties']}
+          placement={placement.mode === 'below' ? 'top' : 'bottom'}
+        >
+          <button
+            type="button"
+            className={BUTTON}
+            aria-label={formatString('toolbar.properties.label', {
+              label: itemLabel,
+            })}
+            onClick={() => {
+              store.requestProperties(selectedId);
+            }}
+            {...rove('properties')}
+          >
+            <PropertiesIcon />
+          </button>
+        </Tooltip>
+      )}
       <Tooltip
         label={deleteReason ?? STRINGS['toolbar.delete']}
         placement={placement.mode === 'below' ? 'top' : 'bottom'}

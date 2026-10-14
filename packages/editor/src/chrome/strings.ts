@@ -295,6 +295,7 @@ export const STRINGS = Object.freeze({
   'leave.confirm': 'Leave anyway',
 
   // Side panel: tabs, empty states, Columns, Layout, Placement, controls
+  'panel.tabs.label': 'Side panel',
   'panel.tab.blocks': 'Blocks',
   'panel.tab.properties': 'Properties',
   'panel.empty.heading': 'Nothing selected',

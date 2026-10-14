@@ -27,6 +27,9 @@ export type EditorMode = 'edit' | 'interact';
  */
 export type EditorStatus = 'opening' | 'editing' | 'locked' | 'unavailable';
 
+/** The two tabs of the sidebar's panel region. */
+export type PanelTab = 'blocks' | 'properties';
+
 /** What opened the picker: focus returns to it when the picker closes with nothing added. */
 export type PickerOpener =
   | 'insert-point'
@@ -50,7 +53,13 @@ export type EditorState = {
   readonly lock: LockView | null;
   /** The item a structural write just landed on; the overlay flashes it once per token. */
   readonly flash: { readonly id: string; readonly token: number } | null;
-  /** Enter on a leaf asks for its Properties; the panel answers it (plan 08-24). */
+  /** Which tab the panel region shows; only an explicit action changes it. */
+  readonly panelTab: PanelTab;
+  /**
+   * An explicit ask for an item's Properties (a double-click or Enter on a
+   * leaf, the toolbar button, an insert that needs input). It switches the
+   * panel to Properties; the panel answers it by moving focus to a control.
+   */
   readonly propertiesRequest: {
     readonly id: string;
     readonly token: number;
@@ -103,6 +112,9 @@ export type EditorStore = {
   treeRefreshed(tree: readonly ModelNode[], pageVersion: number): void;
   flash(id: string): void;
   clearFlash(): void;
+  /** Shows the panel's Properties or Blocks tab. */
+  setPanelTab(tab: PanelTab): void;
+  /** Opens Properties for `id` and asks the panel to focus its first control. */
   requestProperties(id: string): void;
   /** Shows the undo toast for a delete, replacing any earlier one. */
   showToast(entry: UndoEntry, label: string): void;
@@ -128,6 +140,7 @@ export function initialEditorState(): EditorState {
     announcement: '',
     lock: null,
     flash: null,
+    panelTab: 'blocks',
     propertiesRequest: null,
     toast: null,
     picker: null,
@@ -253,9 +266,17 @@ export function createEditorStore(
       if (state.flash === null) return;
       set({ ...state, flash: null });
     },
+    setPanelTab(tab) {
+      if (tab === state.panelTab) return;
+      set({ ...state, panelTab: tab });
+    },
     requestProperties(id) {
       token += 1;
-      set({ ...state, propertiesRequest: { id, token } });
+      set({
+        ...state,
+        panelTab: 'properties',
+        propertiesRequest: { id, token },
+      });
     },
     showToast(entry, label) {
       token += 1;

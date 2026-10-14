@@ -253,6 +253,72 @@ describe('the save runner', () => {
     expect(ctx.edit).toHaveBeenCalledTimes(1);
   });
 
+  it('sends a blurred block at once, and closes the burst of keystrokes as one undo step', async () => {
+    const ctx = setup((_, request) =>
+      Promise.resolve(responseFor(tree, 5 + request.ops.length)),
+    );
+    const type = (text: string): void => {
+      const intent: Intent = { kind: 'update', blockId: 'h1', props: { text } };
+      const model = ctx.store.getState().model;
+      if (model === null) throw new Error('not open');
+      ctx.runner.perform(
+        intent,
+        buildUndoEntry(
+          intent,
+          model,
+          { kind: 'changed', itemId: 'h1', property: 'Text' },
+          { coalesceKey: 'h1:text', open: true },
+        ),
+      );
+    };
+    type('a');
+    type('ab');
+    expect(ctx.store.getState().undo.undo).toHaveLength(1);
+    expect(ctx.store.getState().undo.undo[0]?.open).toBe(true);
+
+    ctx.runner.ready('h1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ctx.edit).toHaveBeenCalledTimes(1);
+    expect(ctx.store.getState().undo.undo[0]?.open).toBe(false);
+
+    // typing again after the blur is a new step
+    type('abc');
+    expect(ctx.store.getState().undo.undo).toHaveLength(2);
+  });
+
+  it('writes the undo of a property change at once and asks for the block to be re-rendered', async () => {
+    const ctx = setup((_, request) =>
+      Promise.resolve(responseFor(tree, 5 + request.ops.length)),
+    );
+    const intent: Intent = {
+      kind: 'update',
+      blockId: 'h1',
+      props: { text: 'x' },
+    };
+    const model = ctx.store.getState().model;
+    if (model === null) throw new Error('not open');
+    ctx.runner.perform(
+      intent,
+      buildUndoEntry(intent, model, {
+        kind: 'changed',
+        itemId: 'h1',
+        property: 'Text',
+      }),
+    );
+    await ctx.runner.flush();
+
+    ctx.runner.undo();
+    await vi.advanceTimersByTimeAsync(0);
+    // no idle wait: the undo is its own write, carrying the fragments
+    expect(ctx.edit).toHaveBeenCalledTimes(2);
+    const [, request] = ctx.edit.mock.calls[1] as [string, EditRequest];
+    expect(request.fragments).toBe(true);
+    expect(request.ops[0]).toMatchObject({ op: 'update', blockId: 'h1' });
+    expect(ctx.store.getState().announcement).toBe(
+      'Undone: Changed Text of heading.',
+    );
+  });
+
   it('undoes a move by writing the inverse as a new write, and redoes it', async () => {
     const ctx = setup((_, request) => {
       const op = request.ops[0];

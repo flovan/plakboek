@@ -37,6 +37,7 @@ import {
   type ApiClient,
 } from './api-client.js';
 import {
+  closeTop,
   recordUndo,
   takeRedo,
   takeUndo,
@@ -90,6 +91,12 @@ export type SaveRunner = {
   ) => void;
   /** Sends everything pending; true when all of it was saved. */
   readonly flush: () => Promise<boolean>;
+  /**
+   * A property field lost focus: that block's pending edit (and whatever was
+   * queued before it) is sent now instead of after the idle wait, and the
+   * undo entry collecting its keystrokes is closed.
+   */
+  readonly ready: (blockId: string) => void;
   /** Sends the held write again after a failure. */
   readonly retry: () => void;
   readonly undo: () => void;
@@ -420,8 +427,26 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     idleTimer = setTimeout(() => {
       idleTimer = null;
       store.setQueue(markReady(store.getState().queue));
+      // The burst of keystrokes ends when its save is sent.
+      store.setUndo(closeTop(store.getState().undo));
       kick();
     }, idleMs);
+  }
+
+  function readyBlock(blockId: string): void {
+    const state = store.getState();
+    if (state.status !== 'editing') return;
+    store.setQueue(markReady(state.queue, blockId));
+    store.setUndo(closeTop(store.getState().undo));
+    // Edits queued after this block's still wait for their own idle time.
+    const waiting = store
+      .getState()
+      .queue.entries.some((entry) => !entry.ready);
+    if (!waiting && idleTimer !== null) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+    kick();
   }
 
   function enqueueIntent(
@@ -431,7 +456,9 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
   ): void {
     const state = store.getState();
     if (state.status !== 'editing') return;
-    const immediate = intent.kind !== 'update';
+    // An undo or redo of a property change is a write of its own, sent at once
+    // with the block's fresh markup, unlike the edits the editor is typing.
+    const immediate = intent.kind !== 'update' || extra.fromHistory === true;
     const seq = state.queue.nextSeq;
     store.setQueue(
       enqueue(state.queue, intent, { immediate, fragments: immediate }),
@@ -440,7 +467,7 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
       meta.set(seq, {
         selectId:
           extra.selectId === undefined ? actedId(intent) : extra.selectId,
-        flash: extra.flash ?? true,
+        flash: extra.flash ?? intent.kind !== 'update',
         announceMove: intent.kind === 'move' && extra.fromHistory !== true,
         announceRestored: extra.restored === true,
         announceAdded: intent.kind === 'insert' && extra.fromHistory !== true,
@@ -528,6 +555,7 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     perform: (intent, entry, options = {}) => {
       enqueueIntent(intent, entry, options);
     },
+    ready: readyBlock,
     flush: () => {
       if (idleTimer !== null) {
         clearTimeout(idleTimer);

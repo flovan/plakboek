@@ -12,7 +12,8 @@ import {
 } from '../client/session/store.js';
 import { DeleteDialog } from './editing/delete-dialog.js';
 import { LiveRegion } from './editing/live-region.js';
-import { Palette } from './editing/palette.js';
+import { SidePanel } from './editing/panel.js';
+import type { PropertiesPanelProps } from './editing/properties/properties-panel.js';
 import { UndoToast } from './editing/toast.js';
 import { ToolGroup } from './editing/tool-group.js';
 import type { ShellIsland } from './island.js';
@@ -71,6 +72,10 @@ export type ShellAppProps = {
     readonly onPick?: (entry: CatalogueEntry) => void;
     /** Called when a palette row is chosen. */
     readonly onInsert?: (entry: CatalogueEntry, position: EditPosition) => void;
+    /** Called when a Properties control changes a value: render it and queue the save. */
+    readonly onPropertiesChange?: PropertiesPanelProps['onPropertiesChange'];
+    /** Called when a Properties control loses focus: save the block's edit now. */
+    readonly onPropertiesBlur?: PropertiesPanelProps['onPropertiesBlur'];
   };
 };
 
@@ -111,7 +116,12 @@ export function ShellApp(props: ShellAppProps): ReactElement {
             />
           ),
           panel: (
-            <Palette store={editor.store} onInsert={editor.onInsert ?? noop} />
+            <SidePanel
+              store={editor.store}
+              onInsert={editor.onInsert ?? noop}
+              onPropertiesChange={editor.onPropertiesChange}
+              onPropertiesBlur={editor.onPropertiesBlur}
+            />
           ),
         };
   return (
