@@ -19,6 +19,7 @@ import {
   NO_DRAFTS,
   reconcileDrafts,
   shownValue,
+  unansweredKeys,
   withChange,
   type Drafts,
 } from '../../../client/session/property-drafts.js';
@@ -163,19 +164,34 @@ function BlockProperties(props: {
     setDrafts((current) => reconcileDrafts(current, node, queue));
   }, [node, queue, setDrafts]);
 
+  /** Which render is the latest for this block; an answer to an older one is not acted on. */
+  const latestSettle = useRef(0);
+
   const settle = useCallback(
     async (key: string, immediate: boolean): Promise<void> => {
       if (onPropertiesChange === undefined) return;
-      const sent = Object.keys(draftValues(draftsRef.current));
+      latestSettle.current += 1;
+      const ticket = latestSettle.current;
       const values = draftValues(draftsRef.current);
+      const sent = Object.keys(values);
       const response = await onPropertiesChange(
         node.id,
         values,
         key,
         immediate,
       );
-      // A newer change to this block took over; its answer is the one that counts.
-      if (response === null) return;
+      if (response === null) {
+        // A newer change to this block took over, and its answer is the one
+        // that counts. When none did, this render failed or was dropped: no
+        // answer will come, so the drafts stop waiting and show as not valid
+        // rather than looking saved.
+        if (latestSettle.current === ticket) {
+          setDrafts((current) =>
+            afterPreview(current, sent, unansweredKeys(current, sent)),
+          );
+        }
+        return;
+      }
       if (response.ok) {
         setDrafts((current) => afterPreview(current, sent, null));
         setLiveNeeds(response.needsInput);

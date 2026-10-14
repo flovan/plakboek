@@ -109,6 +109,18 @@ export function afterPreview(
   return changed ? next : drafts;
 }
 
+/**
+ * The keys of `sent` whose render got no answer at all (the request failed or
+ * the session ended): the drafts still waiting for it. A draft already queued
+ * for saving by an earlier render keeps standing.
+ */
+export function unansweredKeys(
+  drafts: Drafts,
+  sent: readonly string[],
+): readonly string[] {
+  return sent.filter((key) => drafts[key]?.stage === 'previewing');
+}
+
 /** Drops the drafts the model has caught up with; the same object back when none goes. */
 export function reconcileDrafts(
   drafts: Drafts,

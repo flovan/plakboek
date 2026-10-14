@@ -6,6 +6,7 @@ import {
   NO_DRAFTS,
   reconcileDrafts,
   shownValue,
+  unansweredKeys,
   withChange,
   withValues,
 } from '../../src/client/session/property-drafts.js';
@@ -71,6 +72,22 @@ describe('property drafts', () => {
     drafts = withChange(drafts, node, 'text', 'Hi');
     drafts = afterPreview(drafts, ['n', 'text'], ['n']);
     expect(draftValues(drafts)).toEqual({ text: 'Hi' });
+  });
+
+  it('marks a draft that got no answer as not valid, and leaves a queued one standing', () => {
+    let drafts = afterPreview(withChange(NO_DRAFTS, node, 'n', 2), ['n'], null);
+    drafts = withChange(drafts, node, 'text', 'Hi');
+    expect(unansweredKeys(drafts, ['n', 'text'])).toEqual(['text']);
+    const failed = afterPreview(
+      drafts,
+      ['n', 'text'],
+      unansweredKeys(drafts, ['n', 'text']),
+    );
+    expect(failed['text']?.stage).toBe('invalid');
+    expect(failed['n']?.stage).toBe('queued');
+    // the typed text stays shown, and it is not rendered or saved
+    expect(shownValue(failed, node, 'text')).toBe('Hi');
+    expect(draftValues(failed)).toEqual({ n: 2 });
   });
 
   it('puts values on top of the props and removes a key set to undefined', () => {

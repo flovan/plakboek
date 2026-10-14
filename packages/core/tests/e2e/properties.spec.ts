@@ -346,6 +346,26 @@ test.describe('invalid input and needs input', () => {
     ).toHaveCount(0);
   });
 
+  test('a preview request that fails marks the field not valid instead of leaving it looking saved', async ({
+    page,
+  }) => {
+    const frame = await openDemo(page);
+    const count = page.getByRole('spinbutton', { name: 'Count' });
+    await expect(shown(frame, 'count')).toHaveText('5');
+
+    await page.route('**/cms/api/pages/*/preview', (route) => route.abort());
+    await count.fill('7');
+    await expect(count).toHaveAttribute('aria-invalid', 'true');
+    // what is typed stays, the frame did not take it and nothing was queued to save
+    await expect(count).toHaveValue('7');
+    await expect(shown(frame, 'count')).toHaveText('5');
+
+    await page.unroute('**/cms/api/pages/*/preview');
+    await count.fill('8');
+    await expect(shown(frame, 'count')).toHaveText('8');
+    await expect(count).not.toHaveAttribute('aria-invalid', 'true');
+  });
+
   test('a required value emptied again shows Needs input and the marker in the frame, and no error', async ({
     page,
   }) => {
