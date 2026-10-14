@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { MutationObserver, onlineManager } from '@tanstack/react-query';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   createEditorQueryClient,
   shouldRetryWrite,
@@ -41,5 +42,31 @@ describe('createEditorQueryClient', () => {
     const defaults = createEditorQueryClient().getDefaultOptions();
     expect(defaults.mutations?.retry).toBe(shouldRetryWrite);
     expect(defaults.mutations?.retryDelay).toBe(writeRetryDelay);
+  });
+
+  describe('while the browser reports offline', () => {
+    afterEach(() => {
+      onlineManager.setOnline(true);
+    });
+
+    it('still runs a write, so a dropped request fails instead of waiting forever', async () => {
+      onlineManager.setOnline(false);
+      const observer = new MutationObserver<string, Error, undefined>(
+        createEditorQueryClient(),
+        { mutationFn: () => Promise.reject(new Error('no network')) },
+      );
+      const outcome = await Promise.race([
+        observer.mutate(undefined).then(
+          () => 'saved',
+          () => 'failed',
+        ),
+        new Promise<string>((resolve) => {
+          setTimeout(() => {
+            resolve('paused');
+          }, 50);
+        }),
+      ]);
+      expect(outcome).toBe('failed');
+    });
   });
 });

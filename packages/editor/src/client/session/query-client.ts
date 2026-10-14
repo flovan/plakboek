@@ -41,7 +41,14 @@ export function createEditorQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 0 },
-      mutations: { retry: shouldRetryWrite, retryDelay: writeRetryDelay },
+      mutations: {
+        // The default network mode pauses a mutation while the browser says it
+        // is offline, so an offline write would never fail and never offer a
+        // Retry. A write is always tried: a dropped request is a network failure.
+        networkMode: 'always',
+        retry: shouldRetryWrite,
+        retryDelay: writeRetryDelay,
+      },
     },
   });
 }
