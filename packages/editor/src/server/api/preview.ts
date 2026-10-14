@@ -11,6 +11,7 @@ import {
 } from '@plakboek/pages';
 import { renderBlockFragments } from '@plakboek/render/server';
 import type { PreviewResponse } from '../../api-types.js';
+import { visibleProps } from '../model.js';
 import type { PreviewBody } from './schemas.js';
 import { notFound, readPageForest, type ApiContext } from './session.js';
 
@@ -55,9 +56,16 @@ export async function previewPage(
   const node = findBlock(blocks, body.blockId);
   if (node === null) throw notFound();
 
+  // The stored props the editor was shown, not the raw row: a key the
+  // installation hides is not part of what can be previewed, and the same
+  // check a write applies would refuse it as unknown.
+  const stored = visibleProps(
+    deps.pages.config.blocks.find((block) => block.key === node.blockType),
+    node.props,
+  );
   const checked = previewBlockValues(deps.pages.config, {
     blockType: node.blockType,
-    props: body.props ?? node.props,
+    props: body.props ?? stored,
     layout: body.layout === undefined ? node.layout : body.layout,
   });
   if (!checked.ok) return { ok: false, issues: checked.issues };

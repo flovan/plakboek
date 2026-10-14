@@ -4,6 +4,7 @@
  * and every refusal under its documented status and code.
  */
 import { randomUUID } from 'node:crypto';
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type {
   ApiError,
@@ -409,5 +410,90 @@ describe('the preview route', () => {
       blockId: page.seeded.headingId,
     });
     expect(response.status).toBe(403);
+  });
+});
+
+describe('a block holding a stored value of a hidden property', () => {
+  // The heading hides `anchor`. A stored value can still be there (seed data,
+  // or a constraint added after the value was saved).
+  const SECRET = 'stored-anchor-value';
+
+  async function pageWithHiddenValue(title: string): Promise<SeededPage> {
+    const seeded = await createColumnPage(harness, { title, text: 'Hello' });
+    await harness.handle.db.execute(
+      sql`UPDATE page_blocks SET props = ${JSON.stringify({ text: 'Hello', anchor: SECRET })}::jsonb WHERE id = ${seeded.headingId}`,
+    );
+    return seeded;
+  }
+
+  async function storedProps(blockId: string): Promise<unknown> {
+    const rows = await harness.handle.sql<{ props: unknown }[]>`
+      SELECT props FROM page_blocks WHERE id = ${blockId}
+    `;
+    return rows[0]?.props;
+  }
+
+  it('never sends the stored value to the client', async () => {
+    const seeded = await pageWithHiddenValue('Hidden read');
+
+    const response = await api().handle(
+      apiRequest(`/cms/api/pages/${seeded.pageId}/tree`, {
+        user: harness.editor,
+      }),
+    );
+    const text = (await response?.text()) ?? '';
+    expect(text).not.toContain(SECRET);
+    expect(text).not.toContain('anchor');
+    const body = JSON.parse(text) as TreeResponse;
+    expect(
+      body.tree.find((node) => node.id === seeded.headingId)?.props,
+    ).toEqual({ text: 'Hello' });
+  });
+
+  it('previews a change that names no props, without refusing the stored hidden key', async () => {
+    const seeded = await pageWithHiddenValue('Hidden preview');
+    const response = await post(
+      harness.editor,
+      `/cms/api/pages/${seeded.pageId}/preview`,
+      { blockId: seeded.headingId },
+    );
+    const answer = (await response.json()) as PreviewResponse;
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(answer.html).toContain('Hello');
+    expect(answer.html).not.toContain(SECRET);
+  });
+
+  it('saves the visible values the client sends and does not answer with the stored one', async () => {
+    const seeded = await pageWithHiddenValue('Hidden save');
+    const { pageVersion, tree } = await readTree(harness.editor, seeded.pageId);
+    const heading = tree.find((node) => node.id === seeded.headingId);
+
+    const response = await post(
+      harness.editor,
+      `/cms/api/pages/${seeded.pageId}/edit`,
+      {
+        basePageVersion: pageVersion,
+        ops: [
+          {
+            op: 'update',
+            blockId: seeded.headingId,
+            baseVersion: heading?.version ?? 0,
+            props: { ...heading?.props, text: 'Changed' },
+          },
+        ],
+      },
+    );
+    const text = await response.clone().text();
+    const done = await readEdit(response);
+    expect(text).not.toContain(SECRET);
+    expect(
+      done.tree.find((node) => node.id === seeded.headingId)?.props,
+    ).toEqual({ text: 'Changed' });
+    // The engine writes a block's props as the whole validated object, and
+    // refuses a hidden key in it, so the stored value is replaced along with
+    // the rest. Keeping it would leave the page unpublishable, since a hidden
+    // key in stored props fails the publish check.
+    expect(await storedProps(seeded.headingId)).toEqual({ text: 'Changed' });
   });
 });

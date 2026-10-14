@@ -6,17 +6,36 @@
  */
 import {
   findMissingRequiredProps,
+  resolveBlockProperties,
   type BlockDefinition,
   type BlockNode,
   type PagesConfig,
 } from '@plakboek/pages';
 import type { ModelLayout, ModelNode } from '../api-types.js';
 
-function plainProps(props: unknown): Readonly<Record<string, unknown>> {
-  if (typeof props !== 'object' || props === null || Array.isArray(props)) {
+/**
+ * The stored props a block shows the editor: only the keys the block's
+ * resolved properties name. A property an installation hides keeps its stored
+ * value in the database (seed data, or a constraint added later) but is
+ * never sent out, like it is absent from the catalogue. Without a definition
+ * there is no telling which keys are hidden, so nothing is sent.
+ */
+export function visibleProps(
+  definition: BlockDefinition | undefined,
+  props: unknown,
+): Readonly<Record<string, unknown>> {
+  if (
+    definition === undefined ||
+    typeof props !== 'object' ||
+    props === null ||
+    Array.isArray(props)
+  ) {
     return {};
   }
-  return { ...props };
+  const resolved = resolveBlockProperties(definition);
+  return Object.fromEntries(
+    Object.entries(props).filter(([key]) => Object.hasOwn(resolved, key)),
+  );
 }
 
 function toLayout(layout: BlockNode['layout']): ModelLayout | null {
@@ -45,7 +64,7 @@ function flatten(
       sortOrder: block.sortOrder,
       depth: block.depth,
       version: block.version,
-      props: plainProps(block.props),
+      props: visibleProps(definition, block.props),
       layout: toLayout(block.layout),
       needsInput:
         definition === undefined || block.degraded
