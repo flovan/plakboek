@@ -4,6 +4,7 @@ import {
   defaultNode,
   insertActionFor,
   insertionTarget,
+  columnSlots,
   insertSlots,
   paletteGroups,
   pickerGroups,
@@ -89,6 +90,38 @@ const ctx: LegalityContext = {
   columnsEnabled: true,
 };
 
+describe('column slots', () => {
+  const twoColumns = createTreeModel(
+    buildNodes([
+      section('S', [column('c1'), column('c2'), column('c3')]),
+      section('T', [column('d1', [block('x', 'heading')])]),
+    ]),
+  );
+  const wide = { ...ctx, model: twoColumns };
+
+  it('lists the gaps between the columns and after the last, for the section or one of its columns', () => {
+    const expected = [
+      ['c1', 'c2'],
+      ['c2', 'c3'],
+      ['c3', null],
+    ];
+    for (const selected of ['S', 'c2']) {
+      const slots = columnSlots(wide, selected);
+      expect(slots.map((slot) => [slot.previousId, slot.nextId])).toEqual(
+        expected,
+      );
+      expect(slots.every((slot) => slot.level === 'column')).toBe(true);
+      expect(slots.every((slot) => slot.parentId === 'S')).toBe(true);
+    }
+  });
+
+  it('lists none for a block, nothing selected or a page without columns', () => {
+    expect(columnSlots(wide, 'x')).toEqual([]);
+    expect(columnSlots(wide, null)).toEqual([]);
+    expect(columnSlots({ ...wide, columnsEnabled: false }, 'S')).toEqual([]);
+  });
+});
+
 describe('insert slots', () => {
   it('lists the gaps of the page: above, between and below the sections', () => {
     const slots = insertSlots(ctx, null);
@@ -116,7 +149,7 @@ describe('insert slots', () => {
     expect(insertSlots(ctx, 'A')).toEqual([]);
   });
 
-  it('finds the gap after an item, and none after a column', () => {
+  it('finds the gap after an item, and after a column the gap that adds a column', () => {
     expect(slotAfter(ctx, 'h1')).toEqual({
       parentId: 'ca',
       previousId: 'h1',
@@ -124,7 +157,12 @@ describe('insert slots', () => {
       level: 'block',
     });
     expect(slotAfter(ctx, 'c1')?.nextId).toBeNull();
-    expect(slotAfter(ctx, 'ca')).toBeNull();
+    expect(slotAfter(ctx, 'ca')).toEqual({
+      parentId: 'A',
+      previousId: 'ca',
+      nextId: null,
+      level: 'column',
+    });
     expect(slotAfter(ctx, null)).toEqual({
       parentId: null,
       previousId: 'B',

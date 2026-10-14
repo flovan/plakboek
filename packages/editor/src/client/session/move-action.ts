@@ -1,4 +1,5 @@
 import type { CatalogueEntry } from '../../api-types.js';
+import { moveColumnIntent } from './column-actions.js';
 import { buildUndoEntry, type UndoEntry } from './inverse.js';
 import type { LegalityContext } from './legality.js';
 import { moveTarget, type MoveDirection } from './move-targets.js';
@@ -44,7 +45,8 @@ export function moveActionFor(
   if (ctx === null) return null;
   const position = moveTarget(ctx, id, direction);
   if (position === null) return null;
-  const intent: Intent = { kind: 'move', blockId: id, position };
+  // A column that changes section changes two column counts (D-05).
+  const intent: Intent = moveColumnIntent(ctx.model, id, position);
   return {
     intent,
     entry: buildUndoEntry(intent, ctx.model, { kind: 'moved', itemId: id }),

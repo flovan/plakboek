@@ -30,9 +30,11 @@ import { measureSiblingAxis } from '../frame/sibling-axis.js';
 import type {
   CatalogueEntry,
   EditPosition,
+  ModelLayout,
   PreviewResponse,
 } from '../../api-types.js';
 import { createApiClient } from '../session/api-client.js';
+import { addColumnIntent, layoutIntent } from '../session/column-actions.js';
 import { buildUndoEntry } from '../session/inverse.js';
 import {
   insertActionFor,
@@ -73,6 +75,7 @@ import {
 import {
   createEditorStore,
   useEditorStore,
+  type DeleteOpener,
   type EditorMode,
   type PickerOpener,
 } from '../session/store.js';
@@ -383,6 +386,102 @@ function Shell(props: {
     runnerRef.current?.ready(blockId);
   }, []);
 
+  /**
+   * A layout choice (column widths, alignment, fill): render the item with it
+   * and, when the engine accepts it, queue the save like a picked property
+   * value. The choices of one burst share an undo entry. Resolves with whether
+   * the layout was accepted.
+   */
+  const changeLayout = useCallback(
+    async (
+      blockId: string,
+      layout: ModelLayout,
+      property: string,
+    ): Promise<boolean> => {
+      const state = store.getState();
+      const { model } = state;
+      const preview = previewRef.current;
+      if (
+        state.status !== 'editing' ||
+        model === null ||
+        model.get(blockId) === undefined ||
+        preview === null
+      ) {
+        return false;
+      }
+      const intent = layoutIntent(model, blockId, layout);
+      if (intent.kind !== 'update') return false;
+      const response = await preview.change(
+        blockId,
+        { layout: intent.layout ?? null },
+        true,
+      );
+      if (response?.ok !== true) return false;
+      const latest = store.getState();
+      const runner = runnerRef.current;
+      if (
+        latest.status !== 'editing' ||
+        latest.model === null ||
+        latest.model.get(blockId) === undefined ||
+        runner === null
+      ) {
+        return false;
+      }
+      runner.perform(
+        intent,
+        buildUndoEntry(
+          intent,
+          latest.model,
+          { kind: 'changed', itemId: blockId, property },
+          { coalesceKey: `${blockId}:layout`, open: true },
+        ),
+      );
+      return true;
+    },
+    [store],
+  );
+
+  /** Adds a column to a section, after one of its columns or last; the new column is selected. */
+  const addColumn = useCallback(
+    (sectionId: string, afterColumnId: string | null) => {
+      const state = store.getState();
+      const { model } = state;
+      if (state.status !== 'editing' || state.mode !== 'edit') return;
+      if (model === null || model.get(sectionId)?.kind !== 'section') return;
+      store.closePicker();
+      const newId = crypto.randomUUID();
+      const intent = addColumnIntent(model, sectionId, afterColumnId, newId);
+      runnerRef.current?.perform(
+        intent,
+        buildUndoEntry(intent, model, { kind: 'added', itemId: newId }),
+        { selectId: newId },
+      );
+      // The control that asked (the panel's button) is replaced by the new column's panel.
+      requestAnimationFrame(() => {
+        focusRegion(host);
+      });
+    },
+    [host, store],
+  );
+
+  const addColumnLast = useCallback(
+    (sectionId: string) => {
+      addColumn(sectionId, null);
+    },
+    [addColumn],
+  );
+
+  /** Which way a section's columns run in the framed site. */
+  const columnAxis = useCallback(
+    (columnIds: readonly string[]): 'horizontal' | 'vertical' => {
+      const frameDocument = frameOf(host)?.contentDocument ?? null;
+      return frameDocument === null
+        ? 'horizontal'
+        : measureSiblingAxis(frameDocument, columnIds);
+    },
+    [host],
+  );
+
   const moveItem = useCallback(
     (id: string, direction: MoveDirection) => {
       const action = moveActionFor(store.getState(), id, direction);
@@ -414,7 +513,7 @@ function Shell(props: {
 
   /** Delete from the toolbar or the keyboard: it asks first when blocks go with the item. */
   const deleteItem = useCallback(
-    (id: string, opener: 'toolbar' | 'region') => {
+    (id: string, opener: DeleteOpener) => {
       const state = store.getState();
       const { model } = state;
       if (state.status !== 'editing' || state.mode !== 'edit') return;
@@ -447,7 +546,11 @@ function Shell(props: {
       const button =
         request.opener === 'toolbar'
           ? host.shadowRoot?.querySelector('[data-roving="delete"]')
-          : null;
+          : request.opener === 'panel'
+            ? host.shadowRoot?.querySelector(
+                `[data-column-remove="${request.id}"]`,
+              )
+            : null;
       if (button instanceof HTMLElement) button.focus({ preventScroll: true });
       else focusRegion(host);
     });
@@ -460,16 +563,27 @@ function Shell(props: {
     [deleteItem],
   );
 
+  const removeFromPanel = useCallback(
+    (id: string) => {
+      deleteItem(id, 'panel');
+    },
+    [deleteItem],
+  );
+
   const duplicateItem = useCallback(
     (id: string) => {
       const state = store.getState();
       if (state.status !== 'editing' || state.mode !== 'edit') return;
-      const action = duplicateActionFor(state, id, crypto.randomUUID());
+      const newId = crypto.randomUUID();
+      const action = duplicateActionFor(state, id, newId);
       if (action === null) {
         store.announce(STRINGS['toolbar.reason.noDuplicate']);
         return;
       }
-      runnerRef.current?.perform(action.intent, action.entry);
+      // A copied column also resets its section's ratio, so the copy is named.
+      runnerRef.current?.perform(action.intent, action.entry, {
+        selectId: newId,
+      });
     },
     [store],
   );
@@ -506,6 +620,11 @@ function Shell(props: {
       if (state.status !== 'editing' || state.mode !== 'edit' || ctx === null) {
         return;
       }
+      // A column is the only thing a section holds: it is added with no picker.
+      if (slot.level === 'column' && slot.parentId !== null) {
+        addColumn(slot.parentId, slot.previousId);
+        return;
+      }
       const sole = soleSectionType(ctx, slot);
       if (sole !== null) {
         insertEntry(sole, slotPosition(slot), true);
@@ -513,7 +632,7 @@ function Shell(props: {
       }
       store.openPicker(slot, opener);
     },
-    [insertEntry, store],
+    [addColumn, insertEntry, store],
   );
 
   /** Escape: the picker closes and focus goes back to what opened it. */
@@ -897,6 +1016,11 @@ function Shell(props: {
               onInsert: insertFromPalette,
               onPropertiesChange: changeProperties,
               onPropertiesBlur: blurProperties,
+              onLayoutChange: changeLayout,
+              columnAxis,
+              onAddColumn: addColumnLast,
+              onMoveColumn: moveItem,
+              onRemoveColumn: removeFromPanel,
             }
           : undefined
       }

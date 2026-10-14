@@ -23,12 +23,10 @@ const TABS: readonly PanelTab[] = ['blocks', 'properties'];
 const SEGMENT =
   'flex h-10 min-w-0 flex-1 cursor-pointer items-center justify-center border-0 bg-surface px-3 text-body font-semibold text-text -outline-offset-2 hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-selected:bg-text aria-selected:text-surface aria-selected:hover:bg-text';
 
-export type SidePanelProps = {
+export type SidePanelProps = Omit<PropertiesPanelProps, 'store'> & {
   readonly store: EditorStore;
   /** The editor chose a block type and a place for it in the palette. */
   readonly onInsert: (entry: CatalogueEntry, position: EditPosition) => void;
-  readonly onPropertiesChange?: PropertiesPanelProps['onPropertiesChange'];
-  readonly onPropertiesBlur?: PropertiesPanelProps['onPropertiesBlur'];
 };
 
 /**
@@ -55,7 +53,7 @@ function focusFirstControl(root: HTMLElement | null): void {
  * so the palette's search and the panel's unsaved fields survive a switch.
  */
 export function SidePanel(props: SidePanelProps): ReactElement | null {
-  const { store, onInsert, onPropertiesChange, onPropertiesBlur } = props;
+  const { store, onInsert, ...panelProps } = props;
   const base = useId();
   const editing = useEditorStore(store, (state) => state.status === 'editing');
   const tab = useEditorStore(store, (state) => state.panelTab);
@@ -140,11 +138,7 @@ export function SidePanel(props: SidePanelProps): ReactElement | null {
         hidden={tab !== 'properties'}
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        <PropertiesPanel
-          store={store}
-          onPropertiesChange={onPropertiesChange}
-          onPropertiesBlur={onPropertiesBlur}
-        />
+        <PropertiesPanel store={store} {...panelProps} />
       </div>
     </div>
   );

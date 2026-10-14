@@ -12,6 +12,7 @@ import type {
   PreviewResponse,
 } from '../../../api-types.js';
 import { catalogueByKey } from '../../../client/session/move-action.js';
+import type { MoveDirection } from '../../../client/session/move-targets.js';
 import {
   afterPreview,
   draftValues,
@@ -29,7 +30,10 @@ import {
 } from '../../../client/session/store.js';
 import { labelOf, type ItemLabel } from '../../../client/session/tree-model.js';
 import { formatString, STRINGS } from '../../strings.js';
+import { ColumnsGroup } from './columns-group.js';
 import { PropertyField } from './controls.js';
+import { LayoutGroup, type LayoutChangeHandler } from './layout-group.js';
+import { PlacementGroup } from './placement-group.js';
 
 /** What the panel asks of the shell when a property changes. */
 export type PropertiesPanelProps = {
@@ -47,6 +51,15 @@ export type PropertiesPanelProps = {
   ) => Promise<PreviewResponse | null>;
   /** A field lost focus: the block's edit is saved now. */
   readonly onPropertiesBlur?: (blockId: string) => void;
+  /** A layout choice (column widths, alignment, fill): render it and queue the save. */
+  readonly onLayoutChange?: LayoutChangeHandler;
+  /** Whether a section's columns sit side by side or stacked in the site. */
+  readonly columnAxis?: (
+    columnIds: readonly string[],
+  ) => 'horizontal' | 'vertical';
+  readonly onAddColumn?: (sectionId: string) => void;
+  readonly onMoveColumn?: (id: string, direction: MoveDirection) => void;
+  readonly onRemoveColumn?: (id: string) => void;
 };
 
 function textOf(label: ItemLabel): string {
@@ -250,12 +263,23 @@ function Note(props: { readonly children: string }): ReactElement {
 }
 
 /**
- * The Properties tab: the selected item's label and path, then a control for
- * every property it declares. Nothing selected, an item with no properties, an
- * item whose type is unavailable and a column each say so instead.
+ * The Properties tab: the selected item's label and path, then its groups: a
+ * section's Columns and Layout, a control for every property it declares, and
+ * the Placement of a block that can fill its column. Nothing selected, an item
+ * with no properties, an item whose type is unavailable and a column (which
+ * points to its section's layout) each say so instead.
  */
 export function PropertiesPanel(props: PropertiesPanelProps): ReactElement {
-  const { store, onPropertiesChange, onPropertiesBlur } = props;
+  const {
+    store,
+    onPropertiesChange,
+    onPropertiesBlur,
+    onLayoutChange,
+    columnAxis,
+    onAddColumn,
+    onMoveColumn,
+    onRemoveColumn,
+  } = props;
   const state = useEditorStore(store, (current) => current);
   const { model, session, selection } = state;
   const node =
@@ -289,8 +313,24 @@ export function PropertiesPanel(props: PropertiesPanelProps): ReactElement {
             type="button"
             data-open-section-layout=""
             className="h-10 cursor-pointer rounded-lg border border-control-border bg-surface px-3 text-body font-semibold text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-            onClick={() => {
+            onClick={(event) => {
+              const root = event.currentTarget.getRootNode();
               selectAndAnnounce(store, selectCrumb(model, parent.id));
+              // The section's panel replaces this one; its Layout group takes the focus.
+              requestAnimationFrame(() => {
+                if (!(root instanceof ShadowRoot)) return;
+                const tile =
+                  root.querySelector<HTMLElement>(
+                    '[data-properties-group="layout"] [data-tile-group="widths"] [role="radio"][tabindex="0"]',
+                  ) ??
+                  root.querySelector<HTMLElement>(
+                    '[data-properties-group="layout"] [role="radio"][tabindex="0"]',
+                  );
+                tile?.focus();
+                root
+                  .querySelector('[data-properties-group="layout"]')
+                  ?.scrollIntoView({ block: 'nearest' });
+              });
             }}
           >
             {STRINGS['panel.openSectionLayout']}
@@ -300,19 +340,54 @@ export function PropertiesPanel(props: PropertiesPanelProps): ReactElement {
     );
   } else if (node.unavailable !== null || entry === undefined) {
     body = <Note>{STRINGS['panel.unavailable']}</Note>;
-  } else if (entry.properties.length === 0) {
-    body = <Note>{STRINGS['panel.noProperties']}</Note>;
   } else {
-    body = (
-      <BlockProperties
-        key={node.id}
-        store={store}
-        node={node}
-        entry={entry}
-        onPropertiesChange={onPropertiesChange}
-        onPropertiesBlur={onPropertiesBlur}
-      />
-    );
+    const settings =
+      entry.properties.length === 0 ? null : (
+        <BlockProperties
+          key={node.id}
+          store={store}
+          node={node}
+          entry={entry}
+          onPropertiesChange={onPropertiesChange}
+          onPropertiesBlur={onPropertiesBlur}
+        />
+      );
+    const section = node.kind === 'section';
+    const fill = node.kind === 'block' && entry.supportsFill;
+    body =
+      !section && !fill && settings === null ? (
+        <Note>{STRINGS['panel.noProperties']}</Note>
+      ) : (
+        <div className="flex flex-col gap-6">
+          {section ? (
+            <>
+              <ColumnsGroup
+                store={store}
+                section={node}
+                columnAxis={columnAxis}
+                onAddColumn={onAddColumn}
+                onMove={onMoveColumn}
+                onRemove={onRemoveColumn}
+              />
+              <LayoutGroup
+                key={node.id}
+                store={store}
+                section={node}
+                onLayoutChange={onLayoutChange}
+              />
+            </>
+          ) : null}
+          {settings}
+          {fill ? (
+            <PlacementGroup
+              key={node.id}
+              store={store}
+              node={node}
+              onLayoutChange={onLayoutChange}
+            />
+          ) : null}
+        </div>
+      );
   }
 
   return (

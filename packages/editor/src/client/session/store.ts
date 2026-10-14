@@ -38,6 +38,9 @@ export type PickerOpener =
   | 'empty-page'
   | 'key';
 
+/** What asked for a delete: focus returns to it when the confirmation closes with nothing deleted. */
+export type DeleteOpener = 'toolbar' | 'region' | 'panel';
+
 export type EditorState = {
   readonly status: EditorStatus;
   readonly session: EditorSession | null;
@@ -79,7 +82,7 @@ export type EditorState = {
   /** A delete waiting for the editor's confirmation, and what opened it. */
   readonly deleteRequest: {
     readonly id: string;
-    readonly opener: 'toolbar' | 'region';
+    readonly opener: DeleteOpener;
   } | null;
 };
 
@@ -120,7 +123,7 @@ export type EditorStore = {
   showToast(entry: UndoEntry, label: string): void;
   clearToast(): void;
   /** Opens the delete confirmation for `id`. */
-  askDelete(id: string, opener: 'toolbar' | 'region'): void;
+  askDelete(id: string, opener: DeleteOpener): void;
   cancelDelete(): void;
   /** Opens the picker for a gap, replacing any open one. */
   openPicker(slot: InsertSlot, opener: PickerOpener): void;

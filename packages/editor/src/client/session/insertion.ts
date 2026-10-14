@@ -23,8 +23,8 @@ export type InsertSlot = {
   readonly parentId: string | null;
   readonly previousId: string | null;
   readonly nextId: string | null;
-  /** `section` at the page root, `item` under a block, else `block`. */
-  readonly level: 'section' | 'block' | 'item';
+  /** `section` at the page root, `column` under a section, `item` under a block, else `block`. */
+  readonly level: 'section' | 'column' | 'block' | 'item';
 };
 
 /** A group of types under one category label, in the order the list shows them. */
@@ -38,7 +38,9 @@ function levelOf(
   parentId: string | null,
 ): InsertSlot['level'] {
   if (parentId === null) return 'section';
-  return ctx.model.get(parentId)?.kind === 'block' ? 'item' : 'block';
+  const kind = ctx.model.get(parentId)?.kind;
+  if (kind === 'section') return 'column';
+  return kind === 'block' ? 'item' : 'block';
 }
 
 /** The identity of a slot, for telling two slots apart and finding one again. */
@@ -58,8 +60,8 @@ export function slotPosition(slot: InsertSlot): EditPosition {
 /**
  * The gaps of the children of one container: above the first, between each
  * pair and below the last. A container with no children has the one gap that
- * holds everything. A section's children are columns, whose gaps belong to the
- * column tools, so a section has none here.
+ * holds everything. A section's children are columns, whose gaps are the
+ * column slots' (`columnSlots`), so a section has none here.
  */
 export function insertSlots(
   ctx: LegalityContext,
@@ -88,8 +90,42 @@ export function insertSlots(
 }
 
 /**
+ * The gaps between the columns of the section that is selected, or that holds
+ * the selected column, and the gap after its last column. They add a column
+ * with no picker (`level` is `column`), and only where a column may go.
+ */
+export function columnSlots(
+  ctx: LegalityContext,
+  selectedId: string | null,
+): readonly InsertSlot[] {
+  if (!ctx.columnsEnabled || selectedId === null) return [];
+  const selected = ctx.model.get(selectedId);
+  if (selected === undefined) return [];
+  const sectionId =
+    selected.kind === 'section'
+      ? selected.id
+      : selected.kind === 'column'
+        ? selected.parentId
+        : null;
+  if (sectionId === null) return [];
+  const columns = ctx.model.childrenOf(sectionId);
+  const type = columns[0]?.type;
+  if (type === undefined || !canPlace(ctx, type, sectionId)) return [];
+  const slots: InsertSlot[] = [];
+  for (let at = 1; at <= columns.length; at += 1) {
+    slots.push({
+      parentId: sectionId,
+      previousId: columns[at - 1]?.id ?? null,
+      nextId: columns[at]?.id ?? null,
+      level: 'column',
+    });
+  }
+  return slots;
+}
+
+/**
  * The gap right after an item, or after the last section when nothing is
- * given. A column has no such gap here: columns are added by the column tools.
+ * given. After a column it is the gap that adds a column there.
  */
 export function slotAfter(
   ctx: LegalityContext,
@@ -105,7 +141,7 @@ export function slotAfter(
     };
   }
   const node = ctx.model.get(id);
-  if (node === undefined || node.kind === 'column') return null;
+  if (node === undefined) return null;
   const siblings = ctx.model.childrenOf(node.parentId);
   const at = siblings.findIndex((sibling) => sibling.id === id);
   if (at === -1) return null;

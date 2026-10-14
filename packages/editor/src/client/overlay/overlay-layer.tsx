@@ -61,7 +61,8 @@ export function chipText(state: {
 
 /**
  * The ids whose boxes the overlay needs: the children of the scope (the gaps
- * between them are the insert points) and their parent, the blocks that show a
+ * between them are the insert points) and their parent, the columns of a
+ * selected section (the gaps between them add a column), the blocks that show a
  * needs-input marker, and what an open picker hangs from.
  */
 function wantedIds(state: EditorState): readonly string[] {
@@ -73,6 +74,12 @@ function wantedIds(state: EditorState): readonly string[] {
     for (const child of model.childrenOf(parentId)) ids.add(child.id);
   };
   addLevel(selection.scopeId);
+  // The lines between the columns of a selected section hang from its columns.
+  if (selection.selectedId !== null) {
+    if (model.get(selection.selectedId)?.kind === 'section') {
+      addLevel(selection.selectedId);
+    }
+  }
   if (picker !== null) addLevel(picker.slot.parentId);
   for (const node of model.documentOrder()) {
     if (node.needsInput.length > 0) ids.add(node.id);

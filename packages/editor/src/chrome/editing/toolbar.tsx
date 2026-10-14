@@ -97,8 +97,8 @@ export type ToolbarProps = {
 
 /**
  * The floating toolbar of the selected item: the path to it as a breadcrumb
- * and the buttons that move it one step earlier or later, add after it,
- * duplicate it or delete it. It is pinned to the
+ * and the buttons that move it one step earlier or later, add after it (a
+ * column adds a column), duplicate it or delete it. It is pinned to the
  * item in the interaction plane, and is one tab stop with arrow keys roving
  * between its buttons. A button that cannot act stays focusable
  * (`aria-disabled`) so its reason can be read.
@@ -163,7 +163,7 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
   };
 
   const placement = toolbarPlacement({ item, frame, toolbar: size });
-  // A column's own Add after is the column tools' (columns are not added through the picker).
+  // After a column the same button adds a column there, with no picker.
   const addSlot = ctx === null ? null : slotAfter(ctx, selectedId);
   const keys = [
     ...shown.flatMap((entry) =>

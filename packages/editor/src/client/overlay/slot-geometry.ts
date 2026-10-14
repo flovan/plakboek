@@ -43,11 +43,13 @@ function union(boxes: readonly Box[]): Box | null {
  * The band, line and centre of a gap. `boxes` holds the boxes of the
  * neighbours and, when it has one, of the parent that gives the line its
  * length. A gap with no neighbour (an empty parent) has no band: the prompt
- * for an empty container stands in for it.
+ * for an empty container stands in for it. `axisOf` says which way the
+ * siblings run when the caller knows it better than the neighbours can show.
  */
 export function slotGeometry(
   slot: InsertSlot,
   boxes: ReadonlyMap<string, Box>,
+  axisOf?: 'horizontal' | 'vertical',
 ): SlotGeometry | null {
   const previous =
     slot.previousId === null ? null : (boxes.get(slot.previousId) ?? null);
@@ -61,7 +63,8 @@ export function slotGeometry(
     slot.parentId === null ? null : (boxes.get(slot.parentId) ?? null);
   const extent = parent ?? union(neighbours);
   if (extent === null) return null;
-  const axis = siblingAxis(neighbours);
+  // The neighbours of a gap after the last item cannot tell which way their siblings run.
+  const axis = axisOf ?? siblingAxis(neighbours);
 
   if (axis === 'vertical') {
     const y =

@@ -130,6 +130,12 @@ function actedId(intent: Intent): string | null {
   }
 }
 
+/** Whether the write creates an item the editor asked for: an insert, or a group that holds one (a new column). */
+function addsItem(intent: Intent): boolean {
+  if (intent.kind === 'group') return intent.intents.some(addsItem);
+  return intent.kind === 'insert';
+}
+
 /** The type of an inserted node with this id, for naming an item that is not in the tree. */
 function insertedType(intent: Intent, id: string): string | null {
   if (intent.kind === 'group') {
@@ -470,7 +476,7 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
         flash: extra.flash ?? intent.kind !== 'update',
         announceMove: intent.kind === 'move' && extra.fromHistory !== true,
         announceRestored: extra.restored === true,
-        announceAdded: intent.kind === 'insert' && extra.fromHistory !== true,
+        announceAdded: addsItem(intent) && extra.fromHistory !== true,
         undoEntry,
       });
     }

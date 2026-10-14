@@ -593,6 +593,7 @@
 
   .pk-insert:hover,
   .pk-insert:focus-within,
+  .pk-insert[data-always],
   .pk-insert[data-open] {
     opacity: 1;
   }
@@ -650,6 +651,7 @@
 
   .pk-insert:hover .pk-insert-button,
   .pk-insert:focus-within .pk-insert-button,
+  .pk-insert[data-always] .pk-insert-button,
   .pk-insert[data-open] .pk-insert-button {
     pointer-events: auto;
   }

@@ -6,6 +6,7 @@
  * a button and a key never disagree.
  */
 import { formatString } from '../../chrome/strings.js';
+import { duplicateColumnIntent, removeColumnIntent } from './column-actions.js';
 import { buildUndoEntry, type UndoEntry } from './inverse.js';
 import { canPlace, type LegalityContext } from './legality.js';
 import { catalogueByKey, legalityContextOf } from './move-action.js';
@@ -103,7 +104,11 @@ export function deleteActionFor(
   const { model } = state;
   if (model === null || model.get(id) === undefined) return null;
   if (deleteBlockedReason(state, id) !== null) return null;
-  const intent: Intent = { kind: 'delete', blockId: id };
+  // A column goes together with the switch to the equal split (D-05).
+  const intent: Intent = removeColumnIntent(model, id) ?? {
+    kind: 'delete',
+    blockId: id,
+  };
   return {
     intent,
     entry: buildUndoEntry(intent, model, { kind: 'deleted', itemId: id }),
@@ -120,7 +125,11 @@ export function duplicateActionFor(
 ): { readonly intent: Intent; readonly entry: UndoEntry } | null {
   const ctx = legalityContextOf(state);
   if (ctx === null || !canDuplicate(ctx, id)) return null;
-  const intent: Intent = { kind: 'duplicate', blockId: id, newId };
+  const intent: Intent = duplicateColumnIntent(ctx.model, id, newId) ?? {
+    kind: 'duplicate',
+    blockId: id,
+    newId,
+  };
   return {
     intent,
     // Named after the original: the copy is not in the tree until it is saved.

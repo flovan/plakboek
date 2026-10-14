@@ -76,6 +76,14 @@ export type ShellAppProps = {
     readonly onPropertiesChange?: PropertiesPanelProps['onPropertiesChange'];
     /** Called when a Properties control loses focus: save the block's edit now. */
     readonly onPropertiesBlur?: PropertiesPanelProps['onPropertiesBlur'];
+    /** Called by the Layout and Placement groups: render the layout and queue its save. */
+    readonly onLayoutChange?: PropertiesPanelProps['onLayoutChange'];
+    /** Which way a section's columns run in the site, for the Columns group's arrows. */
+    readonly columnAxis?: PropertiesPanelProps['columnAxis'];
+    /** Called by the Columns group's Add column, move and Remove. */
+    readonly onAddColumn?: PropertiesPanelProps['onAddColumn'];
+    readonly onMoveColumn?: PropertiesPanelProps['onMoveColumn'];
+    readonly onRemoveColumn?: PropertiesPanelProps['onRemoveColumn'];
   };
 };
 
@@ -121,6 +129,11 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               onInsert={editor.onInsert ?? noop}
               onPropertiesChange={editor.onPropertiesChange}
               onPropertiesBlur={editor.onPropertiesBlur}
+              onLayoutChange={editor.onLayoutChange}
+              columnAxis={editor.columnAxis}
+              onAddColumn={editor.onAddColumn}
+              onMoveColumn={editor.onMoveColumn}
+              onRemoveColumn={editor.onRemoveColumn}
             />
           ),
         };
