@@ -474,7 +474,9 @@ async function refuseSiblingReference(
  * goes last. With one named, the missing neighbour is read from the stored
  * list, so "after X" lands directly after X and never on top of whatever
  * follows it. Every named id must belong to that exact sibling list
- * (`BlockNotFoundError` / `InvalidSiblingReferenceError`). `excludeId` is
+ * (`BlockNotFoundError` / `InvalidSiblingReferenceError`), and when both are
+ * named the previous one must come before the next one
+ * (`InvalidSiblingReferenceError`, `reason: 'inverted'`). `excludeId` is
  * the block being moved, left out of the list so it never counts as its own
  * neighbour. When no integer fits between the two orders, the whole list is
  * renumbered in one statement first (`rebalancedOrders`), and the position
@@ -522,6 +524,14 @@ export async function resolvePositionSortOrder(
   const previousIndex =
     previousId === null ? -1 : await indexOfNamed(previousId);
   const nextIndex = nextId === null ? -1 : await indexOfNamed(nextId);
+  if (previousId !== null && nextId !== null && previousIndex >= nextIndex) {
+    throw new InvalidSiblingReferenceError(
+      nextId,
+      parentBlockId,
+      parentBlockId,
+      'inverted',
+    );
+  }
 
   let beforeIndex: number;
   let afterIndex: number;
@@ -1021,30 +1031,41 @@ export class CircularMoveError extends Error {
  * caller-supplied id left over from an unrelated parent's sibling list.
  * Without this check the id would still resolve (it is loaded purely by
  * id), and the block's `sort_order` would be computed relative to a block
- * outside its real sibling list (code review WR-02). */
+ * outside its real sibling list (code review WR-02). Also thrown when both
+ * neighbours are named but the "previous" one does not come before the
+ * "next" one in the list (`reason: 'inverted'`; the sibling id is then the
+ * "next" one, and both parents are the destination): no position satisfies
+ * that, and guessing one would store a tied `sort_order`. */
 export class InvalidSiblingReferenceError extends Error {
   readonly siblingId: string;
   readonly expectedParentBlockId: string | null;
   readonly actualParentBlockId: string | null;
+  readonly reason: 'not-a-sibling' | 'inverted';
 
   constructor(
     siblingId: string,
     expectedParentBlockId: string | null,
     actualParentBlockId: string | null,
+    reason: 'not-a-sibling' | 'inverted' = 'not-a-sibling',
   ) {
     super(
-      `@plakboek/pages: sibling "${siblingId}" does not belong to destination parent ${
-        expectedParentBlockId === null
-          ? '"<root>"'
-          : `"${expectedParentBlockId}"`
-      } (its actual parent is ${
-        actualParentBlockId === null ? '"<root>"' : `"${actualParentBlockId}"`
-      })`,
+      reason === 'inverted'
+        ? `@plakboek/pages: sibling "${siblingId}" does not come after the sibling named as previous`
+        : `@plakboek/pages: sibling "${siblingId}" does not belong to destination parent ${
+            expectedParentBlockId === null
+              ? '"<root>"'
+              : `"${expectedParentBlockId}"`
+          } (its actual parent is ${
+            actualParentBlockId === null
+              ? '"<root>"'
+              : `"${actualParentBlockId}"`
+          })`,
     );
     this.name = 'InvalidSiblingReferenceError';
     this.siblingId = siblingId;
     this.expectedParentBlockId = expectedParentBlockId;
     this.actualParentBlockId = actualParentBlockId;
+    this.reason = reason;
   }
 }
 
