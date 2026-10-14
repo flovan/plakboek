@@ -31,6 +31,7 @@ import { getRevisionCap } from '@plakboek/content';
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { PagesDeps } from './config.js';
+import { BlockLayoutValidationError, readStoredLayout } from './layout.js';
 import { assertPageWritable } from './locks.js';
 import { loadPageForUpdate, StalePageVersionError } from './pages.js';
 import { newRevisionBatchId, pruneBlockRevisions } from './revisions.js';
@@ -338,6 +339,11 @@ type BatchState = {
   /** Sections the batch created, or whose column was moved or deleted: the
    * ones that must still hold a column when the batch ends. */
   readonly sectionCandidates: Set<string>;
+  /** Sections whose column count or stored ratio the batch may have
+   * changed: created with a layout, given a layout by an update, or whose
+   * columns were inserted, copied, moved or deleted. The ones whose ratio
+   * must still name one term per column when the batch ends. */
+  readonly layoutCandidates: Set<string>;
   /** The version each touched block was checked against the first time an
    * operation of this batch touched it. */
   readonly firstBaseVersions: Map<string, number>;
@@ -402,7 +408,13 @@ async function insertNode(
   }
   state.createdIds.push(created.id);
   const definition = getBlockDefinition(node.type);
-  if (definition.kind === 'section') state.sectionCandidates.add(created.id);
+  if (definition.kind === 'section') {
+    state.sectionCandidates.add(created.id);
+    state.layoutCandidates.add(created.id);
+  }
+  if (definition.kind === 'column' && parentBlockId !== null) {
+    state.layoutCandidates.add(parentBlockId);
+  }
   // A node sent without children starts with its definition's starter
   // content (D-20); one sent with children, even none, is taken as is.
   for (const child of node.children ?? starterNodesFor(definition)) {
@@ -499,6 +511,9 @@ async function duplicateSubtree(
       state.sectionCandidates.add(created.id);
     }
   }
+  if (kindOf(original.blockType) === 'column' && original.parentBlockId) {
+    state.layoutCandidates.add(original.parentBlockId);
+  }
   state.touchedParentIds.add(original.parentBlockId);
 }
 
@@ -541,6 +556,60 @@ async function assertSectionsHaveColumns(
   }
 }
 
+/** Refuses the batch when a section it touched ends with a stored column
+ * ratio that names a different number of terms than the section has columns
+ * (D-33: the count is derived from the columns, and an equal split is stored
+ * as no ratio at all). Without this, a ratio written for two columns would
+ * come alive again, applied to a third column nobody gave it to, the moment
+ * the section's column count changed back. The editor puts a section on the
+ * equal split in the same batch as every column change; this holds every
+ * other client to the same rule. Runs under the page lock, after the
+ * operations. Refused as an invalid `columns` layout value. */
+async function assertColumnCountsMatchLayout(
+  tx: AuditTransaction,
+  state: BatchState,
+): Promise<void> {
+  const column = getColumnDefinition();
+  if (column === null) return;
+  const candidates = [...state.layoutCandidates].filter(
+    (id) => !state.deletedIds.has(id),
+  );
+  if (candidates.length === 0) return;
+
+  const sections = await tx
+    .select({ id: pageBlocks.id, layout: pageBlocks.layout })
+    .from(pageBlocks)
+    .where(inArray(pageBlocks.id, candidates));
+  const ratios = new Map<string, number>();
+  for (const section of sections) {
+    const ratio = readStoredLayout(section.layout)?.columns;
+    if (ratio !== undefined) ratios.set(section.id, ratio.split(':').length);
+  }
+  if (ratios.size === 0) return;
+
+  const counts = new Map<string, number>();
+  const columns = await tx
+    .select({ parentId: pageBlocks.parentBlockId })
+    .from(pageBlocks)
+    .where(
+      and(
+        inArray(pageBlocks.parentBlockId, [...ratios.keys()]),
+        eq(pageBlocks.blockType, column.key),
+      ),
+    );
+  for (const { parentId } of columns) {
+    if (parentId !== null)
+      counts.set(parentId, (counts.get(parentId) ?? 0) + 1);
+  }
+  for (const [sectionId, terms] of ratios) {
+    if ((counts.get(sectionId) ?? 0) !== terms) {
+      throw new BlockLayoutValidationError([
+        { key: 'columns', code: 'INVALID' },
+      ]);
+    }
+  }
+}
+
 async function applyOperation(
   tx: AuditTransaction,
   ctx: WriteContext,
@@ -570,6 +639,9 @@ async function applyOperation(
         ...(op.layout === undefined ? {} : { layout: op.layout }),
       });
       state.updatedIds.add(op.blockId);
+      if (op.layout !== undefined && kindOf(current.blockType) === 'section') {
+        state.layoutCandidates.add(op.blockId);
+      }
       return;
     }
     case 'move': {
@@ -583,11 +655,14 @@ async function applyOperation(
       state.movedIds.add(op.blockId);
       state.touchedParentIds.add(current.parentBlockId);
       state.touchedParentIds.add(op.position.parentId);
-      if (
-        current.parentBlockId !== null &&
-        kindOf(current.blockType) === 'column'
-      ) {
-        state.sectionCandidates.add(current.parentBlockId);
+      if (kindOf(current.blockType) === 'column') {
+        if (current.parentBlockId !== null) {
+          state.sectionCandidates.add(current.parentBlockId);
+          state.layoutCandidates.add(current.parentBlockId);
+        }
+        if (op.position.parentId !== null) {
+          state.layoutCandidates.add(op.position.parentId);
+        }
       }
       return;
     }
@@ -601,6 +676,7 @@ async function applyOperation(
         kindOf(current.blockType) === 'column'
       ) {
         state.sectionCandidates.add(current.parentBlockId);
+        state.layoutCandidates.add(current.parentBlockId);
       }
       return;
     }
@@ -640,7 +716,10 @@ async function applyOperation(
  * under fresh ids, as create revisions of the batch. Before the commit, a
  * section the batch created, or whose column it moved or deleted, must still
  * hold a column: otherwise `SectionColumnRequiredError` rolls the whole
- * batch back.
+ * batch back. A section the batch touched (created, given a layout, or whose
+ * columns it added, copied, moved or deleted) must also end with a column
+ * ratio naming as many terms as it has columns, or none (D-33): otherwise
+ * `BlockLayoutValidationError` for `columns` rolls the batch back.
  */
 export async function applyBlockEdit(
   deps: PagesDeps,
@@ -717,12 +796,14 @@ export async function applyBlockEdit(
         movedIds: new Set(),
         touchedParentIds: new Set(),
         sectionCandidates: new Set(),
+        layoutCandidates: new Set(),
         firstBaseVersions: new Map(),
       };
       for (const op of input.ops) {
         await applyOperation(tx, ctx, state, op);
       }
       await assertSectionsHaveColumns(tx, state);
+      await assertColumnCountsMatchLayout(tx, state);
 
       await tx
         .update(pages)

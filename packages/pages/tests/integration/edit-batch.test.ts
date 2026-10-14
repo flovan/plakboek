@@ -232,7 +232,7 @@ describe('applyBlockEdit (D-25)', () => {
           node: {
             id: sectionId,
             type: 'section',
-            layout: { columns: '2:1' },
+            layout: { align: 'center' },
             children: [
               {
                 id: columnId,
@@ -262,7 +262,7 @@ describe('applyBlockEdit (D-25)', () => {
     const tree = await readBlockTree(db, ownerOf(page));
     expect(tree.map((node) => node.id)).toEqual([section.id, sectionId]);
     const inserted = tree[1];
-    expect(inserted?.layout).toEqual({ columns: '2:1' });
+    expect(inserted?.layout).toEqual({ align: 'center' });
     expect(inserted?.children[0]?.id).toBe(columnId);
     expect(inserted?.children[0]?.children[0]).toMatchObject({
       id: textId,
@@ -861,7 +861,7 @@ describe('applyBlockEdit (D-25)', () => {
           node: {
             id: sectionId,
             type: 'section',
-            layout: { columns: '2:1', align: 'center' },
+            layout: { align: 'center' },
             children: [
               {
                 id: columnId,
@@ -902,7 +902,7 @@ describe('applyBlockEdit (D-25)', () => {
       'column',
       'text',
     ]);
-    expect(rows[0]?.layout).toEqual({ columns: '2:1', align: 'center' });
+    expect(rows[0]?.layout).toEqual({ align: 'center' });
     expect(rows[2]?.props).toEqual({ value: 'Keep me' });
     expect(rows[2]?.parentBlockId).toBe(columnId);
     expect(await blockCount(page.id)).toBe(0);
@@ -919,7 +919,7 @@ describe('applyBlockEdit (D-25)', () => {
           node: {
             id: sectionId,
             type: 'section',
-            layout: { columns: '2:1', align: 'center' },
+            layout: { align: 'center' },
             children: [
               {
                 id: columnId,

@@ -27,6 +27,7 @@ import {
   SectionColumnRequiredError,
 } from '../../src/edit-batch.js';
 import { createPage, getPage, StalePageVersionError } from '../../src/pages.js';
+import { BlockLayoutValidationError } from '../../src/layout.js';
 import { defineBlocks } from '../../src/registry.js';
 import { insertBlock, readBlockTree } from '../../src/tree.js';
 import type { BlockRecord, OwnerRef, PageRecord } from '../../src/types.js';
@@ -500,5 +501,133 @@ describe('structural batch edits (D-03, D-20, D-22)', () => {
       results.filter((result) => result.status === 'fulfilled').length,
     ).toBeLessThanOrEqual(1);
     expect(await sectionsWithoutColumn(page.id)).toBe(0);
+  });
+  describe('a stored ratio names one term per column (WR-D-07)', () => {
+    async function layoutOf(blockId: string): Promise<unknown> {
+      const [row] = await handle.sql<{ layout: unknown }[]>`
+        SELECT layout FROM page_blocks WHERE id = ${blockId}
+      `;
+      return row?.layout;
+    }
+
+    async function refused(promise: Promise<unknown>): Promise<unknown> {
+      return await promise.then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+    }
+
+    it('refuses a ratio for a different number of columns than the section has, writing nothing', async () => {
+      const { page, section } = await buildFixture('Ratio mismatch on update');
+
+      const error = await refused(
+        applyBlockEdit(deps, actor, {
+          pageId: page.id,
+          basePageVersion: page.version,
+          ops: [
+            {
+              op: 'update',
+              blockId: section.id,
+              baseVersion: section.version,
+              layout: { columns: '2:1' },
+            },
+          ],
+        }),
+      );
+
+      expect(error).toBeInstanceOf(BlockLayoutValidationError);
+      expect((error as BlockLayoutValidationError).issues).toEqual([
+        { key: 'columns', code: 'INVALID' },
+      ]);
+      expect(await layoutOf(section.id)).toBeNull();
+      expect((await currentPage(page.id)).version).toBe(page.version);
+    });
+
+    it('accepts the ratio once the same batch adds the second column, and refuses a delete of that column that leaves the ratio behind', async () => {
+      const { page, section } = await buildFixture('Ratio follows columns');
+      const added = await applyBlockEdit(deps, actor, {
+        pageId: page.id,
+        basePageVersion: page.version,
+        ops: [
+          {
+            op: 'insert',
+            position: { parentId: section.id },
+            node: { type: 'column', children: [] },
+          },
+          {
+            op: 'update',
+            blockId: section.id,
+            baseVersion: section.version,
+            layout: { columns: '2:1' },
+          },
+        ],
+      });
+      expect(await layoutOf(section.id)).toEqual({ columns: '2:1' });
+      const secondColumnId = added.createdIds[0];
+      if (secondColumnId === undefined) throw new Error('no column created');
+
+      const [secondColumn] = await handle.sql<{ version: number }[]>`
+        SELECT version FROM page_blocks WHERE id = ${secondColumnId}
+      `;
+      const removeOnly = await refused(
+        applyBlockEdit(deps, actor, {
+          pageId: page.id,
+          basePageVersion: added.pageVersion,
+          ops: [
+            {
+              op: 'delete',
+              blockId: secondColumnId,
+              baseVersion: secondColumn!.version,
+            },
+          ],
+        }),
+      );
+      expect(removeOnly).toBeInstanceOf(BlockLayoutValidationError);
+      expect(await columnCount(section.id)).toBe(2);
+
+      const [sectionRow] = await handle.sql<{ version: number }[]>`
+        SELECT version FROM page_blocks WHERE id = ${section.id}
+      `;
+      await applyBlockEdit(deps, actor, {
+        pageId: page.id,
+        basePageVersion: added.pageVersion,
+        ops: [
+          {
+            op: 'delete',
+            blockId: secondColumnId,
+            baseVersion: secondColumn!.version,
+          },
+          {
+            op: 'update',
+            blockId: section.id,
+            baseVersion: sectionRow!.version,
+            layout: null,
+          },
+        ],
+      });
+      expect(await columnCount(section.id)).toBe(1);
+      expect(await layoutOf(section.id)).toBeNull();
+    });
+
+    it('refuses an inserted section that carries a ratio for more columns than it is given', async () => {
+      const { page } = await buildFixture('Ratio mismatch on insert');
+
+      const error = await refused(
+        applyBlockEdit(deps, actor, {
+          pageId: page.id,
+          basePageVersion: page.version,
+          ops: [
+            {
+              op: 'insert',
+              position: { parentId: null },
+              node: { type: 'section', layout: { columns: '2:1' } },
+            },
+          ],
+        }),
+      );
+
+      expect(error).toBeInstanceOf(BlockLayoutValidationError);
+      expect((await currentPage(page.id)).version).toBe(page.version);
+    });
   });
 });
