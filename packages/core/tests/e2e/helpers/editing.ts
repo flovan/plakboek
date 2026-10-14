@@ -108,3 +108,22 @@ export async function expectSelectedOver(
     })
     .toBeLessThanOrEqual(1);
 }
+
+export function regionFocused(page: Page): Promise<boolean> {
+  return page
+    .locator(`${HOST} #plakboek-stage`)
+    .evaluate(
+      (element) =>
+        element.getRootNode() instanceof ShadowRoot &&
+        (element.getRootNode() as ShadowRoot).activeElement === element,
+    );
+}
+
+/** Tabs from the top of the shell until the page region has focus. */
+export async function tabToRegion(page: Page): Promise<void> {
+  for (let presses = 0; presses < 30; presses += 1) {
+    if (await regionFocused(page)) return;
+    await page.keyboard.press('Tab');
+  }
+  throw new Error('The page region never took focus');
+}

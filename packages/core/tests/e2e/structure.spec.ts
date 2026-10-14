@@ -10,6 +10,8 @@ import {
   framedSite,
   HOST,
   openEditor,
+  regionFocused,
+  tabToRegion,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
 import {
@@ -48,25 +50,6 @@ async function drillTo(frame: Frame, sectionIndex: number, at: number) {
     .nth(at);
   await target.dblclick();
   await target.dblclick();
-}
-
-/** Tabs from the top of the shell until the page region has focus. */
-async function tabToRegion(page: Page): Promise<void> {
-  for (let presses = 0; presses < 30; presses += 1) {
-    if (await regionFocused(page)) return;
-    await page.keyboard.press('Tab');
-  }
-  throw new Error('The page region never took focus');
-}
-
-function regionFocused(page: Page): Promise<boolean> {
-  return page
-    .locator(`${HOST} #plakboek-stage`)
-    .evaluate(
-      (element) =>
-        element.getRootNode() instanceof ShadowRoot &&
-        (element.getRootNode() as ShadowRoot).activeElement === element,
-    );
 }
 
 function moveButton(page: Page, direction: string) {

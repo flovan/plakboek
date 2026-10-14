@@ -15,7 +15,12 @@ export default defineConfig({
   locales: ['en'],
   defaultLocale: 'en',
   timezone: 'Europe/Brussels',
-  roles: { ...defaultRoles, viewer: ['pages:read'] },
+  roles: {
+    ...defaultRoles,
+    viewer: ['pages:read'],
+    // Edits pages but may not delete: Delete and the undo of an insert or copy are off.
+    'editor-no-delete': ['pages:read', 'pages:read-drafts', 'pages:edit'],
+  },
   blocks: [
     section,
     heading,
