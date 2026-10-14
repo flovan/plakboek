@@ -524,10 +524,10 @@ export type RestoreBlockPreview = {
   readonly revisionId: string;
   readonly blockId: string | null;
   readonly blockType: string;
-  /** The layout the revision stored (narrowed, not re-validated here). A
-   * restore writes it back, minus any key the current configuration no
-   * longer accepts. */
-  readonly layout: BlockLayout | null;
+  /** The layout the revision stored (narrowed, not re-validated here); the
+   * engine always sets it, `null` when the block had none. A restore writes
+   * it back, minus any key the current configuration no longer accepts. */
+  readonly layout?: BlockLayout | null;
   readonly changeType: BlockChangeType;
   readonly storedVersion: number;
   readonly currentVersion: number | null;
