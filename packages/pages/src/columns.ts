@@ -15,6 +15,15 @@
  *   page is published again.
  *
  * Both are no-ops when the registry declares no column kind.
+ *
+ * `upgradeSectionColumns` and `upgradeAllSectionColumns` are trusted system
+ * operations, not user actions. They take no actor, check no permission and
+ * write no audit row: the change moves no content, only adds empty columns
+ * and nests existing blocks one level, and is recorded as a revision batch
+ * with no author, so the page history shows it for what it is. Whoever calls
+ * them has already decided the call is allowed. Nothing that serves a request
+ * may call them without authorising the caller first (the editor's page open
+ * does, behind `pages:edit`), and no HTTP route may expose them directly.
  */
 import { getRevisionCap } from '@plakboek/content';
 import { randomUUID } from 'node:crypto';
@@ -79,8 +88,10 @@ type StoredBlock = typeof pageBlocks.$inferSelect;
  * the upgrade runs, if any, so their own lock does not block it; a run with
  * no acting user (the boot-time upgrade) yields to every live lock.
  *
- * A system data migration with no acting user, so it is not audited and
- * writes no audit row. It never publishes and never purges a cache: what
+ * A trusted system operation (see the file header): it checks no permission
+ * and writes no audit row, because it has no acting user to authorise or
+ * attribute; the caller is responsible for having authorised the call. It
+ * never publishes and never purges a cache: what
  * visitors see is the published snapshot, normalised on read
  * (`normaliseSnapshotColumns`); the page simply shows pending changes until
  * it is published again.

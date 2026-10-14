@@ -66,6 +66,13 @@
  * - Every Drizzle schema table -- a consumer able to read or write these
  *   directly could bypass every guarantee above.
  *
+ * One exception to the above is exported on purpose: `upgradeSectionColumns`
+ * and `upgradeAllSectionColumns` (`columns.ts`), because the editor and the
+ * host runtime run them from other packages. They are trusted system
+ * operations that take no actor, check no permission and write no audit row
+ * (the revision batch they record has no author), so a caller must have
+ * authorised the call itself and no HTTP route may expose them directly.
+ *
  * A second tier of internal helpers stays unexported for the same reason,
  * even though the plan's own withheld list does not name every one
  * individually: the aggregate stored-version read and the pure upcaster-

@@ -502,8 +502,11 @@ runs once per page: a second run changes nothing, and two runs racing on one
 page serialise on an advisory lock. It respects the page edit lock: while
 locking is on, a page held by a live lock of someone other than the optional
 `actorUserId` is left untouched (version included) and the batch upgrade does
-not pick it up until the lock is gone. It is a system data migration, so it
-writes no audit row, never publishes and never purges a cache. It runs in the
+not pick it up until the lock is gone. It is a trusted system operation: it takes no actor, checks no permission
+and writes no audit row (the revision batch it records has no author, so the
+history shows it as a system change), so a caller must have authorised the call
+itself (the editor does, behind `pages:edit`) and no HTTP route may expose it
+directly. It never publishes and never purges a cache. It runs in the
 background at boot (`upgradeAllSectionColumns`, at most 50 pages per call) and
 when an editor opens a page; there is no guarantee beyond that. Published
 snapshots are immutable and never rewritten: `resolvePublishedPage` wraps a
