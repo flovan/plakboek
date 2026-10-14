@@ -349,12 +349,29 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     for (const resolve of waiting) resolve(saved);
   }
 
-  function succeeded(entry: QueueEntry, response: EditResponse): void {
+  /** The page tree an answer carries, or null when the answer cannot be read. */
+  function modelOf(response: EditResponse): TreeModel | null {
+    try {
+      return createTreeModel(response.tree);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A write landed: its tree, version and queue state go in together. The frame
+   * patch has its own guard, because the write is saved whatever the patch
+   * does; the frame is reloaded when the patch cannot be applied.
+   */
+  function succeeded(
+    entry: QueueEntry,
+    response: EditResponse,
+    model: TreeModel,
+  ): void {
     uncertain = false;
     const state = store.getState();
     const info = meta.get(entry.seq);
     meta.delete(entry.seq);
-    const model = createTreeModel(response.tree);
     store.writeApplied({
       model,
       pageVersion: response.pageVersion,
@@ -365,7 +382,13 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
         info?.selectId ?? null,
       ),
     });
-    if (response.patch !== null) applyPatch(response.patch);
+    if (response.patch !== null) {
+      try {
+        applyPatch(response.patch);
+      } catch {
+        reloadFrame();
+      }
+    }
 
     const acted = info?.selectId ?? null;
     if (acted === null || model.get(acted) === undefined) return;
@@ -509,20 +532,27 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
         const taken = takeNext(pruned, model, state.pageVersion);
         if (taken === null) break;
         store.setQueue(taken.state);
-        let goOn: boolean;
+        let response: EditResponse;
         try {
-          const response = await mutation.mutate({
+          response = await mutation.mutate({
             pageId: session.pageId,
             request: taken.request,
           });
-          if (disposed) break;
-          succeeded(taken.entry, response);
-          goOn = true;
         } catch (error) {
           if (disposed) break;
-          goOn = await failed(session.pageId, taken.entry, error);
+          if (!(await failed(session.pageId, taken.entry, error))) break;
+          continue;
         }
-        if (!goOn) break;
+        if (disposed) break;
+        // From here the write is saved: nothing below counts as a failed write.
+        const saved = modelOf(response);
+        if (saved === null) {
+          // The answer cannot be read, so the page is read again from a reload.
+          store.setQueue(onFailure(store.getState().queue, 'stale'));
+          await noteStale(session.pageId);
+          break;
+        }
+        succeeded(taken.entry, response, saved);
       }
     } finally {
       running = false;

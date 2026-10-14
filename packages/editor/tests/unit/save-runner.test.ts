@@ -113,6 +113,7 @@ function setup(
     pageVersion: number;
     tree: readonly ModelNode[];
   }> = () => Promise.reject(new Error('not read')),
+  frame: () => HTMLIFrameElement | null = () => null,
 ): Setup {
   const store = createEditorStore();
   store.opened(session());
@@ -125,7 +126,7 @@ function setup(
     queryClient: new QueryClient({
       defaultOptions: { mutations: { retry: false } },
     }),
-    frame: () => null,
+    frame,
     frameUrl: '/x?_edit=frame',
     hooks: () => null,
     idleMs: 1000,
@@ -461,6 +462,52 @@ describe('the save runner', () => {
       expect(queue.pauseReason).toBe('stale');
       expect(model?.get('h2')?.parentId).toBe('c1');
     });
+  });
+});
+
+describe('a write that landed', () => {
+  const patch = { fragments: [], removed: [], rootOrder: null };
+
+  it('stays saved when the frame patch throws, and the frame is reloaded', async () => {
+    const replace = vi.fn();
+    const frame = {
+      get contentDocument(): Document {
+        throw new Error('the frame went away');
+      },
+      contentWindow: { location: { replace } },
+    } as unknown as HTMLIFrameElement;
+    const ctx = setup(
+      () =>
+        Promise.resolve({
+          ...responseFor(movedToTop(tree, 'h2', 'c2')),
+          patch,
+        }),
+      undefined,
+      () => frame,
+    );
+    performMove(ctx);
+    expect(await ctx.runner.flush()).toBe(true);
+    const state = ctx.store.getState();
+    expect(state.queue.status).toBe('saved');
+    expect(state.queue.lastFailure).toBeNull();
+    expect(state.model?.get('h2')?.parentId).toBe('c2');
+    expect(replace).toHaveBeenCalledWith('/x?_edit=frame');
+  });
+
+  it('pauses with the stale banner, not as a refused write, when its tree cannot be read', async () => {
+    const ctx = setup(() =>
+      Promise.resolve({
+        ...responseFor(tree),
+        tree: undefined as unknown as readonly ModelNode[],
+      }),
+    );
+    performMove(ctx);
+    expect(await ctx.runner.flush()).toBe(false);
+    const { queue, notice } = ctx.store.getState();
+    expect(queue.status).toBe('paused');
+    expect(queue.pauseReason).toBe('stale');
+    expect(queue.lastFailure).toBe('stale');
+    expect(notice?.kind).toBe('stale');
   });
 });
 
