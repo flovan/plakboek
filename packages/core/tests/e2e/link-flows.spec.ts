@@ -5,7 +5,7 @@
  * runs (see `helpers/links.ts`), for accounts the spec creates itself, so a
  * spent link or a changed password never affects another spec.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
 import { issueMagicLink, issuePasswordLink } from './helpers/links.ts';
 import { createTestUser, type TestUser } from './helpers/users.ts';
 
@@ -168,9 +168,10 @@ test.describe('the reset landing', () => {
     const token = tokenOf(link);
 
     const referers: Promise<string | undefined>[] = [];
-    page.on('request', (request) => {
+    const recordReferer = (request: Request): void => {
       referers.push(request.allHeaders().then((headers) => headers.referer));
-    });
+    };
+    page.on('request', recordReferer);
 
     await openModal(page, link);
     const heading = page.getByRole('heading', {
@@ -187,7 +188,9 @@ test.describe('the reset landing', () => {
     expect(await page.evaluate(() => location.href)).not.toContain(token);
 
     // Nothing the page loaded (the backdrop iframe included) was given the
-    // token in a Referer.
+    // token in a Referer. Stop listening first: a header read still pending
+    // when the test ends would fail it.
+    page.off('request', recordReferer);
     const seen = await Promise.all(referers);
     expect(seen.length).toBeGreaterThan(1);
     for (const referer of seen) {
