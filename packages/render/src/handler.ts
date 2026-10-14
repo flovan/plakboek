@@ -95,8 +95,11 @@ export type VisitorHandlerDeps = {
    * Development only: render every block with the live edit markers
    * (`data-pk-*`) so the development server's block swap can find blocks on a
    * visitor page. The host sets it under the Vite dev server and never in a
-   * production build; the handler writes such pages only when no cache is
-   * configured, which is what development runs.
+   * production build. The handler does not trust that alone: the markers are
+   * left out when `NODE_ENV` is `production` or a cache is configured, and a
+   * page rendered with them is always answered `no-store`, so a flag set by
+   * mistake can neither expose block ids and the block catalogue nor let a
+   * proxy keep such a page.
    */
   readonly devBlockMarkers?: boolean;
 };
@@ -136,6 +139,14 @@ const BUILD_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 const REDIRECT_CACHE_CONTROL = 'public, max-age=3600';
 const PAGE_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 const NO_STORE = 'no-store';
+
+/** True when the process runs with `NODE_ENV=production`, the same signal the
+ * rest of the project treats as "this is a production deploy". */
+function isProductionEnvironment(): boolean {
+  return (
+    typeof process !== 'undefined' && process.env.NODE_ENV === 'production'
+  );
+}
 /** What an editor response is forced to: no shared cache may ever keep it. */
 const EDIT_CACHE_CONTROL = 'private, no-store';
 
@@ -341,7 +352,9 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
   const homeSlug = deps.homeSlug ?? DEFAULT_HOME_SLUG;
   const components = createComponentMap(config.blocks, hooks);
   const blockMeta =
-    deps.devBlockMarkers === true && cache === undefined
+    deps.devBlockMarkers === true &&
+    cache === undefined &&
+    !isProductionEnvironment()
       ? devBlockMeta(config)
       : undefined;
   const encoder = new TextEncoder();
@@ -437,7 +450,11 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
       }
       return pageOutcome(
         entry,
-        rendered.degraded ? NO_STORE : healthyPageCacheControl,
+        // A degraded page, and one carrying development markers, never reaches
+        // a shared cache.
+        rendered.degraded || blockMeta !== undefined
+          ? NO_STORE
+          : healthyPageCacheControl,
         rendered.degraded,
       );
     } catch (error) {
