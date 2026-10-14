@@ -130,7 +130,12 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
   const root = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 40 });
   const [active, setActive] = useState('');
-  const [menuOpen, setMenuOpen] = useState(false);
+  /** The item whose hidden path levels are listed, and where the list hangs below the toolbar. */
+  const [menu, setMenu] = useState<{
+    readonly itemId: string;
+    readonly left: number;
+  } | null>(null);
+  const moreButton = useRef<HTMLButtonElement>(null);
 
   useLayoutEffect(() => {
     const element = root.current;
@@ -146,6 +151,9 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
 
   const { model, selection, session } = state;
   const selectedId = selection.selectedId;
+  // The list belongs to the item it was opened for: a new selection closes it.
+  const open = menu !== null && menu.itemId === selectedId ? menu : null;
+  const menuOpen = open !== null;
   if (model === null || session === null || selectedId === null) return null;
   const selected = model.get(selectedId);
   if (selected === undefined) return null;
@@ -196,7 +204,7 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
   const current = keys.includes(active) ? active : (keys[0] ?? '');
 
   const selectCrumbById = (id: string): void => {
-    setMenuOpen(false);
+    setMenu(null);
     selectAndAnnounce(store, selectCrumb(model, id));
   };
 
@@ -204,7 +212,8 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     if (event.key === 'Escape' && menuOpen) {
       event.stopPropagation();
-      setMenuOpen(false);
+      setMenu(null);
+      moreButton.current?.focus();
       return;
     }
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -289,6 +298,16 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
       aria-label={formatString('toolbar.label', { label: itemLabel })}
       aria-orientation="horizontal"
       onKeyDown={onKeyDown}
+      onBlur={(event) => {
+        // Focus leaving the toolbar closes the list of hidden levels.
+        const next = event.relatedTarget;
+        if (
+          menuOpen &&
+          !(next instanceof Node && event.currentTarget.contains(next))
+        ) {
+          setMenu(null);
+        }
+      }}
       style={{
         left: placement.left,
         top: placement.top,
@@ -324,42 +343,29 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
             );
           if (entry === 'more') {
             return (
-              <span key="more" className="relative flex items-center gap-1">
+              <span key="more" className="flex items-center gap-1">
                 {separator}
                 <button
+                  ref={moreButton}
                   type="button"
                   className={CRUMB}
                   aria-label={STRINGS['toolbar.more.label']}
-                  aria-haspopup="menu"
                   aria-expanded={menuOpen}
-                  onClick={() => {
-                    setMenuOpen((open) => !open);
+                  onClick={(event) => {
+                    // The list hangs below the toolbar, under this button.
+                    setMenu(
+                      menuOpen
+                        ? null
+                        : {
+                            itemId: selectedId,
+                            left: event.currentTarget.offsetLeft,
+                          },
+                    );
                   }}
                   {...rove('more')}
                 >
                   {STRINGS['toolbar.more']}
                 </button>
-                {menuOpen ? (
-                  <div
-                    role="menu"
-                    className="pk-toolbar-menu"
-                    aria-label={STRINGS['toolbar.breadcrumb']}
-                  >
-                    {hidden.map((crumb) => (
-                      <button
-                        key={crumb.id}
-                        type="button"
-                        role="menuitem"
-                        className={CRUMB}
-                        onClick={() => {
-                          selectCrumbById(crumb.id);
-                        }}
-                      >
-                        {crumb.text}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
               </span>
             );
           }
@@ -393,6 +399,30 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
           );
         })}
       </nav>
+      {open !== null && hidden.length > 0 ? (
+        // Outside the breadcrumb, which clips what overflows it: the toolbar does not.
+        <div
+          role="group"
+          data-toolbar-hidden-levels=""
+          className="pk-toolbar-menu"
+          aria-label={STRINGS['toolbar.more.label']}
+          style={{ left: open.left }}
+        >
+          {hidden.map((crumb) => (
+            <button
+              key={crumb.id}
+              type="button"
+              className={CRUMB}
+              title={crumb.text}
+              onClick={() => {
+                selectCrumbById(crumb.id);
+              }}
+            >
+              {crumb.text}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
       {moveButton('earlier')}
       {moveButton('later')}

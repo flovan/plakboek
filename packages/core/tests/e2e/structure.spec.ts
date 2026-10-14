@@ -100,6 +100,50 @@ test.describe('moving by the toolbar', () => {
   });
 });
 
+test.describe('the toolbar path of a deeply nested item', () => {
+  test('the hidden levels open in a list that is not clipped, selecting one moves the selection, and Escape closes it', async ({
+    page,
+  }) => {
+    const created = await createEditablePage({
+      blocks: [section(section(heading('Deep')))],
+    });
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await tabToRegion(page);
+    await page.keyboard.press('ArrowDown'); // the outer section
+    for (let step = 0; step < 4; step += 1) {
+      await page.keyboard.press('ArrowRight'); // column, section, column, heading
+    }
+    await expectSelectedOver(page, frame, 'section.section h2');
+
+    const more = page.getByRole('button', { name: 'Show the hidden levels' });
+    await expect(more).toBeVisible();
+    await more.click();
+    const levels = page.locator(`${HOST} [data-toolbar-hidden-levels]`);
+    const items = levels.getByRole('button');
+    await expect(items).toHaveCount(2);
+
+    // the list hangs below the toolbar, whole: the breadcrumb does not clip it
+    const toolbar = await page.locator(TOOLBAR).boundingBox();
+    const list = await levels.boundingBox();
+    const last = await items.last().boundingBox();
+    if (toolbar === null || list === null || last === null) {
+      throw new Error('The toolbar and its hidden levels are not laid out');
+    }
+    expect(list.y).toBeGreaterThanOrEqual(toolbar.y + toolbar.height);
+    expect(last.y + last.height).toBeLessThanOrEqual(list.y + list.height);
+    await expect(items.last()).toBeInViewport({ ratio: 1 });
+
+    await page.keyboard.press('Escape');
+    await expect(levels).toHaveCount(0);
+    await expect(more).toBeFocused();
+
+    await more.click();
+    await items.first().click();
+    await expect(levels).toHaveCount(0);
+  });
+});
+
 test.describe('moving by the keyboard', () => {
   test('the whole move is done without a pointer, crossing into the next section, and focus stays in the region', async ({
     page,
