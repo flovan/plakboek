@@ -1235,7 +1235,14 @@ function Shell(props: {
         proceed();
         return;
       }
-      if (await runner.flush()) {
+      // A flush that throws is a save that did not happen: ask, never leave silently.
+      let saved = false;
+      try {
+        saved = await runner.flush();
+      } catch {
+        saved = false;
+      }
+      if (saved) {
         proceed();
         return;
       }

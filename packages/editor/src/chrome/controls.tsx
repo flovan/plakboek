@@ -109,9 +109,12 @@ export function useLeaveGuard(onLeave: LeaveHandler | undefined): {
   const guard = (which: 'exit' | 'logout', proceed: () => void): void => {
     if (onLeave === undefined) return;
     setLeaving(which);
-    void Promise.resolve(onLeave(proceed)).finally(() => {
-      setLeaving(null);
-    });
+    void Promise.resolve(onLeave(proceed))
+      // A guard that fails has not said to go: the editor stays where they are.
+      .catch(() => undefined)
+      .finally(() => {
+        setLeaving(null);
+      });
   };
 
   return {
