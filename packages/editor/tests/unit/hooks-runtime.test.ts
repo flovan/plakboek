@@ -111,6 +111,37 @@ describe('createHooksRuntime lifecycle', () => {
     expect(log).toEqual(['enter:carousel:edit', 'enter:slide:edit']);
   });
 
+  it('applies the current selection to a document it is attached to, after enter', () => {
+    const log: string[] = [];
+    const frame = fakeDocument(tree());
+    const runtime = createHooksRuntime({
+      hooks: recordingHooks(log, ['carousel', 'slide']),
+      propsOf: () => undefined,
+      mode: 'edit',
+    });
+    // the selection was made before any document was attached
+    runtime.select('slide', ['section', 'carousel']);
+    runtime.attach(frame.document);
+    expect(log).toEqual([
+      'enter:carousel:edit',
+      'enter:slide:edit',
+      'reveal:carousel>slide',
+      'reveal:slide>slide',
+      'select:slide',
+    ]);
+
+    // a reloaded frame is a new document, and gets the selection again
+    log.length = 0;
+    runtime.attach(fakeDocument(tree()).document);
+    expect(log).toEqual([
+      'enter:carousel:edit',
+      'enter:slide:edit',
+      'reveal:carousel>slide',
+      'reveal:slide>slide',
+      'select:slide',
+    ]);
+  });
+
   it('does not enter when attached in Interact, then leaves and enters on mode changes', () => {
     const log: string[] = [];
     const frame = fakeDocument(tree());

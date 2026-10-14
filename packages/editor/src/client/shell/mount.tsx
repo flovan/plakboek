@@ -89,6 +89,7 @@ import {
   type DeleteOpener,
   type DrawerOpener,
   type EditorMode,
+  type EditorState,
   type PickerOpener,
 } from '../session/store.js';
 import { createDragSession } from './drag-session.js';
@@ -239,6 +240,22 @@ function Shell(props: {
       attached = frameDocument;
       runtime.attach(frameDocument);
     };
+    const selectIn = (state: EditorState): void => {
+      const { model } = state;
+      const { selectedId } = state.selection;
+      runtime.select(
+        selectedId,
+        model === null || selectedId === null
+          ? []
+          : model
+              .ancestorsOf(selectedId)
+              .map((ancestor) => ancestor.id)
+              .reverse(),
+      );
+    };
+    // The modules may load after the editor selected something: the runtime
+    // starts from the current selection and applies it once it is attached.
+    selectIn(store.getState());
     frame.addEventListener('load', attach);
     attach();
 
@@ -246,19 +263,7 @@ function Shell(props: {
     const unsubscribe = store.subscribe(() => {
       const next = store.getState();
       if (next.mode !== previous.mode) runtime.setMode(next.mode);
-      if (!sameSelection(next.selection, previous.selection)) {
-        const { model } = next;
-        const { selectedId } = next.selection;
-        runtime.select(
-          selectedId,
-          model === null || selectedId === null
-            ? []
-            : model
-                .ancestorsOf(selectedId)
-                .map((ancestor) => ancestor.id)
-                .reverse(),
-        );
-      }
+      if (!sameSelection(next.selection, previous.selection)) selectIn(next);
       previous = next;
     });
     return () => {

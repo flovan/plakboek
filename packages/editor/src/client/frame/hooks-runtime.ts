@@ -5,7 +5,9 @@
  * The order is fixed, because blocks such as a carousel rely on it:
  *
  * - Edit starts (attach in Edit, a switch from Interact, or after a re-render
- *   in Edit): `enter` on every block that has hooks.
+ *   in Edit): `enter` on every block that has hooks. Attaching in Edit then
+ *   applies the current selection (`reveal` on its ancestors, `reveal` and
+ *   `select` on it).
  * - Switch to Interact: `leave` on every block that has hooks.
  * - Selection changes: `deselect` on the block that was selected, then `reveal`
  *   on each ancestor with hooks, outermost first, then `reveal` and `select` on
@@ -255,7 +257,12 @@ export function createHooksRuntime(options: HooksRuntimeOptions): HooksRuntime {
       stopListening = () => {
         frameDocument.removeEventListener(SWAPPED_EVENT, listener);
       };
-      if (mode === 'edit') enterAll(frameDocument);
+      if (mode === 'edit') {
+        enterAll(frameDocument);
+        // A new document (a reload, or modules that loaded after the selection
+        // was made) shows the selection's slide or panel again.
+        applySelection(frameDocument);
+      }
     },
 
     setMode(next) {
