@@ -337,7 +337,13 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
       }
       // The build-time check of EDIT-14: nothing a visitor loads may reach
       // editor code, however a host's own routes import it.
-      const leaks = findEditorLeaks(output);
+      // The hook modules are the ones the host's `blockEdit` glob matched,
+      // which the block-edit module imports lazily.
+      const leaks = findEditorLeaks(output, {
+        blockEditModules:
+          this.getModuleInfo(RESOLVED_BLOCK_EDIT_ID)?.dynamicallyImportedIds ??
+          [],
+      });
       if (leaks.length > 0) {
         this.error(
           [
@@ -346,7 +352,7 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
               (leak) =>
                 `  ${leak.entry} -> ${leak.chunk}: ${leak.module} (matched "${leak.match}")`,
             ),
-            'Host route modules and the client entry must never import @plakboek/editor, a block edit module (*.edit.ts, *.edit.tsx) or a library only the editor uses (@tiptap, @dnd-kit, prosemirror); the editor loads only through its own chunk.',
+            'Host route modules and the client entry must never import @plakboek/editor, a block edit module (a file the `blockEdit` glob matches, `*.edit.ts` and `*.edit.tsx` by default) or a library only the editor uses (@tiptap, @dnd-kit, prosemirror); the editor loads only through its own chunk.',
           ].join('\n'),
         );
       }

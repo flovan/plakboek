@@ -303,7 +303,8 @@ The hooks are `enter`, `leave`, `select`, `deselect`, `reveal` and `rendered`
 glob or a list of globs, root-relative. These files load only into the
 editor's own chunk, and the client build fails, naming the module, if anything
 a visitor loads imports one, so keep hook code out of block definitions and
-components.
+components. Only the files the glob matches count: a host route named
+`profile.edit.tsx` outside it is ordinary code.
 
 **Bind scripts so they survive a re-render.** The editor replaces a block's
 element when a property changes, and a replaced element has none of the

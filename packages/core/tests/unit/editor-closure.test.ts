@@ -188,8 +188,6 @@ describe('findEditorLeaks', () => {
     ['a TipTap module', '/work/node_modules/@tiptap/react/dist/index.js'],
     ['a dnd-kit module', '/work/node_modules/@dnd-kit/core/dist/core.js'],
     ['a ProseMirror module', '/work/node_modules/prosemirror-model/dist/i.js'],
-    ['a block edit module', '/site/app/blocks/accordion.edit.tsx'],
-    ['a block edit module with a query', '/site/app/blocks/tabs.edit.ts?v=1'],
     ['the block-edit virtual module', '\0virtual:plakboek/block-edit'],
     [
       'a Windows-style editor path',
@@ -205,6 +203,54 @@ describe('findEditorLeaks', () => {
       }),
     };
     expect(findEditorLeaks(bundle)).toHaveLength(1);
+  });
+
+  it.each([
+    ['a module the glob matched', '/site/app/blocks/accordion.edit.tsx'],
+    ['the same module with a query', '/site/app/blocks/accordion.edit.tsx?v=1'],
+    [
+      'a module a custom glob matched under any name',
+      '/site/app/hooks/tabs.ts',
+    ],
+    ['a Windows-style path', 'C:\\site\\app\\blocks\\accordion.edit.tsx'],
+  ])('matches %s as a block edit module', (_label, moduleId) => {
+    const bundle: BundleLike = {
+      ...cleanBundle(),
+      'assets/home-2.js': chunk('assets/home-2.js', {
+        isEntry: true,
+        name: 'home',
+        moduleIds: [moduleId],
+      }),
+    };
+    const [leak] = findEditorLeaks(bundle, {
+      blockEditModules: [
+        '/site/app/blocks/accordion.edit.tsx',
+        '/site/app/hooks/tabs.ts',
+        'C:/site/app/blocks/accordion.edit.tsx',
+      ],
+    });
+    expect(leak?.module).toBe(moduleId);
+    expect(leak?.match).toBe('blockEdit glob');
+  });
+
+  it('does not take a host module for editor code because it is named like a hook module', () => {
+    const bundle: BundleLike = {
+      ...cleanBundle(),
+      'assets/home-2.js': chunk('assets/home-2.js', {
+        isEntry: true,
+        name: 'home',
+        moduleIds: [
+          '/work/app/routes/posts.$id.edit.tsx',
+          '/work/app/routes/profile.edit.tsx',
+        ],
+      }),
+    };
+    expect(findEditorLeaks(bundle)).toEqual([]);
+    expect(
+      findEditorLeaks(bundle, {
+        blockEditModules: ['/work/app/blocks/accordion.edit.tsx'],
+      }),
+    ).toEqual([]);
   });
 
   it('does not match look-alike module paths', () => {
@@ -249,25 +295,29 @@ describe('findEditorLeaks', () => {
         moduleIds: [editModule],
       }),
     };
-    expect(findEditorLeaks(clean)).toEqual([]);
+    const options = { blockEditModules: [editModule] };
+    expect(findEditorLeaks(clean, options)).toEqual([]);
 
     expect(
-      findEditorLeaks({
-        ...clean,
-        'assets/home-2.js': chunk('assets/home-2.js', {
-          isEntry: true,
-          name: 'home',
-          imports: ['assets/react-3.js'],
-          dynamicImports: ['assets/accordion.edit-8.js'],
-          moduleIds: ['/work/app/routes/home.tsx'],
-        }),
-      }),
+      findEditorLeaks(
+        {
+          ...clean,
+          'assets/home-2.js': chunk('assets/home-2.js', {
+            isEntry: true,
+            name: 'home',
+            imports: ['assets/react-3.js'],
+            dynamicImports: ['assets/accordion.edit-8.js'],
+            moduleIds: ['/work/app/routes/home.tsx'],
+          }),
+        },
+        options,
+      ),
     ).toEqual([
       {
         entry: 'assets/home-2.js',
         chunk: 'assets/accordion.edit-8.js',
         module: editModule,
-        match: '.edit.',
+        match: 'blockEdit glob',
       },
     ]);
   });

@@ -112,7 +112,23 @@ describe('plakboek() editor chunk', () => {
     return plugin;
   }
 
-  const clientEnvironment = { environment: { name: 'client' } };
+  /** The block-edit module's info, as the bundler reports it when the
+   * host's glob matched `matched`. */
+  function moduleInfo(matched: readonly string[] = []): {
+    getModuleInfo: (id: string) => { dynamicallyImportedIds: string[] } | null;
+  } {
+    return {
+      getModuleInfo: (id) =>
+        id === '\0virtual:plakboek/block-edit'
+          ? { dynamicallyImportedIds: [...matched] }
+          : null,
+    };
+  }
+
+  const clientEnvironment = {
+    environment: { name: 'client' },
+    ...moduleInfo(),
+  };
 
   function bundleWithEditor(): Record<string, unknown> {
     return {
@@ -338,6 +354,46 @@ describe('plakboek() editor chunk', () => {
         bundle,
       ),
     ).toThrow(/matched "\/node_modules\/@dnd-kit\/"/);
+  });
+
+  it('counts the modules the blockEdit glob matched as editor code, and nothing else named like them', () => {
+    const bundle = bundleWithEditor();
+    bundle['assets/home-1.js'] = {
+      type: 'chunk',
+      name: 'home',
+      fileName: 'assets/home-1.js',
+      isEntry: true,
+      imports: [],
+      dynamicImports: [],
+      moduleIds: ['/work/app/routes/profile.edit.tsx'],
+    };
+    const emitFile = vi.fn();
+    // An ordinary host module that only shares the file name pattern passes.
+    callHook(
+      building().generateBundle,
+      { ...clientEnvironment, emitFile },
+      {},
+      bundle,
+    );
+    expect(emitFile).toHaveBeenCalledTimes(1);
+
+    // The same module is a leak when the glob is what matched it.
+    const error = vi.fn((message: string) => {
+      throw new Error(message);
+    });
+    expect(() =>
+      callHook(
+        building().generateBundle,
+        {
+          ...clientEnvironment,
+          ...moduleInfo(['/work/app/routes/profile.edit.tsx']),
+          emitFile: vi.fn(),
+          error,
+        },
+        {},
+        bundle,
+      ),
+    ).toThrow(/profile\.edit\.tsx \(matched "blockEdit glob"\)/);
   });
 
   it('writes no sidecar for a server bundle', () => {

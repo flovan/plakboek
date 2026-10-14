@@ -27,13 +27,9 @@ export type EditorLeak = {
 const RESOLVED_EDITOR_CLIENT_ID = `\0${EDITOR_CLIENT_ID}`;
 const BLOCK_EDIT_ID = 'virtual:plakboek/block-edit';
 const RESOLVED_BLOCK_EDIT_ID = `\0${BLOCK_EDIT_ID}`;
-
-/**
- * A host's block lifecycle hook module (`accordion.edit.tsx`): the file name
- * ends in `.edit.` plus a script extension. A file merely named `edit.ts` or
- * `editor-notes.ts` is not one.
- */
-const EDIT_MODULE = /\.edit\.[cm]?[jt]sx?$/;
+/** What a module reports as the reason it counts, when the host's `blockEdit`
+ * glob is what picked it. */
+const BLOCK_EDIT_MODULE_MATCH = 'blockEdit glob';
 
 /**
  * Path fragments of the editor package and of the libraries only it uses.
@@ -50,12 +46,22 @@ const EDITOR_PATH_FRAGMENTS = [
   '/node_modules/prosemirror-',
 ] as const;
 
+/** A module id without its query and with forward slashes, so ids written by
+ * different tools compare equal. */
+function normaliseId(id: string): string {
+  const path = id.replaceAll('\\', '/');
+  return path.split('?')[0] ?? path;
+}
+
 /** The fragment that makes a module id editor code, or `undefined`. */
-function editorMatch(id: string): string | undefined {
+function editorMatch(
+  id: string,
+  blockEditModules: ReadonlySet<string>,
+): string | undefined {
   if (id === RESOLVED_EDITOR_CLIENT_ID) return EDITOR_CLIENT_ID;
   if (id === RESOLVED_BLOCK_EDIT_ID) return BLOCK_EDIT_ID;
   const path = id.replaceAll('\\', '/');
-  if (EDIT_MODULE.test(path.split('?')[0] ?? path)) return '.edit.';
+  if (blockEditModules.has(normaliseId(id))) return BLOCK_EDIT_MODULE_MATCH;
   return EDITOR_PATH_FRAGMENTS.find((fragment) => path.includes(fragment));
 }
 
@@ -80,15 +86,33 @@ function closure(bundle: BundleLike, start: string): readonly BundleChunk[] {
   return reached;
 }
 
+export type FindEditorLeaksOptions = {
+  /**
+   * The module ids the host's `blockEdit` glob matched: the block lifecycle
+   * hook modules the editor loads. They count as editor code because the
+   * build knows them by what the glob picked, not by how a file is named, so
+   * an ordinary host module that happens to end in `.edit.tsx` (a route for
+   * editing a profile) is not mistaken for one, and a hook module a custom
+   * glob picked up under any name is not missed.
+   */
+  readonly blockEditModules?: Iterable<string>;
+};
+
 /**
  * Every editor module a non-editor entry can reach. The roots are the entry
  * chunks other than the editor's, plus any dynamic entry the editor chunk
  * does not reach. Each (entry, chunk) pair is reported once, with the first
  * editor module found in the chunk.
  */
-export function findEditorLeaks(bundle: BundleLike): readonly EditorLeak[] {
+export function findEditorLeaks(
+  bundle: BundleLike,
+  options: FindEditorLeaksOptions = {},
+): readonly EditorLeak[] {
   const editor = findEditorChunk(bundle);
   if (editor === undefined) return [];
+  const blockEditModules = new Set(
+    [...(options.blockEditModules ?? [])].map(normaliseId),
+  );
 
   const reachedByEditor = new Set(
     closure(bundle, editor.fileName).map((chunk) => chunk.fileName),
@@ -105,7 +129,7 @@ export function findEditorLeaks(bundle: BundleLike): readonly EditorLeak[] {
   for (const root of roots) {
     for (const reached of closure(bundle, root.fileName)) {
       for (const module of reached.moduleIds) {
-        const match = editorMatch(module);
+        const match = editorMatch(module, blockEditModules);
         if (match === undefined) continue;
         leaks.push(
           Object.freeze({
