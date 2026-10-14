@@ -339,3 +339,59 @@ test.describe('what visitors see', () => {
     expect(await visitorOrder()).toEqual(before);
   });
 });
+
+test.describe('a save that does not go through', () => {
+  const EDIT_ROUTE = '**/cms/api/pages/*/edit';
+
+  test('a network failure keeps the old order and shows Retry, and Retry saves the move', async ({
+    page,
+  }) => {
+    // the write retries three times with backoff before it gives up
+    test.setTimeout(60_000);
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await drillTo(frame, 0, 1);
+    await page.route(EDIT_ROUTE, (route) => route.abort());
+
+    await moveButton(page, 'down').click();
+
+    const alert = page.getByRole('alert').filter({
+      hasText: 'Could not save your changes',
+    });
+    await expect(alert).toBeVisible({ timeout: 15_000 });
+    expect(await headingsIn(frame, 0)).toEqual(['H1', 'H2']);
+    expect(await headingsIn(frame, 1)).toEqual(['H3']);
+
+    await page.unroute(EDIT_ROUTE);
+    await alert.getByRole('button', { name: 'Retry' }).click();
+    await expect.poll(() => headingsIn(frame, 1)).toEqual(['H2', 'H3']);
+    await expectSaved(page);
+  });
+
+  test('a refused move leaves the page alone and offers no Retry', async ({
+    page,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await drillTo(frame, 0, 1);
+    await page.route(EDIT_ROUTE, (route) =>
+      route.fulfill({
+        status: 422,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: { code: 'placement' } }),
+      }),
+    );
+
+    await moveButton(page, 'down').click();
+
+    const alert = page.getByRole('alert').filter({
+      hasText: 'Could not save your changes',
+    });
+    await expect(alert).toBeVisible();
+    await expect(alert.getByRole('button', { name: 'Retry' })).toHaveCount(0);
+    expect(await headingsIn(frame, 0)).toEqual(['H1', 'H2']);
+    expect(await headingsIn(frame, 1)).toEqual(['H3']);
+  });
+});
