@@ -32,11 +32,21 @@ export function LeaveDialog(props: LeaveDialogProps): ReactElement | null {
   const stay = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (!waiting) return;
+    if (!waiting) return undefined;
     const element = dialog.current;
-    if (element === null || element.open) return;
+    if (element === null || element.open) return undefined;
+    // The dialog is closed by taking it out, which does not hand focus back:
+    // the control that asked to leave is remembered and focused again then.
+    const root = element.getRootNode();
+    const opener =
+      root instanceof ShadowRoot || root instanceof Document
+        ? root.activeElement
+        : null;
     element.showModal();
     stay.current?.focus();
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   }, [waiting]);
 
   if (!waiting) return null;

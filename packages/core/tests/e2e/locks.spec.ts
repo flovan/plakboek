@@ -443,6 +443,10 @@ test.describe('leaving with something unsaved', () => {
       await expect(dialog.getByRole('button', { name: 'Stay' })).toBeFocused();
       await dialog.getByRole('button', { name: 'Stay' }).click();
       await expect(dialog).toHaveCount(0);
+      // focus is back on the control that asked to leave
+      await expect(
+        page.getByRole('link', { name: 'Exit edit mode' }),
+      ).toBeFocused();
       await expect(page.locator(HOST)).toHaveAttribute(
         'data-session',
         'editing',
