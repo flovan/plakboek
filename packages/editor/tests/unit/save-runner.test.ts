@@ -11,6 +11,7 @@ import {
   ApiRequestError,
   type ApiClient,
 } from '../../src/client/session/api-client.js';
+import type { HooksRuntime } from '../../src/client/frame/hooks-runtime.js';
 import { buildUndoEntry } from '../../src/client/session/inverse.js';
 import {
   createSaveRunner,
@@ -19,6 +20,7 @@ import {
 import type { Intent } from '../../src/client/session/save-queue.js';
 import { createEditorStore } from '../../src/client/session/store.js';
 import { createTreeModel } from '../../src/client/session/tree-model.js';
+import { fakeFrameDocument } from './support/frame-document.js';
 import { block, buildNodes, column, section } from './support/model.js';
 
 const MINE: LockView = {
@@ -114,6 +116,7 @@ function setup(
     tree: readonly ModelNode[];
   }> = () => Promise.reject(new Error('not read')),
   frame: () => HTMLIFrameElement | null = () => null,
+  hooks: () => HooksRuntime | null = () => null,
 ): Setup {
   const store = createEditorStore();
   store.opened(session());
@@ -128,7 +131,7 @@ function setup(
     }),
     frame,
     frameUrl: '/x?_edit=frame',
-    hooks: () => null,
+    hooks,
     idleMs: 1000,
   });
   return { store, runner, edit: editFn, treeRead: treeFn };
@@ -507,6 +510,43 @@ describe('the save runner', () => {
       expect(queue.pauseReason).toBe('stale');
       expect(model?.get('h2')?.parentId).toBe('c1');
     });
+  });
+});
+
+describe('a patch that adds a top-level section', () => {
+  it('runs the rendered hook for it, so its hooked blocks start their edit lifecycle', async () => {
+    const rendered = vi.fn();
+    const frame = fakeFrameDocument(['s1']);
+    const iframe = {
+      contentDocument: frame.document,
+    } as unknown as HTMLIFrameElement;
+    const added: ModelNode = {
+      ...buildNodes([section('s3')])[0]!,
+      sortOrder: 3000,
+    };
+    const ctx = setup(
+      () =>
+        Promise.resolve({
+          ...responseFor([...tree, added]),
+          patch: {
+            fragments: [
+              {
+                id: 's3',
+                html: '<section data-plakboek-block="s3"></section>',
+              },
+            ],
+            removed: [],
+            rootOrder: ['s1', 's2', 's3'],
+          },
+        }),
+      undefined,
+      () => iframe,
+      () => ({ rendered }) as unknown as HooksRuntime,
+    );
+    performMove(ctx);
+    await ctx.runner.flush();
+    expect(frame.ids()).toEqual(['s1', 's3']);
+    expect(rendered).toHaveBeenCalledWith(['s3']);
   });
 });
 

@@ -328,7 +328,10 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
       reloadFrame();
       return;
     }
-    if (result.replaced.length > 0) hooks()?.rendered(result.replaced);
+    // A new top-level section is new markup too: its blocks start their edit
+    // lifecycle, and a selection that lies inside it is applied.
+    const rendered = [...result.replaced, ...result.created];
+    if (rendered.length > 0) hooks()?.rendered(rendered);
   }
 
   /** An inline edit ended: work held back for it can go in now. */

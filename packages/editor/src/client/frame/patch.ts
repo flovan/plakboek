@@ -116,6 +116,8 @@ function orderRoots(doc: Document, order: readonly string[]): void {
 export type PatchResult = {
   /** Ids of the elements that were replaced with new markup. */
   readonly replaced: readonly string[];
+  /** Ids of the top-level blocks that were added. */
+  readonly created: readonly string[];
   /** Whether the frame must be reloaded; the caller does that with
    * `contentWindow.location.replace(frameUrl)`. */
   readonly reloadNeeded: boolean;
@@ -134,6 +136,7 @@ export function applyPatchSteps(
   const scroller = frameDocument.scrollingElement;
   const scrollTop = scroller?.scrollTop ?? 0;
   const replaced: string[] = [];
+  const created: string[] = [];
   let reloadNeeded = false;
 
   for (const step of steps) {
@@ -175,10 +178,11 @@ export function applyPatchSteps(
       break;
     }
     last.after(element);
+    created.push(step.id);
   }
 
   if (scroller !== null && scroller.scrollTop !== scrollTop)
     scroller.scrollTop = scrollTop;
 
-  return { replaced, reloadNeeded };
+  return { replaced, created, reloadNeeded };
 }
