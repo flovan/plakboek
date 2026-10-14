@@ -464,6 +464,44 @@ describe('the save runner', () => {
   });
 });
 
+describe('the metadata of a write', () => {
+  it('goes with the entry an undo of a typed change merged into, and does not leak onto the next write', async () => {
+    const ctx = setup((_, request) =>
+      Promise.resolve(responseFor(tree, 5 + request.ops.length)),
+    );
+    const type = (blockId: string, text: string): void => {
+      const intent: Intent = { kind: 'update', blockId, props: { text } };
+      const model = ctx.store.getState().model;
+      if (model === null) throw new Error('not open');
+      ctx.runner.perform(
+        intent,
+        buildUndoEntry(intent, model, {
+          kind: 'changed',
+          itemId: blockId,
+          property: 'Text',
+        }),
+      );
+    };
+    type('h1', 'one');
+    await ctx.runner.flush();
+    ctx.store.select({ scopeId: 'c2', selectedId: 'h3' });
+
+    // a new edit of the block waits for its idle time; the undo merges into it
+    type('h1', 'two');
+    ctx.runner.undo();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ctx.edit).toHaveBeenCalledTimes(2);
+    // the undo write's own selection and announcements applied to that entry
+    expect(ctx.store.getState().selection.selectedId).toBe('h1');
+
+    // the next write, a typed edit of another block, carries no leftover of it
+    ctx.store.select({ scopeId: 'c2', selectedId: 'h3' });
+    type('h2', 'next');
+    await ctx.runner.flush();
+    expect(ctx.store.getState().selection.selectedId).toBe('h3');
+  });
+});
+
 describe('actions held until the queue is saved', () => {
   const withText = (text: string): ModelNode[] =>
     tree.map((node) =>

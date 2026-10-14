@@ -46,7 +46,7 @@ import {
 } from './inverse.js';
 import { WRITE_SCOPE_ID } from './query-client.js';
 import {
-  enqueue,
+  enqueueEntry,
   hasPending,
   markReady,
   onFailure,
@@ -511,10 +511,13 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     // An undo or redo of a property change is a write of its own, sent at once
     // with the block's fresh markup, unlike the edits the editor is typing.
     const immediate = intent.kind !== 'update' || extra.fromHistory === true;
-    const seq = state.queue.nextSeq;
-    store.setQueue(
-      enqueue(state.queue, intent, { immediate, fragments: immediate }),
-    );
+    const { state: queue, seq } = enqueueEntry(state.queue, intent, {
+      immediate,
+      fragments: immediate,
+    });
+    store.setQueue(queue);
+    // `seq` is the entry that carries the intent, which an undo or redo of a
+    // property change may have merged into an older one.
     if (immediate) {
       meta.set(seq, {
         selectId:

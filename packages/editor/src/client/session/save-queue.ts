@@ -167,13 +167,14 @@ function settledStatus(entries: readonly QueueEntry[]): SaveStatus {
  * the order the actions were made. A property update merges into the latest
  * pending update of the same block (the latest value wins) and keeps that
  * entry's place, unless a write queued after it touches the block: then it is
- * queued behind that write.
+ * queued behind that write. `seq` is the entry that carries the intent: a new
+ * one, or the older one it merged into.
  */
-export function enqueue(
+export function enqueueEntry(
   state: QueueState,
   intent: Intent,
   options: { readonly immediate: boolean; readonly fragments?: boolean },
-): QueueState {
+): { readonly state: QueueState; readonly seq: number } {
   const immediate = options.immediate || intent.kind !== 'update';
   const fragments = options.fragments === true;
 
@@ -187,6 +188,7 @@ export function enqueue(
   const index =
     intent.kind === 'update' ? mergeIndex(entries, intent.blockId) : -1;
   const existing = index === -1 ? undefined : entries[index];
+  let seq = nextSeq;
 
   if (
     intent.kind === 'update' &&
@@ -200,6 +202,7 @@ export function enqueue(
       fragments: existing.fragments || fragments,
     };
     entries = entries.map((entry, at) => (at === index ? merged : entry));
+    seq = merged.seq;
   } else {
     entries = [
       ...entries,
@@ -210,12 +213,23 @@ export function enqueue(
 
   const hold = state.status === 'paused' || holdsAfterNetworkFailure(state);
   return {
-    ...state,
-    entries,
-    nextSeq,
-    status: hold ? state.status : 'saving',
-    lastFailure: hold ? state.lastFailure : null,
+    state: {
+      ...state,
+      entries,
+      nextSeq,
+      status: hold ? state.status : 'saving',
+      lastFailure: hold ? state.lastFailure : null,
+    },
+    seq,
   };
+}
+
+export function enqueue(
+  state: QueueState,
+  intent: Intent,
+  options: { readonly immediate: boolean; readonly fragments?: boolean },
+): QueueState {
+  return enqueueEntry(state, intent, options).state;
 }
 
 /**
