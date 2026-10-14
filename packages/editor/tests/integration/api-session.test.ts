@@ -329,6 +329,27 @@ describe('the lock endpoints', () => {
     expect(error.lock?.holder?.name).toBe('Editor2');
   });
 
+  it('takes a lock again on renew when the one that was in the way has lapsed, and refuses while it is live', async () => {
+    const seeded = await createColumnPage(harness, {
+      title: 'Lapsed holder',
+      text: 'x',
+    });
+    await open(harness.editor, '/lapsed-holder');
+
+    // The first editor's lock lapses and a second one takes the page.
+    harness.clock.advance(121_000);
+    await readSession(await open(harness.editor2, '/lapsed-holder'));
+    const refused = await lockCall(harness.editor, seeded.pageId, 'renew');
+    expect(refused.status).toBe(423);
+    expect((await readError(refused)).code).toBe('locked');
+
+    // The second editor's tab goes away without releasing; its lock lapses.
+    harness.clock.advance(121_000);
+    const renewed = await lockCall(harness.editor, seeded.pageId, 'renew');
+    expect(renewed.status).toBe(200);
+    expect(((await renewed.json()) as LockResponse).lock.state).toBe('mine');
+  });
+
   it('lets a superadmin take over from an editor, who then finds the page locked', async () => {
     const seeded = await createColumnPage(harness, {
       title: 'Takeover',

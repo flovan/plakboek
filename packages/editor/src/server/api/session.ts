@@ -242,7 +242,15 @@ export async function renewLock(
   pageId: string,
 ): Promise<LockResponse> {
   const { pages } = context.deps;
-  const renewed = await renewPageLock(pages, context.actor, { pageId });
+  let renewed = false;
+  try {
+    renewed = await renewPageLock(pages, context.actor, { pageId });
+  } catch (error) {
+    if (!(error instanceof PageLockedError)) throw error;
+    // The row still names someone else, but that does not say their lock is
+    // live: it may have lapsed after their tab went away. Acquiring decides
+    // by liveness, and refuses with the same error when it is still held.
+  }
   if (!renewed) await acquirePageLock(pages, context.actor, { pageId });
   return await lockResponse(context, pageId);
 }
