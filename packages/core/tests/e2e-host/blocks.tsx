@@ -75,6 +75,101 @@ const Carousel: BlockComponent<{ label: string }> = ({ props, edit }) => (
   </div>
 );
 
+/**
+ * The item-based interactive blocks. Each container renders only its items;
+ * an item is a block of its own (its root spreads `{...edit}`), so the editor
+ * adds, moves, selects and drills into entries, tabs and slides like any other
+ * block. The site's script (`public/site.js`) drives them.
+ */
+const AccordionList: BlockComponent<Record<string, never>> = ({
+  children,
+  edit,
+}) => (
+  <div {...edit} className="accordion-list" data-accordion-list="">
+    {children}
+  </div>
+);
+
+const AccordionItem: BlockComponent<{ title: string }> = ({
+  block,
+  props,
+  children,
+  edit,
+}) => (
+  <div {...edit} className="accordion-item" data-accordion-item="">
+    <button
+      type="button"
+      aria-expanded="false"
+      aria-controls={`entry-${block.id}`}
+      data-accordion-trigger=""
+      {...edit.field('title')}
+    >
+      {props.title}
+    </button>
+    <div id={`entry-${block.id}`} role="region" hidden data-accordion-panel="">
+      {children}
+    </div>
+  </div>
+);
+
+const Tabs: BlockComponent<Record<string, never>> = ({ children, edit }) => (
+  <div {...edit} className="tabs" data-tabs="" role="tablist">
+    {children}
+  </div>
+);
+
+const Tab: BlockComponent<{ label: string }> = ({
+  block,
+  props,
+  children,
+  edit,
+}) => (
+  <div {...edit} className="tab" data-tab="">
+    <button
+      type="button"
+      role="tab"
+      aria-selected="false"
+      aria-controls={`tab-${block.id}`}
+      data-tab-trigger=""
+      {...edit.field('label')}
+    >
+      {props.label}
+    </button>
+    <div id={`tab-${block.id}`} role="tabpanel" hidden data-tab-panel="">
+      {children}
+    </div>
+  </div>
+);
+
+const Slides: BlockComponent<{ autoplay?: boolean }> = ({
+  props,
+  children,
+  edit,
+}) => (
+  <div
+    {...edit}
+    className="slides"
+    data-slides=""
+    data-autoplay={props.autoplay === true ? 'true' : 'false'}
+    role="group"
+    aria-label="Slides"
+  >
+    <div data-slides-track="">{children}</div>
+    <button type="button" data-slides-prev="">
+      Previous slide
+    </button>
+    <button type="button" data-slides-next="">
+      Next slide
+    </button>
+  </div>
+);
+
+const Slide: BlockComponent<Record<string, never>> = ({ children, edit }) => (
+  <div {...edit} className="slide" data-slide="">
+    {children}
+  </div>
+);
+
 const Badge: BlockComponent<{ label: string }> = ({ props, edit }) => (
   <div {...edit} className="badge" data-badge="">
     <span {...edit.field('label')}>{props.label}</span>
@@ -400,4 +495,117 @@ export const propsDemo = defineBlock({
     },
   },
   component: PropsDemo,
+});
+
+export const accordionList = defineBlock({
+  key: 'accordionList',
+  editor: { label: 'Accordion list' },
+  schemaVersion: 1,
+  properties: {},
+  placement: { allowedChildren: ['accordionItem'] },
+  starterChildren: [
+    {
+      type: 'accordionItem',
+      props: { title: 'First entry' },
+      children: [{ type: 'text', props: { text: 'First entry text' } }],
+    },
+    {
+      type: 'accordionItem',
+      props: { title: 'Second entry' },
+      children: [{ type: 'text', props: { text: 'Second entry text' } }],
+    },
+  ],
+  component: AccordionList,
+});
+
+export const accordionItem = defineBlock({
+  key: 'accordionItem',
+  editor: { label: 'Accordion entry' },
+  schemaVersion: 1,
+  properties: {
+    title: {
+      fieldType: 'short_text',
+      label: 'Title',
+      required: true,
+      options: { maxLength: 200 },
+    },
+  },
+  placement: {
+    allowedParents: ['accordionList'],
+    allowedChildren: ['heading', 'text'],
+  },
+  component: AccordionItem,
+});
+
+export const tabs = defineBlock({
+  key: 'tabs',
+  editor: { label: 'Tabs' },
+  schemaVersion: 1,
+  properties: {},
+  placement: { allowedChildren: ['tab'] },
+  starterChildren: [
+    {
+      type: 'tab',
+      props: { label: 'First tab' },
+      children: [{ type: 'text', props: { text: 'First tab text' } }],
+    },
+    {
+      type: 'tab',
+      props: { label: 'Second tab' },
+      children: [{ type: 'text', props: { text: 'Second tab text' } }],
+    },
+  ],
+  component: Tabs,
+});
+
+export const tab = defineBlock({
+  key: 'tab',
+  editor: { label: 'Tab' },
+  schemaVersion: 1,
+  properties: {
+    label: {
+      fieldType: 'short_text',
+      label: 'Label',
+      required: true,
+      options: { maxLength: 100 },
+    },
+  },
+  placement: {
+    allowedParents: ['tabs'],
+    allowedChildren: ['heading', 'text'],
+  },
+  component: Tab,
+});
+
+export const slides = defineBlock({
+  key: 'slides',
+  editor: { label: 'Slides' },
+  schemaVersion: 1,
+  properties: {
+    autoplay: { fieldType: 'boolean', label: 'Autoplay', options: {} },
+  },
+  placement: { allowedChildren: ['slide'] },
+  starterChildren: [
+    {
+      type: 'slide',
+      children: [{ type: 'text', props: { text: 'First slide text' } }],
+    },
+    {
+      type: 'slide',
+      children: [{ type: 'text', props: { text: 'Second slide text' } }],
+    },
+  ],
+  component: Slides,
+});
+
+export const slide = defineBlock({
+  key: 'slide',
+  editor: { label: 'Slide' },
+  schemaVersion: 1,
+  properties: {},
+  placement: {
+    allowedParents: ['slides'],
+    allowedChildren: ['heading', 'text'],
+  },
+  component: Slide,
 });

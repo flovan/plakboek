@@ -1,6 +1,8 @@
 import { defaultRoles, defineConfig } from '@plakboek/core/config';
 import {
   accordion,
+  accordionItem,
+  accordionList,
   badge,
   carousel,
   heading,
@@ -8,7 +10,11 @@ import {
   quote,
   section,
   siteForm,
+  slide,
+  slides,
   spacer,
+  tab,
+  tabs,
   text,
 } from './blocks.tsx';
 
@@ -34,6 +40,12 @@ export default defineConfig({
     siteForm,
     propsDemo,
     quote,
+    accordionList,
+    accordionItem,
+    tabs,
+    tab,
+    slides,
+    slide,
   ],
   // The constraints the Properties panel has to honour: one property is not
   // shown, one has a fixed value, one offers only two of its three choices.
