@@ -1,4 +1,11 @@
-import { useEffect, useId, useRef, useState, type ReactElement } from 'react';
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactElement,
+} from 'react';
 import {
   controlFor,
   instantToLocalInput,
@@ -320,43 +327,81 @@ function CheckboxGroupControl(props: LeafProps): ReactElement {
   );
 }
 
+/**
+ * A native date input reports an empty value for a half-filled entry as well
+ * as for a cleared one. A half-filled entry is the editor's until it is whole:
+ * nothing is sent, and the input is told to show nothing while it is held so
+ * the segments already typed are not wiped. Leaving the field drops it, and
+ * the saved value is shown again.
+ */
+function useDateEntry(
+  fieldValue: string,
+  onChange: (text: string) => void,
+  onBlur: () => void,
+) {
+  const [half, setHalf] = useState(false);
+  return {
+    value: half ? '' : fieldValue,
+    onChange: (event: ChangeEvent<HTMLInputElement>): void => {
+      const text = event.target.value;
+      if (text === '' && event.target.validity.badInput) {
+        setHalf(true);
+        return;
+      }
+      setHalf(false);
+      onChange(text);
+    },
+    onBlur: (): void => {
+      setHalf(false);
+      onBlur();
+    },
+  };
+}
+
 function DateTimeControl(props: LeafProps): ReactElement {
   const { id, fieldKey, value, disabled, onChange, onBlur } = props;
+  const entry = useDateEntry(
+    instantToLocalInput(value),
+    (text) => {
+      onChange(localInputToInstant(text), true);
+    },
+    onBlur,
+  );
   return (
     <input
       id={id}
       data-control={fieldKey}
       type="datetime-local"
-      value={instantToLocalInput(value)}
+      value={entry.value}
       disabled={disabled}
       className={`${INPUT} ${border(props)}`}
       {...aria(props)}
-      onChange={(event) => {
-        onChange(localInputToInstant(event.target.value), true);
-      }}
-      onBlur={onBlur}
+      onChange={entry.onChange}
+      onBlur={entry.onBlur}
     />
   );
 }
 
 function DateControl(props: LeafProps): ReactElement {
   const { id, fieldKey, value, disabled, onChange, onBlur } = props;
+  const entry = useDateEntry(
+    stringOf(value).slice(0, 10),
+    (text) => {
+      onChange(text === '' ? undefined : text, true);
+    },
+    onBlur,
+  );
   return (
     <input
       id={id}
       data-control={fieldKey}
       type="date"
-      value={stringOf(value).slice(0, 10)}
+      value={entry.value}
       disabled={disabled}
       className={`${INPUT} ${border(props)}`}
       {...aria(props)}
-      onChange={(event) => {
-        onChange(
-          event.target.value === '' ? undefined : event.target.value,
-          true,
-        );
-      }}
-      onBlur={onBlur}
+      onChange={entry.onChange}
+      onBlur={entry.onBlur}
     />
   );
 }

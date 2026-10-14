@@ -230,6 +230,33 @@ test.describe('every widget edits its property and the block re-renders live', (
     await expect(shown(frame, 'day')).toHaveText('2026-10-14');
   });
 
+  test('a half-filled date is not sent, so it neither clears the value nor wipes what was typed', async ({
+    page,
+  }) => {
+    const frame = await openDemo(page, { title: 'Demo', day: '2026-10-14' });
+    const day = page.getByLabel('Day', { exact: true });
+    await expect(shown(frame, 'day')).toHaveText('2026-10-14');
+
+    // clearing one segment leaves the entry half-filled
+    await day.focus();
+    await page.keyboard.press('Backspace');
+    expect(
+      await day.evaluate((el: HTMLInputElement) => el.validity.badInput),
+    ).toBe(true);
+    // the preview and the save would have taken the value away by now
+    await page.waitForTimeout(400);
+    await expect(shown(frame, 'day')).toHaveText('2026-10-14');
+    expect(
+      await day.evaluate((el: HTMLInputElement) => el.validity.badInput),
+    ).toBe(true);
+
+    // a whole date goes through, and so does a deliberate clear
+    await day.fill('2026-10-20');
+    await expect(shown(frame, 'day')).toHaveText('2026-10-20');
+    await day.fill('');
+    await expect(shown(frame, 'day')).toHaveCount(0);
+  });
+
   test('a repeater adds, edits, moves and removes its items', async ({
     page,
   }) => {
