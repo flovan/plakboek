@@ -452,11 +452,12 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     pageId: string,
     entry: QueueEntry,
     error: unknown,
+    reconciling = false,
   ): Promise<boolean> {
     const kind = failureKindOf(error);
     const state = store.getState();
 
-    if (kind === 'stale' && uncertain) {
+    if (kind === 'stale' && uncertain && !reconciling) {
       try {
         const fresh = await api.tree(pageId);
         const freshModel = createTreeModel(fresh.tree);
@@ -483,9 +484,18 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
         store.setQueue(onFailure(store.getState().queue, 'stale'));
         await noteStale(pageId);
         return false;
-      } catch {
-        store.setQueue(onFailure(store.getState().queue, 'network'));
-        return false;
+      } catch (readError) {
+        // The tree could not be read. What that answer is decides, like for any
+        // failed request: a session that ended or a page that was taken is not
+        // a network failure. Only an answer that says nothing is retried.
+        return await failed(
+          pageId,
+          entry,
+          failureKindOf(readError) === 'refused'
+            ? new ApiRequestError(null, null)
+            : readError,
+          true,
+        );
       }
     }
 

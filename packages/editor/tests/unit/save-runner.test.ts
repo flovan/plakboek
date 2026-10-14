@@ -450,6 +450,51 @@ describe('the save runner', () => {
       expect(state.pageVersion).toBe(6);
     });
 
+    it('reports an ended session, not a network failure, when the tree read answers 401', async () => {
+      let attempts = 0;
+      const ctx = setup(
+        () => {
+          attempts += 1;
+          return Promise.reject(
+            attempts === 1
+              ? new ApiRequestError(null, null)
+              : new ApiRequestError(409, 'stale-page'),
+          );
+        },
+        () => Promise.reject(new ApiRequestError(401, 'unauthenticated')),
+      );
+      performMove(ctx);
+      await ctx.runner.flush();
+      ctx.runner.retry();
+      expect(await ctx.runner.flush()).toBe(false);
+      const { queue, notice } = ctx.store.getState();
+      expect(queue.status).toBe('paused');
+      expect(queue.pauseReason).toBe('session');
+      expect(notice?.kind).toBe('session-ended');
+    });
+
+    it('still waits for a retry when the tree read itself fails on the network', async () => {
+      let attempts = 0;
+      const ctx = setup(
+        () => {
+          attempts += 1;
+          return Promise.reject(
+            attempts === 1
+              ? new ApiRequestError(null, null)
+              : new ApiRequestError(409, 'stale-page'),
+          );
+        },
+        () => Promise.reject(new ApiRequestError(null, null)),
+      );
+      performMove(ctx);
+      await ctx.runner.flush();
+      ctx.runner.retry();
+      await ctx.runner.flush();
+      const { queue } = ctx.store.getState();
+      expect(queue.status).toBe('failed');
+      expect(queue.lastFailure).toBe('network');
+    });
+
     it('pauses saving with the reason when the tree holds something else', async () => {
       const ctx = staleAfterNetworkLoss(tree);
       performMove(ctx);
