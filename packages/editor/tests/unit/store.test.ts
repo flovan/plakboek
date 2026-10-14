@@ -117,6 +117,45 @@ describe('the editor store', () => {
     expect(state.lock).toEqual(OTHER);
   });
 
+  it('names the holder of a locked page and follows their last activity', () => {
+    const store = createEditorStore();
+    store.opened(sessionWith(OTHER));
+    expect(store.getState().notice).toEqual({
+      kind: 'locked',
+      holderName: 'Edith',
+      lastActiveAt: '2026-10-14T10:00:00.000Z',
+    });
+    const later = {
+      ...OTHER,
+      holder: { name: 'Edith', lastActiveAt: '2026-10-14T10:05:00.000Z' },
+    };
+    store.setLock(later);
+    expect(store.getState().notice?.lastActiveAt).toBe(
+      later.holder.lastActiveAt,
+    );
+  });
+
+  it('drops what was pending and warns when the page is taken over', () => {
+    const store = createEditorStore();
+    store.opened(sessionWith(MINE));
+    store.setQueue({
+      ...store.getState().queue,
+      entries: [
+        {
+          seq: 1,
+          intent: { kind: 'delete', blockId: 'h1' },
+          ready: true,
+          fragments: false,
+        },
+      ],
+    });
+    store.setLock(OTHER);
+    const state = store.getState();
+    expect(state.queue.entries).toEqual([]);
+    expect(state.undo.undo).toEqual([]);
+    expect(state.notice).toEqual({ kind: 'taken-over', holderName: 'Edith' });
+  });
+
   it('notifies subscribers once per change and not after unsubscribing', () => {
     const store = createEditorStore();
     const listener = vi.fn();

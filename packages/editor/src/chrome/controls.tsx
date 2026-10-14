@@ -1,5 +1,10 @@
 import { EDITOR_FLAG_KEY } from '@plakboek/render';
-import type { MouseEvent, ReactNode } from 'react';
+import {
+  useState,
+  type FormEvent,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
 import { STAGE_ID } from './stage.js';
 
 /** The two layouts of the shell: a 280px sidebar with the page framed, or a
@@ -74,4 +79,69 @@ export function forgetEditorFlag(): void {
   } catch {
     // Storage is blocked or missing: there was no flag to clear.
   }
+}
+
+/** Called before Exit edit mode or Log out leaves the page; `proceed` leaves. */
+export type LeaveHandler = (proceed: () => void) => void | Promise<void>;
+
+/** The control that is saving the page before it leaves. */
+export type Leaving = 'exit' | 'logout' | null;
+
+/**
+ * The handlers of Exit edit mode and Log out when a leave guard is given. Each
+ * stops the browser's own navigation or submit, hands `proceed` to the guard
+ * and shows which control is waiting; the guard decides when to go. Without a
+ * guard the anchor and the form behave as plain HTML, so both still work
+ * before any script has run.
+ */
+export function useLeaveGuard(onLeave: LeaveHandler | undefined): {
+  readonly leaving: Leaving;
+  readonly onExitClick: (event: MouseEvent<HTMLAnchorElement>) => void;
+  readonly onLogoutSubmit: (event: FormEvent<HTMLFormElement>) => void;
+} {
+  const [leaving, setLeaving] = useState<Leaving>(null);
+
+  const guard = (which: 'exit' | 'logout', proceed: () => void): void => {
+    if (onLeave === undefined) return;
+    setLeaving(which);
+    void Promise.resolve(onLeave(proceed)).finally(() => {
+      setLeaving(null);
+    });
+  };
+
+  return {
+    leaving,
+    onExitClick: (event) => {
+      if (onLeave === undefined) return;
+      // A click that opens a new tab or window leaves nothing behind.
+      if (
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+      event.preventDefault();
+      if (leaving !== null) return;
+      const anchor = event.currentTarget;
+      guard('exit', () => {
+        anchor.ownerDocument.defaultView?.location.assign(anchor.href);
+      });
+    },
+    onLogoutSubmit: (event) => {
+      if (onLeave === undefined) {
+        forgetEditorFlag();
+        return;
+      }
+      event.preventDefault();
+      if (leaving !== null) return;
+      const form = event.currentTarget;
+      guard('logout', () => {
+        forgetEditorFlag();
+        form.submit();
+      });
+    },
+  };
 }

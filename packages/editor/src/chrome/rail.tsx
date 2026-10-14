@@ -1,13 +1,20 @@
 import type { ReactElement } from 'react';
 import {
   displayNameOf,
-  forgetEditorFlag,
   RAIL_CONTROL,
   skipToPage,
+  useLeaveGuard,
+  type LeaveHandler,
   type SidebarLayout,
   type SidebarSlots,
 } from './controls.js';
-import { ExitIcon, ExpandIcon, FrameIcon, LogOutIcon } from './icons.js';
+import {
+  ExitIcon,
+  ExpandIcon,
+  FrameIcon,
+  LogOutIcon,
+  SpinnerIcon,
+} from './icons.js';
 import type { ShellIsland } from './island.js';
 import { STAGE_ID } from './stage.js';
 import { STRINGS } from './strings.js';
@@ -21,6 +28,8 @@ export type RailProps = {
   /** The layout the shell is in now, for the toggle's pressed state. */
   readonly layout: SidebarLayout;
   readonly onToggleLayout?: () => void;
+  /** Called by Exit edit mode and Log out before they leave; it calls `proceed` to go. */
+  readonly onLeave?: LeaveHandler;
 };
 
 /** The rail's own layer: hidden, nudged left, until the host is in the full
@@ -50,7 +59,8 @@ function initialOf(displayName: string): string {
  * assistive technology only.
  */
 export function Rail(props: RailProps): ReactElement {
-  const { island, slots, hydrated, layout, onToggleLayout } = props;
+  const { island, slots, hydrated, layout, onToggleLayout, onLeave } = props;
+  const { leaving, onExitClick, onLogoutSubmit } = useLeaveGuard(onLeave);
   const displayName = displayNameOf(island.user);
   const pressed = layout === 'full';
   return (
@@ -79,13 +89,25 @@ export function Rail(props: RailProps): ReactElement {
             {pressed ? <ExpandIcon /> : <FrameIcon />}
           </button>
         </Tooltip>
-        <Tooltip label={STRINGS['sidebar.exit']}>
+        <Tooltip
+          label={
+            leaving === 'exit'
+              ? STRINGS['loading.saving']
+              : STRINGS['sidebar.exit']
+          }
+        >
           <a
             href={island.visitorLocation}
-            aria-label={STRINGS['sidebar.exit']}
+            onClick={onExitClick}
+            aria-disabled={leaving === 'exit' ? true : undefined}
+            aria-label={
+              leaving === 'exit'
+                ? STRINGS['loading.saving']
+                : STRINGS['sidebar.exit']
+            }
             className={RAIL_CONTROL}
           >
-            <ExitIcon />
+            {leaving === 'exit' ? <SpinnerIcon /> : <ExitIcon />}
           </a>
         </Tooltip>
         <Tooltip label={displayName}>
@@ -100,17 +122,28 @@ export function Rail(props: RailProps): ReactElement {
         <form
           method="post"
           action={island.logoutPath}
-          onSubmit={forgetEditorFlag}
+          onSubmit={onLogoutSubmit}
           className="m-0"
         >
           <input type="hidden" name="next" value={island.visitorLocation} />
-          <Tooltip label={STRINGS['sidebar.logOut']}>
+          <Tooltip
+            label={
+              leaving === 'logout'
+                ? STRINGS['loading.saving']
+                : STRINGS['sidebar.logOut']
+            }
+          >
             <button
               type="submit"
-              aria-label={STRINGS['sidebar.logOut']}
+              aria-disabled={leaving === 'logout' ? true : undefined}
+              aria-label={
+                leaving === 'logout'
+                  ? STRINGS['loading.saving']
+                  : STRINGS['sidebar.logOut']
+              }
               className={RAIL_CONTROL}
             >
-              <LogOutIcon />
+              {leaving === 'logout' ? <SpinnerIcon /> : <LogOutIcon />}
             </button>
           </Tooltip>
         </form>

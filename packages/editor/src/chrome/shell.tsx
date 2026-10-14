@@ -11,7 +11,9 @@ import {
   type PickerOpener,
 } from '../client/session/store.js';
 import { DeleteDialog } from './editing/delete-dialog.js';
+import { LeaveDialog } from './editing/leave-dialog.js';
 import { LiveRegion } from './editing/live-region.js';
+import { NoticeSlot } from './editing/notices.js';
 import { SidePanel } from './editing/panel.js';
 import type { PropertiesPanelProps } from './editing/properties/properties-panel.js';
 import { UndoToast } from './editing/toast.js';
@@ -48,6 +50,17 @@ export type ShellAppProps = {
     readonly onMode: (mode: EditorMode) => void;
     /** Called by the save status's Retry button. */
     readonly onRetry?: () => void;
+    /** Called by the Take over button of the lock notice; true when it worked. */
+    readonly onTakeOver?: () => Promise<boolean>;
+    /** Called by the lock row's Keep editing button; true when the lock was renewed. */
+    readonly onKeepEditing?: () => Promise<boolean>;
+    /** Where the session-ended notice's Sign in leads. */
+    readonly signInHref?: string;
+    /** Called by Exit edit mode and Log out before they leave the page. */
+    readonly onLeave?: (proceed: () => void) => void | Promise<void>;
+    /** Called by the leave confirmation's Stay and Leave anyway. */
+    readonly onStay?: () => void;
+    readonly onLeaveAnyway?: () => void;
     /** Called by the Undo and Redo buttons. */
     readonly onUndo?: () => void;
     readonly onRedo?: () => void;
@@ -113,7 +126,14 @@ export function ShellApp(props: ShellAppProps): ReactElement {
     editor === undefined || !hydrated
       ? undefined
       : {
-          notice: null,
+          notice: (
+            <NoticeSlot
+              store={editor.store}
+              onTakeOver={editor.onTakeOver ?? (() => Promise.resolve(false))}
+              onReload={onReload ?? noop}
+              signInHref={editor.signInHref ?? '/cms'}
+            />
+          ),
           tools: (
             <ToolGroup
               store={editor.store}
@@ -121,6 +141,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               onRetry={editor.onRetry}
               onUndo={editor.onUndo}
               onRedo={editor.onRedo}
+              onKeepEditing={editor.onKeepEditing}
             />
           ),
           panel: (
@@ -146,6 +167,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
         hydrated={hydrated}
         layout={layout}
         onToggleLayout={onToggleLayout}
+        onLeave={editor?.onLeave}
       />
       <Stage
         frameUrl={island.frameUrl}
@@ -176,6 +198,11 @@ export function ShellApp(props: ShellAppProps): ReactElement {
       {hydrated && editor !== undefined ? (
         <>
           <LiveRegion store={editor.store} />
+          <LeaveDialog
+            store={editor.store}
+            onStay={editor.onStay ?? noop}
+            onLeave={editor.onLeaveAnyway ?? noop}
+          />
           <DeleteDialog
             store={editor.store}
             onConfirm={editor.onConfirmDelete ?? noop}

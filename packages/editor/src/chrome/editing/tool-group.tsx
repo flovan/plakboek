@@ -20,6 +20,7 @@ import {
   UndoIcon,
 } from '../icons.js';
 import { STRINGS } from '../strings.js';
+import { LockExpiry } from './lock-expiry.js';
 import { Tooltip } from '../tooltip.js';
 
 const SEGMENT =
@@ -237,8 +238,10 @@ export function ToolGroup(props: {
   readonly onRetry?: () => void;
   readonly onUndo?: () => void;
   readonly onRedo?: () => void;
+  /** Called by the lock row's Keep editing button; true when the lock was renewed. */
+  readonly onKeepEditing?: () => Promise<boolean>;
 }): ReactElement | null {
-  const { store, onMode, onRetry, onUndo, onRedo } = props;
+  const { store, onMode, onRetry, onUndo, onRedo, onKeepEditing } = props;
   const editing = useEditorStore(store, (state) => state.status === 'editing');
   const mode = useEditorStore(store, (state) => state.mode);
   const saveStatus = useEditorStore(store, (state) => state.queue.status);
@@ -276,6 +279,10 @@ export function ToolGroup(props: {
         onRedo={onRedo}
       />
       <SaveRow status={saveStatus} canRetry={canRetry} onRetry={onRetry} />
+      <LockExpiry
+        store={store}
+        onKeepEditing={onKeepEditing ?? (() => Promise.resolve(false))}
+      />
     </div>
   );
 }

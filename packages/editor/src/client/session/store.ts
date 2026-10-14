@@ -13,6 +13,7 @@ import type { EditorSession, LockView, ModelNode } from '../../api-types.js';
 import { createUndoStack, type UndoEntry, type UndoStack } from './inverse.js';
 import type { InsertSlot } from './insertion.js';
 import { createQueue, type QueueState } from './save-queue.js';
+import type { RenewState } from './lock-client.js';
 import { NO_SELECTION, type Selection } from './scope.js';
 import { createTreeModel, type TreeModel } from './tree-model.js';
 
@@ -41,6 +42,17 @@ export type PickerOpener =
 /** What asked for a delete: focus returns to it when the confirmation closes with nothing deleted. */
 export type DeleteOpener = 'toolbar' | 'region' | 'panel';
 
+/**
+ * What the notice slot at the top of the sidebar says about the page:
+ * another editor holds it, it just came free, it was taken over, it changed
+ * in another tab, or the session ended.
+ */
+export type Notice = {
+  readonly kind: 'locked' | 'lapsed' | 'taken-over' | 'stale' | 'session-ended';
+  readonly holderName?: string;
+  readonly lastActiveAt?: string;
+};
+
 export type EditorState = {
   readonly status: EditorStatus;
   readonly session: EditorSession | null;
@@ -54,6 +66,10 @@ export type EditorState = {
   /** The latest message for the live region. */
   readonly announcement: string;
   readonly lock: LockView | null;
+  /** The banner about the page's state, if there is one. */
+  readonly notice: Notice | null;
+  /** Whether this tab's lock renewals are failing, and when one last worked. */
+  readonly renewal: RenewState | null;
   /** The item a structural write just landed on; the overlay flashes it once per token. */
   readonly flash: { readonly id: string; readonly token: number } | null;
   /** Which tab the panel region shows; only an explicit action changes it. */
@@ -84,6 +100,8 @@ export type EditorState = {
     readonly id: string;
     readonly opener: DeleteOpener;
   } | null;
+  /** Leaving while a save failed: the editor is asked whether to stay. */
+  readonly leaveRequest: { readonly token: number } | null;
 };
 
 /** What a successful write changes in one step, so no one reads a half-applied state. */
@@ -107,6 +125,17 @@ export type EditorStore = {
   announce(text: string): void;
   /** A newer lock view; one held by another editor ends editing in this tab. */
   setLock(view: LockView): void;
+  /** Shows a banner about the page's state, or none. */
+  setNotice(notice: Notice | null): void;
+  /** Lock renewals started or stopped failing. */
+  setRenewal(renewal: RenewState | null): void;
+  /** The editor lost the page to someone else: read-only, nothing pending, banner. */
+  tookOver(view: LockView): void;
+  /** Saving cannot go on until the page is reloaded: the banner says why. */
+  pauseFor(kind: 'stale' | 'session-ended'): void;
+  /** Opens the "Leave without saving?" confirmation. */
+  askLeave(): void;
+  cancelLeave(): void;
   setQueue(queue: QueueState): void;
   setUndo(undo: UndoStack): void;
   /** A write succeeded: the tree, page version, queue and selection change together. */
@@ -142,12 +171,24 @@ export function initialEditorState(): EditorState {
     undo: createUndoStack(),
     announcement: '',
     lock: null,
+    notice: null,
+    renewal: null,
     flash: null,
     panelTab: 'blocks',
     propertiesRequest: null,
     toast: null,
     picker: null,
     deleteRequest: null,
+    leaveRequest: null,
+  };
+}
+
+/** The notice for a page another editor holds. */
+function lockedNotice(view: LockView): Notice {
+  return {
+    kind: 'locked',
+    holderName: view.holder?.name ?? '',
+    ...(view.holder === null ? {} : { lastActiveAt: view.holder.lastActiveAt }),
   };
 }
 
@@ -167,10 +208,15 @@ export function openedState(
     mode: locked ? 'interact' : 'edit',
     selection: NO_SELECTION,
     lock: session.lock,
+    notice: locked ? lockedNotice(session.lock) : null,
+    renewal: null,
+    // A new session starts with nothing queued, whatever the last one left.
+    queue: createQueue(),
     undo: createUndoStack(),
     toast: null,
     picker: null,
     deleteRequest: null,
+    leaveRequest: null,
   };
 }
 
@@ -185,6 +231,28 @@ export function createEditorStore(
     if (next === state) return;
     state = next;
     for (const listener of listeners) listener();
+  }
+
+  function tookOver(view: LockView): void {
+    set({
+      ...state,
+      lock: view,
+      status: 'locked',
+      mode: 'interact',
+      selection: NO_SELECTION,
+      // Whatever was not saved is dropped: it must never land on the new holder's page.
+      queue: createQueue(),
+      undo: createUndoStack(),
+      notice: {
+        kind: 'taken-over',
+        holderName: view.holder?.name ?? '',
+      },
+      renewal: null,
+      toast: null,
+      picker: null,
+      deleteRequest: null,
+      leaveRequest: null,
+    });
   }
 
   return {
@@ -226,22 +294,36 @@ export function createEditorStore(
     },
     setLock(view) {
       // Another editor holding the page ends this tab's editing.
-      const taken = view.state === 'other' && state.status === 'editing';
+      if (view.state === 'other' && state.status === 'editing') {
+        tookOver(view);
+        return;
+      }
+      // While locked out, the banner follows who holds the page and since when.
+      const follows = view.state === 'other' && state.notice?.kind === 'locked';
       set({
         ...state,
         lock: view,
-        ...(taken
-          ? {
-              status: 'locked',
-              mode: 'interact',
-              selection: NO_SELECTION,
-              undo: createUndoStack(),
-              toast: null,
-              picker: null,
-              deleteRequest: null,
-            }
-          : {}),
+        ...(follows ? { notice: lockedNotice(view) } : {}),
       });
+    },
+    tookOver,
+    pauseFor(kind) {
+      set({ ...state, notice: { kind } });
+    },
+    setNotice(notice) {
+      if (notice === state.notice) return;
+      set({ ...state, notice });
+    },
+    setRenewal(renewal) {
+      set({ ...state, renewal });
+    },
+    askLeave() {
+      token += 1;
+      set({ ...state, leaveRequest: { token } });
+    },
+    cancelLeave() {
+      if (state.leaveRequest === null) return;
+      set({ ...state, leaveRequest: null });
     },
     setQueue(queue) {
       set({ ...state, queue });

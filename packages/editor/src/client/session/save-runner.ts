@@ -327,6 +327,28 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     }
   }
 
+  /**
+   * A write met a stale version. Which it is decides what the editor is told:
+   * if someone else holds the page now, it was taken over (the same lock
+   * answer a refused write gets), and if the lock is still ours the page
+   * changed in another tab or window.
+   */
+  async function noteStale(pageId: string): Promise<void> {
+    try {
+      const { lock } = await api.lock(pageId);
+      if (lock.state === 'other') {
+        store.setLock(lock);
+        return;
+      }
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status === 401) {
+        store.pauseFor('session-ended');
+        return;
+      }
+    }
+    store.pauseFor('stale');
+  }
+
   /** What to do with a failed write; true when the runner may go on. */
   async function failed(
     pageId: string,
@@ -361,6 +383,7 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
         }
         uncertain = false;
         store.setQueue(onFailure(store.getState().queue, 'stale'));
+        await noteStale(pageId);
         return false;
       } catch {
         store.setQueue(onFailure(store.getState().queue, 'network'));
@@ -382,8 +405,19 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
       return true;
     }
     if (kind === 'locked' && error instanceof ApiRequestError) {
-      if (error.lock !== undefined) store.setLock(error.lock);
+      // Someone else holds the page: this tab is read-only from here on.
+      if (error.lock !== undefined) {
+        store.setLock(error.lock);
+      } else {
+        try {
+          store.setLock((await api.lock(pageId)).lock);
+        } catch {
+          // The lock could not be read; the pause stands.
+        }
+      }
     }
+    if (kind === 'stale') await noteStale(pageId);
+    if (kind === 'session') store.pauseFor('session-ended');
     if (kind !== 'network') uncertain = false;
     return false;
   }

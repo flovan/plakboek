@@ -44,7 +44,11 @@ import {
   soleSectionType,
   type InsertSlot,
 } from '../session/insertion.js';
-import { startLockClient } from '../session/lock-client.js';
+import {
+  startLockClient,
+  startLockWatch,
+  type LockClientHandle,
+} from '../session/lock-client.js';
 import { legalityContextOf, moveActionFor } from '../session/move-action.js';
 import type { MoveDirection } from '../session/move-targets.js';
 import { withValues } from '../session/property-drafts.js';
@@ -53,7 +57,7 @@ import {
   type PreviewRunner,
 } from '../session/preview-runner.js';
 import { createEditorQueryClient } from '../session/query-client.js';
-import type { Intent } from '../session/save-queue.js';
+import { hasPending, type Intent } from '../session/save-queue.js';
 import { createSaveRunner, type SaveRunner } from '../session/save-runner.js';
 import {
   climb,
@@ -114,6 +118,9 @@ function focusShownToggle(host: HTMLElement, shown: SidebarLayout): void {
     toggle.focus({ preventScroll: true });
   }
 }
+
+/** How long the "stopped editing" notice stays. */
+const LAPSED_NOTICE_MS = 8000;
 
 function frameOf(host: HTMLElement): HTMLIFrameElement | null {
   const frame = host.shadowRoot?.querySelector('iframe');
@@ -252,6 +259,13 @@ function Shell(props: {
     };
   }, [host, hydrated, editable, blockHooks, store]);
 
+  // The lock watch starts again after a failed re-open.
+  const [watchRound, setWatchRound] = useState(0);
+  // The editor took the page over, so the answer is not "the holder stopped".
+  const tookOver = useRef(false);
+  // The lock client's renew-now, while this tab holds the page.
+  const lockRef = useRef<LockClientHandle | null>(null);
+
   // Opening the page for editing: one request after hydration, which takes
   // the lock and brings the page tree. A page that was stored before columns
   // existed comes back upgraded, so the frame is reloaded to show it.
@@ -259,16 +273,33 @@ function Shell(props: {
     mutationFn: async () =>
       await api.open(pathOfLocation(island.visitorLocation)),
     onSuccess: (opened) => {
+      const before = store.getState();
+      const wasLocked = before.status === 'locked';
+      const heldBy = before.notice?.holderName ?? '';
       store.opened(opened);
-      if (opened.upgraded) {
+      const nowMine = opened.lock.state !== 'other';
+      // A page that was held and is free now shows the working tree as the
+      // last holder left it.
+      if (opened.upgraded || (wasLocked && nowMine)) {
         frameOf(host)?.contentWindow?.location.replace(island.frameUrl);
       }
+      if (wasLocked && nowMine && !tookOver.current) {
+        store.setNotice({ kind: 'lapsed', holderName: heldBy });
+        store.announce(formatString('notice.lapsed', { name: heldBy }));
+      }
+      tookOver.current = false;
     },
     onError: (error) => {
+      // A page that was only waiting for its holder keeps waiting.
+      if (store.getState().status === 'locked') {
+        setWatchRound((round) => round + 1);
+        return;
+      }
       const code: unknown = Reflect.get(error, 'code');
       store.failedToOpen(typeof code === 'string' ? code : null);
     },
   });
+  const runOpen = open.mutate;
   const openStarted = useRef(false);
   useEffect(() => {
     if (!hydrated || !editable || openStarted.current) return;
@@ -319,6 +350,37 @@ function Shell(props: {
     island.frameUrl,
   ]);
 
+  // A property change is rendered before it is queued, so for a moment it is
+  // neither pending nor saved. Leaving waits for these to settle.
+  const propertyWork = useRef({
+    busy: 0,
+    waiters: [] as (() => void)[],
+  });
+  const trackPropertyWork = useCallback(
+    async <T,>(work: () => Promise<T>): Promise<T> => {
+      const tracker = propertyWork.current;
+      tracker.busy += 1;
+      try {
+        return await work();
+      } finally {
+        tracker.busy -= 1;
+        if (tracker.busy === 0) {
+          const waiting = tracker.waiters;
+          tracker.waiters = [];
+          for (const resolve of waiting) resolve();
+        }
+      }
+    },
+    [],
+  );
+  const propertyWorkSettled = useCallback((): Promise<void> => {
+    const tracker = propertyWork.current;
+    if (tracker.busy === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      tracker.waiters.push(resolve);
+    });
+  }, []);
+
   /**
    * A Properties control changed: render the block with the candidate values
    * and, when the engine accepts them, queue the save as one edit that the
@@ -331,55 +393,56 @@ function Shell(props: {
       values: Readonly<Record<string, unknown>>,
       changedKey: string,
       immediate: boolean,
-    ): Promise<PreviewResponse | null> => {
-      const state = store.getState();
-      const node = state.model?.get(blockId);
-      const preview = previewRef.current;
-      if (
-        state.status !== 'editing' ||
-        node === undefined ||
-        preview === null
-      ) {
-        return null;
-      }
-      const response = await preview.change(
-        blockId,
-        { props: withValues(node.props, values) },
-        immediate,
-      );
-      if (response?.ok !== true) return response;
-      const latest = store.getState();
-      const { model, session } = latest;
-      const runner = runnerRef.current;
-      if (
-        latest.status !== 'editing' ||
-        model === null ||
-        model.get(blockId) === undefined ||
-        runner === null
-      ) {
-        return response;
-      }
-      const type = model.get(blockId)?.type;
-      const property = session?.catalogue
-        .find((entry) => entry.key === type)
-        ?.properties.find((item) => item.key === changedKey);
-      const intent: Intent = { kind: 'update', blockId, props: values };
-      runner.perform(
-        intent,
-        buildUndoEntry(
+    ): Promise<PreviewResponse | null> =>
+      await trackPropertyWork(async () => {
+        const state = store.getState();
+        const node = state.model?.get(blockId);
+        const preview = previewRef.current;
+        if (
+          state.status !== 'editing' ||
+          node === undefined ||
+          preview === null
+        ) {
+          return null;
+        }
+        const response = await preview.change(
+          blockId,
+          { props: withValues(node.props, values) },
+          immediate,
+        );
+        if (response?.ok !== true) return response;
+        const latest = store.getState();
+        const { model, session } = latest;
+        const runner = runnerRef.current;
+        if (
+          latest.status !== 'editing' ||
+          model === null ||
+          model.get(blockId) === undefined ||
+          runner === null
+        ) {
+          return response;
+        }
+        const type = model.get(blockId)?.type;
+        const property = session?.catalogue
+          .find((entry) => entry.key === type)
+          ?.properties.find((item) => item.key === changedKey);
+        const intent: Intent = { kind: 'update', blockId, props: values };
+        runner.perform(
           intent,
-          model,
-          {
-            kind: 'changed',
-            itemId: blockId,
-            property: property?.label ?? changedKey,
-          },
-          { coalesceKey: `${blockId}:${changedKey}`, open: true },
-        ),
-      );
-      return response;
-    },
-    [store],
+          buildUndoEntry(
+            intent,
+            model,
+            {
+              kind: 'changed',
+              itemId: blockId,
+              property: property?.label ?? changedKey,
+            },
+            { coalesceKey: `${blockId}:${changedKey}`, open: true },
+          ),
+        );
+        return response;
+      }),
+    [store, trackPropertyWork],
   );
 
   const blurProperties = useCallback((blockId: string) => {
@@ -397,48 +460,49 @@ function Shell(props: {
       blockId: string,
       layout: ModelLayout,
       property: string,
-    ): Promise<boolean> => {
-      const state = store.getState();
-      const { model } = state;
-      const preview = previewRef.current;
-      if (
-        state.status !== 'editing' ||
-        model === null ||
-        model.get(blockId) === undefined ||
-        preview === null
-      ) {
-        return false;
-      }
-      const intent = layoutIntent(model, blockId, layout);
-      if (intent.kind !== 'update') return false;
-      const response = await preview.change(
-        blockId,
-        { layout: intent.layout ?? null },
-        true,
-      );
-      if (response?.ok !== true) return false;
-      const latest = store.getState();
-      const runner = runnerRef.current;
-      if (
-        latest.status !== 'editing' ||
-        latest.model === null ||
-        latest.model.get(blockId) === undefined ||
-        runner === null
-      ) {
-        return false;
-      }
-      runner.perform(
-        intent,
-        buildUndoEntry(
+    ): Promise<boolean> =>
+      await trackPropertyWork(async () => {
+        const state = store.getState();
+        const { model } = state;
+        const preview = previewRef.current;
+        if (
+          state.status !== 'editing' ||
+          model === null ||
+          model.get(blockId) === undefined ||
+          preview === null
+        ) {
+          return false;
+        }
+        const intent = layoutIntent(model, blockId, layout);
+        if (intent.kind !== 'update') return false;
+        const response = await preview.change(
+          blockId,
+          { layout: intent.layout ?? null },
+          true,
+        );
+        if (response?.ok !== true) return false;
+        const latest = store.getState();
+        const runner = runnerRef.current;
+        if (
+          latest.status !== 'editing' ||
+          latest.model === null ||
+          latest.model.get(blockId) === undefined ||
+          runner === null
+        ) {
+          return false;
+        }
+        runner.perform(
           intent,
-          latest.model,
-          { kind: 'changed', itemId: blockId, property },
-          { coalesceKey: `${blockId}:layout`, open: true },
-        ),
-      );
-      return true;
-    },
-    [store],
+          buildUndoEntry(
+            intent,
+            latest.model,
+            { kind: 'changed', itemId: blockId, property },
+            { coalesceKey: `${blockId}:layout`, open: true },
+          ),
+        );
+        return true;
+      }),
+    [store, trackPropertyWork],
   );
 
   /** Adds a column to a section, after one of its columns or last; the new column is selected. */
@@ -968,7 +1032,7 @@ function Shell(props: {
     ) {
       return undefined;
     }
-    return startLockClient({
+    const client = startLockClient({
       api,
       pageId: session.pageId,
       heartbeatSeconds: session.limits.heartbeatSeconds,
@@ -978,8 +1042,122 @@ function Shell(props: {
       onLost: (view) => {
         store.setLock(view);
       },
+      onRenewState: (renewal) => {
+        store.setRenewal(renewal);
+      },
+      onSessionEnded: () => {
+        store.pauseFor('session-ended');
+      },
     });
+    lockRef.current = client;
+    return () => {
+      lockRef.current = null;
+      client();
+    };
   }, [hydrated, session, status, api, store]);
+
+  // A page someone else holds is read once per heartbeat until it is free;
+  // then it is opened again, which takes the lock and brings the latest tree.
+  useEffect(() => {
+    if (!hydrated || session === null || status !== 'locked') return undefined;
+    return startLockWatch({
+      api,
+      pageId: session.pageId,
+      heartbeatSeconds: session.limits.heartbeatSeconds,
+      onHeld: (view) => {
+        store.setLock(view);
+      },
+      onFree: () => {
+        runOpen();
+      },
+      onSessionEnded: () => {
+        store.pauseFor('session-ended');
+      },
+    });
+  }, [hydrated, session, status, api, store, runOpen, watchRound]);
+
+  // The "stopped editing" notice stays for eight seconds.
+  const notice = useEditorStore(store, (state) => state.notice);
+  useEffect(() => {
+    if (notice?.kind !== 'lapsed') return undefined;
+    const timer = globalThis.setTimeout(() => {
+      if (store.getState().notice?.kind === 'lapsed') store.setNotice(null);
+    }, LAPSED_NOTICE_MS);
+    return () => {
+      globalThis.clearTimeout(timer);
+    };
+  }, [notice, store]);
+
+  /** Takes the page from its holder; the page is then opened again. */
+  const takeOver = useCallback(async (): Promise<boolean> => {
+    const pageId = store.getState().session?.pageId;
+    if (pageId === undefined) return false;
+    try {
+      await api.lockAction(pageId, 'take-over');
+    } catch {
+      return false;
+    }
+    tookOver.current = true;
+    runOpen();
+    return true;
+  }, [api, store, runOpen]);
+
+  /** Renews the lock now, for the row that counts down to its lapse. */
+  const keepEditing = useCallback(async (): Promise<boolean> => {
+    return (await lockRef.current?.renew()) ?? false;
+  }, []);
+
+  // Leaving while something is unsaved: the browser asks, unless the editor
+  // already chose to leave anyway.
+  const leavingAnyway = useRef(false);
+  useEffect(() => {
+    const view = host.ownerDocument.defaultView;
+    if (view === null || !editable) return undefined;
+    const onBeforeUnload = (event: BeforeUnloadEvent): void => {
+      if (leavingAnyway.current) return;
+      if (hasPending(store.getState().queue)) event.preventDefault();
+    };
+    view.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      view.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, [host, editable, store]);
+
+  const leaveProceed = useRef<(() => void) | null>(null);
+
+  /** Exit edit mode and Log out: everything pending is sent first. */
+  const leave = useCallback(
+    async (proceed: () => void): Promise<void> => {
+      // A change still being rendered is queued once its preview answers.
+      await propertyWorkSettled();
+      const runner = runnerRef.current;
+      if (runner === null || !hasPending(store.getState().queue)) {
+        proceed();
+        return;
+      }
+      if (await runner.flush()) {
+        proceed();
+        return;
+      }
+      leaveProceed.current = proceed;
+      store.askLeave();
+    },
+    [store, propertyWorkSettled],
+  );
+
+  const stay = useCallback(() => {
+    leaveProceed.current = null;
+    store.cancelLeave();
+  }, [store]);
+
+  const leaveAnyway = useCallback(() => {
+    const proceed = leaveProceed.current;
+    leaveProceed.current = null;
+    store.cancelLeave();
+    // The editor has chosen: the browser's own prompt would ask a second time.
+    leavingAnyway.current = true;
+    proceed?.();
+  }, [store]);
 
   // Follow the document in the frame: its links, its title, a failed render
   // and a navigation that took it somewhere else.
@@ -1018,6 +1196,12 @@ function Shell(props: {
           ? {
               store,
               onMode: changeMode,
+              onTakeOver: takeOver,
+              onKeepEditing: keepEditing,
+              signInHref: `/cms?next=${encodeURIComponent(island.visitorLocation)}`,
+              onLeave: leave,
+              onStay: stay,
+              onLeaveAnyway: leaveAnyway,
               onRetry: retrySave,
               onUndo: undo,
               onRedo: redo,

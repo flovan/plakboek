@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LockResponse, LockView } from '../../src/api-types.js';
 import { ApiRequestError } from '../../src/client/session/api-client.js';
-import { startLockClient } from '../../src/client/session/lock-client.js';
+import {
+  expiryState,
+  isFreeToOpen,
+  startLockClient,
+  startLockWatch,
+} from '../../src/client/session/lock-client.js';
 
 const view = (state: LockView['state']): LockView => ({
   enabled: true,
@@ -178,5 +183,141 @@ describe('startLockClient', () => {
     });
     fire('pagehide');
     expect(sendRelease).toHaveBeenCalledWith('/cms/api/pages/p1/lock/release');
+  });
+});
+
+describe('renewals that fail', () => {
+  it('reports failing renewals, then recovery, and renews on request', async () => {
+    const lockAction = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiRequestError(null, null))
+      .mockResolvedValue(answer('mine'));
+    const onRenewState = vi.fn();
+    const { doc } = fakeDocument();
+    let clock = 1_000;
+    const client = startLockClient({
+      api: { lock: vi.fn(), lockAction },
+      pageId: 'p1',
+      heartbeatSeconds: 30,
+      onLock: vi.fn(),
+      onLost: vi.fn(),
+      onRenewState,
+      now: () => clock,
+      document: doc,
+      sendRelease: vi.fn(),
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(onRenewState).toHaveBeenLastCalledWith({
+      failing: true,
+      lastRenewAt: 1_000,
+    });
+    clock = 61_000;
+    expect(await client.renew()).toBe(true);
+    expect(onRenewState).toHaveBeenLastCalledWith({
+      failing: false,
+      lastRenewAt: 61_000,
+    });
+    client();
+  });
+
+  it('ends the heartbeat and reports the session when the answer is a 401', async () => {
+    const lockAction = vi
+      .fn()
+      .mockRejectedValue(new ApiRequestError(401, null));
+    const onSessionEnded = vi.fn();
+    const { doc } = fakeDocument();
+    startLockClient({
+      api: { lock: vi.fn(), lockAction },
+      pageId: 'p1',
+      heartbeatSeconds: 30,
+      onLock: vi.fn(),
+      onLost: vi.fn(),
+      onSessionEnded,
+      document: doc,
+      sendRelease: vi.fn(),
+    });
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(onSessionEnded).toHaveBeenCalledTimes(1);
+    expect(lockAction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('expiryState', () => {
+  const ttl = 120;
+  const at = (seconds: number, failing = true) =>
+    expiryState(0, seconds * 1000, ttl, failing);
+
+  it('is not shown while renewals work', () => {
+    expect(at(100, false)).toEqual({
+      visible: false,
+      remainingSeconds: 20,
+      announceAt: null,
+    });
+  });
+
+  it('counts down from the last successful renewal while they fail', () => {
+    expect(at(0)).toMatchObject({ visible: true, remainingSeconds: 120 });
+    expect(at(90.5)).toMatchObject({ visible: true, remainingSeconds: 30 });
+    expect(at(200)).toMatchObject({ visible: true, remainingSeconds: 0 });
+  });
+
+  it('names the announcement moment the countdown has reached', () => {
+    expect(at(30).announceAt).toBeNull();
+    expect(at(60).announceAt).toBe(60);
+    expect(at(80).announceAt).toBe(60);
+    expect(at(90).announceAt).toBe(30);
+    expect(at(110).announceAt).toBe(10);
+    expect(at(130).announceAt).toBe(10);
+  });
+});
+
+describe('startLockWatch', () => {
+  const held = { ...view('other'), holder: { name: 'A', lastActiveAt: 'x' } };
+
+  it('treats anything but another editor holding the page as free', () => {
+    expect(isFreeToOpen(view('other'))).toBe(false);
+    expect(isFreeToOpen(view('free'))).toBe(true);
+    expect(isFreeToOpen(view('mine'))).toBe(true);
+  });
+
+  it('reads the lock each beat and reports the first free view once', async () => {
+    const lock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, lock: held })
+      .mockResolvedValueOnce({ ok: true, lock: view('free') });
+    const onHeld = vi.fn();
+    const onFree = vi.fn();
+    startLockWatch({
+      api: { lock },
+      pageId: 'p1',
+      heartbeatSeconds: 30,
+      onHeld,
+      onFree,
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(onHeld).toHaveBeenCalledWith(held);
+    expect(onFree).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(onFree).toHaveBeenCalledWith(view('free'));
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(lock).toHaveBeenCalledTimes(2);
+    expect(onFree).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps watching after a failed read', async () => {
+    const lock = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiRequestError(null, null))
+      .mockResolvedValueOnce({ ok: true, lock: view('free') });
+    const onFree = vi.fn();
+    startLockWatch({
+      api: { lock },
+      pageId: 'p1',
+      heartbeatSeconds: 30,
+      onHeld: vi.fn(),
+      onFree,
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(onFree).toHaveBeenCalledTimes(1);
   });
 });

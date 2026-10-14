@@ -2,13 +2,20 @@ import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   CONTROL,
   displayNameOf,
-  forgetEditorFlag,
   skipToPage,
+  useLeaveGuard,
+  type LeaveHandler,
   type SidebarEditing,
   type SidebarLayout,
   type SidebarSlots,
 } from './controls.js';
-import { ExitIcon, ExpandIcon, FrameIcon, LogOutIcon } from './icons.js';
+import {
+  ExitIcon,
+  ExpandIcon,
+  FrameIcon,
+  LogOutIcon,
+  SpinnerIcon,
+} from './icons.js';
 import type { ShellIsland } from './island.js';
 import { Rail } from './rail.js';
 import { STAGE_ID } from './stage.js';
@@ -31,6 +38,8 @@ export type SidebarProps = {
   /** The layout the shell is in now, for the toggle's pressed state. */
   readonly layout: SidebarLayout;
   readonly onToggleLayout?: () => void;
+  /** Called by Exit edit mode and Log out before they leave; it calls `proceed` to go. */
+  readonly onLeave?: LeaveHandler;
 };
 
 /** The framed layer: shown in place until the host is in the full layout,
@@ -70,7 +79,9 @@ function UserName(props: { readonly name: string }): ReactElement {
  * come from classes.
  */
 export function Sidebar(props: SidebarProps): ReactElement {
-  const { island, slots, editing, hydrated, layout, onToggleLayout } = props;
+  const { island, slots, editing, hydrated, layout, onToggleLayout, onLeave } =
+    props;
+  const { leaving, onExitClick, onLogoutSubmit } = useLeaveGuard(onLeave);
   const displayName = displayNameOf(island.user);
   const pressed = layout === 'full';
   return (
@@ -116,22 +127,35 @@ export function Sidebar(props: SidebarProps): ReactElement {
             {pressed ? <ExpandIcon /> : <FrameIcon />}
             {STRINGS['sidebar.fullWidth']}
           </button>
-          <a href={island.visitorLocation} className={CONTROL}>
-            <ExitIcon />
-            {STRINGS['sidebar.exit']}
+          <a
+            href={island.visitorLocation}
+            onClick={onExitClick}
+            aria-disabled={leaving === 'exit' ? true : undefined}
+            className={CONTROL}
+          >
+            {leaving === 'exit' ? <SpinnerIcon /> : <ExitIcon />}
+            {leaving === 'exit'
+              ? STRINGS['loading.saving']
+              : STRINGS['sidebar.exit']}
           </a>
           <div className="mt-2 flex flex-col gap-2">
             <UserName name={displayName} />
             <form
               method="post"
               action={island.logoutPath}
-              onSubmit={forgetEditorFlag}
+              onSubmit={onLogoutSubmit}
               className="m-0"
             >
               <input type="hidden" name="next" value={island.visitorLocation} />
-              <button type="submit" className={CONTROL}>
-                <LogOutIcon />
-                {STRINGS['sidebar.logOut']}
+              <button
+                type="submit"
+                aria-disabled={leaving === 'logout' ? true : undefined}
+                className={CONTROL}
+              >
+                {leaving === 'logout' ? <SpinnerIcon /> : <LogOutIcon />}
+                {leaving === 'logout'
+                  ? STRINGS['loading.saving']
+                  : STRINGS['sidebar.logOut']}
               </button>
             </form>
           </div>
@@ -143,6 +167,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
         hydrated={hydrated}
         layout={layout}
         onToggleLayout={onToggleLayout}
+        onLeave={onLeave}
       />
     </aside>
   );
