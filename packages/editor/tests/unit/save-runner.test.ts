@@ -464,6 +464,95 @@ describe('the save runner', () => {
   });
 });
 
+describe('failures that are not a refusal of the change', () => {
+  it('pauses on a lock that changed during the write and keeps the edits behind it queued', async () => {
+    const ctx = setup(() =>
+      Promise.reject(new ApiRequestError(409, 'lock-changed')),
+    );
+    performMove(ctx);
+    performMove(ctx, {
+      kind: 'delete',
+      blockId: 'h1',
+    });
+    expect(await ctx.runner.flush()).toBe(false);
+    // only the first write went out; the second is not shed or sent on
+    expect(ctx.edit).toHaveBeenCalledTimes(1);
+    const { queue, notice } = ctx.store.getState();
+    expect(queue.status).toBe('paused');
+    expect(queue.pauseReason).toBe('locked');
+    expect(queue.entries).toHaveLength(2);
+    // the lock could not be read, so the editor is told the page changed
+    expect(notice?.kind).toBe('stale');
+  });
+
+  it('holds the write for a retry on a 429 instead of dropping it', async () => {
+    const ctx = setup(() => Promise.reject(new ApiRequestError(429, null)));
+    performMove(ctx);
+    expect(await ctx.runner.flush()).toBe(false);
+    const { queue } = ctx.store.getState();
+    expect(queue.status).toBe('failed');
+    expect(queue.lastFailure).toBe('network');
+    expect(queue.entries).toHaveLength(1);
+  });
+
+  it('pauses instead of shedding the edit when the page is gone or the permission was lost', async () => {
+    const ctx = setup(() =>
+      Promise.reject(new ApiRequestError(404, 'not-found')),
+    );
+    performMove(ctx);
+    expect(await ctx.runner.flush()).toBe(false);
+    const { queue, notice } = ctx.store.getState();
+    expect(queue.status).toBe('paused');
+    expect(queue.pauseReason).toBe('stale');
+    expect(notice?.kind).toBe('stale');
+  });
+
+  it('puts the entry of a refused undo back on the undo stack', async () => {
+    let refuse = false;
+    const ctx = setup(() =>
+      refuse
+        ? Promise.reject(new ApiRequestError(422, 'placement'))
+        : Promise.resolve(responseFor(movedToTop(tree, 'h2', 'c2'))),
+    );
+    performMove(ctx);
+    await ctx.runner.flush();
+    expect(ctx.store.getState().undo.undo).toHaveLength(1);
+
+    refuse = true;
+    ctx.runner.undo();
+    await ctx.runner.flush();
+    const { undo } = ctx.store.getState();
+    expect(undo.undo).toHaveLength(1);
+    expect(undo.redo).toHaveLength(0);
+  });
+
+  it('drops the undo entry of a refused typed edit', async () => {
+    const ctx = setup(() =>
+      Promise.reject(new ApiRequestError(422, 'invalid-props')),
+    );
+    const intent: Intent = {
+      kind: 'update',
+      blockId: 'h1',
+      props: { text: 'x' },
+    };
+    const model = ctx.store.getState().model;
+    if (model === null) throw new Error('not open');
+    ctx.runner.perform(
+      intent,
+      buildUndoEntry(
+        intent,
+        model,
+        { kind: 'changed', itemId: 'h1', property: 'Text' },
+        { coalesceKey: 'h1:text', open: true },
+      ),
+    );
+    ctx.runner.ready('h1');
+    await ctx.runner.flush();
+    expect(ctx.store.getState().queue.lastFailure).toBe('refused');
+    expect(ctx.store.getState().undo.undo).toHaveLength(0);
+  });
+});
+
 describe('the metadata of a write', () => {
   it('goes with the entry an undo of a typed change merged into, and does not leak onto the next write', async () => {
     const ctx = setup((_, request) =>

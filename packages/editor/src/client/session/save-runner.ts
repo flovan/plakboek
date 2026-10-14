@@ -43,6 +43,7 @@ import {
   takeUndo,
   type ActionLabel,
   type UndoEntry,
+  type UndoStack,
 } from './inverse.js';
 import { WRITE_SCOPE_ID } from './query-client.js';
 import {
@@ -204,12 +205,74 @@ type EntryMeta = {
   /** The write adds a new item: say so once it is there. */
   readonly announceAdded: boolean;
   readonly undoEntry: UndoEntry | null;
+  /** The write is this undo or redo, so a refusal puts the entry back where it was. */
+  readonly history: HistoryStep | null;
+};
+
+type HistoryStep = {
+  readonly which: 'undo' | 'redo';
+  readonly entry: UndoEntry;
 };
 
 type EnqueueExtra = PerformOptions & {
   readonly fromHistory?: boolean;
   readonly restored?: boolean;
+  readonly history?: HistoryStep;
 };
+
+/** The undo keys a typed or layout edit coalesces under, for the keys the update sets. */
+function coalesceKeysOf(intent: Intent): readonly string[] {
+  if (intent.kind !== 'update') return [];
+  return [
+    ...Object.keys(intent.props ?? {}).map((key) => `${intent.blockId}:${key}`),
+    ...(intent.layout === undefined ? [] : [`${intent.blockId}:layout`]),
+  ];
+}
+
+/**
+ * The stacks once a write was refused: it will never happen, so it is not
+ * something to undo. A refused undo or redo puts its entry back where it came
+ * from; a refused property edit drops the entry that collected its keystrokes
+ * (found by its key, since a burst's edits merged into one write).
+ */
+function withoutRefused(
+  stack: UndoStack,
+  intent: Intent,
+  info: EntryMeta | undefined,
+): UndoStack {
+  const history = info?.history ?? null;
+  if (history !== null) {
+    const { which, entry } = history;
+    if (which === 'undo' && stack.redo.at(-1) === entry) {
+      return {
+        undo: [...stack.undo, entry],
+        redo: stack.redo.slice(0, -1),
+      };
+    }
+    if (which === 'redo' && stack.undo.at(-1) === entry) {
+      return {
+        undo: stack.undo.slice(0, -1),
+        redo: [...stack.redo, entry],
+      };
+    }
+    return stack;
+  }
+  if (info?.undoEntry != null) {
+    return stack.undo.at(-1) === info.undoEntry
+      ? { undo: stack.undo.slice(0, -1), redo: stack.redo }
+      : stack;
+  }
+  const keys = coalesceKeysOf(intent);
+  const at = stack.undo.findLastIndex(
+    (entry) => entry.coalesceKey !== null && keys.includes(entry.coalesceKey),
+  );
+  return at === -1
+    ? stack
+    : {
+        undo: stack.undo.filter((_, index) => index !== at),
+        redo: stack.redo,
+      };
+}
 
 export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
   const { store, api, queryClient, frame, frameUrl, hooks } = options;
@@ -411,21 +474,18 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
       meta.delete(entry.seq);
       // The write will never happen, so it is not something to undo.
       const stack = store.getState().undo;
-      if (info?.undoEntry != null && stack.undo.at(-1) === info.undoEntry) {
-        store.setUndo({ undo: stack.undo.slice(0, -1), redo: stack.redo });
-      }
+      const reverted = withoutRefused(stack, entry.intent, info);
+      if (reverted !== stack) store.setUndo(reverted);
       return true;
     }
-    if (kind === 'locked' && error instanceof ApiRequestError) {
-      // Someone else holds the page: this tab is read-only from here on.
-      if (error.lock !== undefined) {
+    if (kind === 'locked') {
+      // Someone else holds the page: this tab is read-only from here on. An
+      // answer without the lock (the lock changed during the write) is read
+      // again, and when the page is still ours the banner says it changed.
+      if (error instanceof ApiRequestError && error.lock !== undefined) {
         store.setLock(error.lock);
       } else {
-        try {
-          store.setLock((await api.lock(pageId)).lock);
-        } catch {
-          // The lock could not be read; the pause stands.
-        }
+        await noteStale(pageId);
       }
     }
     if (kind === 'stale') await noteStale(pageId);
@@ -527,6 +587,7 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
         announceRestored: extra.restored === true,
         announceAdded: addsItem(intent) && extra.fromHistory !== true,
         undoEntry,
+        history: extra.history ?? null,
       });
     }
     if (undoEntry !== null) {
@@ -603,6 +664,7 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     enqueueIntent(taken.intent, null, {
       fromHistory: true,
       restored: restores,
+      history: { which, entry: taken.entry },
     });
   }
 

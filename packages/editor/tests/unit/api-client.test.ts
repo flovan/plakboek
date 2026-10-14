@@ -124,7 +124,15 @@ describe('failureKindOf', () => {
     [423, 'locked', 'locked'],
     [401, 'unauthenticated', 'session'],
     [400, 'invalid-props', 'refused'],
-    [403, 'forbidden', 'refused'],
+    [408, null, 'network'],
+    [425, null, 'network'],
+    [429, null, 'network'],
+    [409, 'lock-changed', 'locked'],
+    [409, 'locking-disabled', 'stale'],
+    [403, 'forbidden', 'stale'],
+    [404, 'not-found', 'stale'],
+    [422, 'placement', 'refused'],
+    [413, 'too-large', 'refused'],
   ] as const)('maps %s %s to %s', (status, code, kind) => {
     expect(failureKindOf(new ApiRequestError(status, code))).toBe(kind);
   });

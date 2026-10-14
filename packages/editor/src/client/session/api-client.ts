@@ -147,20 +147,31 @@ export function createApiClient(
   };
 }
 
+/** Statuses a proxy in front of the server answers when it could not take the request now. */
+const TRANSIENT_STATUSES: ReadonlySet<number> = new Set([408, 425, 429]);
+
 /**
- * How a failed request counts for the save queue: no answer and a server
- * failure are the network's (a retry can help), a stale version is stale, a
- * held lock is locked, a missing session is the session's, and any other
- * refusal is a refusal of the change itself.
+ * How a failed request counts for the save queue. No answer, a server failure
+ * and a proxy's "try again" are the network's (a retry can help). A stale
+ * version, a page or permission that changed under the editor, and a lock that
+ * is switched off are stale: the page has to be read again. A lock that is held
+ * or changed during the write is locked, a missing session is the session's,
+ * and only a refusal of the change itself (validation, placement, a clash of
+ * ids) is a refusal that drops it.
  */
 export function failureKindOf(error: unknown): FailureKind {
   if (!(error instanceof ApiRequestError)) return 'refused';
   const { status, code } = error;
-  if (status === null || status >= 500) return 'network';
+  if (status === null || status >= 500 || TRANSIENT_STATUSES.has(status)) {
+    return 'network';
+  }
   if (status === 409 && code !== null && code.startsWith('stale-')) {
     return 'stale';
   }
+  if (status === 409 && code === 'lock-changed') return 'locked';
+  if (status === 409 && code === 'locking-disabled') return 'stale';
   if (status === 423) return 'locked';
   if (status === 401) return 'session';
+  if (status === 403 || status === 404) return 'stale';
   return 'refused';
 }
