@@ -50,6 +50,25 @@ async function drillTo(frame: Frame, sectionIndex: number, at: number) {
   await target.dblclick();
 }
 
+/** Tabs from the top of the shell until the page region has focus. */
+async function tabToRegion(page: Page): Promise<void> {
+  for (let presses = 0; presses < 30; presses += 1) {
+    if (await regionFocused(page)) return;
+    await page.keyboard.press('Tab');
+  }
+  throw new Error('The page region never took focus');
+}
+
+function regionFocused(page: Page): Promise<boolean> {
+  return page
+    .locator(`${HOST} #plakboek-stage`)
+    .evaluate(
+      (element) =>
+        element.getRootNode() instanceof ShadowRoot &&
+        (element.getRootNode() as ShadowRoot).activeElement === element,
+    );
+}
+
 function moveButton(page: Page, direction: string) {
   return page.getByRole('button', {
     name: new RegExp(`^Move .* ${direction}$`),
@@ -95,5 +114,228 @@ test.describe('moving by the toolbar', () => {
     const reloaded = await framedSite(page);
     await expect.poll(() => headingsIn(reloaded, 1)).toEqual(['H2', 'H3']);
     expect(await headingsIn(reloaded, 0)).toEqual(['H1']);
+  });
+});
+
+test.describe('moving by the keyboard', () => {
+  test('the whole move is done without a pointer, crossing into the next section, and focus stays in the region', async ({
+    page,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+
+    await tabToRegion(page);
+    await page.keyboard.press('ArrowDown'); // the first section
+    await page.keyboard.press('ArrowRight'); // its column
+    await page.keyboard.press('ArrowRight'); // H1
+    await expectSelectedOver(
+      page,
+      frame,
+      'section.section >> nth=0 >> h2 >> nth=0',
+    );
+
+    await page.keyboard.press('Alt+ArrowDown'); // past H2
+    await expect.poll(() => headingsIn(frame, 0)).toEqual(['H2', 'H1']);
+    await page.keyboard.press('Alt+ArrowDown'); // into the next section
+    await expect.poll(() => headingsIn(frame, 1)).toEqual(['H1', 'H3']);
+    expect(await headingsIn(frame, 0)).toEqual(['H2']);
+    await expectSaved(page);
+    expect(await regionFocused(page)).toBe(true);
+
+    await page.reload();
+    const reloaded = await framedSite(page);
+    await expect.poll(() => headingsIn(reloaded, 1)).toEqual(['H1', 'H3']);
+  });
+
+  test('Alt+Arrow at the first block of the first section says so and changes nothing', async ({
+    page,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await tabToRegion(page);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+
+    await page.keyboard.press('Alt+ArrowUp');
+
+    await expect(page.locator(`${HOST} [data-live-region]`)).toHaveText(
+      'Already at the start',
+    );
+    expect(await headingsIn(frame, 0)).toEqual(['H1', 'H2']);
+  });
+});
+
+test.describe('the toolbar buttons', () => {
+  test('Move up at the very start is aria-disabled and gives its reason', async ({
+    page,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await drillTo(frame, 0, 0);
+
+    const up = moveButton(page, 'up');
+    await expect(up).toHaveAttribute('aria-disabled', 'true');
+    await expect(
+      page.locator(`${TOOLBAR} [data-tooltip]`, {
+        hasText: 'Already at the start',
+      }),
+    ).toHaveCount(1);
+    // an aria-disabled button stays clickable; the click must do nothing
+    await up.click({ force: true });
+    expect(await headingsIn(frame, 0)).toEqual(['H1', 'H2']);
+    await expect(moveButton(page, 'down')).toHaveAttribute(
+      'aria-disabled',
+      'false',
+    );
+  });
+
+  test('columns that sit side by side move left and right', async ({
+    page,
+  }) => {
+    const created = await createEditablePage({
+      blocks: [
+        {
+          type: 'section',
+          props: { variant: 'plain' },
+          children: [
+            { type: 'column', children: [heading('Left')] },
+            { type: 'column', children: [heading('Right')] },
+          ],
+        },
+      ],
+    });
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    // double-click a heading: the section's column under the pointer
+    await frame.getByRole('heading', { name: 'Left' }).dblclick();
+
+    await expect(moveButton(page, 'right')).toBeVisible();
+    await expect(moveButton(page, 'left')).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+    await expect(moveButton(page, 'down')).toHaveCount(0);
+  });
+});
+
+test.describe('undo and redo', () => {
+  test('undo restores the order, saved, and it stays restored after a reload', async ({
+    page,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await drillTo(frame, 0, 1);
+    await moveButton(page, 'down').click();
+    await expect.poll(() => headingsIn(frame, 1)).toEqual(['H2', 'H3']);
+    await expectSaved(page);
+
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect.poll(() => headingsIn(frame, 0)).toEqual(['H1', 'H2']);
+    await expectSaved(page);
+    await expect(page.locator(`${HOST} [data-live-region]`)).toContainText(
+      'Undone: Moved',
+    );
+
+    await page.reload();
+    const reloaded = await framedSite(page);
+    await expect.poll(() => headingsIn(reloaded, 0)).toEqual(['H1', 'H2']);
+    expect(await headingsIn(reloaded, 1)).toEqual(['H3']);
+  });
+
+  test('redo applies the move again, saved, and it stays applied after a reload', async ({
+    page,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await drillTo(frame, 0, 1);
+    await moveButton(page, 'down').click();
+    await expect.poll(() => headingsIn(frame, 1)).toEqual(['H2', 'H3']);
+    await expectSaved(page);
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect.poll(() => headingsIn(frame, 0)).toEqual(['H1', 'H2']);
+    await expectSaved(page);
+
+    await page.keyboard.press('ControlOrMeta+Shift+Z');
+    await expect.poll(() => headingsIn(frame, 1)).toEqual(['H2', 'H3']);
+    await expectSaved(page);
+    await expect(page.locator(`${HOST} [data-live-region]`)).toContainText(
+      'Redone: Moved',
+    );
+
+    await page.reload();
+    const reloaded = await framedSite(page);
+    await expect.poll(() => headingsIn(reloaded, 1)).toEqual(['H2', 'H3']);
+    // the history is the session's: a reload starts with nothing to undo
+    await expect(page.getByRole('button', { name: 'Undo' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+  });
+
+  test('the frame keeps its scroll position through a move and an undo', async ({
+    page,
+  }) => {
+    const created = await createEditablePage({
+      blocks: [
+        section(heading('H1'), heading('H2')),
+        section(
+          heading('H3'),
+          { type: 'spacer', props: { size: 'tall' } },
+          { type: 'spacer', props: { size: 'tall' } },
+        ),
+      ],
+    });
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await tabToRegion(page);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await frame.evaluate(() => window.scrollTo(0, 300));
+    const scrolled = await frame.evaluate(() => window.scrollY);
+    expect(scrolled).toBeGreaterThan(0);
+
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect.poll(() => headingsIn(frame, 0)).toEqual(['H2', 'H1']);
+    await expectSaved(page);
+    expect(await frame.evaluate(() => window.scrollY)).toBe(scrolled);
+
+    await page.keyboard.press('ControlOrMeta+Z');
+    await expect.poll(() => headingsIn(frame, 0)).toEqual(['H1', 'H2']);
+    await expectSaved(page);
+    expect(await frame.evaluate(() => window.scrollY)).toBe(scrolled);
+  });
+});
+
+test.describe('what visitors see', () => {
+  test('a visitor still receives the published order after the working tree was rearranged', async ({
+    page,
+  }) => {
+    const created = await twoSections(true);
+    const visitorOrder = async (): Promise<string[]> => {
+      const response = await page.request.get(created.path);
+      expect(response.status()).toBe(200);
+      const html = await response.text();
+      return [...html.matchAll(/<h2[^>]*>([^<]*)<\/h2>/g)].map(
+        (match) => match[1] ?? '',
+      );
+    };
+    const before = await visitorOrder();
+    expect(before).toEqual(['H1', 'H2', 'H3']);
+
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await drillTo(frame, 0, 0);
+    await moveButton(page, 'down').click();
+    await expect.poll(() => headingsIn(frame, 0)).toEqual(['H2', 'H1']);
+    await expectSaved(page);
+
+    expect(await visitorOrder()).toEqual(before);
   });
 });
