@@ -5,6 +5,7 @@ import {
   draftValues,
   NO_DRAFTS,
   reconcileDrafts,
+  refusedKeys,
   shownValue,
   unansweredKeys,
   withChange,
@@ -88,6 +89,15 @@ describe('property drafts', () => {
     // the typed text stays shown, and it is not rendered or saved
     expect(shownValue(failed, node, 'text')).toBe('Hi');
     expect(draftValues(failed)).toEqual({ n: 2 });
+  });
+
+  it('refuses the keys the engine named, else the changed key, else everything sent', () => {
+    expect(refusedKeys(['n', 'other'], 'text', ['n', 'text'])).toEqual(['n']);
+    expect(refusedKeys([], 'text', ['n', 'text'])).toEqual(['text']);
+    // the changed key is no longer sent (a refused key re-rendered without it) and
+    // nothing named matches: every key sent is refused, so a re-render always shrinks
+    expect(refusedKeys([], 'n', ['text', 'other'])).toEqual(['text', 'other']);
+    expect(refusedKeys(['stored'], 'n', ['text'])).toEqual(['text']);
   });
 
   it('puts values on top of the props and removes a key set to undefined', () => {

@@ -110,6 +110,22 @@ export function afterPreview(
 }
 
 /**
+ * The keys of `sent` a refusal answers for: the keys the engine named, else
+ * the changed key when it was sent, else every key sent. Never empty while
+ * something was sent, so each refusal makes progress: a render without the
+ * refused keys always has fewer keys than the one before.
+ */
+export function refusedKeys(
+  issueKeys: readonly string[],
+  changedKey: string,
+  sent: readonly string[],
+): readonly string[] {
+  const named = issueKeys.filter((issueKey) => sent.includes(issueKey));
+  if (named.length > 0) return named;
+  return sent.includes(changedKey) ? [changedKey] : sent;
+}
+
+/**
  * The keys of `sent` whose render got no answer at all (the request failed or
  * the session ended): the drafts still waiting for it. A draft already queued
  * for saving by an earlier render keeps standing.

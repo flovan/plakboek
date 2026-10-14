@@ -18,6 +18,7 @@ import {
   draftValues,
   NO_DRAFTS,
   reconcileDrafts,
+  refusedKeys,
   shownValue,
   unansweredKeys,
   withChange,
@@ -197,10 +198,11 @@ function BlockProperties(props: {
         setLiveNeeds(response.needsInput);
         return;
       }
-      const named = response.issues
-        .map((issue) => issue.key)
-        .filter((issueKey) => sent.includes(issueKey));
-      const refused = named.length > 0 ? named : [key];
+      const refused = refusedKeys(
+        response.issues.map((issue) => issue.key),
+        key,
+        sent,
+      );
       setDrafts((current) => afterPreview(current, sent, refused));
       // What was rendered together with a refused value is rendered again without it.
       if (sent.some((sentKey) => !refused.includes(sentKey))) {
