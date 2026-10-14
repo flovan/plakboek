@@ -255,7 +255,7 @@ test.describe('where a line shows', () => {
 });
 
 test.describe('ending a drag without a change', () => {
-  test('Escape mid-drag leaves the order unchanged and the page unsaved-free', async ({
+  test('Escape mid-drag leaves the order unchanged and writes nothing', async ({
     page,
   }) => {
     const created = await twoSections();
@@ -347,5 +347,124 @@ test.describe('a drop that is not saved', () => {
     ).toBeVisible({ timeout: 15_000 });
     expect(await headingsIn(frame, 1)).toEqual(['H1', 'H2']);
     expect(await headingsIn(frame, 2)).toEqual(['H3', 'H4']);
+  });
+});
+
+/** Records every text the live region shows from now on, in order. */
+async function recordAnnouncements(
+  page: Page,
+): Promise<() => Promise<string[]>> {
+  await page.locator(HOST).evaluate((host) => {
+    const region = host.shadowRoot?.querySelector('[data-live-region]');
+    const seen: string[] = [];
+    Reflect.set(window, '__announcements', seen);
+    if (region === null || region === undefined) return;
+    new MutationObserver(() => {
+      const text = region.textContent ?? '';
+      if (text !== '' && seen.at(-1) !== text) seen.push(text);
+    }).observe(region, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  });
+  return async () =>
+    await page.evaluate(
+      () => Reflect.get(window, '__announcements') as string[],
+    );
+}
+
+test.describe('dragging by the keyboard', () => {
+  test('Space, two Arrow Downs and Space move the heading two legal positions with no pointer, announcing each step', async ({
+    page,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await drillTo(frame, 1, 0);
+    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await settledHandle(page);
+    const announced = await recordAnnouncements(page);
+
+    await page.locator(HANDLE).focus();
+    await page.keyboard.press('Space');
+    await expect(page.locator(LINE)).toBeVisible();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Space');
+
+    await expect.poll(() => headingsIn(frame, 2)).toEqual(['H1', 'H3', 'H4']);
+    expect(await headingsIn(frame, 1)).toEqual(['H2']);
+    await expect(page.getByText(SAVED)).toBeVisible();
+    await expect(page.locator(SURFACE)).toHaveCount(0);
+    await expect(page.locator(LINE)).toHaveCount(0);
+    expect(await announced()).toEqual(
+      expect.arrayContaining([
+        'Picked up Heading. Use the arrow keys to choose a position, Space to drop, Escape to cancel.',
+        'Position 2 of 2 in Column 1.',
+        'Position 1 of 3 in Column 1.',
+        'Dropped Heading at position 1 of 3 in Column 1.',
+      ]),
+    );
+
+    await page.reload();
+    const reloaded = await framedSite(page);
+    await expect
+      .poll(() => headingsIn(reloaded, 2))
+      .toEqual(['H1', 'H3', 'H4']);
+  });
+
+  test('Escape after lifting leaves the heading where it was and hands focus back to the handle', async ({
+    page,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await drillTo(frame, 1, 0);
+    await settledHandle(page);
+    const announced = await recordAnnouncements(page);
+
+    await page.locator(HANDLE).focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Escape');
+
+    await expect(page.locator(LINE)).toHaveCount(0);
+    await expect(page.locator(HANDLE)).toBeFocused();
+    expect(await headingsIn(frame, 1)).toEqual(['H1', 'H2']);
+    expect(await headingsIn(frame, 2)).toEqual(['H3', 'H4']);
+    expect(await announced()).toContain('Move cancelled.');
+    await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  });
+
+  test('a step to a slot below the window scrolls the frame so the line is in view', async ({
+    page,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await frame.evaluate(() => window.scrollTo(0, 0));
+    await frame.locator('section.section').nth(0).locator('h2').dblclick();
+    await frame.locator('section.section').nth(0).locator('h2').dblclick();
+    await settledHandle(page);
+
+    await page.locator(HANDLE).focus();
+    await page.keyboard.press('Space');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+
+    await expect
+      .poll(() => frame.evaluate(() => window.scrollY))
+      .toBeGreaterThan(0);
+    await expect
+      .poll(async () => {
+        const line = await page.locator(LINE).boundingBox();
+        const view = await page.locator(`${HOST} iframe`).boundingBox();
+        if (line === null || view === null) return false;
+        return line.y >= view.y && line.y + line.height <= view.y + view.height;
+      })
+      .toBe(true);
+    await page.keyboard.press('Escape');
   });
 });

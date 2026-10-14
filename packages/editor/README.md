@@ -29,6 +29,19 @@ older browsers are not supported: without declarative shadow DOM the shell
 renders no chrome, and `bootEditor()` finds no shadow root and does nothing.
 Visitors never load this package, so the floor applies to editors only.
 
+## Dependencies
+
+Drag and drop is the editor's own pointer and keyboard controller, with no
+drag-and-drop library. Drop targets are derived from the page model and the
+geometry of the framed page: the shell covers the frame with a transparent
+surface while a drag runs, works out which gap the pointer is nearest to, runs
+that gap through the same placement rules the server enforces, and scrolls the
+frame window directly near its top and bottom edges. The keyboard drag steps
+through the same list of legal gaps in document order.
+
+TanStack Query is the client's network layer: it runs the saves (one write at a
+time per page, with retries), the live property previews and the lock polling.
+
 ## How edit mode shows the site
 
 Edit mode is two requests to the page's own address, both answered by the
