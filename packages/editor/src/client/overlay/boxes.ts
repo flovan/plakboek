@@ -21,6 +21,8 @@ export type BoxesState = {
   readonly boxes: ReadonlyMap<string, Box>;
   /** The ids of the columns the render marked empty. */
   readonly empty: readonly string[];
+  /** The ids of the items fixed to the viewport: they sit in no gap between siblings. */
+  readonly fixed: readonly string[];
 };
 
 export type BoxTrackerOptions = {
@@ -60,10 +62,15 @@ export function measureLoose(element: Element, view: Window): Box | null {
 function sameState(a: BoxesState | null, b: BoxesState | null): boolean {
   if (a === null || b === null) return a === b;
   if (!sameBox(a.frame, b.frame)) return false;
-  if (a.boxes.size !== b.boxes.size || a.empty.length !== b.empty.length) {
+  if (
+    a.boxes.size !== b.boxes.size ||
+    a.empty.length !== b.empty.length ||
+    a.fixed.length !== b.fixed.length
+  ) {
     return false;
   }
   if (a.empty.some((id, at) => id !== b.empty[at])) return false;
+  if (a.fixed.some((id, at) => id !== b.fixed[at])) return false;
   for (const [id, box] of a.boxes) {
     if (!sameBox(box, b.boxes.get(id) ?? null)) return false;
   }
@@ -121,11 +128,14 @@ export function createBoxTracker(
       if (id !== null && !byId.has(id)) byId.set(id, element);
     }
     const boxes = new Map<string, Box>();
+    const fixed: string[] = [];
     for (const id of options.ids()) {
       const element = byId.get(id);
       if (element === undefined) continue;
       const box = measureLoose(element, view);
-      if (box !== null) boxes.set(id, box);
+      if (box === null) continue;
+      boxes.set(id, box);
+      if (view.getComputedStyle(element).position === 'fixed') fixed.push(id);
     }
     const empty: string[] = [];
     for (const element of doc.querySelectorAll(EMPTY_SELECTOR)) {
@@ -136,7 +146,7 @@ export function createBoxTracker(
       empty.push(id);
       boxes.set(id, box);
     }
-    emit({ frame: frameBox, boxes, empty });
+    emit({ frame: frameBox, boxes, empty, fixed });
   }
 
   function schedule(): void {

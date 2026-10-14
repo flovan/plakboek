@@ -626,10 +626,16 @@
     margin-left: -1px;
   }
 
+  /*
+   * The button's 32px hit area reaches past the 16px band, so it takes the
+   * pointer only while its band is hovered or holds focus or the picker: the
+   * rest of the time the page under it stays hoverable.
+   */
   .pk-insert-button {
     position: absolute;
     top: 50%;
     left: 50%;
+    pointer-events: none;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -640,6 +646,12 @@
     border: 0;
     background: transparent;
     cursor: pointer;
+  }
+
+  .pk-insert:hover .pk-insert-button,
+  .pk-insert:focus-within .pk-insert-button,
+  .pk-insert[data-open] .pk-insert-button {
+    pointer-events: auto;
   }
 
   .pk-insert-dot {

@@ -278,6 +278,12 @@ export function OverlayLayer(props: {
       [...measured.boxes].map(([id, box]) => [id, outlineRect(box, at)]),
     );
   }, [measured]);
+  // An item fixed to the viewport sits in no gap, so the gaps and the picker ignore it.
+  const inFlow = useMemo((): ReadonlyMap<string, Box> => {
+    if (measured === null || measured.fixed.length === 0) return placed;
+    const fixed = new Set(measured.fixed);
+    return new Map([...placed].filter(([id]) => !fixed.has(id)));
+  }, [measured, placed]);
   const picker = useEditorStore(store ?? NO_STORE, (current) => current.picker);
 
   // The toolbar gives way to the delete confirmation while it is open.
@@ -403,7 +409,7 @@ export function OverlayLayer(props: {
               <>
                 <InsertPoints
                   store={store}
-                  boxes={placed}
+                  boxes={inFlow}
                   onOpen={(slot) => {
                     onOpenPicker(slot, 'insert-point');
                   }}
@@ -436,7 +442,7 @@ export function OverlayLayer(props: {
                 key={picker.token}
                 store={store}
                 slot={picker.slot}
-                anchor={slotAnchor(picker.slot, placed, frameBox)}
+                anchor={slotAnchor(picker.slot, inFlow, frameBox)}
                 frame={frameBox}
                 onPick={onPick}
                 onClose={onClosePicker}

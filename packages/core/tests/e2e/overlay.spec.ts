@@ -71,9 +71,9 @@ async function overlayBox(page: Page, selector: string): Promise<Rect> {
  * is aimed at the middle of the frame, where it covers the pointer whatever
  * the frame then does.
  */
-async function hover(page: Page, selector: string): Promise<void> {
+async function hover(page: Page, selector: string, along = 0.5): Promise<void> {
   const point = await page.evaluate(
-    ({ host, target }) => {
+    ({ host, target, fraction }) => {
       const iframe = document
         .querySelector(host)
         ?.shadowRoot?.querySelector('iframe');
@@ -89,10 +89,10 @@ async function hover(page: Page, selector: string): Promise<void> {
       const bottom = Math.min(rect.bottom, iframe.clientHeight);
       return {
         x: frameBox.left + iframe.clientLeft + rect.left + rect.width / 2,
-        y: frameBox.top + iframe.clientTop + (top + bottom) / 2,
+        y: frameBox.top + iframe.clientTop + top + (bottom - top) * fraction,
       };
     },
-    { host: HOST, target: selector },
+    { host: HOST, target: selector, fraction: along },
   );
   await page.mouse.move(point.x, point.y);
 }
@@ -224,9 +224,10 @@ test.describe('hovering a block in the framed site', () => {
   }) => {
     await openShell(page, '/?_edit=1');
     const frame = await framedSite(page);
-    // the section's own top padding holds no child block
+    // the section's own top padding holds no child block, and 12px down is
+    // below the band of the insert point above the first section
     const section = await boxOf(frame, 'section.variant-plain');
-    await page.mouse.move(section.x + section.width / 2, section.y + 4);
+    await page.mouse.move(section.x + section.width / 2, section.y + 12);
     await expect(page.locator(CHIP)).toHaveText('Section');
     await expect(page.locator(SECTION_OUTLINE)).toHaveCount(0);
     expectNear(await overlayBox(page, OUTLINE), section);
@@ -355,7 +356,9 @@ test.describe('over the adversarial theme', () => {
     test(`outlines ${name} at its real position`, async ({ page }) => {
       await openShell(page, '/?_edit=1', selector);
       const frame = await framedSite(page);
-      await hover(page, selector);
+      // near the top of the element, clear of the insert point band that a
+      // fixed badge can happen to sit over
+      await hover(page, selector, 0.2);
       await expect(page.locator(CHIP)).toHaveText(label);
       await expectOutlineOver(page, frame, selector);
     });
