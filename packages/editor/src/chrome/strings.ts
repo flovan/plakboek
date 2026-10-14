@@ -344,9 +344,9 @@ export const STRINGS = Object.freeze({
     'This property uses a custom control the editor does not have yet.',
   'panel.none': 'None',
   'panel.repeater.add': 'Add item',
-  'panel.repeater.moveEarlier': 'Move earlier',
-  'panel.repeater.moveLater': 'Move later',
-  'panel.repeater.remove': 'Remove',
+  'panel.repeater.moveEarlier': 'Move item {n} earlier',
+  'panel.repeater.moveLater': 'Move item {n} later',
+  'panel.repeater.remove': 'Remove item {n}',
   'panel.palette.selectFirst': 'Select a place on the page first',
   'panel.palette.notHere': "Can't be added here",
 

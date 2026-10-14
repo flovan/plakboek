@@ -286,11 +286,30 @@ test.describe('every widget edits its property and the block re-renders live', (
     await row(1).getByRole('checkbox', { name: 'Done' }).check();
     await expectItems([{ label: 'First' }, { label: 'Second', done: true }]);
 
+    // every row's actions name the row they act on
+    await expect(
+      row(0).getByRole('button', { name: 'Move item 1 later' }),
+    ).toBeVisible();
+    await expect(
+      row(1).getByRole('button', { name: 'Remove item 2' }),
+    ).toBeVisible();
+
     await row(0).locator('[data-repeater-action="later"]').click();
     await expectItems([{ label: 'Second', done: true }, { label: 'First' }]);
+    // focus follows the moved row, so the same action can be pressed again
+    await expect(
+      row(1).locator('[data-repeater-action="later"]'),
+    ).toBeFocused();
 
     await row(0).locator('[data-repeater-action="remove"]').click();
     await expectItems([{ label: 'First' }]);
+    await expect(
+      row(0).locator('[data-repeater-action="remove"]'),
+    ).toBeFocused();
+
+    await row(0).locator('[data-repeater-action="remove"]').click();
+    await expect(page.locator(`${HOST} [data-repeater-row]`)).toHaveCount(0);
+    await expect(add).toBeFocused();
   });
 
   test('what cannot be chosen yet is shown read-only with a note on where it will be edited', async ({

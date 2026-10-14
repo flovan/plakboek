@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from 'react';
+import { useEffect, useRef, type ReactElement, type ReactNode } from 'react';
 import type { SubField } from '../../../client/session/control-map.js';
 import {
   ArrowDownIcon,
@@ -6,7 +6,7 @@ import {
   PlusIcon,
   TrashIcon,
 } from '../../icons.js';
-import { STRINGS } from '../../strings.js';
+import { formatString, STRINGS } from '../../strings.js';
 
 type Row = Readonly<Record<string, unknown>>;
 
@@ -54,6 +54,27 @@ export type RepeaterControlProps = {
 export function RepeaterControl(props: RepeaterControlProps): ReactElement {
   const rows = rowsOf(props.value);
   const { disabled, onChange, onBlur } = props;
+  const root = useRef<HTMLDivElement>(null);
+  /** Where focus goes once the list has re-rendered: a row's action, or the Add button. */
+  const refocus = useRef<{
+    readonly row: number | null;
+    readonly action: string;
+  } | null>(null);
+
+  // Rows are keyed by position, so a move or a removal leaves the focused
+  // button on a different row (or deletes it): put focus where the editor was.
+  useEffect(() => {
+    const target = refocus.current;
+    if (target === null) return;
+    refocus.current = null;
+    root.current
+      ?.querySelector<HTMLElement>(
+        target.row === null
+          ? '[data-repeater-action="add"]'
+          : `[data-repeater-row="${String(target.row)}"] [data-repeater-action="${target.action}"]`,
+      )
+      ?.focus();
+  });
 
   const replace = (next: readonly Row[], immediate: boolean): void => {
     onChange(next, immediate);
@@ -63,11 +84,13 @@ export function RepeaterControl(props: RepeaterControlProps): ReactElement {
     const [taken] = next.splice(from, 1);
     if (taken === undefined) return;
     next.splice(to, 0, taken);
+    refocus.current = { row: to, action: to < from ? 'earlier' : 'later' };
     replace(next, true);
   };
 
   return (
     <div
+      ref={root}
       role="group"
       aria-labelledby={props.labelId}
       aria-describedby={props.describedBy}
@@ -110,7 +133,9 @@ export function RepeaterControl(props: RepeaterControlProps): ReactElement {
             <button
               type="button"
               className={ICON_BUTTON}
-              aria-label={STRINGS['panel.repeater.moveEarlier']}
+              aria-label={formatString('panel.repeater.moveEarlier', {
+                n: String(at + 1),
+              })}
               aria-disabled={disabled || at === 0}
               data-repeater-action="earlier"
               onClick={() => {
@@ -122,7 +147,9 @@ export function RepeaterControl(props: RepeaterControlProps): ReactElement {
             <button
               type="button"
               className={ICON_BUTTON}
-              aria-label={STRINGS['panel.repeater.moveLater']}
+              aria-label={formatString('panel.repeater.moveLater', {
+                n: String(at + 1),
+              })}
               aria-disabled={disabled || at === rows.length - 1}
               data-repeater-action="later"
               onClick={() => {
@@ -134,11 +161,18 @@ export function RepeaterControl(props: RepeaterControlProps): ReactElement {
             <button
               type="button"
               className={ICON_BUTTON}
-              aria-label={STRINGS['panel.repeater.remove']}
+              aria-label={formatString('panel.repeater.remove', {
+                n: String(at + 1),
+              })}
               aria-disabled={disabled}
               data-repeater-action="remove"
               onClick={() => {
                 if (disabled) return;
+                const left = rows.length - 1;
+                refocus.current =
+                  left === 0
+                    ? { row: null, action: 'add' }
+                    : { row: Math.min(at, left - 1), action: 'remove' };
                 replace(
                   rows.filter((_, index) => index !== at),
                   true,
