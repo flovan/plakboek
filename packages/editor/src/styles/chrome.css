@@ -279,6 +279,7 @@
 
   /* 24px of stage on every side of the frame. */
   .pk-stage {
+    position: relative;
     min-width: 0;
     min-height: 0;
     padding: 24px;
@@ -437,20 +438,23 @@
   }
 
   .pk-toolbar,
-  .pk-toolbar-menu {
+  .pk-toolbar-menu,
+  .pk-toast {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   }
 }
 
 :host([data-theme='dark']) .pk-frame,
 :host([data-theme='dark']) .pk-toolbar,
-:host([data-theme='dark']) .pk-toolbar-menu {
+:host([data-theme='dark']) .pk-toolbar-menu,
+:host([data-theme='dark']) .pk-toast {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 :host([data-theme='light']) .pk-frame,
 :host([data-theme='light']) .pk-toolbar,
-:host([data-theme='light']) .pk-toolbar-menu {
+:host([data-theme='light']) .pk-toolbar-menu,
+:host([data-theme='light']) .pk-toast {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
@@ -574,6 +578,35 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   }
 
+  /*
+   * The undo toast: bottom centre of the frame, 16px above its bottom edge
+   * (the stage keeps 24px around the frame, none in the full layout), above
+   * the overlay and below the confirmation dialogs.
+   */
+  .pk-toast {
+    position: absolute;
+    z-index: 4;
+    bottom: 40px;
+    left: 50%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: max-content;
+    max-width: min(400px, calc(100% - 48px));
+    padding: 8px 8px 8px 16px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    transform: translateX(-50%);
+  }
+
+  :host([data-layout='full']) .pk-toast {
+    bottom: 16px;
+    max-width: min(400px, calc(100% - 32px));
+  }
+
   /* Shown only while it animates; with reduced motion it has no fill at all. */
   .pk-overlay-flash {
     position: absolute;
@@ -584,7 +617,8 @@
 
   @media (forced-colors: active) {
     .pk-toolbar,
-    .pk-toolbar-menu {
+    .pk-toolbar-menu,
+    .pk-toast {
       border-color: CanvasText;
       background: Canvas;
     }
@@ -629,6 +663,10 @@
 
   .pk-toolbar {
     animation: pk-overlay-in 100ms ease-out;
+  }
+
+  .pk-toast {
+    animation: pk-overlay-in 120ms ease-out;
   }
 
   /* The drop flash: the tint goes from 24% to the resting 8% over 400ms, by opacity only. */

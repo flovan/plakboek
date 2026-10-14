@@ -7,13 +7,19 @@ import {
   type EditorMode,
   type EditorStore,
 } from '../client/session/store.js';
+import { DeleteDialog } from './editing/delete-dialog.js';
 import { LiveRegion } from './editing/live-region.js';
+import { UndoToast } from './editing/toast.js';
 import { ToolGroup } from './editing/tool-group.js';
 import type { ShellIsland } from './island.js';
 import { Sidebar, type SidebarLayout, type SidebarSlots } from './sidebar.js';
 import { Stage } from './stage.js';
 
 export type { SidebarSlots } from './sidebar.js';
+
+function noop(): void {
+  // Nothing to call: the shell was given no handler for this action.
+}
 
 export type ShellAppProps = {
   readonly island: ShellIsland;
@@ -42,6 +48,15 @@ export type ShellAppProps = {
     readonly onRedo?: () => void;
     /** Called by the floating toolbar's move buttons. */
     readonly onMove?: (id: string, direction: MoveDirection) => void;
+    /** Called by the floating toolbar's Duplicate and Delete buttons. */
+    readonly onDuplicate?: (id: string) => void;
+    readonly onDelete?: (id: string) => void;
+    /** Called by the delete confirmation's destructive button. */
+    readonly onConfirmDelete?: (id: string) => void;
+    /** Called when the delete confirmation closes with nothing deleted. */
+    readonly onCancelDelete?: () => void;
+    /** Called by the undo toast's button. */
+    readonly onToastUndo?: () => void;
   };
 };
 
@@ -98,12 +113,32 @@ export function ShellApp(props: ShellAppProps): ReactElement {
         editRegion={hydrated && editor !== undefined && editRegion}
         frameFailed={frameFailed}
         onReload={onReload}
+        toast={
+          hydrated && editor !== undefined ? (
+            <UndoToast
+              store={editor.store}
+              onUndo={editor.onToastUndo ?? editor.onUndo ?? noop}
+            />
+          ) : null
+        }
       />
       {hydrated && island.mode === 'edit' ? (
-        <OverlayLayer store={editor?.store} onMove={editor?.onMove} />
+        <OverlayLayer
+          store={editor?.store}
+          onMove={editor?.onMove}
+          onDuplicate={editor?.onDuplicate}
+          onDelete={editor?.onDelete}
+        />
       ) : null}
       {hydrated && editor !== undefined ? (
-        <LiveRegion store={editor.store} />
+        <>
+          <LiveRegion store={editor.store} />
+          <DeleteDialog
+            store={editor.store}
+            onConfirm={editor.onConfirmDelete ?? noop}
+            onCancel={editor.onCancelDelete ?? noop}
+          />
+        </>
       ) : null}
     </>
   );

@@ -17,6 +17,7 @@ import {
 } from '@tanstack/react-query';
 import { formatString, STRINGS } from '../../chrome/strings.js';
 import type {
+  CatalogueEntry,
   EditNode,
   EditRequest,
   EditResponse,
@@ -57,7 +58,7 @@ import {
   type QueueEntry,
 } from './save-queue.js';
 import { NO_SELECTION, selectCrumb, type Selection } from './scope.js';
-import type { EditorStore } from './store.js';
+import type { EditorState, EditorStore } from './store.js';
 import { createTreeModel, labelOf, type TreeModel } from './tree-model.js';
 
 export type SaveRunnerOptions = {
@@ -72,9 +73,21 @@ export type SaveRunnerOptions = {
   readonly idleMs?: number;
 };
 
+/** What a caller can say about where the page goes once a write lands. */
+export type PerformOptions = {
+  /** The item to select afterwards; defaults to the item the intent acted on. */
+  readonly selectId?: string | null;
+  /** Whether the selected item flashes; true unless said otherwise. */
+  readonly flash?: boolean;
+};
+
 export type SaveRunner = {
   /** Queues `intent`; `entry`, when given, is recorded for undo. */
-  readonly perform: (intent: Intent, entry: UndoEntry | null) => void;
+  readonly perform: (
+    intent: Intent,
+    entry: UndoEntry | null,
+    options?: PerformOptions,
+  ) => void;
   /** Sends everything pending; true when all of it was saved. */
   readonly flush: () => Promise<boolean>;
   /** Sends the held write again after a failure. */
@@ -154,11 +167,24 @@ export function selectionAfterWrite(
   return current;
 }
 
+function catalogueOf(state: EditorState): ReadonlyMap<string, CatalogueEntry> {
+  return new Map(
+    (state.session?.catalogue ?? []).map((item) => [item.key, item]),
+  );
+}
+
 type EntryMeta = {
   readonly selectId: string | null;
   readonly flash: boolean;
   readonly announceMove: boolean;
+  /** The write brings back a deleted item: say so once it is there. */
+  readonly announceRestored: boolean;
   readonly undoEntry: UndoEntry | null;
+};
+
+type EnqueueExtra = PerformOptions & {
+  readonly fromHistory?: boolean;
+  readonly restored?: boolean;
 };
 
 export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
@@ -254,19 +280,18 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     const acted = info?.selectId ?? null;
     if (acted === null || model.get(acted) === undefined) return;
     if (info?.flash === true) store.flash(acted);
-    if (info?.announceMove === true) {
-      const after = store.getState();
+    const after = store.getState();
+    const text = (id: string): string => {
+      const label = labelOf(model, catalogueOf(after), id);
+      return label.kind === 'column'
+        ? formatString('label.column', { n: String(label.n) })
+        : label.text;
+    };
+    if (info?.announceRestored === true) {
+      store.announce(formatString('announce.restored', { label: text(acted) }));
+    } else if (info?.announceMove === true) {
       const place = model.siblingIndex(acted);
       const parent = model.parentOf(acted);
-      const byKey = new Map(
-        (after.session?.catalogue ?? []).map((item) => [item.key, item]),
-      );
-      const text = (id: string): string => {
-        const label = labelOf(model, byKey, id);
-        return label.kind === 'column'
-          ? formatString('label.column', { n: String(label.n) })
-          : label.text;
-      };
       store.announce(
         formatString('announce.moved', {
           label: text(acted),
@@ -391,7 +416,7 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
   function enqueueIntent(
     intent: Intent,
     undoEntry: UndoEntry | null,
-    fromHistory: boolean,
+    extra: EnqueueExtra,
   ): void {
     const state = store.getState();
     if (state.status !== 'editing') return;
@@ -402,9 +427,11 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     );
     if (immediate) {
       meta.set(seq, {
-        selectId: actedId(intent),
-        flash: true,
-        announceMove: intent.kind === 'move' && !fromHistory,
+        selectId:
+          extra.selectId === undefined ? actedId(intent) : extra.selectId,
+        flash: extra.flash ?? true,
+        announceMove: intent.kind === 'move' && extra.fromHistory !== true,
+        announceRestored: extra.restored === true,
         undoEntry,
       });
     }
@@ -470,17 +497,24 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     }
     const text = actionText(taken.entry);
     store.setUndo(taken.stack);
-    store.announce(
-      formatString(which === 'undo' ? 'announce.undone' : 'announce.redone', {
-        action: text,
-      }),
-    );
-    enqueueIntent(taken.intent, null, true);
+    // Bringing a deleted item back is announced as such once it is there.
+    const restores = which === 'undo' && taken.entry.action.kind === 'deleted';
+    if (!restores) {
+      store.announce(
+        formatString(which === 'undo' ? 'announce.undone' : 'announce.redone', {
+          action: text,
+        }),
+      );
+    }
+    enqueueIntent(taken.intent, null, {
+      fromHistory: true,
+      restored: restores,
+    });
   }
 
   return {
-    perform: (intent, entry) => {
-      enqueueIntent(intent, entry, false);
+    perform: (intent, entry, options = {}) => {
+      enqueueIntent(intent, entry, options);
     },
     flush: () => {
       if (idleTimer !== null) {

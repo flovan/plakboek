@@ -16,7 +16,7 @@ import type { SidebarLayout } from '../../chrome/controls.js';
 import { ShellApp } from '../../chrome/shell.js';
 import { SHELL_ROOT_ID, type ShellIsland } from '../../chrome/island.js';
 import { STAGE_ID } from '../../chrome/stage.js';
-import { STRINGS } from '../../chrome/strings.js';
+import { formatString, STRINGS } from '../../chrome/strings.js';
 import type { BlockEditHooks } from '@plakboek/render';
 import type { BootEditorOptions } from '../boot.js';
 import { attachClaim } from '../frame/claim.js';
@@ -44,6 +44,12 @@ import {
   selectByClick,
 } from '../session/scope.js';
 import { selectAndAnnounce } from '../session/selection-announcement.js';
+import {
+  deleteActionFor,
+  deleteBlockedReason,
+  duplicateActionFor,
+  needsDeleteConfirmation,
+} from '../session/structure-actions.js';
 import {
   createEditorStore,
   useEditorStore,
@@ -287,12 +293,99 @@ function Shell(props: {
     [store],
   );
 
+  /** Deletes at once and offers to undo it; the caller has settled any confirmation. */
+  const performDelete = useCallback(
+    (id: string) => {
+      const runner = runnerRef.current;
+      const action = deleteActionFor(store.getState(), id);
+      if (runner === null || action === null) return;
+      runner.perform(action.intent, action.entry, {
+        selectId: action.selectId,
+        flash: false,
+      });
+      store.showToast(action.entry, action.label);
+      store.announce(formatString('action.deleted', { label: action.label }));
+      // After the confirmation (if any) has closed and handed the page back.
+      requestAnimationFrame(() => {
+        focusRegion(host);
+      });
+    },
+    [host, store],
+  );
+
+  /** Delete from the toolbar or the keyboard: it asks first when blocks go with the item. */
+  const deleteItem = useCallback(
+    (id: string, opener: 'toolbar' | 'region') => {
+      const state = store.getState();
+      const { model } = state;
+      if (state.status !== 'editing' || state.mode !== 'edit') return;
+      if (model === null || model.get(id) === undefined) return;
+      const blocked = deleteBlockedReason(state, id);
+      if (blocked !== null) {
+        store.announce(STRINGS[blocked]);
+        return;
+      }
+      if (needsDeleteConfirmation(model, id)) store.askDelete(id, opener);
+      else performDelete(id);
+    },
+    [store, performDelete],
+  );
+
+  const confirmDelete = useCallback(
+    (id: string) => {
+      store.cancelDelete();
+      performDelete(id);
+    },
+    [store, performDelete],
+  );
+
+  /** The dialog closed with nothing deleted: focus goes back to what opened it. */
+  const cancelDelete = useCallback(() => {
+    const request = store.getState().deleteRequest;
+    store.cancelDelete();
+    if (request === null) return;
+    requestAnimationFrame(() => {
+      const button =
+        request.opener === 'toolbar'
+          ? host.shadowRoot?.querySelector('[data-roving="delete"]')
+          : null;
+      if (button instanceof HTMLElement) button.focus({ preventScroll: true });
+      else focusRegion(host);
+    });
+  }, [host, store]);
+
+  const deleteFromToolbar = useCallback(
+    (id: string) => {
+      deleteItem(id, 'toolbar');
+    },
+    [deleteItem],
+  );
+
+  const duplicateItem = useCallback(
+    (id: string) => {
+      const state = store.getState();
+      if (state.status !== 'editing' || state.mode !== 'edit') return;
+      const action = duplicateActionFor(state, id, crypto.randomUUID());
+      if (action === null) {
+        store.announce(STRINGS['toolbar.reason.noDuplicate']);
+        return;
+      }
+      runnerRef.current?.perform(action.intent, action.entry);
+    },
+    [store],
+  );
+
   const retrySave = useCallback(() => {
     runnerRef.current?.retry();
   }, []);
   const undo = useCallback(() => {
     runnerRef.current?.undo();
   }, []);
+  /** Undo from the toast: its button is about to go, so focus goes to the page. */
+  const undoFromToast = useCallback(() => {
+    runnerRef.current?.undo();
+    focusRegion(host);
+  }, [host]);
   const redo = useCallback(() => {
     runnerRef.current?.redo();
   }, []);
@@ -407,10 +500,20 @@ function Shell(props: {
         case 'redo':
           runnerRef.current?.redo();
           break;
+        case 'delete':
+          if (selected !== undefined) {
+            deleteItem(selected.id, inToolbar ? 'toolbar' : 'region');
+          }
+          break;
+        case 'duplicate':
+          if (selected !== undefined) duplicateItem(selected.id);
+          break;
       }
     };
 
     const onKey = (event: KeyboardEvent): void => {
+      // The delete confirmation owns the keyboard while it is open.
+      if (store.getState().deleteRequest !== null) return;
       const target = event.composedPath()[0] ?? event.target;
       const action = keyAction(event, target);
       if (action === null) {
@@ -499,7 +602,17 @@ function Shell(props: {
       releaseClaim?.();
       frame.removeAttribute('tabindex');
     };
-  }, [host, hydrated, editable, status, store, changeMode, climbSelection]);
+  }, [
+    host,
+    hydrated,
+    editable,
+    status,
+    store,
+    changeMode,
+    climbSelection,
+    deleteItem,
+    duplicateItem,
+  ]);
 
   // The lock is held while editing: renewed on a heartbeat, again when the tab
   // is shown, and released when the page goes away.
@@ -567,6 +680,11 @@ function Shell(props: {
               onUndo: undo,
               onRedo: redo,
               onMove: moveItem,
+              onDuplicate: duplicateItem,
+              onDelete: deleteFromToolbar,
+              onConfirmDelete: confirmDelete,
+              onCancelDelete: cancelDelete,
+              onToastUndo: undoFromToast,
             }
           : undefined
       }

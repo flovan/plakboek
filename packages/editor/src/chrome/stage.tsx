@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { FrameErrorPanel, NarrowWindowPanel } from './panels.js';
 import { STRINGS } from './strings.js';
 
@@ -13,6 +13,8 @@ export type StageProps = {
   readonly frameFailed?: boolean;
   /** Called by the failure panel's Reload page button. */
   readonly onReload?: () => void;
+  /** Drawn over the frame's bottom edge: the undo toast. */
+  readonly toast?: ReactNode;
 };
 
 /**
@@ -29,7 +31,13 @@ export type StageProps = {
  * iframe stays in place (hidden) and the failure panel is drawn instead.
  */
 export function Stage(props: StageProps): ReactElement {
-  const { frameUrl, editRegion = false, frameFailed = false, onReload } = props;
+  const {
+    frameUrl,
+    editRegion = false,
+    frameFailed = false,
+    onReload,
+    toast,
+  } = props;
   return (
     <div
       id={STAGE_ID}
@@ -55,6 +63,7 @@ export function Stage(props: StageProps): ReactElement {
       <div className="hidden h-full max-[1024px]:block">
         <NarrowWindowPanel />
       </div>
+      {toast}
     </div>
   );
 }

@@ -17,6 +17,10 @@ import {
 import { breadcrumb, selectCrumb } from '../../client/session/scope.js';
 import { selectAndAnnounce } from '../../client/session/selection-announcement.js';
 import {
+  canDuplicate,
+  deleteBlockedReason,
+} from '../../client/session/structure-actions.js';
+import {
   useEditorStore,
   type EditorStore,
 } from '../../client/session/store.js';
@@ -26,6 +30,8 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   ArrowUpIcon,
+  DuplicateIcon,
+  TrashIcon,
 } from '../icons.js';
 import { formatString, STRINGS } from '../strings.js';
 import { Tooltip } from '../tooltip.js';
@@ -35,6 +41,9 @@ const MAX_CRUMBS = 4;
 
 const BUTTON =
   'flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent';
+
+/** Delete turns destructive on hover and focus only, and never while it cannot act. */
+const DELETE_BUTTON = `${BUTTON} hover:text-destructive focus-visible:text-destructive`;
 
 const CRUMB =
   'h-6 max-w-[96px] cursor-pointer truncate rounded-sm border-0 bg-transparent px-1 text-caption font-semibold text-text-muted hover:bg-surface-muted hover:text-text focus-visible:outline-2 focus-visible:outline-focus-ring';
@@ -63,6 +72,11 @@ const MOVE_COPY = {
   },
 } as const;
 
+/** The platform's shortcut key: Command on Apple systems, Control elsewhere. */
+function shortcutModifier(): 'Meta' | 'Control' {
+  return /Mac|iPhone|iPad/.test(navigator.platform) ? 'Meta' : 'Control';
+}
+
 export type ToolbarProps = {
   readonly store: EditorStore;
   /** The selected item's box in the shell's coordinates. */
@@ -72,17 +86,20 @@ export type ToolbarProps = {
   /** Whether the item's siblings sit side by side or stacked in the site. */
   readonly axis: 'horizontal' | 'vertical';
   readonly onMove: (id: string, direction: MoveDirection) => void;
+  readonly onDuplicate: (id: string) => void;
+  readonly onDelete: (id: string) => void;
 };
 
 /**
  * The floating toolbar of the selected item: the path to it as a breadcrumb
- * and the buttons that move it one step earlier or later. It is pinned to the
+ * and the buttons that move it one step earlier or later, duplicate it or
+ * delete it. It is pinned to the
  * item in the interaction plane, and is one tab stop with arrow keys roving
  * between its buttons. A button that cannot act stays focusable
  * (`aria-disabled`) so its reason can be read.
  */
 export function Toolbar(props: ToolbarProps): ReactElement | null {
-  const { store, item, frame, axis, onMove } = props;
+  const { store, item, frame, axis, onMove, onDuplicate, onDelete } = props;
   const state = useEditorStore(store, (current) => current);
   const root = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 40 });
@@ -142,6 +159,8 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
     ),
     'earlier',
     'later',
+    'duplicate',
+    'delete',
   ];
   const current = keys.includes(active) ? active : (keys[0] ?? '');
 
@@ -207,6 +226,13 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
       </Tooltip>
     );
   };
+
+  const duplicateReason =
+    ctx !== null && canDuplicate(ctx, selectedId)
+      ? null
+      : STRINGS['toolbar.reason.noDuplicate'];
+  const blocked = deleteBlockedReason(state, selectedId);
+  const deleteReason = blocked === null ? null : STRINGS[blocked];
 
   return (
     <div
@@ -309,6 +335,46 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
       <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
       {moveButton('earlier')}
       {moveButton('later')}
+      <Tooltip
+        label={duplicateReason ?? STRINGS['toolbar.duplicate']}
+        placement={placement.mode === 'below' ? 'top' : 'bottom'}
+      >
+        <button
+          type="button"
+          className={BUTTON}
+          aria-label={formatString('toolbar.duplicate.label', {
+            label: itemLabel,
+          })}
+          aria-disabled={duplicateReason !== null}
+          aria-keyshortcuts={`${shortcutModifier()}+D`}
+          onClick={() => {
+            if (duplicateReason === null) onDuplicate(selectedId);
+          }}
+          {...rove('duplicate')}
+        >
+          <DuplicateIcon />
+        </button>
+      </Tooltip>
+      <Tooltip
+        label={deleteReason ?? STRINGS['toolbar.delete']}
+        placement={placement.mode === 'below' ? 'top' : 'bottom'}
+      >
+        <button
+          type="button"
+          className={deleteReason === null ? DELETE_BUTTON : BUTTON}
+          aria-label={formatString('toolbar.delete.label', {
+            label: itemLabel,
+          })}
+          aria-disabled={deleteReason !== null}
+          aria-keyshortcuts="Delete"
+          onClick={() => {
+            if (deleteReason === null) onDelete(selectedId);
+          }}
+          {...rove('delete')}
+        >
+          <TrashIcon />
+        </button>
+      </Tooltip>
     </div>
   );
 }

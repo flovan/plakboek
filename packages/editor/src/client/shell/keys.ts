@@ -44,7 +44,9 @@ export type StructureAction =
   | { readonly kind: 'climb' }
   | { readonly kind: 'move'; readonly direction: 'earlier' | 'later' }
   | { readonly kind: 'undo' }
-  | { readonly kind: 'redo' };
+  | { readonly kind: 'redo' }
+  | { readonly kind: 'delete' }
+  | { readonly kind: 'duplicate' };
 
 /** Where focus was when the key was pressed. */
 export type StructureFocus = {
@@ -62,10 +64,11 @@ export type StructureKeyInput = KeyInput & { readonly shiftKey: boolean };
  * The keyboard model of the page region (UI-SPEC S2): arrows walk the siblings
  * of the scope, Right or Enter drill in, Left climbs, Home and End jump, Alt
  * and an arrow along the siblings' axis move the selection, and Control or
- * Command with Z undoes (with Shift, redoes). Plain keys act only with focus
- * on the region, or for Up and Down on the toolbar, which keeps the left and
- * right arrows and Home and End for itself. Nothing fires while the user
- * types.
+ * Command with Z undoes (with Shift, redoes), Control or Command with D
+ * duplicates and Delete or Backspace deletes the selection. Plain keys act
+ * only with focus on the region, or for Up, Down, Delete and Backspace on the
+ * toolbar, which keeps the left and right arrows and Home and End for itself.
+ * Nothing fires while the user types.
  */
 export function structureKeyAction(
   input: StructureKeyInput,
@@ -81,6 +84,15 @@ export function structureKeyAction(
   }
   if (!focus.inRegion && !focus.inToolbar) return null;
 
+  if (
+    command &&
+    !input.altKey &&
+    !input.shiftKey &&
+    (key === 'd' || key === 'D')
+  ) {
+    return { kind: 'duplicate' };
+  }
+
   if (input.altKey && !command && !input.shiftKey) {
     const along =
       focus.axis === 'horizontal'
@@ -92,6 +104,7 @@ export function structureKeyAction(
   }
   if (command || input.altKey || input.shiftKey) return null;
 
+  if (key === 'Delete' || key === 'Backspace') return { kind: 'delete' };
   if (key === 'ArrowDown') return { kind: 'sibling', direction: 'next' };
   if (key === 'ArrowUp') return { kind: 'sibling', direction: 'previous' };
   if (!focus.inRegion) return null;

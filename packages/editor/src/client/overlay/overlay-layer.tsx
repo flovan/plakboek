@@ -74,8 +74,11 @@ export function OverlayLayer(props: {
   readonly store?: EditorStore;
   /** Called by the toolbar's move buttons. */
   readonly onMove?: (id: string, direction: MoveDirection) => void;
+  /** Called by the toolbar's Duplicate and Delete buttons. */
+  readonly onDuplicate?: (id: string) => void;
+  readonly onDelete?: (id: string) => void;
 }): ReactElement {
-  const { frame, store, onMove } = props;
+  const { frame, store, onMove, onDuplicate, onDelete } = props;
   const layer = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<HoverState | null>(null);
   const [selection, setSelection] = useState<SelectionState | null>(null);
@@ -179,8 +182,14 @@ export function OverlayLayer(props: {
   const origin =
     frameBox === null ? null : { x: frameBox.left, y: frameBox.top };
 
+  // The toolbar gives way to the delete confirmation while it is open.
+  const confirming = useEditorStore(
+    store ?? NO_STORE,
+    (current) => current.deleteRequest !== null,
+  );
   const toolbarItem =
     store === undefined ||
+    confirming ||
     selection === null ||
     selection.selected === null ||
     selectedId === null ||
@@ -268,6 +277,8 @@ export function OverlayLayer(props: {
       </div>
       {store === undefined ||
       onMove === undefined ||
+      onDuplicate === undefined ||
+      onDelete === undefined ||
       !active ||
       frameBox === null ||
       toolbarItem === null ? null : (
@@ -286,6 +297,8 @@ export function OverlayLayer(props: {
               frame={frameBox}
               axis={axis}
               onMove={onMove}
+              onDuplicate={onDuplicate}
+              onDelete={onDelete}
             />
           </div>
         </div>

@@ -131,6 +131,28 @@ describe('structureKeyAction', () => {
     ).toEqual({ kind: 'redo' });
   });
 
+  it('deletes with Delete or Backspace and duplicates with Control or Command and D, from the region or the toolbar only', () => {
+    for (const name of ['Delete', 'Backspace']) {
+      expect(structureKeyAction(key(name), {}, region)).toEqual({
+        kind: 'delete',
+      });
+      expect(structureKeyAction(key(name), {}, toolbar)).toEqual({
+        kind: 'delete',
+      });
+      expect(structureKeyAction(key(name), {}, elsewhere)).toBeNull();
+    }
+    expect(structureKeyAction(key('d', { ctrlKey: true }), {}, region)).toEqual(
+      { kind: 'duplicate' },
+    );
+    expect(
+      structureKeyAction(key('D', { metaKey: true }), {}, toolbar),
+    ).toEqual({ kind: 'duplicate' });
+    expect(
+      structureKeyAction(key('d', { ctrlKey: true }), {}, elsewhere),
+    ).toBeNull();
+    expect(structureKeyAction(key('d'), {}, region)).toBeNull();
+  });
+
   it('does nothing while the user types, and ignores plain keys away from the region', () => {
     expect(
       structureKeyAction(

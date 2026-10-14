@@ -20,6 +20,7 @@ import {
   UndoIcon,
 } from '../icons.js';
 import { STRINGS } from '../strings.js';
+import { Tooltip } from '../tooltip.js';
 
 const SEGMENT =
   'flex h-10 min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 border-0 bg-surface px-3 text-body font-semibold text-text -outline-offset-2 hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-checked:bg-text aria-checked:text-surface aria-checked:hover:bg-text';
@@ -121,37 +122,58 @@ function isApplePlatform(): boolean {
 function HistoryRow(props: {
   readonly canUndo: boolean;
   readonly canRedo: boolean;
+  /** The next undo or redo deletes something this role may not delete. */
+  readonly undoNeedsDelete: boolean;
+  readonly redoNeedsDelete: boolean;
   readonly onUndo?: () => void;
   readonly onRedo?: () => void;
 }): ReactElement {
-  const { canUndo, canRedo, onUndo, onRedo } = props;
+  const { canUndo, canRedo, undoNeedsDelete, redoNeedsDelete, onUndo, onRedo } =
+    props;
   const modifier = isApplePlatform() ? 'Meta' : 'Control';
+  const undoActs = canUndo && !undoNeedsDelete;
+  const redoActs = canRedo && !redoNeedsDelete;
+  const reason = STRINGS['toolbar.reason.noDeletePermission'];
   return (
     <div className="flex gap-2">
-      <button
-        type="button"
-        className={HISTORY_BUTTON}
-        aria-disabled={!canUndo}
-        aria-keyshortcuts={`${modifier}+Z`}
-        onClick={() => {
-          if (canUndo) onUndo?.();
-        }}
+      <Tooltip
+        label={reason}
+        enabled={canUndo && undoNeedsDelete}
+        placement="bottom"
+        className="flex min-w-0 flex-1"
       >
-        <UndoIcon />
-        {STRINGS['tools.undo']}
-      </button>
-      <button
-        type="button"
-        className={HISTORY_BUTTON}
-        aria-disabled={!canRedo}
-        aria-keyshortcuts={`${modifier}+Shift+Z`}
-        onClick={() => {
-          if (canRedo) onRedo?.();
-        }}
+        <button
+          type="button"
+          className={HISTORY_BUTTON}
+          aria-disabled={!undoActs}
+          aria-keyshortcuts={`${modifier}+Z`}
+          onClick={() => {
+            if (undoActs) onUndo?.();
+          }}
+        >
+          <UndoIcon />
+          {STRINGS['tools.undo']}
+        </button>
+      </Tooltip>
+      <Tooltip
+        label={reason}
+        enabled={canRedo && redoNeedsDelete}
+        placement="bottom"
+        className="flex min-w-0 flex-1"
       >
-        <RedoIcon />
-        {STRINGS['tools.redo']}
-      </button>
+        <button
+          type="button"
+          className={HISTORY_BUTTON}
+          aria-disabled={!redoActs}
+          aria-keyshortcuts={`${modifier}+Shift+Z`}
+          onClick={() => {
+            if (redoActs) onRedo?.();
+          }}
+        >
+          <RedoIcon />
+          {STRINGS['tools.redo']}
+        </button>
+      </Tooltip>
     </div>
   );
 }
@@ -226,6 +248,18 @@ export function ToolGroup(props: {
   );
   const canUndo = useEditorStore(store, (state) => state.undo.undo.length > 0);
   const canRedo = useEditorStore(store, (state) => state.undo.redo.length > 0);
+  const cannotDelete = useEditorStore(
+    store,
+    (state) => state.session?.canDelete !== true,
+  );
+  const undoNeedsDelete = useEditorStore(
+    store,
+    (state) => state.undo.undo.at(-1)?.requiresDelete === true,
+  );
+  const redoNeedsDelete = useEditorStore(
+    store,
+    (state) => state.undo.redo.at(-1)?.requiresDelete === true,
+  );
   if (!editing) return null;
   return (
     <div
@@ -236,6 +270,8 @@ export function ToolGroup(props: {
       <HistoryRow
         canUndo={canUndo}
         canRedo={canRedo}
+        undoNeedsDelete={cannotDelete && undoNeedsDelete}
+        redoNeedsDelete={cannotDelete && redoNeedsDelete}
         onUndo={onUndo}
         onRedo={onRedo}
       />

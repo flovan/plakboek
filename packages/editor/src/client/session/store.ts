@@ -10,7 +10,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import type { EditorSession, LockView, ModelNode } from '../../api-types.js';
-import { createUndoStack, type UndoStack } from './inverse.js';
+import { createUndoStack, type UndoEntry, type UndoStack } from './inverse.js';
 import { createQueue, type QueueState } from './save-queue.js';
 import { NO_SELECTION, type Selection } from './scope.js';
 import { createTreeModel, type TreeModel } from './tree-model.js';
@@ -46,6 +46,17 @@ export type EditorState = {
     readonly id: string;
     readonly token: number;
   } | null;
+  /** The undo toast of the latest delete; shown while its entry is the next undo. */
+  readonly toast: {
+    readonly entry: UndoEntry;
+    readonly label: string;
+    readonly token: number;
+  } | null;
+  /** A delete waiting for the editor's confirmation, and what opened it. */
+  readonly deleteRequest: {
+    readonly id: string;
+    readonly opener: 'toolbar' | 'region';
+  } | null;
 };
 
 /** What a successful write changes in one step, so no one reads a half-applied state. */
@@ -78,6 +89,12 @@ export type EditorStore = {
   flash(id: string): void;
   clearFlash(): void;
   requestProperties(id: string): void;
+  /** Shows the undo toast for a delete, replacing any earlier one. */
+  showToast(entry: UndoEntry, label: string): void;
+  clearToast(): void;
+  /** Opens the delete confirmation for `id`. */
+  askDelete(id: string, opener: 'toolbar' | 'region'): void;
+  cancelDelete(): void;
 };
 
 export function initialEditorState(): EditorState {
@@ -94,6 +111,8 @@ export function initialEditorState(): EditorState {
     lock: null,
     flash: null,
     propertiesRequest: null,
+    toast: null,
+    deleteRequest: null,
   };
 }
 
@@ -114,6 +133,8 @@ export function openedState(
     selection: NO_SELECTION,
     lock: session.lock,
     undo: createUndoStack(),
+    toast: null,
+    deleteRequest: null,
   };
 }
 
@@ -177,6 +198,8 @@ export function createEditorStore(
               mode: 'interact',
               selection: NO_SELECTION,
               undo: createUndoStack(),
+              toast: null,
+              deleteRequest: null,
             }
           : {}),
       });
@@ -210,6 +233,22 @@ export function createEditorStore(
     requestProperties(id) {
       token += 1;
       set({ ...state, propertiesRequest: { id, token } });
+    },
+    showToast(entry, label) {
+      token += 1;
+      set({ ...state, toast: { entry, label, token } });
+    },
+    clearToast() {
+      if (state.toast === null) return;
+      set({ ...state, toast: null });
+    },
+    askDelete(id, opener) {
+      if (state.mode !== 'edit') return;
+      set({ ...state, deleteRequest: { id, opener } });
+    },
+    cancelDelete() {
+      if (state.deleteRequest === null) return;
+      set({ ...state, deleteRequest: null });
     },
   };
 }

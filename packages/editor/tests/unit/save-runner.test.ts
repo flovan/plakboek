@@ -289,6 +289,44 @@ describe('the save runner', () => {
     expect(ctx.store.getState().undo.undo).toHaveLength(1);
   });
 
+  it('selects the neighbour after a delete, and undo brings the item back under its own id and says so', async () => {
+    const without = tree.filter((node) => node.id !== 'h2');
+    const ctx = setup((_, request) =>
+      Promise.resolve(
+        request.ops[0]?.op === 'delete'
+          ? responseFor(without, 6)
+          : responseFor(tree, 7),
+      ),
+    );
+    const model = ctx.store.getState().model;
+    if (model === null) throw new Error('not open');
+    const intent: Intent = { kind: 'delete', blockId: 'h2' };
+    ctx.runner.perform(
+      intent,
+      buildUndoEntry(intent, model, { kind: 'deleted', itemId: 'h2' }),
+      { selectId: 'h1', flash: false },
+    );
+    await ctx.runner.flush();
+    expect(ctx.store.getState().model?.get('h2')).toBeUndefined();
+    expect(ctx.store.getState().selection).toEqual({
+      scopeId: 'c1',
+      selectedId: 'h1',
+    });
+    expect(ctx.store.getState().flash).toBeNull();
+
+    ctx.runner.undo();
+    await ctx.runner.flush();
+    const [, request] = ctx.edit.mock.calls[1] as [string, EditRequest];
+    expect(request.ops[0]).toMatchObject({
+      op: 'insert',
+      node: { id: 'h2', type: 'heading' },
+      position: { parentId: 'c1', previousId: 'h1' },
+    });
+    const state = ctx.store.getState();
+    expect(state.selection).toEqual({ scopeId: 'c1', selectedId: 'h2' });
+    expect(state.announcement).toBe('Restored heading.');
+  });
+
   describe('when a retry meets a stale version after the first attempt got no answer', () => {
     function staleAfterNetworkLoss(freshTree: readonly ModelNode[]): Setup {
       let attempts = 0;
