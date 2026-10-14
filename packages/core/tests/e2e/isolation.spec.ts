@@ -10,7 +10,14 @@
  * site's document.
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
+import { openEditor, SELECTED, tabToRegion } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
+import {
+  createEditablePage,
+  heading,
+  paragraph,
+  section,
+} from './helpers/pages.ts';
 import { assertSiteBehaviour } from './helpers/site-behaviour.ts';
 import { boxSnapshot, styleSnapshot } from './helpers/snapshots.ts';
 import { signIn } from './helpers/session.ts';
@@ -274,6 +281,170 @@ test.describe('the site is not changed by the chrome around it', () => {
     await switchToInteract(page);
     await assertSiteBehaviour(await framedSite(page));
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  });
+});
+
+/** The site elements of the interactive-block page that are measured. */
+const BLOCK_PAGE_SAMPLE = [
+  'html',
+  'body',
+  'header.site-header',
+  'section.section',
+  '[data-plakboek-columns]',
+  '[data-plakboek-columns] > *',
+  'h2',
+  'p',
+  '[data-accordion-list]',
+  '[data-accordion-trigger]',
+  '[data-tabs]',
+  '[data-tab-trigger]',
+  '[data-slides]',
+  '[data-slide]',
+  '[data-slides-next]',
+  '.cookie-banner',
+  '#site-footer',
+] as const;
+
+test.describe('the site with every editing layer mounted', () => {
+  test('has the computed styles and boxes a visitor gets, and no visitor response carries editor markers or hook code', async ({
+    page,
+    context,
+    playwright,
+  }) => {
+    const created = await createEditablePage({
+      publish: true,
+      blocks: [
+        section(
+          // renders the same whatever its note says
+          { type: 'note', props: { note: 'A note' } },
+          heading('First heading'),
+          heading('Second heading'),
+          {
+            type: 'accordionList',
+            children: [
+              {
+                type: 'accordionItem',
+                props: { title: 'First entry' },
+                children: [paragraph('First entry text')],
+              },
+              {
+                type: 'accordionItem',
+                props: { title: 'Second entry' },
+                children: [paragraph('Second entry text')],
+              },
+            ],
+          },
+          {
+            type: 'tabs',
+            children: [
+              {
+                type: 'tab',
+                props: { label: 'First tab' },
+                children: [paragraph('First tab text')],
+              },
+              { type: 'tab', props: { label: 'Second tab' } },
+            ],
+          },
+          {
+            type: 'slides',
+            props: { autoplay: false },
+            children: [
+              { type: 'slide', children: [paragraph('First slide text')] },
+              { type: 'slide', children: [paragraph('Second slide text')] },
+            ],
+          },
+        ),
+      ],
+    });
+    await openEditor(page, created.path);
+    const framed = await framedSite(page);
+
+    // a block selected (outline and toolbar) that still needs a value (its
+    // marker), and an insert point showing in the gap between two headings
+    await tabToRegion(page);
+    for (const key of ['ArrowDown', 'ArrowRight', 'ArrowRight']) {
+      await page.keyboard.press(key);
+    }
+    await page.getByRole('button', { name: 'Properties of Note' }).click();
+    await page.getByRole('textbox', { name: 'Note' }).fill('');
+    await expect(page.getByText('All changes saved')).toBeVisible();
+    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await expect(page.locator(`${HOST} [role="toolbar"]`)).toBeVisible();
+    await expect(page.locator(`${HOST} [data-marker]`)).toHaveCount(1);
+    const first = await framed.locator('h2').nth(0).boundingBox();
+    const second = await framed.locator('h2').nth(1).boundingBox();
+    if (first === null || second === null) throw new Error('No headings');
+    await page.mouse.move(
+      first.x + first.width / 2,
+      (first.y + first.height + second.y) / 2,
+    );
+    await expect(
+      page.getByRole('button', { name: 'Add block after Heading' }).first(),
+    ).toBeVisible();
+
+    const size = await framed.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+    const properties = await allProperties(framed);
+    const inFrame = {
+      styles: await styleSnapshot(framed, BLOCK_PAGE_SAMPLE, properties),
+      boxes: await boxSnapshot(framed, BLOCK_PAGE_SAMPLE),
+    };
+
+    // the same page, published, opened on its own at the frame's size
+    const visitor = await context.newPage();
+    await visitor.setViewportSize(size);
+    const response = await visitor.goto(created.path);
+    expect(response?.status()).toBe(200);
+    await visitor.waitForFunction(
+      () =>
+        (window as Window & { __siteScriptsReady?: boolean })
+          .__siteScriptsReady === true,
+    );
+    const alone = {
+      styles: await styleSnapshot(visitor, BLOCK_PAGE_SAMPLE, properties),
+      boxes: await boxSnapshot(visitor, BLOCK_PAGE_SAMPLE),
+    };
+    for (const selector of BLOCK_PAGE_SAMPLE) {
+      expect(alone.boxes[selector], `${selector} for a visitor`).not.toBeNull();
+    }
+    expect(inFrame.styles).toEqual(alone.styles);
+    expect(inFrame.boxes).toEqual(alone.boxes);
+
+    // sensitive: another size measures differently
+    await visitor.setViewportSize({
+      width: size.width - 200,
+      height: size.height,
+    });
+    expect(await boxSnapshot(visitor, BLOCK_PAGE_SAMPLE)).not.toEqual(
+      alone.boxes,
+    );
+    await visitor.close();
+
+    // what a visitor is sent: no editor marker, and no hook code in the page
+    // or in any script it loads
+    const anonymous = await playwright.request.newContext({
+      baseURL: process.env.E2E_BASE_URL,
+    });
+    const html = await (await anonymous.get(created.path)).text();
+    expect(html).toContain('data-accordion-list');
+    expect(html).not.toContain('data-pk-');
+    expect(html).not.toContain('plakboek-editor');
+    expect(html).not.toContain('block-edit');
+    const scripts = [...html.matchAll(/src="([^"]+\.js)"/g)].map(
+      (match) => match[1] ?? '',
+    );
+    expect(scripts.length).toBeGreaterThan(0);
+    // the build's chunks (the editor's, and the hook modules inside it) are
+    // not loaded by a visitor's page
+    expect(scripts.filter((path) => path.startsWith('/assets/'))).toEqual([]);
+    for (const path of scripts) {
+      const code = await (await anonymous.get(path)).text();
+      expect(code, path).not.toContain('data-pk-');
+      expect(code, path).not.toContain('block-edit');
+    }
+    await anonymous.dispose();
   });
 });
 

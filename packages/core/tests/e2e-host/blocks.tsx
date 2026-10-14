@@ -170,6 +170,11 @@ const Slide: BlockComponent<Record<string, never>> = ({ children, edit }) => (
   </div>
 );
 
+/** Renders the same whatever its required note says, so a spec can leave it empty. */
+const Note: BlockComponent<{ note: string }> = ({ edit }) => (
+  <div {...edit} className="note" aria-hidden="true" style={{ height: 24 }} />
+);
+
 const Badge: BlockComponent<{ label: string }> = ({ props, edit }) => (
   <div {...edit} className="badge" data-badge="">
     <span {...edit.field('label')}>{props.label}</span>
@@ -608,4 +613,19 @@ export const slide = defineBlock({
     allowedChildren: ['heading', 'text'],
   },
   component: Slide,
+});
+
+export const note = defineBlock({
+  key: 'note',
+  editor: { label: 'Note' },
+  schemaVersion: 1,
+  properties: {
+    note: {
+      fieldType: 'short_text',
+      label: 'Note',
+      required: true,
+      options: { maxLength: 100 },
+    },
+  },
+  component: Note,
 });

@@ -6,6 +6,7 @@ import {
   badge,
   carousel,
   heading,
+  note,
   propsDemo,
   quote,
   section,
@@ -46,6 +47,7 @@ export default defineConfig({
     tab,
     slides,
     slide,
+    note,
   ],
   // The constraints the Properties panel has to honour: one property is not
   // shown, one has a fixed value, one offers only two of its three choices.
