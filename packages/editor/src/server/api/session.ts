@@ -3,10 +3,10 @@
  * tree and keeping its edit lock.
  *
  * Opening is where the lock is taken (the shell request itself never writes):
- * the page is found from the live working tree, brought into the column shape
- * when it predates columns, the lock is taken when locking is on and free (or
- * already the caller's), and everything the client needs to start comes back
- * in one answer. A lock held by someone else does not fail the open; it is
+ * the page is found from the live working tree, the lock is taken when
+ * locking is on and free (or already the caller's), the tree is brought into
+ * the column shape when it predates columns (only while nobody else holds the
+ * page), and everything the client needs to start comes back in one answer. A lock held by someone else does not fail the open; it is
  * reported as lock state `other` and nothing is taken.
  *
  * A lock view only ever names the holder by display name and last activity.
@@ -125,20 +125,9 @@ export async function openPage(
   }
   const { id: pageId, locale } = resolution.page;
 
-  // Bring a tree that predates columns into the column shape before it is
-  // read, so the client only ever sees one shape.
-  const upgrade = await upgradeSectionColumns(deps.pages, { pageId });
-  const page = await getPage(deps.pages.db, pageId);
-  if (page === null) throw notFound();
-  // The version is read before the tree: a write that slips in between only
-  // leaves the client with an older base version, which the next write
-  // refuses as stale rather than applying over newer work.
-  const blocks = await readBlockTree(
-    deps.pages.db,
-    { ownerType: 'page', ownerId: pageId, locale },
-    deps.pages.hooks,
-  );
-
+  // The lock comes first: bringing a tree that predates columns into the
+  // column shape is a write, and a page someone else is editing is not ours
+  // to rewrite under them.
   try {
     await acquirePageLock(deps.pages, actor, { pageId });
   } catch (error) {
@@ -150,6 +139,26 @@ export async function openPage(
       throw error;
     }
   }
+
+  // Bring a tree that predates columns into the column shape before it is
+  // read, so the client only ever sees one shape. The engine leaves a page
+  // held by someone else alone: a viewer is shown its tree as it is, and the
+  // holder's own open has already put it in shape.
+  const upgrade = await upgradeSectionColumns(deps.pages, {
+    pageId,
+    actorUserId: actor.userId,
+  });
+  const page = await getPage(deps.pages.db, pageId);
+  if (page === null) throw notFound();
+  // The version is read before the tree: a write that slips in between only
+  // leaves the client with an older base version, which the next write
+  // refuses as stale rather than applying over newer work.
+  const blocks = await readBlockTree(
+    deps.pages.db,
+    { ownerType: 'page', ownerId: pageId, locale },
+    deps.pages.hooks,
+  );
+
   const lock = await lockViewOf(context, pageId);
 
   return {

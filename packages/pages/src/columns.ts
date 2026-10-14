@@ -34,6 +34,8 @@ import {
 } from './registry.js';
 import { pageBlocks, pages } from './schema.js';
 import { readStoredLayout } from './layout.js';
+import { isPageLockLive, PAGE_EDIT_LOCK_TTL_SECONDS } from './locks.js';
+import { getPageEditLocking } from './settings.js';
 
 /** Where the one column a section gains sorts among its (non-column)
  * children's own orders, which it does not touch. */
@@ -69,6 +71,14 @@ type StoredBlock = typeof pageBlocks.$inferSelect;
  * bumped once. Running it again changes nothing. A page that no longer
  * exists is skipped silently.
  *
+ * It respects the page's edit lock like every other write to the tree: while
+ * project-wide locking is on and someone other than `actorUserId` holds a
+ * live lock, the page is left exactly as it is (nothing is rewritten and the
+ * version does not move under the holder's open editor), and the result is
+ * the same as for a page with nothing to do. Pass the user on whose behalf
+ * the upgrade runs, if any, so their own lock does not block it; a run with
+ * no acting user (the boot-time upgrade) yields to every live lock.
+ *
  * A system data migration with no acting user, so it is not audited and
  * writes no audit row. It never publishes and never purges a cache: what
  * visitors see is the published snapshot, normalised on read
@@ -77,7 +87,12 @@ type StoredBlock = typeof pageBlocks.$inferSelect;
  */
 export async function upgradeSectionColumns(
   deps: PagesDeps,
-  input: { readonly pageId: string },
+  input: {
+    readonly pageId: string;
+    /** The user the upgrade runs for: a live lock of theirs does not block
+     * it. Omit for a run with no acting user. */
+    readonly actorUserId?: string;
+  },
 ): Promise<{
   /** True when this call changed the page's tree. */
   readonly upgraded: boolean;
@@ -96,11 +111,24 @@ export async function upgradeSectionColumns(
     );
 
     const [page] = await tx
-      .select({ id: pages.id, locale: pages.locale, version: pages.version })
+      .select({
+        id: pages.id,
+        locale: pages.locale,
+        version: pages.version,
+        lockedBy: pages.lockedBy,
+        lockedAt: pages.lockedAt,
+      })
       .from(pages)
       .where(eq(pages.id, input.pageId))
       .for('update');
     if (page === undefined) return { upgraded: false, pageVersion: null };
+    if (
+      isPageLockLive(page.lockedBy, page.lockedAt, now) &&
+      page.lockedBy !== input.actorUserId &&
+      (await getPageEditLocking(tx))
+    ) {
+      return { upgraded: false, pageVersion: null };
+    }
 
     const rows = await tx
       .select()
@@ -286,7 +314,8 @@ export async function upgradeSectionColumns(
  * holding a non-column child or no child), then each is upgraded in its own
  * short transaction. Returns how many pages were examined and how many
  * changed; call again while `upgraded` is above zero. A no-op without a
- * column kind.
+ * column kind. Pages held by a live edit lock are left out (see
+ * `upgradeSectionColumns`) and picked up by a later run once the lock is gone.
  */
 export async function upgradeAllSectionColumns(
   deps: PagesDeps,
@@ -303,12 +332,26 @@ export async function upgradeAllSectionColumns(
     1,
     Math.floor(options.batchSize ?? DEFAULT_UPGRADE_BATCH_SIZE),
   );
+  // A page someone is editing is left for later, and kept out of the
+  // candidates so a batch of held pages cannot hide the pages behind them.
+  // A lock lapses at `locked_at` plus the TTL, as `isPageLockLive` has it.
+  const lockedOut = (await getPageEditLocking(deps.db))
+    ? sql`AND (
+        p.locked_by IS NULL
+        OR p.locked_at IS NULL
+        OR p.locked_at <= ${new Date(
+          (deps.now ?? (() => new Date()))().getTime() -
+            PAGE_EDIT_LOCK_TTL_SECONDS * 1000,
+        ).toISOString()}::timestamptz
+      )`
+    : sql``;
 
   const result: unknown = await deps.db.execute(sql`
     SELECT DISTINCT s.owner_id AS "pageId"
     FROM page_blocks s
     JOIN pages p ON p.id = s.owner_id AND p.locale = s.locale
     WHERE s.owner_type = 'page'
+      ${lockedOut}
       AND s.block_type IN (${sql.join(
         sectionKeys.map((key) => sql`${key}`),
         sql`, `,

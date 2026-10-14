@@ -309,8 +309,10 @@ function reportReservedPagePaths(runtime: Runtime): void {
  * never waits for it, and a page's upgrade is its own transaction. It runs as
  * background work of the runtime's database handle: once the handle starts
  * closing, the loop stops after the batch in hand, without a report, and
- * shutdown waits for that batch. A failure costs one line naming only the
- * error type.
+ * shutdown waits for that batch. A page held by an editor's live lock is left
+ * alone (its upgrade would move the version under the open editor) and is
+ * picked up by a later boot or by that editor's next open. A failure costs one
+ * line naming only the error type.
  */
 function upgradeColumnsInBackground(runtime: Runtime): void {
   runInBackground(runtime.db, async (closing) => {

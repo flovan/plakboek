@@ -27,6 +27,8 @@ import {
 } from '../../src/columns.js';
 import { definePagesConfig, type PagesDeps } from '../../src/config.js';
 import { createPage, getPage } from '../../src/pages.js';
+import { PAGE_EDIT_LOCK_TTL_SECONDS } from '../../src/locks.js';
+import { setPageEditLocking } from '../../src/settings.js';
 import { publishPage } from '../../src/publish.js';
 import { defineBlocks } from '../../src/registry.js';
 import { insertBlock, readBlockTree } from '../../src/tree.js';
@@ -61,6 +63,7 @@ describe('column shape upgrade (D-03)', () => {
   let db: AuditDatabase;
   let baseDeps: Omit<PagesDeps, 'config'>;
   let actor: AuditActor;
+  let colleagueId: string;
   const clock = (): Date => new Date('2026-10-13T16:00:00.000Z');
 
   /** The world before columns existed: blocks sit directly under sections. */
@@ -115,6 +118,13 @@ describe('column shape upgrade (D-03)', () => {
       roleKey: SUPERADMIN_ROLE_KEY,
     });
     actor = { userId: user.userId, roleKey: user.roleKey };
+    colleagueId = randomUUID();
+    await createUserWithRole(db, {
+      id: colleagueId,
+      email: 'columns-upgrade-colleague@example.com',
+      name: 'Colleague',
+      roleKey: SUPERADMIN_ROLE_KEY,
+    });
     baseDeps = { db, recorder, resolver, now: clock };
   });
 
@@ -376,6 +386,117 @@ describe('column shape upgrade (D-03)', () => {
     expect(await upgradeAllSectionColumns(columnDeps())).toEqual({
       pages: 0,
       upgraded: 0,
+    });
+  });
+  describe('and the page edit lock', () => {
+    async function holdLock(
+      pageId: string,
+      userId: string,
+      ageSeconds = 0,
+    ): Promise<void> {
+      const lockedAt = new Date(clock().getTime() - ageSeconds * 1000);
+      await handle.sql`
+        UPDATE pages
+        SET locked_by = ${userId}, locked_at = ${lockedAt.toISOString()}
+        WHERE id = ${pageId}
+      `;
+    }
+
+    async function typesUnderFirstSection(page: PageRecord): Promise<string[]> {
+      const tree = await readBlockTree(db, ownerOf(page));
+      return (tree[0]?.children ?? []).map((child) => child.blockType);
+    }
+
+    it('leaves a page someone else is editing alone, version included', async () => {
+      const { page } = await buildFlatPage('Upgrade held page');
+      await holdLock(page.id, colleagueId);
+
+      const result = await upgradeSectionColumns(columnDeps(), {
+        pageId: page.id,
+        actorUserId: actor.userId,
+      });
+
+      expect(result).toEqual({ upgraded: false, pageVersion: null });
+      expect((await currentPage(page.id)).version).toBe(page.version);
+      expect(await typesUnderFirstSection(page)).toEqual([
+        'text',
+        'text',
+        'section',
+      ]);
+      // With no acting user a live lock of anyone holds the run back too.
+      const background = await upgradeSectionColumns(columnDeps(), {
+        pageId: page.id,
+      });
+      expect(background.upgraded).toBe(false);
+    });
+
+    it('upgrades a page the acting user holds, or whose lock lapsed, or while locking is off', async () => {
+      const own = await buildFlatPage('Upgrade own lock');
+      await holdLock(own.page.id, actor.userId);
+      expect(
+        (
+          await upgradeSectionColumns(columnDeps(), {
+            pageId: own.page.id,
+            actorUserId: actor.userId,
+          })
+        ).upgraded,
+      ).toBe(true);
+
+      const lapsed = await buildFlatPage('Upgrade lapsed lock');
+      await holdLock(lapsed.page.id, colleagueId, PAGE_EDIT_LOCK_TTL_SECONDS);
+      expect(
+        (
+          await upgradeSectionColumns(columnDeps(), {
+            pageId: lapsed.page.id,
+            actorUserId: actor.userId,
+          })
+        ).upgraded,
+      ).toBe(true);
+
+      const unlocked = await buildFlatPage('Upgrade locking off');
+      await holdLock(unlocked.page.id, colleagueId);
+      await setPageEditLocking(columnDeps(), actor, { enabled: false });
+      try {
+        expect(
+          (
+            await upgradeSectionColumns(columnDeps(), {
+              pageId: unlocked.page.id,
+              actorUserId: actor.userId,
+            })
+          ).upgraded,
+        ).toBe(true);
+      } finally {
+        await setPageEditLocking(columnDeps(), actor, { enabled: true });
+      }
+    });
+
+    it('skips held pages in the batch upgrade without letting them fill the batch', async () => {
+      await upgradeAllSectionColumns(columnDeps());
+      const held = await buildFlatPage('Upgrade batch held');
+      const alsoHeld = await buildFlatPage('Upgrade batch also held');
+      const free = await buildFlatPage('Upgrade batch free');
+      await holdLock(held.page.id, colleagueId);
+      await holdLock(alsoHeld.page.id, colleagueId);
+
+      const result = await upgradeAllSectionColumns(columnDeps(), {
+        batchSize: 2,
+      });
+
+      expect(result).toEqual({ pages: 1, upgraded: 1 });
+      expect(await typesUnderFirstSection(free.page)).toEqual(['column']);
+      for (const fixture of [held, alsoHeld]) {
+        expect((await currentPage(fixture.page.id)).version).toBe(
+          fixture.page.version,
+        );
+      }
+
+      // Once the locks are gone, the next run picks the pages up.
+      await holdLock(held.page.id, colleagueId, PAGE_EDIT_LOCK_TTL_SECONDS);
+      await holdLock(alsoHeld.page.id, colleagueId, PAGE_EDIT_LOCK_TTL_SECONDS);
+      expect(await upgradeAllSectionColumns(columnDeps())).toEqual({
+        pages: 2,
+        upgraded: 2,
+      });
     });
   });
 });

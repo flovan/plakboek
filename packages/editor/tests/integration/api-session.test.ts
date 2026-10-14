@@ -5,6 +5,7 @@
  * a page's lock.
  */
 import { setPageEditLocking } from '@plakboek/pages';
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type {
   ApiError,
@@ -163,6 +164,35 @@ describe('opening a page', () => {
     ]);
     const again = await readSession(await open(harness.editor, '/flat'));
     expect(again.upgraded).toBe(false);
+  });
+
+  it('does not rewrite a page that predates columns while someone else is editing it', async () => {
+    const seeded = await createFlatPage(harness, {
+      title: 'Held',
+      text: 'Old',
+    });
+    const holder = await readSession(await open(harness.editor, '/held'));
+    expect(holder.upgraded).toBe(true);
+
+    // The holder's open is what brought it into shape; undo that to stand in
+    // for a page the holder's open did not reach.
+    await harness.handle.db.execute(
+      sql`UPDATE page_blocks SET parent_block_id = ${seeded.sectionId}, depth = 1 WHERE id = ${seeded.headingId}`,
+    );
+    await harness.handle.db.execute(
+      sql`DELETE FROM page_blocks WHERE parent_block_id = ${seeded.sectionId} AND block_type = 'column'`,
+    );
+
+    const peer = await readSession(await open(harness.editor2, '/held'));
+    expect(peer.lock.state).toBe('other');
+    expect(peer.upgraded).toBe(false);
+    expect(peer.pageVersion).toBe(holder.pageVersion);
+    expect(peer.tree.map((node) => node.type)).toEqual(['section', 'heading']);
+
+    // The holder opening again is the one who may rewrite it.
+    const again = await readSession(await open(harness.editor, '/held'));
+    expect(again.upgraded).toBe(true);
+    expect(again.pageVersion).toBe(holder.pageVersion + 1);
   });
 
   it('answers 404 for a page that does not exist', async () => {

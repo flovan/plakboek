@@ -499,8 +499,11 @@ their existing order, every block below them sits one level deeper, the page
 version is bumped once and the change is recorded as one revision batch with no
 author (a create for each new column, a move for each re-parented child). It
 runs once per page: a second run changes nothing, and two runs racing on one
-page serialise on an advisory lock. It is a system data migration, so it writes
-no audit row, never publishes and never purges a cache. It runs in the
+page serialise on an advisory lock. It respects the page edit lock: while
+locking is on, a page held by a live lock of someone other than the optional
+`actorUserId` is left untouched (version included) and the batch upgrade does
+not pick it up until the lock is gone. It is a system data migration, so it
+writes no audit row, never publishes and never purges a cache. It runs in the
 background at boot (`upgradeAllSectionColumns`, at most 50 pages per call) and
 when an editor opens a page; there is no guarantee beyond that. Published
 snapshots are immutable and never rewritten: `resolvePublishedPage` wraps a
