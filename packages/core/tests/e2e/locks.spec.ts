@@ -167,3 +167,197 @@ test.describe('a page someone else holds', () => {
     }
   });
 });
+
+test.describe('taking over', () => {
+  test('an editor with wider permissions takes a page, and the holder is then told and made read-only', async ({
+    browser,
+  }) => {
+    const created = await twoSections();
+    // Take over needs a permission superset: an editor covers one who may not delete.
+    const holder = await personIn(
+      browser,
+      { roleKey: 'editor-no-delete', name: 'Hal Holder' },
+      { clock: true },
+    );
+    const taker = await personIn(browser, {
+      roleKey: 'editor',
+      name: 'Tess Taker',
+    });
+    try {
+      await openEditor(holder.page, created.path);
+      await openShell(taker.page, created.path);
+      await expect(taker.page.locator(HOST)).toHaveAttribute(
+        'data-session',
+        'locked',
+      );
+
+      await taker.page.getByRole('button', { name: 'Take over' }).click();
+      const dialog = taker.page.getByRole('dialog', {
+        name: 'Take over editing?',
+      });
+      await expect(dialog).toContainText(
+        'Hal Holder will lose editing access to this page.',
+      );
+      await expect(
+        dialog.getByRole('button', { name: 'Cancel' }),
+      ).toBeFocused();
+      await dialog.getByRole('button', { name: 'Take over' }).click();
+
+      // the taker edits now, and is not told that anyone "stopped"
+      await expect(taker.page.locator(HOST)).toHaveAttribute(
+        'data-session',
+        'editing',
+      );
+      await expect(taker.page.locator(MODE_GROUP)).toBeVisible();
+      await expect(taker.page.locator(NOTICE)).toHaveCount(0);
+
+      // the editor finds out at the next heartbeat
+      await holder.page.clock.fastForward(BEAT_MS);
+      await expect(holder.page.locator(HOST)).toHaveAttribute(
+        'data-session',
+        'locked',
+      );
+      const alert = holder.page.getByRole('alert').filter({
+        hasText: 'Tess Taker took over this page',
+      });
+      await expect(alert).toContainText('Everything saved so far is kept.');
+      await expect(holder.page.locator(TOOLS)).toHaveCount(0);
+    } finally {
+      await holder.context.close();
+      await taker.context.close();
+    }
+  });
+
+  test('an editor whose permissions do not cover the holder is not offered Take over', async ({
+    browser,
+  }) => {
+    const created = await twoSections();
+    const holder = await personIn(browser, {
+      roleKey: 'editor',
+      name: 'Hal Holder',
+    });
+    const other = await personIn(browser, {
+      roleKey: 'editor-no-delete',
+      name: 'Wim Waiting',
+    });
+    try {
+      await openEditor(holder.page, created.path);
+      await openShell(other.page, created.path);
+      await expect(
+        other.page.locator(`${NOTICE}[data-notice="locked"]`),
+      ).toContainText('Hal Holder is editing this page');
+      await expect(
+        other.page.getByRole('button', { name: 'Take over' }),
+      ).toHaveCount(0);
+    } finally {
+      await holder.context.close();
+      await other.context.close();
+    }
+  });
+});
+
+test.describe('conflicts and a lock that cannot be renewed', () => {
+  test('a write from a second tab of the same editor pauses saving until the page is reloaded', async ({
+    browser,
+  }) => {
+    const created = await twoSections();
+    const editor = await personIn(browser, {
+      roleKey: 'editor',
+      name: 'Edie Editor',
+    });
+    try {
+      const tabA = editor.page;
+      await openEditor(tabA, created.path);
+      const tabB = await editor.context.newPage();
+      await openShell(tabB, created.path);
+      await expect(tabB.locator(HOST)).toHaveAttribute(
+        'data-session',
+        'editing',
+      );
+
+      await moveSecondHeadingDown(tabA);
+
+      const frameB = await framedSite(tabB);
+      await drillTo(frameB, 0, 1);
+      await tabB.getByRole('button', { name: /^Move .* down$/ }).click();
+      const alert = tabB.getByRole('alert').filter({
+        hasText: 'This page changed elsewhere',
+      });
+      await expect(alert).toContainText('It was edited in another tab');
+      await expect(tabB.getByText('Saving is paused')).toBeVisible();
+      // the page was not changed by the refused write
+      expect(await headingsIn(frameB, 0)).toEqual(['H1', 'H2']);
+
+      await alert.getByRole('button', { name: 'Reload page' }).click();
+      await waitForShell(tabB);
+      const reloaded = await framedSite(tabB);
+      await expect.poll(() => headingsIn(reloaded, 1)).toEqual(['H2', 'H3']);
+      await expect(tabB.locator(NOTICE)).toHaveCount(0);
+    } finally {
+      await editor.context.close();
+    }
+  });
+
+  test('a write after the session ended says so and offers to sign in again', async ({
+    browser,
+  }) => {
+    const created = await twoSections();
+    const editor = await personIn(browser, {
+      roleKey: 'editor',
+      name: 'Edie Editor',
+    });
+    try {
+      await openEditor(editor.page, created.path);
+      await editor.context.clearCookies();
+
+      const frame = await framedSite(editor.page);
+      await drillTo(frame, 0, 1);
+      await editor.page.getByRole('button', { name: /^Move .* down$/ }).click();
+
+      const alert = editor.page.getByRole('alert').filter({
+        hasText: 'Your session ended',
+      });
+      await expect(alert).toContainText('Your saved changes are kept.');
+      await expect(
+        alert.getByRole('link', { name: 'Sign in' }),
+      ).toHaveAttribute(
+        'href',
+        `/cms?next=${encodeURIComponent(created.path)}`,
+      );
+    } finally {
+      await editor.context.close();
+    }
+  });
+
+  test('renewals that fail show when editing access ends, announce it, and Keep editing renews', async ({
+    browser,
+  }) => {
+    const created = await twoSections();
+    const editor = await personIn(
+      browser,
+      { roleKey: 'editor', name: 'Edie Editor' },
+      { clock: true },
+    );
+    try {
+      await openEditor(editor.page, created.path);
+      const row = editor.page.locator(`${HOST} [data-lock-expiry]`);
+      await expect(row).toHaveCount(0);
+
+      const renewals = '**/cms/api/pages/*/lock/renew';
+      await editor.page.route(renewals, (route) => route.abort());
+      await editor.page.clock.fastForward(BEAT_MS);
+      await expect(row).toContainText('Editing access ends in');
+      // a minute left is said once, in the live region
+      await editor.page.clock.fastForward(BEAT_MS);
+      await expect(
+        editor.page.locator(`${HOST} [role="status"].sr-only`),
+      ).toContainText('Editing access ends in 1:00');
+
+      await editor.page.unroute(renewals);
+      await row.getByRole('button', { name: 'Keep editing' }).click();
+      await expect(row).toHaveCount(0);
+    } finally {
+      await editor.context.close();
+    }
+  });
+});
