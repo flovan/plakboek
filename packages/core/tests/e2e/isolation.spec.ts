@@ -358,7 +358,8 @@ test.describe('chrome utilities compute inside the shadow root', () => {
           ? active?.localName
           : null;
       }, HOST);
-    for (let step = 0; step < 4 && (await focused()) !== 'button'; step += 1) {
+    // skip link, Mode, Undo, Redo, then the layout toggle
+    for (let step = 0; step < 6 && (await focused()) !== 'button'; step += 1) {
       await page.keyboard.press(press);
     }
     expect(await focused()).toBe('button');
