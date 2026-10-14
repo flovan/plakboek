@@ -42,6 +42,10 @@ import {
   type StarterNode,
 } from './registry.js';
 import { pageBlocks, pages } from './schema.js';
+import {
+  assertSectionsHaveColumns,
+  SectionColumnRequiredError,
+} from './section-columns.js';
 import { getPageEditLocking } from './settings.js';
 import { loadSubtreeRows } from './subtree.js';
 import {
@@ -55,6 +59,9 @@ import {
   type WriteContext,
 } from './tree.js';
 import type { OwnerRef, PageRecord } from './types.js';
+
+/** Re-exported from `section-columns.ts`, where the rule lives. */
+export { SectionColumnRequiredError };
 
 /** At most this many operations in one batch. */
 export const BLOCK_EDIT_MAX_OPS = 50;
@@ -160,20 +167,6 @@ export class BlockIdConflictError extends Error {
     super(`@plakboek/pages: a block with id "${blockId}" already exists`);
     this.name = 'BlockIdConflictError';
     this.blockId = blockId;
-  }
-}
-
-/** Thrown when a batch would leave a section without a column (D-03): a
- * section always holds at least one column. Nothing has been written. */
-export class SectionColumnRequiredError extends Error {
-  readonly sectionId: string;
-
-  constructor(sectionId: string) {
-    super(
-      `@plakboek/pages: section "${sectionId}" must keep at least one column`,
-    );
-    this.name = 'SectionColumnRequiredError';
-    this.sectionId = sectionId;
   }
 }
 
@@ -517,45 +510,6 @@ async function duplicateSubtree(
   state.touchedParentIds.add(original.parentBlockId);
 }
 
-/** Refuses the batch when a section it created, or whose column it moved or
- * deleted, ends without a column (D-03). Runs under the page lock, so the
- * answer cannot change before the commit. */
-async function assertSectionsHaveColumns(
-  tx: AuditTransaction,
-  state: BatchState,
-): Promise<void> {
-  const column = getColumnDefinition();
-  if (column === null) return;
-  const candidates = [...state.sectionCandidates].filter(
-    (id) => !state.deletedIds.has(id),
-  );
-  if (candidates.length === 0) return;
-
-  const withColumn = new Set(
-    (
-      await tx
-        .select({ parentId: pageBlocks.parentBlockId })
-        .from(pageBlocks)
-        .where(
-          and(
-            inArray(pageBlocks.parentBlockId, candidates),
-            eq(pageBlocks.blockType, column.key),
-          ),
-        )
-    ).map((row) => row.parentId),
-  );
-  const existing = await tx
-    .select({ id: pageBlocks.id })
-    .from(pageBlocks)
-    .where(inArray(pageBlocks.id, candidates));
-  const existingIds = new Set(existing.map((row) => row.id));
-  for (const id of candidates) {
-    if (existingIds.has(id) && !withColumn.has(id)) {
-      throw new SectionColumnRequiredError(id);
-    }
-  }
-}
-
 /** Refuses the batch when a section it touched ends with a stored column
  * ratio that names a different number of terms than the section has columns
  * (D-33: the count is derived from the columns, and an equal split is stored
@@ -802,7 +756,10 @@ export async function applyBlockEdit(
       for (const op of input.ops) {
         await applyOperation(tx, ctx, state, op);
       }
-      await assertSectionsHaveColumns(tx, state);
+      await assertSectionsHaveColumns(
+        tx,
+        [...state.sectionCandidates].filter((id) => !state.deletedIds.has(id)),
+      );
       await assertColumnCountsMatchLayout(tx, state);
 
       await tx

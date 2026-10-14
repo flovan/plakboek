@@ -40,6 +40,7 @@ import {
   type BlockDefinition,
 } from './registry.js';
 import { blockRevisions, pageBlocks, pages } from './schema.js';
+import { assertSectionsHaveColumns } from './section-columns.js';
 import { getPageEditLocking } from './settings.js';
 import {
   computeSubtreeShape,
@@ -820,7 +821,9 @@ export type RestoreBatchResult = {
  * a `'create'`/`'update'` revision rewrites the still-live block's props.
  * Before each write, builds the `PlacementContext` for the recorded
  * position and calls `assertPlacementAllowed`, so a restore can never
- * recreate a shape the current registry forbids; as one more write-time
+ * recreate a shape the current registry forbids (and, at the end, refuses
+ * `SectionColumnRequiredError` when it would leave a section without a
+ * column, D-03: one a column was moved out of, or one it re-created bare); as one more write-time
  * safety net, `validateBlockProps` re-checks the built props (catching a
  * constraint this preview's own classification didn't model, e.g. a
  * property that became `fixed`/`narrowed` after the revision was
@@ -906,6 +909,9 @@ export async function restoreRevisionBatch(
       // from the same batch has to be re-parented to its parent's NEW id.
       // Keyed by the id the block had when it was deleted.
       const restoredIds = new Map<string, string>();
+      // Sections a restored block may have left without a column (D-03): one
+      // a column was re-parented out of, and one this batch re-created.
+      const sectionsToCheck = new Set<string>();
 
       for (const block of orderedBlocks) {
         const raw = rawByRevisionId.get(block.revisionId);
@@ -1006,6 +1012,7 @@ export async function restoreRevisionBatch(
           });
           const deletedId = raw.subjectBlockId ?? raw.blockId;
           if (deletedId !== null) restoredIds.set(deletedId, newId);
+          if (definition.kind === 'section') sectionsToCheck.add(newId);
           restoredBlocks += 1;
         } else if (block.changeType === 'move') {
           if (block.blockId === null) {
@@ -1052,6 +1059,14 @@ export async function restoreRevisionBatch(
               deps.config.sectionNestingDepth,
               finalSectionDepth,
             );
+          }
+
+          if (
+            definition.kind === 'column' &&
+            current.parentBlockId !== null &&
+            current.parentBlockId !== parentBlockId
+          ) {
+            sectionsToCheck.add(current.parentBlockId);
           }
 
           await tx
@@ -1143,6 +1158,8 @@ export async function restoreRevisionBatch(
           restoredBlocks += 1;
         }
       }
+
+      await assertSectionsHaveColumns(tx, sectionsToCheck);
 
       await tx
         .update(pages)

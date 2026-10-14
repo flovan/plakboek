@@ -23,6 +23,8 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { definePagesConfig, type PagesDeps } from '../../src/config.js';
 import { createPage, getPage } from '../../src/pages.js';
+import { restoreRevisionBatch } from '../../src/revisions.js';
+import { SectionColumnRequiredError } from '../../src/section-columns.js';
 import {
   BlockPlacementError,
   SectionNestingDepthExceededError,
@@ -30,7 +32,7 @@ import {
 } from '../../src/placement.js';
 import { defineBlocks } from '../../src/registry.js';
 import type { BlockRecord, OwnerRef, PageRecord } from '../../src/types.js';
-import { insertBlock, moveBlock } from '../../src/tree.js';
+import { deleteBlock, insertBlock, moveBlock } from '../../src/tree.js';
 import { createTestDatabase } from './test-database.js';
 
 describe('column placement through insertBlock (D-01, D-02, D-03, D-15, D-18)', () => {
@@ -296,6 +298,7 @@ describe('column placement through insertBlock (D-01, D-02, D-03, D-15, D-18)', 
     const target = await add(page, 'section', outerColumn.id);
     const source = await add(page, 'section', null);
     const sourceColumn = await add(page, 'column', source.id);
+    await add(page, 'column', source.id);
     const text = await add(page, 'text', sourceColumn.id);
 
     const moved = await move(page, sourceColumn, target.id);
@@ -306,5 +309,96 @@ describe('column placement through insertBlock (D-01, D-02, D-03, D-15, D-18)', 
       SELECT depth FROM page_blocks WHERE id = ${text.id}
     `;
     expect(textRow?.depth).toBe(4);
+  });
+  describe('a section keeps a column through the single-operation writers and the history restore (code review WR-D-01)', () => {
+    async function versionOf(blockId: string): Promise<number> {
+      const [row] = await handle.sql<{ version: number }[]>`
+        SELECT version FROM page_blocks WHERE id = ${blockId}
+      `;
+      return row?.version ?? 0;
+    }
+
+    async function exists(blockId: string): Promise<boolean> {
+      const rows = await handle.sql`
+        SELECT 1 FROM page_blocks WHERE id = ${blockId}
+      `;
+      return rows.length > 0;
+    }
+
+    async function pageVersion(page: PageRecord): Promise<number> {
+      return (await getPage(db, page.id))?.version ?? 0;
+    }
+
+    async function remove(page: PageRecord, block: BlockRecord) {
+      return await deleteBlock(deps, actor, {
+        blockId: block.id,
+        baseVersion: await versionOf(block.id),
+        pageId: page.id,
+        basePageVersion: await pageVersion(page),
+      });
+    }
+
+    it("refuses to delete a section's last column, and deletes one of two", async () => {
+      const page = await freshPage('Delete the last column');
+      const section = await add(page, 'section', null);
+      const first = await add(page, 'column', section.id);
+      const second = await add(page, 'column', section.id);
+
+      await remove(page, second);
+      expect(await exists(second.id)).toBe(false);
+
+      const before = await pageVersion(page);
+      const error: unknown = await remove(page, first).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(SectionColumnRequiredError);
+      expect((error as SectionColumnRequiredError).sectionId).toBe(section.id);
+      expect(await exists(first.id)).toBe(true);
+      expect(await pageVersion(page)).toBe(before);
+    });
+
+    it("refuses to move a section's last column away, writing nothing", async () => {
+      const page = await freshPage('Move the last column');
+      const source = await add(page, 'section', null);
+      const column = await add(page, 'column', source.id);
+      const target = await add(page, 'section', null);
+      await add(page, 'column', target.id);
+
+      const before = await pageVersion(page);
+      const error: unknown = await move(page, column, target.id).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(SectionColumnRequiredError);
+      expect(await versionOf(column.id)).toBe(column.version);
+      expect(await pageVersion(page)).toBe(before);
+    });
+
+    it('refuses to restore a move that takes the last column out of the section it is in now', async () => {
+      const page = await freshPage('Restore a column move');
+      const home = await add(page, 'section', null);
+      const homeColumn = await add(page, 'column', home.id);
+      const wanderer = await add(page, 'column', home.id);
+      const away = await add(page, 'section', null);
+
+      // The wanderer leaves `home` for `away`; the batch records where it was.
+      await move(page, wanderer, away.id);
+      const [batch] = await handle.sql<{ revisionBatchId: string }[]>`
+        SELECT revision_batch_id AS "revisionBatchId" FROM block_revisions
+        WHERE block_id = ${wanderer.id} AND change_type = 'move'
+      `;
+      expect(homeColumn.id).not.toBe(wanderer.id);
+
+      // `away` now holds the wanderer as its only column; restoring the move
+      // sends it home and would leave `away` with none.
+      const before = await pageVersion(page);
+      const error: unknown = await restoreRevisionBatch(deps, actor, {
+        revisionBatchId: batch!.revisionBatchId,
+        pageId: page.id,
+        basePageVersion: before,
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(SectionColumnRequiredError);
+      expect((error as SectionColumnRequiredError).sectionId).toBe(away.id);
+      expect(await pageVersion(page)).toBe(before);
+    });
   });
 });

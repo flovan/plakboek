@@ -60,6 +60,7 @@ import {
   recordBlockRevision,
 } from './revisions.js';
 import { blockRevisions, pageBlocks, pages } from './schema.js';
+import { assertSectionsHaveColumns } from './section-columns.js';
 import { getPageEditLocking } from './settings.js';
 import {
   computeSubtreeShape,
@@ -754,6 +755,12 @@ export async function insertBlockInTransaction(
  * load, placement, lenient props validation, `sortOrder` as `max(sort_order)
  * + 1000` among siblings when not supplied, the `'create'` revision) and
  * bumps the owning page's `version`.
+ *
+ * This is the single-block writer: it inserts exactly the block it is given
+ * and expands no starter content, so a section inserted here starts without a
+ * column. The column upgrade (`upgradeSectionColumns`) and the snapshot
+ * normalisation give such a section its column, and `applyBlockEdit` inserts
+ * a section with one from the start; use that for anything an editor does.
  */
 export async function insertBlock(
   deps: PagesDeps,
@@ -1258,6 +1265,21 @@ export async function moveBlockInTransaction(
   return toBlockRecordFromRow(movedRow);
 }
 
+/** The section a column sits under, when `row` is a column and its parent
+ * is not the page root: the one section whose last column a single-operation
+ * move or delete could take away. A type the registry no longer knows is
+ * never a column (a degraded block never blocks a structural write). */
+function sectionOfColumn(row: PageBlockRow): string | null {
+  if (row.parentBlockId === null) return null;
+  try {
+    return getBlockDefinition(row.blockType).kind === 'column'
+      ? row.parentBlockId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Moves a block and its whole subtree to a new parent and a new position
  * among its siblings, in one transaction (a structural change, D-38). Through
@@ -1268,7 +1290,8 @@ export async function moveBlockInTransaction(
  * the moved block `FOR UPDATE`, throwing `StaleBlockVersionError` on a
  * mismatch; runs `moveBlockInTransaction` (destination, placement, subtree
  * height checks, ordering with rebalancing, descendant depth rewrite, the
- * `'move'` revision); bumps the owning page's `version`.
+ * `'move'` revision); refuses `SectionColumnRequiredError` when it moved a
+ * section's last column away (D-03); bumps the owning page's `version`.
  */
 export async function moveBlock(
   deps: PagesDeps,
@@ -1332,6 +1355,12 @@ export async function moveBlock(
           nextSiblingId: input.afterSiblingId,
         },
       );
+      // A column moved out of its section must not have been the section's
+      // last one (D-03).
+      const leftSection = sectionOfColumn(current);
+      if (leftSection !== null && leftSection !== input.newParentBlockId) {
+        await assertSectionsHaveColumns(tx, [leftSection]);
+      }
 
       await tx
         .update(pages)
@@ -1531,8 +1560,9 @@ export async function deleteSubtreeInTransaction(
  * `StaleBlockVersionError` on a mismatch; runs `deleteSubtreeInTransaction`
  * (recomputing the delete impact inside this same transaction rather than
  * trusting a caller's earlier `computeBlockDeleteImpact` preview); bumps the
- * owning page's `version`. Returns the impact counts as both the result and
- * the audit `after` payload.
+ * owning page's `version`. Refuses `SectionColumnRequiredError` when the
+ * block is a section's last column (D-03). Returns the impact counts as both
+ * the result and the audit `after` payload.
  */
 export async function deleteBlock(
   deps: PagesDeps,
@@ -1589,6 +1619,11 @@ export async function deleteBlock(
         },
         { current },
       );
+      // Deleting a section's last column would leave it empty (D-03).
+      const emptiedSection = sectionOfColumn(current);
+      if (emptiedSection !== null) {
+        await assertSectionsHaveColumns(tx, [emptiedSection]);
+      }
       const blockTypes = Object.freeze([
         ...new Set(rows.map((row) => row.blockType)),
       ]);

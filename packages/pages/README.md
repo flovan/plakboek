@@ -433,23 +433,23 @@ A pattern's literal text may contain only lowercase letters, digits, hyphens and
 
 ### Block tree (reads and structural writes, D-38)
 
-| Export                         | Kind     | Purpose                                                                                             |
-| ------------------------------ | -------- | --------------------------------------------------------------------------------------------------- |
-| `BlockNotFoundError`           | class    | A block write names a block/parent id that no longer exists                                         |
-| `CircularMoveError`            | class    | `moveBlock` given a destination that is the block itself or its own descendant                      |
-| `computeBlockDeleteImpact`     | function | Previews what deleting a block (and its subtree) would touch                                        |
-| `deleteBlock`                  | function | Deletes a block and its whole subtree, keeping its revision history                                 |
-| `insertBlock`                  | function | Inserts a block, enforcing placement, section and depth rules on write                              |
-| `InvalidSiblingReferenceError` | class    | `moveBlock` given a `beforeSiblingId`/`afterSiblingId` that isn't a child of the destination parent |
-| `moveBlock`                    | function | Moves a block and its whole subtree to a new parent and sibling position                            |
-| `readBlockTree`                | function | Reads one owner's full block tree, upcasting each row's props on the way out                        |
-| `StaleBlockVersionError`       | class    | A block write's `baseVersion` no longer matches the block's stored version                          |
-| `updateBlockProps`             | function | Edits a block's properties, validated against its current declaration                               |
-| `BlockDeleteImpact`            | type     | The result of `computeBlockDeleteImpact`/`deleteBlock`                                              |
-| `DeleteBlockInput`             | type     | Input to `deleteBlock`                                                                              |
-| `InsertBlockInput`             | type     | Input to `insertBlock`                                                                              |
-| `MoveBlockInput`               | type     | Input to `moveBlock`                                                                                |
-| `UpdateBlockPropsInput`        | type     | Input to `updateBlockProps`                                                                         |
+| Export                         | Kind     | Purpose                                                                                                                          |
+| ------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `BlockNotFoundError`           | class    | A block write names a block/parent id that no longer exists                                                                      |
+| `CircularMoveError`            | class    | `moveBlock` given a destination that is the block itself or its own descendant                                                   |
+| `computeBlockDeleteImpact`     | function | Previews what deleting a block (and its subtree) would touch                                                                     |
+| `deleteBlock`                  | function | Deletes a block and its whole subtree, keeping its revision history                                                              |
+| `insertBlock`                  | function | Inserts a block, enforcing placement, section and depth rules on write                                                           |
+| `InvalidSiblingReferenceError` | class    | `moveBlock` given a `beforeSiblingId`/`afterSiblingId` that isn't a child of the destination parent, or named in the wrong order |
+| `moveBlock`                    | function | Moves a block and its whole subtree to a new parent and sibling position                                                         |
+| `readBlockTree`                | function | Reads one owner's full block tree, upcasting each row's props on the way out                                                     |
+| `StaleBlockVersionError`       | class    | A block write's `baseVersion` no longer matches the block's stored version                                                       |
+| `updateBlockProps`             | function | Edits a block's properties, validated against its current declaration                                                            |
+| `BlockDeleteImpact`            | type     | The result of `computeBlockDeleteImpact`/`deleteBlock`                                                                           |
+| `DeleteBlockInput`             | type     | Input to `deleteBlock`                                                                                                           |
+| `InsertBlockInput`             | type     | Input to `insertBlock`                                                                                                           |
+| `MoveBlockInput`               | type     | Input to `moveBlock`                                                                                                             |
+| `UpdateBlockPropsInput`        | type     | Input to `updateBlockProps`                                                                                                      |
 
 ### Batch edits (D-25)
 
@@ -482,7 +482,7 @@ cache.
 | `BlockEditLimitError`        | class    | A batch is empty, holds too many operations or inserts too many blocks (`limit`: `empty`, `ops`, `nodes`) |
 | `BlockIdConflictError`       | class    | An inserted node supplies an id that is already in use                                                    |
 | `BlockOwnershipError`        | class    | A batch names a block that belongs to another page, locale or owner                                       |
-| `SectionColumnRequiredError` | class    | A batch would leave a section without a column                                                            |
+| `SectionColumnRequiredError` | class    | A batch, `moveBlock`, `deleteBlock` or history restore would leave a section without a column             |
 | `BlockEditInput`             | type     | Input to `applyBlockEdit`: page id, base page version and the operations                                  |
 | `BlockEditNode`              | type     | One block to insert, with an optional client id and subtree                                               |
 | `BlockEditOp`                | type     | One insert, update, move, delete or duplicate operation                                                   |
