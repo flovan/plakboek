@@ -4,6 +4,7 @@ import {
   badge,
   carousel,
   heading,
+  propsDemo,
   section,
   siteForm,
   spacer,
@@ -30,6 +31,20 @@ export default defineConfig({
     badge,
     spacer,
     siteForm,
+    propsDemo,
+  ],
+  // The constraints the Properties panel has to honour: one property is not
+  // shown, one has a fixed value, one offers only two of its three choices.
+  // Written as plain sets because this host imports only the core package.
+  constraints: [
+    {
+      blockKey: 'propsDemo',
+      properties: {
+        hiddenProp: 'hidden',
+        fixedProp: { fixed: 'fixed value' },
+        narrowedProp: { allow: ['alpha', 'beta'] },
+      },
+    },
   ],
   seed: {
     title: 'Home',

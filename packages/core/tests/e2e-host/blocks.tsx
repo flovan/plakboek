@@ -104,6 +104,23 @@ const SiteForm: BlockComponent<{ label: string }> = ({ props, edit }) => (
   </form>
 );
 
+/**
+ * Shows every value it was given as text in an element of its own, so a spec
+ * can read what a Properties control changed from the frame.
+ */
+const PropsDemo: BlockComponent<Record<string, unknown>> = ({
+  props,
+  edit,
+}) => (
+  <div {...edit} className="props-demo">
+    {Object.entries(props).map(([key, value]) => (
+      <p key={key} data-prop={key}>
+        {typeof value === 'string' ? value : JSON.stringify(value)}
+      </p>
+    ))}
+  </div>
+);
+
 export const section = defineBlock({
   key: 'section',
   kind: 'section',
@@ -237,4 +254,114 @@ export const siteForm = defineBlock({
     },
   },
   component: SiteForm,
+});
+
+const choices = (...values: readonly string[]) =>
+  values.map((value) => ({
+    value,
+    labels: { en: `${value.slice(0, 1).toUpperCase()}${value.slice(1)}` },
+  }));
+
+/**
+ * One property for every widget the editor draws a control for, and one for
+ * each constraint the host config puts on it (hidden, fixed, narrowed).
+ */
+export const propsDemo = defineBlock({
+  key: 'propsDemo',
+  editor: { label: 'Props demo' },
+  schemaVersion: 1,
+  properties: {
+    title: {
+      fieldType: 'short_text',
+      label: 'Title',
+      required: true,
+      options: { maxLength: 80 },
+    },
+    link: { fieldType: 'url', label: 'Link', options: {} },
+    handle: { fieldType: 'slug', label: 'Handle', options: {} },
+    notes: { fieldType: 'long_text', label: 'Notes', options: {} },
+    count: {
+      fieldType: 'number',
+      label: 'Count',
+      options: { min: 0, max: 100 },
+    },
+    level: {
+      fieldType: 'integer',
+      label: 'Level',
+      widget: 'slider',
+      options: { min: 0, max: 10 },
+    },
+    agree: { fieldType: 'boolean', label: 'Agree', options: {} },
+    active: {
+      fieldType: 'boolean',
+      label: 'Active',
+      widget: 'switch',
+      options: {},
+    },
+    size: {
+      fieldType: 'select',
+      label: 'Size',
+      options: { choices: choices('small', 'medium', 'large') },
+    },
+    mood: {
+      fieldType: 'select',
+      label: 'Mood',
+      widget: 'radio',
+      options: { choices: choices('calm', 'lively') },
+    },
+    tags: {
+      fieldType: 'multi_select',
+      label: 'Tags',
+      options: { choices: choices('red', 'green', 'blue') },
+    },
+    extras: {
+      fieldType: 'multi_select',
+      label: 'Extras',
+      widget: 'multi-dropdown',
+      options: { choices: choices('one', 'two', 'three') },
+    },
+    publishAt: {
+      fieldType: 'date_time',
+      label: 'Publish at',
+      options: { mode: 'instant' },
+    },
+    day: {
+      fieldType: 'date_time',
+      label: 'Day',
+      widget: 'date-picker',
+      options: { mode: 'date' },
+    },
+    data: { fieldType: 'json', label: 'Data', options: {} },
+    items: {
+      fieldType: 'repeater',
+      label: 'Items',
+      options: {
+        fields: [
+          {
+            key: 'label',
+            label: 'Item label',
+            fieldType: 'short_text',
+            options: { maxLength: 30 },
+          },
+          { key: 'done', label: 'Done', fieldType: 'boolean', options: {} },
+        ],
+      },
+    },
+    body: { fieldType: 'rich_text', label: 'Body', options: {} },
+    photo: { fieldType: 'image', label: 'Photo', options: {} },
+    attachment: { fieldType: 'file', label: 'Attachment', options: {} },
+    related: {
+      fieldType: 'reference',
+      label: 'Related',
+      options: { allowedTypeKeys: ['page'], cardinality: 'single' },
+    },
+    hiddenProp: { fieldType: 'short_text', label: 'Hidden', options: {} },
+    fixedProp: { fieldType: 'short_text', label: 'Fixed', options: {} },
+    narrowedProp: {
+      fieldType: 'select',
+      label: 'Narrowed',
+      options: { choices: choices('alpha', 'beta', 'gamma') },
+    },
+  },
+  component: PropsDemo,
 });
