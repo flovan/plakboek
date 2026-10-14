@@ -25,7 +25,7 @@ const PRIMARY_BUTTON =
 
 export type EmptyPromptsProps = {
   readonly store: EditorStore;
-  /** The ids of the columns the render marked empty. */
+  /** The ids of the columns the render marked empty (`data-pk-empty`, read by the box tracker). */
   readonly empty: readonly string[];
   /** The boxes of those columns, in the shell's coordinates. */
   readonly boxes: ReadonlyMap<string, Box>;
