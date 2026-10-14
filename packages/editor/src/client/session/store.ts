@@ -16,7 +16,7 @@ import { createUndoStack, type UndoEntry, type UndoStack } from './inverse.js';
 import type { InsertSlot } from './insertion.js';
 import { createQueue, type QueueState } from './save-queue.js';
 import type { RenewState } from './lock-client.js';
-import { NO_SELECTION, type Selection } from './scope.js';
+import { NO_SELECTION, sameSelection, type Selection } from './scope.js';
 import { createTreeModel, type TreeModel } from './tree-model.js';
 
 /** Edit selects and changes the page; Interact hands the page back to the site. */
@@ -324,10 +324,7 @@ export function createEditorStore(
     },
     select(selection) {
       if (state.mode !== 'edit') return;
-      const same =
-        selection.scopeId === state.selection.scopeId &&
-        selection.selectedId === state.selection.selectedId;
-      if (same) return;
+      if (sameSelection(selection, state.selection)) return;
       // What the picker would add to belongs to the selection it was opened from.
       set({ ...state, selection, picker: null });
     },
@@ -375,12 +372,18 @@ export function createEditorStore(
       set({ ...state, undo });
     },
     writeApplied(applied) {
+      const selection =
+        state.mode === 'edit' ? applied.selection : NO_SELECTION;
       set({
         ...state,
         model: applied.model,
         pageVersion: applied.pageVersion,
         queue: applied.queue,
-        selection: state.mode === 'edit' ? applied.selection : NO_SELECTION,
+        // A selection that did not change stays the same object, so what
+        // follows the selection (hooks, overlay) does not run again per save.
+        selection: sameSelection(selection, state.selection)
+          ? state.selection
+          : selection,
       });
     },
     treeRefreshed(tree, pageVersion) {

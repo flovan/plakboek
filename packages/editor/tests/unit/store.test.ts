@@ -156,6 +156,31 @@ describe('the editor store', () => {
     expect(state.notice).toEqual({ kind: 'taken-over', holderName: 'Edith' });
   });
 
+  it('keeps the selection object when a write leaves the selection as it was, and replaces it when it moved', () => {
+    const store = createEditorStore();
+    store.opened(sessionWith(MINE));
+    const model = createTreeModel(tree);
+    store.select({ scopeId: 'c1', selectedId: 'h1' });
+    const before = store.getState().selection;
+    const applied = (selection: typeof before) => ({
+      model,
+      pageVersion: 8,
+      queue: store.getState().queue,
+      selection,
+    });
+
+    // a rebuilt object with the same values is what every save produced
+    store.writeApplied(applied({ scopeId: 'c1', selectedId: 'h1' }));
+    expect(store.getState().selection).toBe(before);
+    expect(store.getState().pageVersion).toBe(8);
+
+    store.writeApplied(applied({ scopeId: 'c2', selectedId: 'h2' }));
+    expect(store.getState().selection).toEqual({
+      scopeId: 'c2',
+      selectedId: 'h2',
+    });
+  });
+
   it('notifies subscribers once per change and not after unsubscribing', () => {
     const store = createEditorStore();
     const listener = vi.fn();

@@ -227,13 +227,15 @@ export function OverlayLayer(props: {
             },
           },
     );
-    // A new selection changes what a click would select under the pointer.
-    let previous = store?.getState().selection;
+    // A new selection changes what a click would select under the pointer, and
+    // so does a saved write, which patches the markup under it.
+    let previous = store?.getState();
     const unsubscribe = store?.subscribe(() => {
-      const next = store.getState().selection;
-      if (next === previous) return;
+      const next = store.getState();
+      const changed =
+        next.selection !== previous?.selection || next.model !== previous.model;
       previous = next;
-      created.refresh();
+      if (changed) created.refresh();
     });
     return () => {
       unsubscribe?.();

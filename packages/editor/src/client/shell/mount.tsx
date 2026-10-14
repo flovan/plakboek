@@ -73,6 +73,7 @@ import {
   lastSibling,
   nextSibling,
   previousSibling,
+  sameSelection,
   selectByClick,
 } from '../session/scope.js';
 import { selectAndAnnounce } from '../session/selection-announcement.js';
@@ -245,7 +246,7 @@ function Shell(props: {
     const unsubscribe = store.subscribe(() => {
       const next = store.getState();
       if (next.mode !== previous.mode) runtime.setMode(next.mode);
-      if (next.selection !== previous.selection) {
+      if (!sameSelection(next.selection, previous.selection)) {
         const { model } = next;
         const { selectedId } = next.selection;
         runtime.select(

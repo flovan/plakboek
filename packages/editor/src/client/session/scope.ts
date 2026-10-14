@@ -18,6 +18,11 @@ export type Selection = {
 /** Nothing selected, page scope. */
 export const NO_SELECTION: Selection = { scopeId: null, selectedId: null };
 
+/** Whether two selections name the same scope and item. */
+export function sameSelection(left: Selection, right: Selection): boolean {
+  return left.scopeId === right.scopeId && left.selectedId === right.selectedId;
+}
+
 /** What a gesture produced: the next selection and whether to open Properties. */
 export type ScopeResult = {
   readonly selection: Selection;
