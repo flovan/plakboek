@@ -160,9 +160,11 @@ test.describe('Edit mode claims the site', () => {
 
     // a link of the site's header clears the selection (the claim took the
     // click and read it as one on empty page) and does nothing else
+    // The second section is selected, because the first sits right under the
+    // header and its toolbar would cover the links being clicked.
     for (const control of ['#handled-link', '#hash-link']) {
-      await frame.getByRole('heading', { name: 'Alpha heading' }).click();
-      await expectSelectedOver(page, frame, SECTION_A);
+      await frame.getByRole('heading', { name: 'Beta heading' }).click();
+      await expectSelectedOver(page, frame, SECTION_B);
       const scrolled = await frame.evaluate(() => window.scrollY);
       await frame.locator(control).click();
       await expect(page.locator(SELECTED)).toHaveCount(0);

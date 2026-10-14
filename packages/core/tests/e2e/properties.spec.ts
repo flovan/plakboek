@@ -238,27 +238,32 @@ test.describe('every widget edits its property and the block re-renders live', (
     const row = (at: number) =>
       page.locator(`${HOST} [data-repeater-row="${String(at)}"]`);
 
+    // what the block shows is read as data: the order of an item's keys is not the editor's
+    const expectItems = async (items: readonly unknown[]): Promise<void> => {
+      await expect
+        .poll(async () =>
+          JSON.parse((await shown(frame, 'items').textContent()) ?? 'null'),
+        )
+        .toEqual(items);
+    };
+
     // an empty list shows only the Add item button
     await expect(page.locator(`${HOST} [data-repeater-row]`)).toHaveCount(0);
 
     await add.click();
     await row(0).getByRole('textbox', { name: 'Item label' }).fill('First');
-    await expect(shown(frame, 'items')).toHaveText('[{"label":"First"}]');
+    await expectItems([{ label: 'First' }]);
 
     await add.click();
     await row(1).getByRole('textbox', { name: 'Item label' }).fill('Second');
     await row(1).getByRole('checkbox', { name: 'Done' }).check();
-    await expect(shown(frame, 'items')).toHaveText(
-      '[{"label":"First"},{"label":"Second","done":true}]',
-    );
+    await expectItems([{ label: 'First' }, { label: 'Second', done: true }]);
 
     await row(0).locator('[data-repeater-action="later"]').click();
-    await expect(shown(frame, 'items')).toHaveText(
-      '[{"label":"Second","done":true},{"label":"First"}]',
-    );
+    await expectItems([{ label: 'Second', done: true }, { label: 'First' }]);
 
     await row(0).locator('[data-repeater-action="remove"]').click();
-    await expect(shown(frame, 'items')).toHaveText('[{"label":"First"}]');
+    await expectItems([{ label: 'First' }]);
   });
 
   test('what cannot be chosen yet is shown read-only with a note on where it will be edited', async ({
