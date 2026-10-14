@@ -25,6 +25,7 @@ import {
 import {
   createEditablePage,
   heading,
+  paragraph,
   releaseAllPageLocks,
   section,
   type EditablePage,
@@ -356,6 +357,129 @@ test.describe('conflicts and a lock that cannot be renewed', () => {
       await editor.page.unroute(renewals);
       await row.getByRole('button', { name: 'Keep editing' }).click();
       await expect(row).toHaveCount(0);
+    } finally {
+      await editor.context.close();
+    }
+  });
+});
+
+test.describe('leaving with something unsaved', () => {
+  const EDITS = '**/cms/api/pages/*/edit';
+
+  /** Opens a page with a heading "Hello", types into its text control and leaves the write unsent. */
+  async function typeIntoHeading(page: Page): Promise<EditablePage> {
+    const created = await createEditablePage({
+      blocks: [section(heading('Hello'), paragraph('Below'))],
+    });
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    const target = frame.locator('section.section >> h2').first();
+    await target.dblclick();
+    await target.dblclick();
+    await target.dblclick();
+    const control = page.getByRole('textbox', { name: 'Text' });
+    await expect(control).toHaveValue('Hello');
+    await control.press('End');
+    await control.pressSequentially(' there');
+    return created;
+  }
+
+  test('Exit edit mode saves first, says so while it does, and then leaves', async ({
+    browser,
+  }) => {
+    const editor = await personIn(browser, {
+      roleKey: 'editor',
+      name: 'Edie Editor',
+    });
+    try {
+      const { page } = editor;
+      // a slow save, so the control can be seen waiting for it
+      await page.route(EDITS, async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        await route.continue();
+      });
+      const created = await typeIntoHeading(page);
+
+      await page.getByRole('link', { name: 'Exit edit mode' }).click();
+      await expect(page.getByRole('link', { name: 'Saving' })).toBeVisible();
+      await page.waitForURL(`**${created.path}`);
+      expect(new URL(page.url()).search).toBe('');
+
+      await page.unroute(EDITS);
+      await openEditor(page, created.path);
+      const frame = await framedSite(page);
+      await expect(frame.locator('section.section >> h2').first()).toHaveText(
+        'Hello there',
+      );
+    } finally {
+      await editor.context.close();
+    }
+  });
+
+  test('a save that fails asks before leaving, and Stay keeps the page while Leave anyway goes without a second prompt', async ({
+    browser,
+  }) => {
+    const editor = await personIn(browser, {
+      roleKey: 'editor',
+      name: 'Edie Editor',
+    });
+    try {
+      const { page } = editor;
+      const prompts: string[] = [];
+      page.on('dialog', (dialog) => {
+        prompts.push(dialog.type());
+        void dialog.dismiss();
+      });
+      await page.route(EDITS, (route) => route.abort());
+      const created = await typeIntoHeading(page);
+
+      await page.getByRole('link', { name: 'Exit edit mode' }).click();
+      const dialog = page.getByRole('dialog', {
+        name: 'Leave without saving?',
+      });
+      await expect(dialog).toContainText(
+        'Your latest changes could not be saved.',
+      );
+      await expect(dialog.getByRole('button', { name: 'Stay' })).toBeFocused();
+      await dialog.getByRole('button', { name: 'Stay' }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect(page.locator(HOST)).toHaveAttribute(
+        'data-session',
+        'editing',
+      );
+      expect(page.url()).toContain('_edit=1');
+
+      await page.getByRole('link', { name: 'Exit edit mode' }).click();
+      await page
+        .getByRole('dialog', { name: 'Leave without saving?' })
+        .getByRole('button', { name: 'Leave anyway' })
+        .click();
+      await page.waitForURL(`**${created.path}`);
+      expect(prompts).toEqual([]);
+    } finally {
+      await editor.context.close();
+    }
+  });
+
+  test('closing the page with a change not yet saved raises the browser prompt', async ({
+    browser,
+  }) => {
+    const editor = await personIn(browser, {
+      roleKey: 'editor',
+      name: 'Edie Editor',
+    });
+    try {
+      const { page } = editor;
+      await page.route(EDITS, (route) => route.abort());
+      await typeIntoHeading(page);
+      await expect(page.getByText('Could not save your changes')).toBeVisible();
+
+      // closing with the unload handlers run does not wait for the page, so the prompt is awaited
+      const prompt = page.waitForEvent('dialog');
+      await page.close({ runBeforeUnload: true });
+      const dialog = await prompt;
+      expect(dialog.type()).toBe('beforeunload');
+      await dialog.dismiss();
     } finally {
       await editor.context.close();
     }
