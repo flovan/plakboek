@@ -6,7 +6,12 @@
  * and undone as one step.
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
-import { framedSite, HOST, openEditor } from './helpers/editing.ts';
+import {
+  framedSite,
+  HOST,
+  LIVE_REGION,
+  openEditor,
+} from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
 import {
   createEditablePage,
@@ -359,5 +364,109 @@ test.describe('invalid input and needs input', () => {
     await expect(field.locator('[data-needs-input-tag]')).toHaveCount(0);
     await expect(shown(frame, 'title')).toHaveText('Back again');
     await expect(page.locator(`${HOST} [data-marker]`)).toHaveCount(0);
+  });
+});
+
+test.describe('undo and focus', () => {
+  test('a burst of keystrokes in one field is one undo step, and undoing it restores the panel, the frame and storage', async ({
+    page,
+  }) => {
+    await openPageWithHeading(page);
+    const frame = await framedSite(page);
+    const first = frame
+      .locator('section.section')
+      .first()
+      .locator('h2')
+      .first();
+    await openPropertiesOfHeading(frame, 0);
+    const control = textControl(page);
+    await expect(control).toBeFocused();
+
+    await control.press('End');
+    // slow enough that every keystroke is rendered and queued on its own
+    await control.pressSequentially(' world', { delay: 200 });
+    await expect(first).toHaveText('Hello world', { timeout: 1000 });
+    // leaving the field sends the save and ends the burst
+    await control.blur();
+    await expectSaved(page);
+
+    await page.keyboard.press('Control+z');
+    await expect(first).toHaveText('Hello');
+    await expect(control).toHaveValue('Hello');
+    await expect(page.locator(LIVE_REGION)).toContainText(
+      'Undone: Changed Text of Heading.',
+    );
+    await expectSaved(page);
+
+    await page.reload();
+    const reloaded = await framedSite(page);
+    await expect(
+      reloaded.locator('section.section').first().locator('h2').first(),
+    ).toHaveText('Hello');
+  });
+
+  test('the toolbar Properties button opens the panel on its tab and focuses the first control', async ({
+    page,
+  }) => {
+    await openPageWithHeading(page);
+    const frame = await framedSite(page);
+    const target = frame
+      .locator('section.section')
+      .first()
+      .locator('h2')
+      .first();
+    // two double-clicks leave the heading selected without asking for Properties
+    await target.dblclick();
+    await target.dblclick();
+    await expect(page.getByRole('tab', { name: 'Blocks' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    await page.getByRole('button', { name: 'Properties of Heading' }).click();
+    await expect(propertiesTab(page)).toHaveAttribute('aria-selected', 'true');
+    await expect(textControl(page)).toBeFocused();
+  });
+
+  test('adding a heading opens Properties with focus in its empty Text control, and selecting another block afterwards leaves focus alone', async ({
+    page,
+  }) => {
+    await openPageWithHeading(page);
+    const frame = await framedSite(page);
+    const target = frame
+      .locator('section.section')
+      .first()
+      .locator('h2')
+      .first();
+    await target.dblclick();
+    await target.dblclick();
+
+    await page.getByRole('button', { name: 'Add after Heading' }).click();
+    const picker = page.getByRole('dialog', { name: 'Add a block' });
+    await picker.getByRole('combobox').fill('head');
+    await page.keyboard.press('Enter');
+
+    await expect(propertiesTab(page)).toHaveAttribute('aria-selected', 'true');
+    const control = textControl(page);
+    await expect(control).toHaveValue('');
+    await expect(control).toBeFocused();
+    await expect(
+      page.locator(`${HOST} [data-field="text"] [data-needs-input-tag]`),
+    ).toHaveText('Needs input');
+
+    // clicking another block in the frame selects it; the panel does not take focus
+    await frame
+      .locator('section.section')
+      .first()
+      .locator('h2')
+      .first()
+      .click();
+    await expect(control).not.toBeFocused();
+    expect(
+      await page
+        .locator(HOST)
+        .evaluate((host) => host.shadowRoot?.activeElement?.tagName ?? ''),
+    ).not.toBe('INPUT');
+    await expect(propertiesTab(page)).toHaveAttribute('aria-selected', 'true');
   });
 });
