@@ -1,6 +1,7 @@
 import type { CatalogueEntry } from '../../api-types.js';
 import { formatString, STRINGS } from '../../chrome/strings.js';
 import type { Selection } from './scope.js';
+import type { EditorStore } from './store.js';
 import { labelOf, type ItemLabel, type TreeModel } from './tree-model.js';
 
 function textOf(label: ItemLabel): string {
@@ -43,4 +44,22 @@ export function announceSelection(
   return node.needsInput.length > 0
     ? `${sentence}${STRINGS['announce.needsInput']}`
     : sentence;
+}
+
+/** Moves the selection and tells the live region about it. */
+export function selectAndAnnounce(
+  store: EditorStore,
+  selection: Selection,
+): void {
+  const before = store.getState().selection;
+  store.select(selection);
+  const state = store.getState();
+  if (state.selection === before || state.model === null) return;
+  store.announce(
+    announceSelection(
+      state.model,
+      state.session?.catalogue ?? [],
+      state.selection,
+    ),
+  );
 }

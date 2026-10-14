@@ -15,7 +15,9 @@ import {
   CheckIcon,
   EditPointerIcon,
   InteractHandIcon,
+  RedoIcon,
   SpinnerIcon,
+  UndoIcon,
 } from '../icons.js';
 import { STRINGS } from '../strings.js';
 
@@ -108,11 +110,59 @@ function ModeToggle(props: {
   );
 }
 
+const HISTORY_BUTTON =
+  'flex h-10 min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-control-border bg-surface px-3 text-body font-semibold text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-surface';
+
+/** Whether Command, not Control, is the platform's shortcut key. */
+function isApplePlatform(): boolean {
+  return /Mac|iPhone|iPad/.test(navigator.platform);
+}
+
+function HistoryRow(props: {
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  readonly onUndo?: () => void;
+  readonly onRedo?: () => void;
+}): ReactElement {
+  const { canUndo, canRedo, onUndo, onRedo } = props;
+  const modifier = isApplePlatform() ? 'Meta' : 'Control';
+  return (
+    <div className="flex gap-2">
+      <button
+        type="button"
+        className={HISTORY_BUTTON}
+        aria-disabled={!canUndo}
+        aria-keyshortcuts={`${modifier}+Z`}
+        onClick={() => {
+          if (canUndo) onUndo?.();
+        }}
+      >
+        <UndoIcon />
+        {STRINGS['tools.undo']}
+      </button>
+      <button
+        type="button"
+        className={HISTORY_BUTTON}
+        aria-disabled={!canRedo}
+        aria-keyshortcuts={`${modifier}+Shift+Z`}
+        onClick={() => {
+          if (canRedo) onRedo?.();
+        }}
+      >
+        <RedoIcon />
+        {STRINGS['tools.redo']}
+      </button>
+    </div>
+  );
+}
+
 function SaveRow(props: {
   readonly status: SaveStatus;
+  /** A refused write cannot be sent again, so only a network failure offers Retry. */
+  readonly canRetry: boolean;
   readonly onRetry?: () => void;
 }): ReactElement {
-  const { status, onRetry } = props;
+  const { status, canRetry, onRetry } = props;
   const row = 'flex items-start gap-2 text-body wrap-anywhere';
   const icon = 'mt-1 shrink-0';
   switch (status) {
@@ -130,9 +180,11 @@ function SaveRow(props: {
             <AlertIcon className={icon} />
             <span>{STRINGS['save.failed']}</span>
           </div>
-          <button type="button" onClick={onRetry} className={SMALL_BUTTON}>
-            {STRINGS['save.retry']}
-          </button>
+          {canRetry ? (
+            <button type="button" onClick={onRetry} className={SMALL_BUTTON}>
+              {STRINGS['save.retry']}
+            </button>
+          ) : null}
         </div>
       );
     case 'paused':
@@ -161,11 +213,19 @@ export function ToolGroup(props: {
   readonly store: EditorStore;
   readonly onMode: (mode: EditorMode) => void;
   readonly onRetry?: () => void;
+  readonly onUndo?: () => void;
+  readonly onRedo?: () => void;
 }): ReactElement | null {
-  const { store, onMode, onRetry } = props;
+  const { store, onMode, onRetry, onUndo, onRedo } = props;
   const editing = useEditorStore(store, (state) => state.status === 'editing');
   const mode = useEditorStore(store, (state) => state.mode);
   const saveStatus = useEditorStore(store, (state) => state.queue.status);
+  const canRetry = useEditorStore(
+    store,
+    (state) => state.queue.lastFailure === 'network',
+  );
+  const canUndo = useEditorStore(store, (state) => state.undo.undo.length > 0);
+  const canRedo = useEditorStore(store, (state) => state.undo.redo.length > 0);
   if (!editing) return null;
   return (
     <div
@@ -173,7 +233,13 @@ export function ToolGroup(props: {
       className="mb-4 flex shrink-0 flex-col gap-2 border-b border-border pb-4"
     >
       <ModeToggle mode={mode} onMode={onMode} />
-      <SaveRow status={saveStatus} onRetry={onRetry} />
+      <HistoryRow
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={onUndo}
+        onRedo={onRedo}
+      />
+      <SaveRow status={saveStatus} canRetry={canRetry} onRetry={onRetry} />
     </div>
   );
 }

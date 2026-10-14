@@ -1,6 +1,12 @@
 import type { ReactElement } from 'react';
 import { OverlayLayer } from '../client/overlay/overlay-layer.js';
-import type { EditorMode, EditorStore } from '../client/session/store.js';
+import type { MoveDirection } from '../client/session/move-targets.js';
+import {
+  NO_STORE,
+  useEditorStore,
+  type EditorMode,
+  type EditorStore,
+} from '../client/session/store.js';
 import { LiveRegion } from './editing/live-region.js';
 import { ToolGroup } from './editing/tool-group.js';
 import type { ShellIsland } from './island.js';
@@ -31,6 +37,11 @@ export type ShellAppProps = {
     readonly onMode: (mode: EditorMode) => void;
     /** Called by the save status's Retry button. */
     readonly onRetry?: () => void;
+    /** Called by the Undo and Redo buttons. */
+    readonly onUndo?: () => void;
+    readonly onRedo?: () => void;
+    /** Called by the floating toolbar's move buttons. */
+    readonly onMove?: (id: string, direction: MoveDirection) => void;
   };
 };
 
@@ -52,6 +63,10 @@ export function ShellApp(props: ShellAppProps): ReactElement {
     onReload,
     editor,
   } = props;
+  const editRegion = useEditorStore(
+    editor?.store ?? NO_STORE,
+    (state) => state.status === 'editing' && state.mode === 'edit',
+  );
   const editing =
     editor === undefined || !hydrated
       ? undefined
@@ -62,6 +77,8 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               store={editor.store}
               onMode={editor.onMode}
               onRetry={editor.onRetry}
+              onUndo={editor.onUndo}
+              onRedo={editor.onRedo}
             />
           ),
           panel: null,
@@ -78,11 +95,12 @@ export function ShellApp(props: ShellAppProps): ReactElement {
       />
       <Stage
         frameUrl={island.frameUrl}
+        editRegion={hydrated && editor !== undefined && editRegion}
         frameFailed={frameFailed}
         onReload={onReload}
       />
       {hydrated && island.mode === 'edit' ? (
-        <OverlayLayer store={editor?.store} />
+        <OverlayLayer store={editor?.store} onMove={editor?.onMove} />
       ) : null}
       {hydrated && editor !== undefined ? (
         <LiveRegion store={editor.store} />

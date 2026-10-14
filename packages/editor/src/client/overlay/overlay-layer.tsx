@@ -5,15 +5,19 @@ import {
   type CSSProperties,
   type ReactElement,
 } from 'react';
+import { Toolbar } from '../../chrome/editing/toolbar.js';
 import { formatString } from '../../chrome/strings.js';
+import { measureSiblingAxis } from '../frame/sibling-axis.js';
+import type { MoveDirection } from '../session/move-targets.js';
 import { hoverTarget } from '../session/scope.js';
 import {
-  createEditorStore,
+  NO_STORE,
   useEditorStore,
   type EditorStore,
 } from '../session/store.js';
 import {
   chipPlacement,
+  isVisibleIn,
   outlineRect,
   type Box,
   type ChipPlacement,
@@ -23,9 +27,6 @@ import {
   type HoverState,
   type SelectionState,
 } from './tracker.js';
-
-/** Stands in for the store when the overlay has none, so the hook still runs. */
-const NO_STORE = createEditorStore();
 
 function boxStyle(box: Box): CSSProperties {
   return {
@@ -71,11 +72,19 @@ export function chipText(state: {
 export function OverlayLayer(props: {
   readonly frame?: HTMLIFrameElement | null;
   readonly store?: EditorStore;
+  /** Called by the toolbar's move buttons. */
+  readonly onMove?: (id: string, direction: MoveDirection) => void;
 }): ReactElement {
-  const { frame, store } = props;
+  const { frame, store, onMove } = props;
   const layer = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<HoverState | null>(null);
   const [selection, setSelection] = useState<SelectionState | null>(null);
+  const [axis, setAxis] = useState<'horizontal' | 'vertical'>('vertical');
+  const flash = useEditorStore(store ?? NO_STORE, (current) => current.flash);
+  const selectedId = useEditorStore(
+    store ?? NO_STORE,
+    (current) => current.selection.selectedId,
+  );
   const active = useEditorStore(
     store ?? NO_STORE,
     (current) =>
@@ -110,7 +119,30 @@ export function OverlayLayer(props: {
             },
             selection: {
               read: () => store.getState().selection,
-              onChange: setSelection,
+              onChange: (next) => {
+                setSelection(next);
+                const { model, selection: current } = store.getState();
+                const frameDocument = target.contentDocument;
+                const node =
+                  current.selectedId === null || model === null
+                    ? undefined
+                    : model.get(current.selectedId);
+                if (
+                  node === undefined ||
+                  model === null ||
+                  frameDocument === null
+                ) {
+                  return;
+                }
+                setAxis(
+                  measureSiblingAxis(
+                    frameDocument,
+                    model
+                      .childrenOf(node.parentId)
+                      .map((sibling) => sibling.id),
+                  ),
+                );
+              },
             },
           },
     );
@@ -147,67 +179,117 @@ export function OverlayLayer(props: {
   const origin =
     frameBox === null ? null : { x: frameBox.left, y: frameBox.top };
 
+  const toolbarItem =
+    store === undefined ||
+    selection === null ||
+    selection.selected === null ||
+    selectedId === null ||
+    origin === null ||
+    !isVisibleIn(outlineRect(selection.selected, origin), selection.frame)
+      ? null
+      : outlineRect(selection.selected, origin);
+
   return (
-    <div
-      ref={layer}
-      className="pk-overlay"
-      aria-hidden="true"
-      data-overlay=""
-      style={frameBox === null ? undefined : boxStyle(frameBox)}
-    >
-      {frameBox !== null && origin !== null ? (
-        <div
-          className="pk-overlay-plane"
-          style={{ left: -frameBox.left, top: -frameBox.top }}
-        >
-          {selection === null || selection.scope === null ? null : (
-            <div
-              className="pk-overlay-scope"
-              data-overlay-scope=""
-              style={boxStyle(outlineRect(selection.scope, origin))}
-            />
-          )}
-          {selection === null || selection.selected === null ? null : (
-            <div
-              className="pk-overlay-selected"
-              data-overlay-selected=""
-              style={boxStyle(outlineRect(selection.selected, origin))}
-            />
-          )}
-          {drawn === null || state === null ? null : (
-            <>
-              {drawn.section === null ? null : (
-                <div
-                  className="pk-overlay-section"
-                  data-overlay-section=""
-                  style={boxStyle(drawn.section)}
-                />
-              )}
+    <>
+      <div
+        ref={layer}
+        className="pk-overlay"
+        aria-hidden="true"
+        data-overlay=""
+        style={frameBox === null ? undefined : boxStyle(frameBox)}
+      >
+        {frameBox !== null && origin !== null ? (
+          <div
+            className="pk-overlay-plane"
+            style={{ left: -frameBox.left, top: -frameBox.top }}
+          >
+            {selection === null || selection.scope === null ? null : (
               <div
-                key={state.blockId}
-                className="pk-overlay-target"
-                data-overlay-target={state.blockId}
-              >
-                <div
-                  className="pk-overlay-outline"
-                  data-overlay-outline=""
-                  style={boxStyle(drawn.outline)}
-                />
-                {drawn.chip.mode === 'hidden' ? null : (
+                className="pk-overlay-scope"
+                data-overlay-scope=""
+                style={boxStyle(outlineRect(selection.scope, origin))}
+              />
+            )}
+            {selection === null || selection.selected === null ? null : (
+              <div
+                className="pk-overlay-selected"
+                data-overlay-selected=""
+                style={boxStyle(outlineRect(selection.selected, origin))}
+              />
+            )}
+            {selection === null ||
+            selection.selected === null ||
+            flash === null ||
+            flash.id !== selectedId ? null : (
+              <div
+                key={flash.token}
+                className="pk-overlay-flash"
+                data-overlay-flash=""
+                style={boxStyle(outlineRect(selection.selected, origin))}
+                onAnimationEnd={() => {
+                  store?.clearFlash();
+                }}
+              />
+            )}
+            {drawn === null || state === null ? null : (
+              <>
+                {drawn.section === null ? null : (
                   <div
-                    className="pk-overlay-chip"
-                    data-overlay-chip=""
-                    data-placement={drawn.chip.mode}
-                    style={{ left: drawn.chip.left, top: drawn.chip.top }}
-                  >
-                    {chipText(state)}
-                  </div>
+                    className="pk-overlay-section"
+                    data-overlay-section=""
+                    style={boxStyle(drawn.section)}
+                  />
                 )}
-              </div>
-            </>
-          )}
+                <div
+                  key={state.blockId}
+                  className="pk-overlay-target"
+                  data-overlay-target={state.blockId}
+                >
+                  <div
+                    className="pk-overlay-outline"
+                    data-overlay-outline=""
+                    style={boxStyle(drawn.outline)}
+                  />
+                  {drawn.chip.mode === 'hidden' ? null : (
+                    <div
+                      className="pk-overlay-chip"
+                      data-overlay-chip=""
+                      data-placement={drawn.chip.mode}
+                      style={{ left: drawn.chip.left, top: drawn.chip.top }}
+                    >
+                      {chipText(state)}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
+      {store === undefined ||
+      onMove === undefined ||
+      !active ||
+      frameBox === null ||
+      toolbarItem === null ? null : (
+        <div
+          className="pk-overlay-interaction"
+          data-overlay-interaction=""
+          style={boxStyle(frameBox)}
+        >
+          <div
+            className="pk-overlay-plane"
+            style={{ left: -frameBox.left, top: -frameBox.top }}
+          >
+            <Toolbar
+              store={store}
+              item={toolbarItem}
+              frame={frameBox}
+              axis={axis}
+              onMove={onMove}
+            />
+          </div>
         </div>
-      ) : null}
-    </div>
+      )}
+    </>
   );
 }

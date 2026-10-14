@@ -1,6 +1,7 @@
 import {
   QueryClientProvider,
   useMutation,
+  useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
 import {
@@ -21,25 +22,35 @@ import type { BootEditorOptions } from '../boot.js';
 import { attachClaim } from '../frame/claim.js';
 import { loadBlockEditModules } from '../frame/block-edit-loader.js';
 import { hitChain } from '../frame/hit-test.js';
-import { createHooksRuntime } from '../frame/hooks-runtime.js';
+import {
+  createHooksRuntime,
+  type HooksRuntime,
+} from '../frame/hooks-runtime.js';
+import { measureSiblingAxis } from '../frame/sibling-axis.js';
 import { createApiClient } from '../session/api-client.js';
 import { startLockClient } from '../session/lock-client.js';
+import { moveActionFor } from '../session/move-action.js';
+import type { MoveDirection } from '../session/move-targets.js';
 import { createEditorQueryClient } from '../session/query-client.js';
+import { createSaveRunner, type SaveRunner } from '../session/save-runner.js';
 import {
   climb,
   drillByDoubleClick,
+  drillFirst,
+  firstSibling,
+  lastSibling,
+  nextSibling,
+  previousSibling,
   selectByClick,
-  type Selection,
 } from '../session/scope.js';
-import { announceSelection } from '../session/selection-announcement.js';
+import { selectAndAnnounce } from '../session/selection-announcement.js';
 import {
   createEditorStore,
   useEditorStore,
   type EditorMode,
-  type EditorStore,
 } from '../session/store.js';
 import { watchFrame } from './frame-watch.js';
-import { keyAction } from './keys.js';
+import { keyAction, structureKeyAction } from './keys.js';
 import { applyLayout, readLayout, writeLayout } from './layout.js';
 
 /**
@@ -79,21 +90,6 @@ function frameOf(host: HTMLElement): HTMLIFrameElement | null {
   return frame instanceof HTMLIFrameElement ? frame : null;
 }
 
-/** Moves the selection and tells the live region about it. */
-function selectAndAnnounce(store: EditorStore, selection: Selection): void {
-  const before = store.getState().selection;
-  store.select(selection);
-  const state = store.getState();
-  if (state.selection === before || state.model === null) return;
-  store.announce(
-    announceSelection(
-      state.model,
-      state.session?.catalogue ?? [],
-      state.selection,
-    ),
-  );
-}
-
 /** The path of a visitor location: the open request names a page, not a query. */
 function pathOfLocation(location: string): string {
   const query = location.indexOf('?');
@@ -114,6 +110,11 @@ function focusStage(host: HTMLElement, frame: HTMLIFrameElement | null): void {
   host.shadowRoot?.getElementById(STAGE_ID)?.focus({ preventScroll: true });
 }
 
+/** Keeps keyboard focus on the page region, never in the framed site. */
+function focusRegion(host: HTMLElement): void {
+  host.shadowRoot?.getElementById(STAGE_ID)?.focus({ preventScroll: true });
+}
+
 function Shell(props: {
   readonly host: HTMLElement;
   readonly island: ShellIsland;
@@ -123,6 +124,9 @@ function Shell(props: {
   const editable = island.mode === 'edit';
   const [store] = useState(createEditorStore);
   const [api] = useState(() => createApiClient());
+  const queryClient = useQueryClient();
+  const hooksRef = useRef<HooksRuntime | null>(null);
+  const runnerRef = useRef<SaveRunner | null>(null);
   const status = useEditorStore(store, (state) => state.status);
   const session = useEditorStore(store, (state) => state.session);
   // The first client render must match the server markup, which was rendered
@@ -172,6 +176,7 @@ function Shell(props: {
       propsOf: (id) => store.getState().model?.get(id)?.props,
       mode: store.getState().mode,
     });
+    hooksRef.current = runtime;
     let attached: Document | null = null;
     const attach = (): void => {
       const frameDocument = frame.contentDocument;
@@ -211,6 +216,7 @@ function Shell(props: {
     return () => {
       unsubscribe();
       frame.removeEventListener('load', attach);
+      hooksRef.current = null;
       runtime.dispose();
     };
   }, [host, hydrated, editable, blockHooks, store]);
@@ -244,6 +250,53 @@ function Shell(props: {
     if (editable) host.dataset.session = status;
   }, [host, editable, status]);
 
+  // The save runner lives as long as this tab holds the page: it sends the
+  // queue, patches the frame and keeps the undo stack's writes in order.
+  useEffect(() => {
+    if (!hydrated || !editable || status !== 'editing') return undefined;
+    const runner = createSaveRunner({
+      store,
+      api,
+      queryClient,
+      frame: () => frameOf(host),
+      frameUrl: island.frameUrl,
+      hooks: () => hooksRef.current,
+    });
+    runnerRef.current = runner;
+    return () => {
+      runnerRef.current = null;
+      runner.dispose();
+    };
+  }, [
+    host,
+    hydrated,
+    editable,
+    status,
+    store,
+    api,
+    queryClient,
+    island.frameUrl,
+  ]);
+
+  const moveItem = useCallback(
+    (id: string, direction: MoveDirection) => {
+      const action = moveActionFor(store.getState(), id, direction);
+      if (action !== null)
+        runnerRef.current?.perform(action.intent, action.entry);
+    },
+    [store],
+  );
+
+  const retrySave = useCallback(() => {
+    runnerRef.current?.retry();
+  }, []);
+  const undo = useCallback(() => {
+    runnerRef.current?.undo();
+  }, []);
+  const redo = useCallback(() => {
+    runnerRef.current?.redo();
+  }, []);
+
   const changeMode = useCallback(
     (next: EditorMode) => {
       const state = store.getState();
@@ -276,10 +329,94 @@ function Shell(props: {
     let releaseClaim: (() => void) | null = null;
     let releaseKeys: (() => void) | null = null;
 
+    const structureKey = (event: KeyboardEvent, target: unknown): void => {
+      const state = store.getState();
+      const { model, selection } = state;
+      if (state.mode !== 'edit' || model === null) return;
+      const path = event.composedPath();
+      const inRegion = path[0] instanceof Element && path[0].id === STAGE_ID;
+      const inToolbar = path.some(
+        (node) => node instanceof Element && node.hasAttribute('data-toolbar'),
+      );
+      const frameDocument = frame.contentDocument;
+      const selected =
+        selection.selectedId === null
+          ? undefined
+          : model.get(selection.selectedId);
+      const axis =
+        frameDocument === null || selected === undefined
+          ? 'vertical'
+          : measureSiblingAxis(
+              frameDocument,
+              model.childrenOf(selected.parentId).map((node) => node.id),
+            );
+      const action = structureKeyAction(event, target, {
+        inRegion,
+        inToolbar,
+        axis,
+      });
+      if (action === null) return;
+      event.preventDefault();
+      switch (action.kind) {
+        case 'sibling':
+          selectAndAnnounce(
+            store,
+            action.direction === 'next'
+              ? nextSibling(model, selection)
+              : previousSibling(model, selection),
+          );
+          break;
+        case 'edge':
+          selectAndAnnounce(
+            store,
+            action.edge === 'first'
+              ? firstSibling(model, selection)
+              : lastSibling(model, selection),
+          );
+          break;
+        case 'drill': {
+          const result = drillFirst(model, selection);
+          selectAndAnnounce(store, result.selection);
+          if (result.openProperties && result.selection.selectedId !== null) {
+            store.requestProperties(result.selection.selectedId);
+          }
+          break;
+        }
+        case 'climb':
+          selectAndAnnounce(store, climb(model, selection));
+          break;
+        case 'move': {
+          if (selected === undefined) break;
+          const move = moveActionFor(state, selected.id, action.direction);
+          if (move === null) {
+            store.announce(
+              STRINGS[
+                action.direction === 'earlier'
+                  ? 'toolbar.reason.atStart'
+                  : 'toolbar.reason.atEnd'
+              ],
+            );
+          } else {
+            runnerRef.current?.perform(move.intent, move.entry);
+          }
+          break;
+        }
+        case 'undo':
+          runnerRef.current?.undo();
+          break;
+        case 'redo':
+          runnerRef.current?.redo();
+          break;
+      }
+    };
+
     const onKey = (event: KeyboardEvent): void => {
       const target = event.composedPath()[0] ?? event.target;
       const action = keyAction(event, target);
-      if (action === null) return;
+      if (action === null) {
+        structureKey(event, target);
+        return;
+      }
       if (action === 'toggle-mode') {
         event.preventDefault();
         changeMode(store.getState().mode === 'edit' ? 'interact' : 'edit');
@@ -306,6 +443,7 @@ function Shell(props: {
               store,
               selectByClick(hit.model, hit.selection, hit.chain),
             );
+            focusRegion(host);
           },
           onDoubleClick: (x, y) => {
             const hit = read(x, y);
@@ -314,6 +452,7 @@ function Shell(props: {
               store,
               drillByDoubleClick(hit.model, hit.selection, hit.chain).selection,
             );
+            focusRegion(host);
           },
         });
       } else if (!wanted && releaseClaim !== null) {
@@ -419,7 +558,18 @@ function Shell(props: {
       onToggleLayout={toggleLayout}
       frameFailed={frameFailed}
       onReload={reload}
-      editor={editable ? { store, onMode: changeMode } : undefined}
+      editor={
+        editable
+          ? {
+              store,
+              onMode: changeMode,
+              onRetry: retrySave,
+              onUndo: undo,
+              onRedo: redo,
+              onMove: moveItem,
+            }
+          : undefined
+      }
     />
   );
 }

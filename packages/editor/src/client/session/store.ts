@@ -9,7 +9,8 @@
  * selected changed.
  */
 import { useSyncExternalStore } from 'react';
-import type { EditorSession, LockView } from '../../api-types.js';
+import type { EditorSession, LockView, ModelNode } from '../../api-types.js';
+import { createUndoStack, type UndoStack } from './inverse.js';
 import { createQueue, type QueueState } from './save-queue.js';
 import { NO_SELECTION, type Selection } from './scope.js';
 import { createTreeModel, type TreeModel } from './tree-model.js';
@@ -33,9 +34,26 @@ export type EditorState = {
   readonly mode: EditorMode;
   readonly selection: Selection;
   readonly queue: QueueState;
+  /** The editor's own actions this session, for undo and redo; cleared on reload. */
+  readonly undo: UndoStack;
   /** The latest message for the live region. */
   readonly announcement: string;
   readonly lock: LockView | null;
+  /** The item a structural write just landed on; the overlay flashes it once per token. */
+  readonly flash: { readonly id: string; readonly token: number } | null;
+  /** Enter on a leaf asks for its Properties; the panel answers it (plan 08-24). */
+  readonly propertiesRequest: {
+    readonly id: string;
+    readonly token: number;
+  } | null;
+};
+
+/** What a successful write changes in one step, so no one reads a half-applied state. */
+export type WriteApplied = {
+  readonly model: TreeModel;
+  readonly pageVersion: number;
+  readonly queue: QueueState;
+  readonly selection: Selection;
 };
 
 export type EditorStore = {
@@ -51,6 +69,15 @@ export type EditorStore = {
   announce(text: string): void;
   /** A newer lock view; one held by another editor ends editing in this tab. */
   setLock(view: LockView): void;
+  setQueue(queue: QueueState): void;
+  setUndo(undo: UndoStack): void;
+  /** A write succeeded: the tree, page version, queue and selection change together. */
+  writeApplied(applied: WriteApplied): void;
+  /** A newer tree read from the server, with no write of ours behind it. */
+  treeRefreshed(tree: readonly ModelNode[], pageVersion: number): void;
+  flash(id: string): void;
+  clearFlash(): void;
+  requestProperties(id: string): void;
 };
 
 export function initialEditorState(): EditorState {
@@ -62,8 +89,11 @@ export function initialEditorState(): EditorState {
     mode: 'edit',
     selection: NO_SELECTION,
     queue: createQueue(),
+    undo: createUndoStack(),
     announcement: '',
     lock: null,
+    flash: null,
+    propertiesRequest: null,
   };
 }
 
@@ -83,6 +113,7 @@ export function openedState(
     mode: locked ? 'interact' : 'edit',
     selection: NO_SELECTION,
     lock: session.lock,
+    undo: createUndoStack(),
   };
 }
 
@@ -91,6 +122,7 @@ export function createEditorStore(
 ): EditorStore {
   let state = initial;
   const listeners = new Set<() => void>();
+  let token = 0;
 
   function set(next: EditorState): void {
     if (next === state) return;
@@ -140,9 +172,44 @@ export function createEditorStore(
         ...state,
         lock: view,
         ...(taken
-          ? { status: 'locked', mode: 'interact', selection: NO_SELECTION }
+          ? {
+              status: 'locked',
+              mode: 'interact',
+              selection: NO_SELECTION,
+              undo: createUndoStack(),
+            }
           : {}),
       });
+    },
+    setQueue(queue) {
+      set({ ...state, queue });
+    },
+    setUndo(undo) {
+      set({ ...state, undo });
+    },
+    writeApplied(applied) {
+      set({
+        ...state,
+        model: applied.model,
+        pageVersion: applied.pageVersion,
+        queue: applied.queue,
+        selection: state.mode === 'edit' ? applied.selection : NO_SELECTION,
+      });
+    },
+    treeRefreshed(tree, pageVersion) {
+      set({ ...state, model: createTreeModel(tree), pageVersion });
+    },
+    flash(id) {
+      token += 1;
+      set({ ...state, flash: { id, token } });
+    },
+    clearFlash() {
+      if (state.flash === null) return;
+      set({ ...state, flash: null });
+    },
+    requestProperties(id) {
+      token += 1;
+      set({ ...state, propertiesRequest: { id, token } });
     },
   };
 }
@@ -158,3 +225,6 @@ export function useEditorStore<T>(
     () => selector(store.getState()),
   );
 }
+
+/** Stands in for the store where a component works with or without one. */
+export const NO_STORE: EditorStore = createEditorStore();

@@ -253,6 +253,8 @@ export const STRINGS = Object.freeze({
   'toolbar.delete': 'Delete',
   'toolbar.delete.label': 'Delete {label}',
   'toolbar.more': '…',
+  'toolbar.more.label': 'Show the hidden levels',
+  'toolbar.breadcrumb': 'Path to the selected item',
   'toolbar.reason.atStart': 'Already at the start',
   'toolbar.reason.atEnd': 'Already at the end',
   'toolbar.reason.lastColumn': 'A section needs at least one column.',
