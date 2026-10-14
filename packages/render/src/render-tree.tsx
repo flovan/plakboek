@@ -90,7 +90,7 @@ export function placeholderFor(
  */
 export function liveEditFor(
   blockMeta: ReadonlyMap<string, BlockMeta>,
-): (node: BlockNode) => EditProxy {
+): (node: Pick<BlockNode, 'id' | 'blockType'>) => EditProxy {
   return (node) => {
     const meta = blockMeta.get(node.blockType);
     return createLiveEdit({
