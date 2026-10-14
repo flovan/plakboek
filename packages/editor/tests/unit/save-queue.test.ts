@@ -211,6 +211,97 @@ describe('save queue ordering and send-time versions', () => {
     });
   });
 
+  it('queues an edit behind a structural write that touches the same block instead of merging ahead of it', () => {
+    const restored: Intent = {
+      kind: 'insert',
+      position: { parentId: 's1', previousId: 'a' },
+      node: { id: 'h', type: 'heading', props: { text: 'old' } },
+    };
+    let state = enqueue(
+      createQueue(),
+      { kind: 'update', blockId: 'h', props: { text: 'first' } },
+      { immediate: false },
+    );
+    state = enqueue(
+      state,
+      { kind: 'delete', blockId: 'h' },
+      { immediate: true },
+    );
+    state = enqueue(state, restored, { immediate: true });
+    state = enqueue(
+      state,
+      { kind: 'update', blockId: 'h', props: { text: 'later' } },
+      { immediate: false },
+    );
+    expect(state.entries.map((entry) => entry.intent.kind)).toEqual([
+      'update',
+      'delete',
+      'insert',
+      'update',
+    ]);
+    expect(state.entries[0]?.intent).toEqual({
+      kind: 'update',
+      blockId: 'h',
+      props: { text: 'first' },
+    });
+    expect(state.entries[3]?.intent).toEqual({
+      kind: 'update',
+      blockId: 'h',
+      props: { text: 'later' },
+    });
+  });
+
+  it('keeps an undo of a typed change behind a move made after it', () => {
+    let state = enqueue(
+      createQueue(),
+      { kind: 'update', blockId: 'h', props: { text: 'typed' } },
+      { immediate: false },
+    );
+    state = enqueue(
+      state,
+      {
+        kind: 'move',
+        blockId: 'h',
+        position: { parentId: 's1', previousId: null, nextId: 'a' },
+      },
+      { immediate: true },
+    );
+    state = enqueue(
+      state,
+      { kind: 'update', blockId: 'h', props: { text: 'undone' } },
+      { immediate: true, fragments: true },
+    );
+    expect(state.entries.map((entry) => entry.intent.kind)).toEqual([
+      'update',
+      'move',
+      'update',
+    ]);
+  });
+
+  it('still merges into the latest update when only other blocks were queued after it', () => {
+    let state = enqueue(
+      createQueue(),
+      { kind: 'update', blockId: 'h', props: { text: '1' } },
+      { immediate: false },
+    );
+    state = enqueue(
+      state,
+      { kind: 'delete', blockId: 'c' },
+      { immediate: true },
+    );
+    state = enqueue(
+      state,
+      { kind: 'update', blockId: 'h', props: { text: '2' } },
+      { immediate: false },
+    );
+    expect(state.entries).toHaveLength(2);
+    expect(state.entries[0]?.intent).toEqual({
+      kind: 'update',
+      blockId: 'h',
+      props: { text: '2' },
+    });
+  });
+
   it('flattens a group into one request in order and skips vanished blocks', () => {
     const state = enqueue(
       createQueue(),

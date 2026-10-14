@@ -120,6 +120,43 @@ function mergeUpdates(
   };
 }
 
+/** Whether the intent names the block, so a write queued after it must not jump in front of it. */
+function touchesBlock(intent: Intent, blockId: string): boolean {
+  switch (intent.kind) {
+    case 'insert': {
+      // A node without an id cannot be ruled out.
+      const ids = insertedIds(intent.node);
+      return ids === null || ids.includes(blockId);
+    }
+    case 'duplicate':
+      return intent.blockId === blockId || intent.newId === blockId;
+    case 'update':
+    case 'move':
+    case 'delete':
+      return intent.blockId === blockId;
+    case 'group':
+      return intent.intents.some((member) => touchesBlock(member, blockId));
+  }
+}
+
+/**
+ * The pending update a new update of `blockId` may merge into: the latest one
+ * for the block, and only when nothing queued after it touches the block. A
+ * structural write in between (a delete and the insert an undo makes, a move)
+ * must keep its place, so the new edit then gets an entry of its own.
+ */
+function mergeIndex(entries: readonly QueueEntry[], blockId: string): number {
+  const index = entries.findLastIndex(
+    (entry) =>
+      entry.intent.kind === 'update' && entry.intent.blockId === blockId,
+  );
+  if (index === -1) return -1;
+  const blocked = entries
+    .slice(index + 1)
+    .some((entry) => touchesBlock(entry.intent, blockId));
+  return blocked ? -1 : index;
+}
+
 function settledStatus(entries: readonly QueueEntry[]): SaveStatus {
   return entries.length > 0 ? 'saving' : 'saved';
 }
@@ -127,8 +164,10 @@ function settledStatus(entries: readonly QueueEntry[]): SaveStatus {
 /**
  * Add an intent. Structural intents (anything but a property update) are ready
  * at once and make every pending property edit ready first, so saves leave in
- * the order the actions were made. A property update merges into a pending
- * update of the same block (the latest value wins) and keeps that entry's place.
+ * the order the actions were made. A property update merges into the latest
+ * pending update of the same block (the latest value wins) and keeps that
+ * entry's place, unless a write queued after it touches the block: then it is
+ * queued behind that write.
  */
 export function enqueue(
   state: QueueState,
@@ -146,13 +185,7 @@ export function enqueue(
   let nextSeq = state.nextSeq;
 
   const index =
-    intent.kind === 'update'
-      ? entries.findIndex(
-          (entry) =>
-            entry.intent.kind === 'update' &&
-            entry.intent.blockId === intent.blockId,
-        )
-      : -1;
+    intent.kind === 'update' ? mergeIndex(entries, intent.blockId) : -1;
   const existing = index === -1 ? undefined : entries[index];
 
   if (
