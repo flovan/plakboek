@@ -846,6 +846,94 @@
     }
   }
 
+  /*
+   * Dragging. The source is dimmed where it stands (the page does not reflow),
+   * the insertion line is 2px with a round 8px cap at each end, and the label
+   * follows the pointer in the shell's viewport, above everything else.
+   */
+  .pk-overlay-drag-source {
+    position: absolute;
+    pointer-events: none;
+    background: var(--pk-overlay-drag-source);
+    forced-color-adjust: none;
+  }
+
+  .pk-drag-line {
+    position: absolute;
+    pointer-events: none;
+    background: var(--pk-overlay-outline);
+    forced-color-adjust: none;
+  }
+
+  .pk-drag-line::before,
+  .pk-drag-line::after {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: inherit;
+  }
+
+  .pk-drag-line[data-axis='horizontal']::before {
+    top: -3px;
+    left: -4px;
+  }
+
+  .pk-drag-line[data-axis='horizontal']::after {
+    top: -3px;
+    right: -4px;
+  }
+
+  .pk-drag-line[data-axis='vertical']::before {
+    top: -4px;
+    left: -3px;
+  }
+
+  .pk-drag-line[data-axis='vertical']::after {
+    bottom: -4px;
+    left: -3px;
+  }
+
+  .pk-drag-surface {
+    position: absolute;
+    pointer-events: auto;
+    cursor: grabbing;
+    user-select: none;
+  }
+
+  .pk-drag-surface[data-legal='false'] {
+    cursor: no-drop;
+  }
+
+  .pk-drag-label {
+    position: fixed;
+    z-index: 6;
+    box-sizing: border-box;
+    height: 20px;
+    max-width: 240px;
+    padding: 0 8px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--pk-overlay-outline);
+    color: var(--pk-overlay-chip-text);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+    forced-color-adjust: none;
+  }
+
+  @media (forced-colors: active) {
+    .pk-drag-line,
+    .pk-drag-label {
+      background: Highlight;
+      color: HighlightText;
+    }
+  }
+
   .pk-overlay-chip {
     position: absolute;
     box-sizing: border-box;

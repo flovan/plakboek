@@ -4,6 +4,7 @@ import {
   insertionTarget,
   paletteGroups,
 } from '../../client/session/insertion.js';
+import type { Point } from '../../client/overlay/geometry.js';
 import { legalityContextOf } from '../../client/session/move-action.js';
 import {
   useEditorStore,
@@ -18,6 +19,8 @@ export type PaletteProps = {
   readonly store: EditorStore;
   /** The editor chose a type and a place for it. */
   readonly onInsert: (entry: CatalogueEntry, position: EditPosition) => void;
+  /** A row was pressed: it becomes a drag once the pointer has moved 4px. */
+  readonly onDragStart?: (entry: CatalogueEntry, origin: Point) => void;
 };
 
 /**
@@ -29,7 +32,7 @@ export type PaletteProps = {
  * nothing.
  */
 export function Palette(props: PaletteProps): ReactElement | null {
-  const { store, onInsert } = props;
+  const { store, onInsert, onDragStart } = props;
   const state = useEditorStore(store, (current) => current);
   const [query, setQuery] = useState('');
   const base = useId();
@@ -91,6 +94,13 @@ export function Palette(props: PaletteProps): ReactElement | null {
                   className={ROW}
                   data-palette-row={entry.key}
                   aria-disabled={target === null}
+                  onPointerDown={(event) => {
+                    if (event.button !== 0 || !event.isPrimary) return;
+                    onDragStart?.(entry, {
+                      x: event.clientX,
+                      y: event.clientY,
+                    });
+                  }}
                   onClick={() => {
                     if (target !== null) onInsert(entry, target);
                   }}

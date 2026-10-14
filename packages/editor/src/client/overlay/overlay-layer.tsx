@@ -25,12 +25,14 @@ import {
   type PickerOpener,
 } from '../session/store.js';
 import { createBoxTracker, type BoxesState } from './boxes.js';
+import { DragDecoration, DragLabel, DragSurface } from './drag-layer.js';
 import {
   chipPlacement,
   isVisibleIn,
   outlineRect,
   type Box,
   type ChipPlacement,
+  type Point,
 } from './geometry.js';
 import { slotAnchor } from './slot-geometry.js';
 import {
@@ -138,6 +140,10 @@ export function OverlayLayer(props: {
   readonly onDismissPicker?: () => void;
   /** Called when a type is chosen in the picker. */
   readonly onPick?: (entry: CatalogueEntry) => void;
+  /** Called when the toolbar's drag handle is pressed, with where the press was. */
+  readonly onDragStart?: (id: string, origin: Point) => void;
+  /** Called when Space or Enter on the drag handle lifts the item. */
+  readonly onLiftDrag?: (id: string) => void;
 }): ReactElement {
   const {
     frame,
@@ -149,6 +155,8 @@ export function OverlayLayer(props: {
     onClosePicker,
     onDismissPicker,
     onPick,
+    onDragStart,
+    onLiftDrag,
   } = props;
   const layer = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<HoverState | null>(null);
@@ -166,6 +174,9 @@ export function OverlayLayer(props: {
       store === undefined ||
       (current.status === 'editing' && current.mode === 'edit'),
   );
+  const drag = useEditorStore(store ?? NO_STORE, (current) => current.drag);
+  // While the pointer drags, the frame belongs to the drag: no hover, toolbar or gaps.
+  const pointerDragging = drag?.via === 'pointer' && drag.active;
 
   useEffect(() => {
     if (!active) {
@@ -265,7 +276,7 @@ export function OverlayLayer(props: {
     readonly section: Box | null;
     readonly chip: ChipPlacement;
   } | null = null;
-  if (state !== null) {
+  if (state !== null && !pointerDragging) {
     const origin = { x: state.frame.left, y: state.frame.top };
     const outline = outlineRect(state.element, origin);
     drawn = {
@@ -298,14 +309,27 @@ export function OverlayLayer(props: {
     store ?? NO_STORE,
     (current) => current.deleteRequest !== null,
   );
+  // A keyboard drag keeps the toolbar (it holds the focused handle) even when
+  // the frame has scrolled the item out of view.
   const toolbarItem =
     store === undefined ||
     confirming ||
+    pointerDragging ||
     selection === null ||
     selection.selected === null ||
     selectedId === null ||
     origin === null ||
-    !isVisibleIn(outlineRect(selection.selected, origin), selection.frame)
+    (drag === null &&
+      !isVisibleIn(outlineRect(selection.selected, origin), selection.frame))
+      ? null
+      : outlineRect(selection.selected, origin);
+  const dragSource =
+    drag === null ||
+    drag.subject.kind !== 'move' ||
+    drag.subject.id !== selectedId ||
+    selection === null ||
+    selection.selected === null ||
+    origin === null
       ? null
       : outlineRect(selection.selected, origin);
 
@@ -383,6 +407,13 @@ export function OverlayLayer(props: {
                 </div>
               </>
             )}
+            {store === undefined || origin === null ? null : (
+              <DragDecoration
+                store={store}
+                frame={frameBox}
+                source={dragSource}
+              />
+            )}
             {store === undefined || measured === null ? null : (
               <NeedsInputMarkers
                 store={store}
@@ -412,7 +443,8 @@ export function OverlayLayer(props: {
             className="pk-overlay-plane"
             style={{ left: -frameBox.left, top: -frameBox.top }}
           >
-            {confirming || measured === null ? null : (
+            <DragSurface store={store} frame={frameBox} />
+            {confirming || measured === null || drag !== null ? null : (
               <>
                 <InsertPoints
                   store={store}
@@ -442,9 +474,11 @@ export function OverlayLayer(props: {
                 onAddAfter={(slot) => {
                   onOpenPicker(slot, 'toolbar');
                 }}
+                onDragStart={onDragStart}
+                onLiftDrag={onLiftDrag}
               />
             )}
-            {picker === null || confirming ? null : (
+            {picker === null || confirming || drag !== null ? null : (
               <Picker
                 key={picker.token}
                 store={store}
@@ -459,6 +493,7 @@ export function OverlayLayer(props: {
           </div>
         </div>
       )}
+      {store === undefined ? null : <DragLabel store={store} />}
     </>
   );
 }

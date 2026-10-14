@@ -3,9 +3,14 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type PointerEvent,
   type ReactElement,
 } from 'react';
-import { toolbarPlacement, type Box } from '../../client/overlay/geometry.js';
+import {
+  toolbarPlacement,
+  type Box,
+  type Point,
+} from '../../client/overlay/geometry.js';
 import {
   legalityContextOf,
   catalogueByKey,
@@ -32,6 +37,7 @@ import {
   ArrowRightIcon,
   ArrowUpIcon,
   DuplicateIcon,
+  GripIcon,
   PlusIcon,
   PropertiesIcon,
   TrashIcon,
@@ -93,6 +99,10 @@ export type ToolbarProps = {
   readonly onDelete: (id: string) => void;
   /** Called with the gap right after the selected item. */
   readonly onAddAfter: (slot: InsertSlot) => void;
+  /** Called when the drag handle is pressed: the pointer drag starts once it has moved 4px. */
+  readonly onDragStart?: (id: string, origin: Point) => void;
+  /** Called when Space or Enter on the drag handle lifts the item for a keyboard drag. */
+  readonly onLiftDrag?: (id: string) => void;
 };
 
 /**
@@ -113,6 +123,8 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
     onDuplicate,
     onDelete,
     onAddAfter,
+    onDragStart,
+    onLiftDrag,
   } = props;
   const state = useEditorStore(store, (current) => current);
   const root = useRef<HTMLDivElement>(null);
@@ -166,6 +178,7 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
   // After a column the same button adds a column there, with no picker.
   const addSlot = ctx === null ? null : slotAfter(ctx, selectedId);
   const keys = [
+    'drag',
     ...shown.flatMap((entry) =>
       entry === 'more'
         ? ['more']
@@ -245,6 +258,20 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
     );
   };
 
+  const onHandlePointerDown = (
+    event: PointerEvent<HTMLButtonElement>,
+  ): void => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    onDragStart?.(selectedId, { x: event.clientX, y: event.clientY });
+  };
+  const onHandleKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    if (event.key !== ' ' && event.key !== 'Enter') return;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) onLiftDrag?.(selectedId);
+  };
+
   const duplicateReason =
     ctx !== null && canDuplicate(ctx, selectedId)
       ? null
@@ -268,6 +295,22 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
         maxWidth: Math.max(0, frame.width - 16),
       }}
     >
+      <Tooltip
+        label={STRINGS['toolbar.drag.tooltip']}
+        placement={placement.mode === 'below' ? 'top' : 'bottom'}
+      >
+        <button
+          type="button"
+          className={`${BUTTON} cursor-grab touch-none select-none`}
+          data-drag-handle=""
+          aria-label={formatString('toolbar.drag.label', { label: itemLabel })}
+          onPointerDown={onHandlePointerDown}
+          onKeyDown={onHandleKeyDown}
+          {...rove('drag')}
+        >
+          <GripIcon />
+        </button>
+      </Tooltip>
       <nav
         className="flex min-w-0 items-center gap-1 overflow-hidden px-1"
         aria-label={STRINGS['toolbar.breadcrumb']}

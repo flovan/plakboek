@@ -1,4 +1,4 @@
-import type { CatalogueEntry } from '../../api-types.js';
+import type { CatalogueEntry, EditPosition } from '../../api-types.js';
 import { moveColumnIntent } from './column-actions.js';
 import { buildUndoEntry, type UndoEntry } from './inverse.js';
 import type { LegalityContext } from './legality.js';
@@ -35,6 +35,22 @@ export function legalityContextOf(state: EditorState): LegalityContext | null {
   };
 }
 
+/** The move of an item to a position, with its undo entry; null before the session has opened. */
+export function moveToPositionFor(
+  state: EditorState,
+  id: string,
+  position: EditPosition,
+): { readonly intent: Intent; readonly entry: UndoEntry } | null {
+  const ctx = legalityContextOf(state);
+  if (ctx === null) return null;
+  // A column that changes section changes two column counts (D-05).
+  const intent: Intent = moveColumnIntent(ctx.model, id, position);
+  return {
+    intent,
+    entry: buildUndoEntry(intent, ctx.model, { kind: 'moved', itemId: id }),
+  };
+}
+
 /** The move of an item one step earlier or later, with its undo entry; null at the true start or end. */
 export function moveActionFor(
   state: EditorState,
@@ -45,10 +61,5 @@ export function moveActionFor(
   if (ctx === null) return null;
   const position = moveTarget(ctx, id, direction);
   if (position === null) return null;
-  // A column that changes section changes two column counts (D-05).
-  const intent: Intent = moveColumnIntent(ctx.model, id, position);
-  return {
-    intent,
-    entry: buildUndoEntry(intent, ctx.model, { kind: 'moved', itemId: id }),
-  };
+  return moveToPositionFor(state, id, position);
 }

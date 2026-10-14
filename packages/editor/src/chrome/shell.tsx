@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import type { CatalogueEntry, EditPosition } from '../api-types.js';
+import type { Point } from '../client/overlay/geometry.js';
 import { OverlayLayer } from '../client/overlay/overlay-layer.js';
 import type { InsertSlot } from '../client/session/insertion.js';
 import type { MoveDirection } from '../client/session/move-targets.js';
@@ -91,6 +92,11 @@ export type ShellAppProps = {
     readonly onPick?: (entry: CatalogueEntry) => void;
     /** Called when a palette row is chosen. */
     readonly onInsert?: (entry: CatalogueEntry, position: EditPosition) => void;
+    /** Called when the toolbar's drag handle is pressed, and when a palette row is. */
+    readonly onDragStart?: (id: string, origin: Point) => void;
+    readonly onDragEntry?: (entry: CatalogueEntry, origin: Point) => void;
+    /** Called when Space or Enter on the drag handle lifts the item. */
+    readonly onLiftDrag?: (id: string) => void;
     /** Called when a Properties control changes a value: render it and queue the save. */
     readonly onPropertiesChange?: PropertiesPanelProps['onPropertiesChange'];
     /** Called when a Properties control loses focus: save the block's edit now. */
@@ -155,6 +161,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
             <SidePanel
               store={editor.store}
               onInsert={editor.onInsert ?? noop}
+              onDragStart={editor.onDragEntry}
               onPropertiesChange={editor.onPropertiesChange}
               onPropertiesBlur={editor.onPropertiesBlur}
               onLayoutChange={editor.onLayoutChange}
@@ -239,6 +246,8 @@ export function ShellApp(props: ShellAppProps): ReactElement {
           onClosePicker={editor?.onClosePicker}
           onDismissPicker={editor?.onDismissPicker}
           onPick={editor?.onPick}
+          onDragStart={editor?.onDragStart}
+          onLiftDrag={editor?.onLiftDrag}
         />
       ) : null}
       {hydrated && editor !== undefined ? (

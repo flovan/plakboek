@@ -8,6 +8,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactElement,
@@ -50,7 +51,11 @@ import {
   startLockWatch,
   type LockClientHandle,
 } from '../session/lock-client.js';
-import { legalityContextOf, moveActionFor } from '../session/move-action.js';
+import {
+  legalityContextOf,
+  moveActionFor,
+  moveToPositionFor,
+} from '../session/move-action.js';
 import type { MoveDirection } from '../session/move-targets.js';
 import { withValues } from '../session/property-drafts.js';
 import {
@@ -85,6 +90,7 @@ import {
   type EditorMode,
   type PickerOpener,
 } from '../session/store.js';
+import { createDragSession } from './drag-session.js';
 import { drawerFits, setDrawerColumn } from './drawer.js';
 import { watchFrame } from './frame-watch.js';
 import { keyAction, structureKeyAction } from './keys.js';
@@ -697,6 +703,17 @@ function Shell(props: {
     [host, store],
   );
 
+  /** A drop of a dragged item: saved at once, like a move by the buttons. */
+  const moveTo = useCallback(
+    (id: string, position: EditPosition) => {
+      const action = moveToPositionFor(store.getState(), id, position);
+      if (action !== null) {
+        runnerRef.current?.perform(action.intent, action.entry);
+      }
+    },
+    [store],
+  );
+
   /** Opens the picker for a gap; a section gap with only one legal type adds it at once. */
   const openPicker = useCallback(
     (slot: InsertSlot, opener: PickerOpener) => {
@@ -763,6 +780,56 @@ function Shell(props: {
       insertEntry(entry, position, false);
     },
     [insertEntry],
+  );
+
+  // Dragging: the toolbar's handle and the palette's rows start one, and a
+  // drop is a move or an insert like any other structural write.
+  const dragSession = useMemo(
+    () =>
+      createDragSession({
+        store,
+        frame: () => frameOf(host),
+        onMove: moveTo,
+        onInsert: insertFromPalette,
+        onKeyboardEnd: () => {
+          // The handle is still there after a cancel and usually after a drop.
+          requestAnimationFrame(() => {
+            const handle = host.shadowRoot?.querySelector('[data-drag-handle]');
+            if (handle instanceof HTMLElement)
+              handle.focus({ preventScroll: true });
+            else focusRegion(host);
+          });
+        },
+      }),
+    [host, store, moveTo, insertFromPalette],
+  );
+  useEffect(() => {
+    const unsubscribe = store.subscribe(() => {
+      const { status: now, mode } = store.getState();
+      if (now !== 'editing' || mode !== 'edit') dragSession.abandon();
+    });
+    return () => {
+      unsubscribe();
+      dragSession.abandon();
+    };
+  }, [store, dragSession]);
+  const startDrag = useCallback(
+    (id: string, origin: { x: number; y: number }) => {
+      dragSession.startPointer({ kind: 'move', id }, origin);
+    },
+    [dragSession],
+  );
+  const startEntryDrag = useCallback(
+    (entry: CatalogueEntry, origin: { x: number; y: number }) => {
+      dragSession.startPointer({ kind: 'insert', type: entry.key }, origin);
+    },
+    [dragSession],
+  );
+  const liftDrag = useCallback(
+    (id: string) => {
+      dragSession.liftKeyboard(id);
+    },
+    [dragSession],
   );
 
   const retrySave = useCallback(() => {
@@ -1269,6 +1336,9 @@ function Shell(props: {
               onDismissPicker: dismissPicker,
               onPick: pickEntry,
               onInsert: insertFromPalette,
+              onDragStart: startDrag,
+              onDragEntry: startEntryDrag,
+              onLiftDrag: liftDrag,
               onPropertiesChange: changeProperties,
               onPropertiesBlur: blurProperties,
               onLayoutChange: changeLayout,

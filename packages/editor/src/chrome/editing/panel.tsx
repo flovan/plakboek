@@ -12,7 +12,7 @@ import {
   type PanelTab,
 } from '../../client/session/store.js';
 import { STRINGS } from '../strings.js';
-import { Palette } from './palette.js';
+import { Palette, type PaletteProps } from './palette.js';
 import {
   PropertiesPanel,
   type PropertiesPanelProps,
@@ -27,6 +27,8 @@ export type SidePanelProps = Omit<PropertiesPanelProps, 'store'> & {
   readonly store: EditorStore;
   /** The editor chose a block type and a place for it in the palette. */
   readonly onInsert: (entry: CatalogueEntry, position: EditPosition) => void;
+  /** A palette row was pressed: it becomes a drag once the pointer has moved 4px. */
+  readonly onDragStart?: PaletteProps['onDragStart'];
 };
 
 /**
@@ -53,7 +55,7 @@ function focusFirstControl(root: HTMLElement | null): void {
  * so the palette's search and the panel's unsaved fields survive a switch.
  */
 export function SidePanel(props: SidePanelProps): ReactElement | null {
-  const { store, onInsert, ...panelProps } = props;
+  const { store, onInsert, onDragStart, ...panelProps } = props;
   const base = useId();
   const editing = useEditorStore(store, (state) => state.status === 'editing');
   const tab = useEditorStore(store, (state) => state.panelTab);
@@ -129,7 +131,7 @@ export function SidePanel(props: SidePanelProps): ReactElement | null {
         hidden={tab !== 'blocks'}
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        <Palette store={store} onInsert={onInsert} />
+        <Palette store={store} onInsert={onInsert} onDragStart={onDragStart} />
       </div>
       <div
         role="tabpanel"

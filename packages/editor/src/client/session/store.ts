@@ -10,6 +10,8 @@
  */
 import { useSyncExternalStore } from 'react';
 import type { EditorSession, LockView, ModelNode } from '../../api-types.js';
+import { createDragFeed, type DragFeed } from '../drag/feed.js';
+import type { DragSubject } from '../drag/slots.js';
 import { createUndoStack, type UndoEntry, type UndoStack } from './inverse.js';
 import type { InsertSlot } from './insertion.js';
 import { createQueue, type QueueState } from './save-queue.js';
@@ -60,6 +62,20 @@ export type Notice = {
   readonly lastActiveAt?: string;
 };
 
+/**
+ * The drag in progress. A pointer drag is `active` once the pointer has moved
+ * 4px, and only then covers the frame with the capture surface; a keyboard
+ * drag is active from the lift. The pointer and the line change per frame and
+ * live in the store's `dragFeed` instead.
+ */
+export type DragState = {
+  readonly via: 'pointer' | 'keyboard';
+  readonly subject: DragSubject;
+  /** What the label that follows the pointer says. */
+  readonly label: string;
+  readonly active: boolean;
+};
+
 export type EditorState = {
   readonly status: EditorStatus;
   readonly session: EditorSession | null;
@@ -106,6 +122,8 @@ export type EditorState = {
     readonly opener: PickerOpener;
     readonly token: number;
   } | null;
+  /** The drag in progress, or null. */
+  readonly drag: DragState | null;
   /** A delete waiting for the editor's confirmation, and what opened it. */
   readonly deleteRequest: {
     readonly id: string;
@@ -124,6 +142,8 @@ export type WriteApplied = {
 };
 
 export type EditorStore = {
+  /** What the overlay draws while an item is dragged: the pointer and the insertion line. */
+  readonly dragFeed: DragFeed;
   getState(): EditorState;
   subscribe(listener: () => void): () => void;
   /** The open request answered: the session starts, or waits for the lock. */
@@ -171,6 +191,8 @@ export type EditorStore = {
   /** Opens the picker for a gap, replacing any open one. */
   openPicker(slot: InsertSlot, opener: PickerOpener): void;
   closePicker(): void;
+  /** A drag starts, becomes active or ends; the picker closes while one runs. */
+  setDrag(drag: DragState | null): void;
 };
 
 export function initialEditorState(): EditorState {
@@ -194,6 +216,7 @@ export function initialEditorState(): EditorState {
     propertiesRequest: null,
     toast: null,
     picker: null,
+    drag: null,
     deleteRequest: null,
     leaveRequest: null,
   };
@@ -231,6 +254,7 @@ export function openedState(
     undo: createUndoStack(),
     toast: null,
     picker: null,
+    drag: null,
     deleteRequest: null,
     leaveRequest: null,
   };
@@ -241,6 +265,7 @@ export function createEditorStore(
 ): EditorStore {
   let state = initial;
   const listeners = new Set<() => void>();
+  const dragFeed = createDragFeed();
   let token = 0;
 
   function set(next: EditorState): void {
@@ -266,12 +291,14 @@ export function createEditorStore(
       renewal: null,
       toast: null,
       picker: null,
+      drag: null,
       deleteRequest: null,
       leaveRequest: null,
     });
   }
 
   return {
+    dragFeed,
     getState: () => state,
     subscribe(listener) {
       listeners.add(listener);
@@ -416,6 +443,10 @@ export function createEditorStore(
     closePicker() {
       if (state.picker === null) return;
       set({ ...state, picker: null });
+    },
+    setDrag(drag) {
+      if (drag === null && state.drag === null) return;
+      set({ ...state, drag, picker: drag === null ? state.picker : null });
     },
   };
 }
