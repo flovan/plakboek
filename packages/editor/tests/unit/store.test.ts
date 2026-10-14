@@ -169,6 +169,34 @@ describe('the editor store', () => {
   });
 });
 
+describe('the rail drawer', () => {
+  it('opens on a tab, closes, and keeps the tab the editor last looked at', () => {
+    const store = createEditorStore();
+    store.openDrawer('properties');
+    expect(store.getState().drawer).toBe('properties');
+    expect(store.getState().panelTab).toBe('properties');
+    store.closeDrawer();
+    expect(store.getState().drawer).toBeNull();
+    expect(store.getState().panelTab).toBe('properties');
+    // the notice button opens the drawer without changing the tab
+    store.openDrawer('notice');
+    expect(store.getState().panelTab).toBe('properties');
+  });
+
+  it('counts a notice as read once the drawer was opened or closed on it', () => {
+    const store = createEditorStore();
+    store.opened(sessionWith(OTHER));
+    const notice = store.getState().notice;
+    expect(notice).not.toBeNull();
+    expect(store.getState().noticeSeen).not.toBe(notice);
+    store.openDrawer('notice');
+    expect(store.getState().noticeSeen).toBe(notice);
+    store.setNotice({ kind: 'lapsed', holderName: 'Edith' });
+    store.closeDrawer();
+    expect(store.getState().noticeSeen).toBe(store.getState().notice);
+  });
+});
+
 describe('announceSelection', () => {
   const model = createTreeModel(
     tree.map((node) =>

@@ -379,6 +379,9 @@ export const STRINGS = Object.freeze({
   'landmark.editRegion': 'Page being edited',
   'rail.blocks': 'Blocks',
   'rail.properties': 'Properties',
+  'rail.notice': 'Page status',
+  'rail.withNotice': '{label}, new notice',
+  'rail.drawer': 'Blocks and properties',
 });
 
 /** A key of `STRINGS`. */

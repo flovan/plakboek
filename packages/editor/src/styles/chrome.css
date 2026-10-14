@@ -309,6 +309,34 @@
     padding: 0;
   }
 
+  /*
+   * The panel drawer of the full layout: a 280px column between the rail and
+   * the stage. It is not drawn over the site; opening it (the host's
+   * `data-drawer` attribute) takes the width from the frame's column in one
+   * step, so the site's own media queries flip once. It sits in the sidebar's
+   * stacking layer.
+   */
+  .pk-drawer {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    padding: 16px;
+    overflow: hidden;
+    background: var(--pk-surface);
+    border-right: 1px solid var(--pk-border);
+  }
+
+  .pk-drawer[hidden] {
+    display: none;
+  }
+
+  :host([data-layout='full'][data-drawer='open']) .pk-shell {
+    grid-template-columns: 56px 280px minmax(0, 1fr);
+  }
+
   :host([data-layout='full']) .pk-frame {
     border: 0;
     border-radius: 0;

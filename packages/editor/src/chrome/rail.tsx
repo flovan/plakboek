@@ -5,6 +5,7 @@ import {
   skipToPage,
   useLeaveGuard,
   type LeaveHandler,
+  type SidebarEditing,
   type SidebarLayout,
   type SidebarSlots,
 } from './controls.js';
@@ -23,6 +24,8 @@ import { Tooltip } from './tooltip.js';
 export type RailProps = {
   readonly island: ShellIsland;
   readonly slots?: SidebarSlots;
+  /** The editing tools of the rail; absent for a user who cannot edit. */
+  readonly editing?: SidebarEditing;
   /** The toggle only works once the client has hydrated. */
   readonly hydrated: boolean;
   /** The layout the shell is in now, for the toggle's pressed state. */
@@ -59,7 +62,8 @@ function initialOf(displayName: string): string {
  * assistive technology only.
  */
 export function Rail(props: RailProps): ReactElement {
-  const { island, slots, hydrated, layout, onToggleLayout, onLeave } = props;
+  const { island, slots, editing, hydrated, layout, onToggleLayout, onLeave } =
+    props;
   const { leaving, onExitClick, onLogoutSubmit } = useLeaveGuard(onLeave);
   const displayName = displayNameOf(island.user);
   const pressed = layout === 'full';
@@ -73,6 +77,7 @@ export function Rail(props: RailProps): ReactElement {
         {STRINGS['sidebar.skipLink']}
       </a>
       <span className="sr-only">{STRINGS['product.name']}</span>
+      {editing?.rail}
       <div data-slot="nav" className="min-h-0 w-full flex-1 overflow-y-auto">
         {slots?.nav?.({ layout: 'full' })}
       </div>
@@ -81,6 +86,7 @@ export function Rail(props: RailProps): ReactElement {
           <button
             type="button"
             aria-label={STRINGS['sidebar.fullWidth']}
+            data-layout-toggle=""
             aria-pressed={pressed}
             disabled={!hydrated}
             onClick={onToggleLayout}

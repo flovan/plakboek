@@ -7,6 +7,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactElement,
@@ -80,9 +81,11 @@ import {
   createEditorStore,
   useEditorStore,
   type DeleteOpener,
+  type DrawerOpener,
   type EditorMode,
   type PickerOpener,
 } from '../session/store.js';
+import { drawerFits, setDrawerColumn } from './drawer.js';
 import { watchFrame } from './frame-watch.js';
 import { keyAction, structureKeyAction } from './keys.js';
 import { applyLayout, readLayout, writeLayout } from './layout.js';
@@ -106,8 +109,8 @@ function focusShownToggle(host: HTMLElement, shown: SidebarLayout): void {
   );
   const toggle = root.querySelector(
     shown === 'full'
-      ? '[data-rail] button[aria-pressed]'
-      : '[data-sidebar] button[aria-pressed]',
+      ? '[data-rail] [data-layout-toggle]'
+      : '[data-sidebar] [data-layout-toggle]',
   );
   const active = root.activeElement;
   if (
@@ -1175,13 +1178,62 @@ function Shell(props: {
     host.ownerDocument.defaultView?.location.reload();
   }, [host]);
 
+  const showLayout = useCallback(
+    (next: SidebarLayout) => {
+      applyLayout(host, next);
+      focusShownToggle(host, next);
+      writeLayout(next);
+      setLayout(next);
+      // The drawer belongs to the full layout; it never stays open into either.
+      store.closeDrawer();
+    },
+    [host, store],
+  );
+
   const toggleLayout = useCallback(() => {
-    const next: SidebarLayout = layout === 'full' ? 'framed' : 'full';
-    applyLayout(host, next);
-    focusShownToggle(host, next);
-    writeLayout(next);
-    setLayout(next);
-  }, [host, layout]);
+    showLayout(layout === 'full' ? 'framed' : 'full');
+  }, [layout, showLayout]);
+
+  // The drawer pushes the frame: its column is on the host while it is open
+  // in the full layout, and the framed page keeps its scroll position.
+  const drawerOpen = useEditorStore(store, (state) => state.drawer !== null);
+  useLayoutEffect(() => {
+    setDrawerColumn(host, frameOf(host), layout === 'full' && drawerOpen);
+  }, [host, layout, drawerOpen]);
+
+  // A rail button opens the drawer, unless the pushed frame would be narrower
+  // than the site can be used in: then the sidebar layout is shown instead,
+  // on the same tab.
+  const openDrawer = useCallback(
+    (opener: DrawerOpener) => {
+      const frame = frameOf(host);
+      const closed = store.getState().drawer === null;
+      if (
+        closed &&
+        frame !== null &&
+        !drawerFits(frame.getBoundingClientRect().width)
+      ) {
+        if (opener !== 'notice') store.setPanelTab(opener);
+        showLayout('framed');
+        return;
+      }
+      store.openDrawer(opener);
+    },
+    [host, store, showLayout],
+  );
+
+  // An explicit ask for an item's Properties (a double-click, the toolbar
+  // button) shows them: in the full layout that opens the drawer, in the same
+  // store update's wake so the panel's own focus move is the one that lands.
+  useEffect(() => {
+    let seen = store.getState().propertiesRequest?.token ?? 0;
+    return store.subscribe(() => {
+      const token = store.getState().propertiesRequest?.token ?? 0;
+      if (token === seen) return;
+      seen = token;
+      if (layout === 'full') openDrawer('properties');
+    });
+  }, [store, layout, openDrawer]);
 
   return (
     <ShellApp
@@ -1196,6 +1248,7 @@ function Shell(props: {
           ? {
               store,
               onMode: changeMode,
+              onOpenDrawer: openDrawer,
               onTakeOver: takeOver,
               onKeepEditing: keepEditing,
               signInHref: `/cms?next=${encodeURIComponent(island.visitorLocation)}`,

@@ -119,6 +119,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
         <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-4">
           <button
             type="button"
+            data-layout-toggle=""
             aria-pressed={pressed}
             disabled={!hydrated}
             onClick={onToggleLayout}
@@ -164,6 +165,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
       <Rail
         island={island}
         slots={slots}
+        editing={editing}
         hydrated={hydrated}
         layout={layout}
         onToggleLayout={onToggleLayout}

@@ -21,7 +21,10 @@ export type SidebarSlots = {
 
 /**
  * What the sidebar shows while a page is being edited, in this order between
- * the product name and the navigation slot. A read-only shell has none.
+ * the product name and the navigation slot. A read-only shell has none. The
+ * notice, tools and panel belong to the framed sidebar and are left out while
+ * the full-width layout is in force, which shows `rail` and the drawer instead,
+ * so only one copy of the editing controls is ever live.
  */
 export type SidebarEditing = {
   /** Banners about the page's state (lock, paused saving). */
@@ -30,6 +33,8 @@ export type SidebarEditing = {
   readonly tools: ReactNode;
   /** The side panel: blocks and properties. */
   readonly panel: ReactNode;
+  /** The full-width rail's editing tools. */
+  readonly rail?: ReactNode;
 };
 
 /** The selector prefix that styles an element by the host's layout. It makes

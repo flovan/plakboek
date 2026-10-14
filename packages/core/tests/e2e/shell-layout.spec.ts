@@ -18,7 +18,7 @@ const SIDEBAR_BODY = `${HOST} [data-sidebar]`;
 // seen. While the 240ms swap runs both are briefly visible, so each toggle is
 // addressed through its own layer.
 const FRAMED_TOGGLE = `${SIDEBAR_BODY} button[aria-pressed]`;
-const RAIL_TOGGLE = `${RAIL} button[aria-pressed]`;
+const RAIL_TOGGLE = `${RAIL} [data-layout-toggle]`;
 const STORAGE_KEY = 'plakboek:editor-layout';
 
 // The viewport is 1400x900.

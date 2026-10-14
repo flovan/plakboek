@@ -6,15 +6,19 @@ import type { MoveDirection } from '../client/session/move-targets.js';
 import {
   NO_STORE,
   useEditorStore,
+  type DrawerOpener,
   type EditorMode,
   type EditorStore,
   type PickerOpener,
 } from '../client/session/store.js';
 import { DeleteDialog } from './editing/delete-dialog.js';
+import { PanelDrawer } from './editing/drawer.js';
 import { LeaveDialog } from './editing/leave-dialog.js';
 import { LiveRegion } from './editing/live-region.js';
+import { LockExpiry } from './editing/lock-expiry.js';
 import { NoticeSlot } from './editing/notices.js';
 import { SidePanel } from './editing/panel.js';
+import { RailTools } from './editing/rail-tools.js';
 import type { PropertiesPanelProps } from './editing/properties/properties-panel.js';
 import { UndoToast } from './editing/toast.js';
 import { ToolGroup } from './editing/tool-group.js';
@@ -50,6 +54,8 @@ export type ShellAppProps = {
     readonly onMode: (mode: EditorMode) => void;
     /** Called by the save status's Retry button. */
     readonly onRetry?: () => void;
+    /** Called by a rail button that opens the panel drawer. */
+    readonly onOpenDrawer?: (opener: DrawerOpener) => void;
     /** Called by the Take over button of the lock notice; true when it worked. */
     readonly onTakeOver?: () => Promise<boolean>;
     /** Called by the lock row's Keep editing button; true when the lock was renewed. */
@@ -122,7 +128,8 @@ export function ShellApp(props: ShellAppProps): ReactElement {
     editor?.store ?? NO_STORE,
     (state) => state.status === 'editing' && state.mode === 'edit',
   );
-  const editing =
+  const full = layout === 'full';
+  const parts =
     editor === undefined || !hydrated
       ? undefined
       : {
@@ -158,6 +165,44 @@ export function ShellApp(props: ShellAppProps): ReactElement {
             />
           ),
         };
+  // One copy of the editing controls is live at a time: the framed sidebar's
+  // notice, tools and panel, or the full-width rail's tools and the drawer.
+  const editing =
+    editor === undefined || parts === undefined
+      ? undefined
+      : full
+        ? {
+            notice: null,
+            tools: null,
+            panel: null,
+            rail: (
+              <RailTools
+                store={editor.store}
+                onMode={editor.onMode}
+                onRetry={editor.onRetry}
+                onUndo={editor.onUndo}
+                onRedo={editor.onRedo}
+                onOpenDrawer={editor.onOpenDrawer ?? noop}
+              />
+            ),
+          }
+        : parts;
+  const drawer =
+    editor === undefined || parts === undefined || !full ? null : (
+      <PanelDrawer
+        store={editor.store}
+        notice={parts.notice}
+        status={
+          <LockExpiry
+            store={editor.store}
+            onKeepEditing={
+              editor.onKeepEditing ?? (() => Promise.resolve(false))
+            }
+          />
+        }
+        panel={parts.panel}
+      />
+    );
   return (
     <>
       <Sidebar
@@ -169,6 +214,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
         onToggleLayout={onToggleLayout}
         onLeave={editor?.onLeave}
       />
+      {drawer}
       <Stage
         frameUrl={island.frameUrl}
         editRegion={hydrated && editor !== undefined && editRegion}

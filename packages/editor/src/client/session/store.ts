@@ -31,6 +31,13 @@ export type EditorStatus = 'opening' | 'editing' | 'locked' | 'unavailable';
 /** The two tabs of the sidebar's panel region. */
 export type PanelTab = 'blocks' | 'properties';
 
+/**
+ * What opened the rail's panel drawer: the Blocks or Properties button, or the
+ * notice button of a page that has no tools. Focus goes back to that button
+ * when the drawer closes.
+ */
+export type DrawerOpener = 'blocks' | 'properties' | 'notice';
+
 /** What opened the picker: focus returns to it when the picker closes with nothing added. */
 export type PickerOpener =
   | 'insert-point'
@@ -74,6 +81,10 @@ export type EditorState = {
   readonly flash: { readonly id: string; readonly token: number } | null;
   /** Which tab the panel region shows; only an explicit action changes it. */
   readonly panelTab: PanelTab;
+  /** The rail's panel drawer: what opened it, or null while it is closed. */
+  readonly drawer: DrawerOpener | null;
+  /** The notice that was showing when the drawer was last open or closed, so a newer one is unread. */
+  readonly noticeSeen: Notice | null;
   /**
    * An explicit ask for an item's Properties (a double-click or Enter on a
    * leaf, the toolbar button, an insert that needs input). It switches the
@@ -146,6 +157,9 @@ export type EditorStore = {
   clearFlash(): void;
   /** Shows the panel's Properties or Blocks tab. */
   setPanelTab(tab: PanelTab): void;
+  /** Opens the rail's drawer; Blocks and Properties also show their tab. */
+  openDrawer(opener: DrawerOpener): void;
+  closeDrawer(): void;
   /** Opens Properties for `id` and asks the panel to focus its first control. */
   requestProperties(id: string): void;
   /** Shows the undo toast for a delete, replacing any earlier one. */
@@ -175,6 +189,8 @@ export function initialEditorState(): EditorState {
     renewal: null,
     flash: null,
     panelTab: 'blocks',
+    drawer: null,
+    noticeSeen: null,
     propertiesRequest: null,
     toast: null,
     picker: null,
@@ -354,6 +370,19 @@ export function createEditorStore(
     setPanelTab(tab) {
       if (tab === state.panelTab) return;
       set({ ...state, panelTab: tab });
+    },
+    openDrawer(opener) {
+      if (state.drawer === opener) return;
+      set({
+        ...state,
+        drawer: opener,
+        noticeSeen: state.notice,
+        panelTab: opener === 'notice' ? state.panelTab : opener,
+      });
+    },
+    closeDrawer() {
+      if (state.drawer === null) return;
+      set({ ...state, drawer: null, noticeSeen: state.notice });
     },
     requestProperties(id) {
       token += 1;

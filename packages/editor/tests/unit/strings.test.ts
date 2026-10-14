@@ -42,6 +42,7 @@ const VARIABLES: Readonly<Record<string, readonly string[]>> = {
   'toolbar.delete.label': ['label'],
   'insert.blockAfter': ['label'],
   'picker.noMatch': ['query'],
+  'rail.withNotice': ['label'],
   'delete.heading': ['kind'],
   'delete.body.other': ['count'],
   'delete.confirm': ['kind'],
