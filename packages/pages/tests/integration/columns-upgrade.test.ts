@@ -264,6 +264,45 @@ describe('column shape upgrade (D-03)', () => {
     expect(moveOfA).toMatchObject({ parent: outer.id, depth: 1 });
   });
 
+  it('waits for a property edit in flight and records the props that were committed, not the ones it read first (WR-D-04)', async () => {
+    const { page, textIds } = await buildFlatPage('Upgrade reads locked rows');
+    const deps = columnDeps();
+
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let editStarted: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      editStarted = resolve;
+    });
+    // A property edit that has changed the row and not yet committed. It
+    // takes no page lock, like `updateBlockProps`.
+    const edit = handle.sql.begin(async (sql) => {
+      await sql`
+        UPDATE page_blocks
+        SET props = '{"edited":true}'::jsonb, version = version + 1
+        WHERE id = ${textIds.a}
+      `;
+      editStarted();
+      await held;
+    });
+    await started;
+
+    const upgrade = upgradeSectionColumns(deps, { pageId: page.id });
+    // Let the upgrade reach the blocks it reads, then let the edit commit.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    release();
+    await edit;
+    expect((await upgrade).upgraded).toBe(true);
+
+    const [revision] = await handle.sql<{ props: unknown }[]>`
+      SELECT props FROM block_revisions
+      WHERE block_id = ${textIds.a} AND change_type = 'move'
+    `;
+    expect(revision?.props).toEqual({ edited: true });
+  });
+
   it('changes nothing on a second run', async () => {
     const { page } = await buildFlatPage('Upgrade idempotent');
     const deps = columnDeps();

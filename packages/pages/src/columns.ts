@@ -130,6 +130,11 @@ export async function upgradeSectionColumns(
       return { upgraded: false, pageVersion: null };
     }
 
+    // Locked, not just read: the page row lock does not serialise
+    // `updateBlockProps`, which takes no page lock, so a property edit
+    // committing between this read and the updates below would otherwise
+    // leave the revisions recorded here describing props the stored row no
+    // longer has. Lock order stays page, then blocks.
     const rows = await tx
       .select()
       .from(pageBlocks)
@@ -139,7 +144,8 @@ export async function upgradeSectionColumns(
           eq(pageBlocks.ownerId, page.id),
           eq(pageBlocks.locale, page.locale),
         ),
-      );
+      )
+      .for('update');
 
     const childrenOf = new Map<string | null, StoredBlock[]>();
     for (const row of rows) {
