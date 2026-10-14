@@ -25,7 +25,12 @@ import {
   loadParentForPlacement,
   SectionNestingDepthExceededError,
 } from './placement.js';
-import { readStoredLayout, type BlockLayout } from './layout.js';
+import {
+  BlockLayoutValidationError,
+  readStoredLayout,
+  validateBlockLayout,
+  type BlockLayout,
+} from './layout.js';
 import {
   BlockPropsValidationError,
   getBlockDefinition,
@@ -517,6 +522,10 @@ export type RestoreBlockPreview = {
   readonly revisionId: string;
   readonly blockId: string | null;
   readonly blockType: string;
+  /** The layout the revision stored (narrowed, not re-validated here). A
+   * restore writes it back, minus any key the current configuration no
+   * longer accepts. */
+  readonly layout: BlockLayout | null;
   readonly changeType: BlockChangeType;
   readonly storedVersion: number;
   readonly currentVersion: number | null;
@@ -673,6 +682,7 @@ export async function computeBlockRestorePreview(
         revisionId: row.id,
         blockId: row.blockId,
         blockType: row.blockType,
+        layout: readStoredLayout(row.layout),
         changeType: asBlockChangeType(row.changeType),
         storedVersion: row.schemaVersion,
         currentVersion: null,
@@ -693,6 +703,7 @@ export async function computeBlockRestorePreview(
         revisionId: row.id,
         blockId: row.blockId,
         blockType: row.blockType,
+        layout: readStoredLayout(row.layout),
         changeType: asBlockChangeType(row.changeType),
         storedVersion: row.schemaVersion,
         currentVersion: definition.schemaVersion,
@@ -709,6 +720,7 @@ export async function computeBlockRestorePreview(
       revisionId: row.id,
       blockId: row.blockId,
       blockType: row.blockType,
+      layout: readStoredLayout(row.layout),
       changeType: asBlockChangeType(row.changeType),
       storedVersion: row.schemaVersion,
       currentVersion: definition.schemaVersion,
@@ -726,6 +738,32 @@ export async function computeBlockRestorePreview(
     droppedCount: counts.dropped,
     failedCount: counts.failed,
   });
+}
+
+/** Builds the layout a restore actually writes for one block: the stored
+ * layout, narrowed (`readStoredLayout`) and then validated key by key against
+ * the block's CURRENT definition and the configured presets. A key the
+ * current configuration no longer accepts (a removed ratio preset, a block
+ * type that stopped supporting fill) is left out rather than failing the
+ * whole restore -- layout is presentation, and an absent key reads as the
+ * default (equal split, stretch, no fill). */
+function buildRestoredLayout(
+  definition: BlockDefinition,
+  stored: unknown,
+  presets: readonly string[],
+): BlockLayout | null {
+  const narrowed = readStoredLayout(stored);
+  if (narrowed === null) return null;
+  const kept: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(narrowed)) {
+    try {
+      validateBlockLayout(definition, { [key]: value }, presets);
+      kept[key] = value;
+    } catch (error) {
+      if (!(error instanceof BlockLayoutValidationError)) throw error;
+    }
+  }
+  return validateBlockLayout(definition, kept, presets);
 }
 
 /** Builds the props a restore actually writes for one block: every `mapped`
@@ -897,6 +935,12 @@ export async function restoreRevisionBatch(
           blockDepthCeiling: deps.config.blockDepthCeiling,
         });
 
+        const restoredLayout = buildRestoredLayout(
+          definition,
+          raw.layout,
+          deps.config.columnPresets,
+        );
+
         if (block.changeType === 'delete') {
           let validatedProps: Record<string, unknown>;
           try {
@@ -917,7 +961,7 @@ export async function restoreRevisionBatch(
             parentBlockId: raw.parentBlockId,
             blockType: block.blockType,
             props: validatedProps,
-            layout: readStoredLayout(raw.layout),
+            layout: restoredLayout,
             schemaVersion: definition.schemaVersion,
             depth: raw.depth,
             sortOrder: raw.sortOrder,
@@ -939,7 +983,7 @@ export async function restoreRevisionBatch(
             sortOrder: raw.sortOrder,
             depth: raw.depth,
             props: validatedProps,
-            layout: readStoredLayout(raw.layout),
+            layout: restoredLayout,
             schemaVersion: definition.schemaVersion,
             authorId: actor.userId,
             createdAt: restoredAt,
@@ -1048,6 +1092,7 @@ export async function restoreRevisionBatch(
             .update(pageBlocks)
             .set({
               props: validatedProps,
+              layout: restoredLayout,
               version: sql`${pageBlocks.version} + 1`,
               updatedAt: restoredAt,
               updatedBy: actor.userId,

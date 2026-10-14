@@ -26,6 +26,7 @@ import { BlockLayoutValidationError } from '../../src/layout.js';
 import { createPage, getPage } from '../../src/pages.js';
 import { publishPage } from '../../src/publish.js';
 import { defineBlocks } from '../../src/registry.js';
+import { restoreRevisionBatch } from '../../src/revisions.js';
 import {
   insertBlock,
   readBlockTree,
@@ -268,6 +269,75 @@ describe('block layout through the write, read, revision and publish paths', () 
     const tree = await readBlockTree(db, ownerOf(page));
     expect(tree.find((node) => node.id === added.id)?.layout).toEqual({
       columns: '3:1',
+    });
+  });
+
+  describe('restoring an update revision', () => {
+    async function layoutOf(blockId: string): Promise<unknown> {
+      const [row] = await handle.sql<{ layout: unknown }[]>`
+        SELECT layout FROM page_blocks WHERE id = ${blockId}
+      `;
+      return row?.layout;
+    }
+
+    async function layoutOnlyBatch(page: PageRecord) {
+      const section = await add(page, 'section', null, { columns: '2:1' });
+      const changed = await updateBlockProps(deps, actor, {
+        blockId: section.id,
+        baseVersion: section.version,
+        props: {},
+        layout: { columns: '1:2' },
+      });
+      const [batch] = await handle.sql<{ revisionBatchId: string }[]>`
+        SELECT revision_batch_id AS "revisionBatchId" FROM block_revisions
+        WHERE block_id = ${section.id} AND change_type = 'update'
+      `;
+      await updateBlockProps(deps, actor, {
+        blockId: section.id,
+        baseVersion: changed.version,
+        props: {},
+        layout: null,
+      });
+      expect(await layoutOf(section.id)).toBeNull();
+      return { section, revisionBatchId: batch!.revisionBatchId };
+    }
+
+    it('writes the stored layout back and records it in the restore revision (CR-D-01)', async () => {
+      const page = await freshPage('Layout restore');
+      const { section, revisionBatchId } = await layoutOnlyBatch(page);
+
+      const current = await getPage(db, page.id);
+      const restored = await restoreRevisionBatch(deps, actor, {
+        revisionBatchId,
+        pageId: page.id,
+        basePageVersion: current?.version ?? 0,
+      });
+      expect(restored.restoredBlocks).toBe(1);
+
+      expect(await layoutOf(section.id)).toEqual({ columns: '1:2' });
+      const [revision] = await handle.sql<{ layout: unknown }[]>`
+        SELECT layout FROM block_revisions
+        WHERE revision_batch_id = ${restored.revisionBatchId}
+      `;
+      expect(revision?.layout).toEqual({ columns: '1:2' });
+    });
+
+    it('leaves out a layout key the current configuration no longer accepts instead of failing the restore (CR-D-01)', async () => {
+      const page = await freshPage('Layout restore stale preset');
+      const { section, revisionBatchId } = await layoutOnlyBatch(page);
+
+      const withoutPreset = {
+        ...deps,
+        config: pagesConfig({ exclude: ['1:2'] }),
+      };
+      const current = await getPage(db, page.id);
+      const restored = await restoreRevisionBatch(withoutPreset, actor, {
+        revisionBatchId,
+        pageId: page.id,
+        basePageVersion: current?.version ?? 0,
+      });
+      expect(restored.restoredBlocks).toBe(1);
+      expect(await layoutOf(section.id)).toBeNull();
     });
   });
 });
