@@ -81,6 +81,26 @@ const Badge: BlockComponent<{ label: string }> = ({ props, edit }) => (
   </div>
 );
 
+/**
+ * A coloured quote that can fill its column: with `layout.fill` on, its root
+ * grows to the column's full height, as a block that supports fill does.
+ */
+const Quote: BlockComponent<{ text: string }> = ({ props, edit, layout }) => (
+  <blockquote
+    {...edit}
+    {...edit.field('text')}
+    className="quote"
+    style={{
+      margin: 0,
+      padding: '16px',
+      background: '#e0e7ff',
+      ...(layout.fill === true ? { flex: '1 1 auto' } : {}),
+    }}
+  >
+    {props.text}
+  </blockquote>
+);
+
 const SPACER_HEIGHTS: Readonly<Record<string, string>> = {
   tall: '1600px',
   short: '200px',
@@ -169,6 +189,22 @@ export const text = defineBlock({
     },
   },
   component: Text,
+});
+
+export const quote = defineBlock({
+  key: 'quote',
+  editor: { label: 'Quote' },
+  schemaVersion: 1,
+  layout: { fill: true },
+  properties: {
+    text: {
+      fieldType: 'short_text',
+      label: 'Text',
+      required: true,
+      options: { maxLength: 300 },
+    },
+  },
+  component: Quote,
 });
 
 export const accordion = defineBlock({

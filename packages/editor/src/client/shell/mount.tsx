@@ -482,6 +482,20 @@ function Shell(props: {
     [host],
   );
 
+  /** A column's move from its section's panel: the section stays selected, so more moves can follow. */
+  const moveColumnFromPanel = useCallback(
+    (id: string, direction: MoveDirection) => {
+      const state = store.getState();
+      const action = moveActionFor(state, id, direction);
+      if (action === null) return;
+      runnerRef.current?.perform(action.intent, action.entry, {
+        selectId: state.selection.selectedId,
+        flash: false,
+      });
+    },
+    [store],
+  );
+
   const moveItem = useCallback(
     (id: string, direction: MoveDirection) => {
       const action = moveActionFor(store.getState(), id, direction);
@@ -493,14 +507,17 @@ function Shell(props: {
 
   /** Deletes at once and offers to undo it; the caller has settled any confirmation. */
   const performDelete = useCallback(
-    (id: string) => {
+    (id: string, opener: DeleteOpener) => {
       const runner = runnerRef.current;
-      const action = deleteActionFor(store.getState(), id);
+      const state = store.getState();
+      const action = deleteActionFor(state, id);
       if (runner === null || action === null) return;
-      runner.perform(action.intent, action.entry, {
-        selectId: action.selectId,
-        flash: false,
-      });
+      // Removing a column from its section's panel leaves the section selected, so more can follow.
+      const selectId =
+        opener === 'panel'
+          ? (state.model?.get(id)?.parentId ?? action.selectId)
+          : action.selectId;
+      runner.perform(action.intent, action.entry, { selectId, flash: false });
       store.showToast(action.entry, action.label);
       store.announce(formatString('action.deleted', { label: action.label }));
       // After the confirmation (if any) has closed and handed the page back.
@@ -524,15 +541,16 @@ function Shell(props: {
         return;
       }
       if (needsDeleteConfirmation(model, id)) store.askDelete(id, opener);
-      else performDelete(id);
+      else performDelete(id, opener);
     },
     [store, performDelete],
   );
 
   const confirmDelete = useCallback(
     (id: string) => {
+      const opener = store.getState().deleteRequest?.opener ?? 'region';
       store.cancelDelete();
-      performDelete(id);
+      performDelete(id, opener);
     },
     [store, performDelete],
   );
@@ -1019,7 +1037,7 @@ function Shell(props: {
               onLayoutChange: changeLayout,
               columnAxis,
               onAddColumn: addColumnLast,
-              onMoveColumn: moveItem,
+              onMoveColumn: moveColumnFromPanel,
               onRemoveColumn: removeFromPanel,
             }
           : undefined

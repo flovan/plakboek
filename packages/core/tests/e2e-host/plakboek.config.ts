@@ -5,6 +5,7 @@ import {
   carousel,
   heading,
   propsDemo,
+  quote,
   section,
   siteForm,
   spacer,
@@ -32,6 +33,7 @@ export default defineConfig({
     spacer,
     siteForm,
     propsDemo,
+    quote,
   ],
   // The constraints the Properties panel has to honour: one property is not
   // shown, one has a fixed value, one offers only two of its three choices.
