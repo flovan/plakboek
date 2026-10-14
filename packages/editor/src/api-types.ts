@@ -190,7 +190,10 @@ export type FragmentPatch = {
 export type EditResponse = {
   readonly ok: true;
   readonly pageVersion: number;
-  readonly tree: readonly ModelNode[];
+  /** The page's tree after the write. `null` when the write was saved but
+   * the server could not read the tree back to answer with: the client reads
+   * it again, and has no fragments to patch (`patch` is `null` too). */
+  readonly tree: readonly ModelNode[] | null;
   readonly createdIds: readonly string[];
   readonly deletedIds: readonly string[];
   readonly patch: FragmentPatch | null;

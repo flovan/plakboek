@@ -355,7 +355,7 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
   /** The page tree an answer carries, or null when the answer cannot be read. */
   function modelOf(response: EditResponse): TreeModel | null {
     try {
-      return createTreeModel(response.tree);
+      return response.tree === null ? null : createTreeModel(response.tree);
     } catch {
       return null;
     }
@@ -558,14 +558,30 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
         }
         if (disposed) break;
         // From here the write is saved: nothing below counts as a failed write.
-        const saved = modelOf(response);
+        let landed = response;
+        if (response.tree === null) {
+          // Saved, but the server could not read the tree back: read it here.
+          try {
+            const fresh = await api.tree(session.pageId);
+            landed = {
+              ...response,
+              pageVersion: fresh.pageVersion,
+              tree: fresh.tree,
+            };
+          } catch {
+            // The unreadable answer below is handled like any other.
+          }
+        }
+        const saved = modelOf(landed);
         if (saved === null) {
           // The answer cannot be read, so the page is read again from a reload.
           store.setQueue(onFailure(store.getState().queue, 'stale'));
           await noteStale(session.pageId);
           break;
         }
-        succeeded(taken.entry, response, saved);
+        succeeded(taken.entry, landed, saved);
+        // No fragments came with it, so the frame is brought up to date by a reload.
+        if (landed !== response) reloadFrame();
       }
     } finally {
       running = false;

@@ -5,7 +5,15 @@
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import type {
   ApiError,
   EditOp,
@@ -151,7 +159,7 @@ describe('the edit route', () => {
 
     expect(done.pageVersion).toBe(page.pageVersion + 1);
     expect(
-      done.tree.find((node) => node.id === seeded.headingId)?.parentId,
+      done.tree?.find((node) => node.id === seeded.headingId)?.parentId,
     ).toBe(page.otherColumnId);
     expect(done.createdIds).toEqual([]);
     expect(done.deletedIds).toEqual([]);
@@ -333,6 +341,66 @@ describe('the edit route', () => {
   });
 });
 
+describe('a write whose read-back fails', () => {
+  it('is still answered as saved, with the version and no tree, instead of as a failed write', async () => {
+    const page = await twoSectionPage('Read-back');
+    const { seeded } = page;
+    const tree = await readTree(harness.editor, seeded.pageId);
+    const heading = tree.tree.find((node) => node.id === seeded.headingId);
+
+    // Rendering the answer's fragments fails once the write is committed.
+    const failing = new Map(components);
+    failing.get = (): never => {
+      throw new Error('a component map that fails');
+    };
+    const quiet = vi.spyOn(console, 'error').mockReturnValue(undefined);
+    try {
+      const failingApi = createEditorApi({
+        auth: harness.auth,
+        resolver: harness.resolver,
+        pages: harness.pagesDeps,
+        homeSlug: 'home',
+        components: failing,
+        siteOrigin: SITE_ORIGIN,
+      });
+      const response = await failingApi.handle(
+        apiRequest(`/cms/api/pages/${seeded.pageId}/edit`, {
+          user: harness.editor,
+          method: 'POST',
+          body: {
+            basePageVersion: tree.pageVersion,
+            ops: [
+              {
+                op: 'update',
+                blockId: seeded.headingId,
+                baseVersion: heading?.version ?? 0,
+                props: { text: 'Saved anyway' },
+              },
+            ],
+          },
+        }),
+      );
+      if (response === null) throw new Error('the API ignored the edit');
+      const done = await readEdit(response);
+      expect(done.tree).toBeNull();
+      expect(done.patch).toBeNull();
+      expect(quiet).toHaveBeenCalledWith(
+        '[@plakboek/editor] api edit read-back failed',
+        'Error',
+      );
+
+      // The write landed, and the version it names is the page's.
+      const after = await readTree(harness.editor, seeded.pageId);
+      expect(after.pageVersion).toBe(done.pageVersion);
+      expect(
+        after.tree.find((node) => node.id === seeded.headingId)?.props,
+      ).toEqual({ text: 'Saved anyway' });
+    } finally {
+      quiet.mockRestore();
+    }
+  });
+});
+
 describe('the preview route', () => {
   async function preview(
     user: SignedIn,
@@ -488,7 +556,7 @@ describe('a block holding a stored value of a hidden property', () => {
     const done = await readEdit(response);
     expect(text).not.toContain(SECRET);
     expect(
-      done.tree.find((node) => node.id === seeded.headingId)?.props,
+      done.tree?.find((node) => node.id === seeded.headingId)?.props,
     ).toEqual({ text: 'Changed' });
     // The engine writes a block's props as the whole validated object, and
     // refuses a hidden key in it, so the stored value is replaced along with

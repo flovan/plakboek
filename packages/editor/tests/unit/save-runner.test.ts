@@ -579,6 +579,38 @@ describe('a write that landed', () => {
     expect(replace).toHaveBeenCalledWith('/x?_edit=frame');
   });
 
+  it('reads the tree again when a saved write comes back without one, and reloads the frame', async () => {
+    const replace = vi.fn();
+    const frame = { contentWindow: { location: { replace } } };
+    const moved = movedToTop(tree, 'h2', 'c2');
+    const ctx = setup(
+      () => Promise.resolve({ ...responseFor(moved), tree: null }),
+      () => Promise.resolve({ ok: true, pageVersion: 9, tree: moved }),
+      () => frame as unknown as HTMLIFrameElement,
+    );
+    performMove(ctx);
+    expect(await ctx.runner.flush()).toBe(true);
+    expect(ctx.edit).toHaveBeenCalledTimes(1);
+    expect(ctx.treeRead).toHaveBeenCalledTimes(1);
+    const state = ctx.store.getState();
+    expect(state.queue.status).toBe('saved');
+    expect(state.pageVersion).toBe(9);
+    expect(state.model?.get('h2')?.parentId).toBe('c2');
+    expect(replace).toHaveBeenCalledWith('/x?_edit=frame');
+  });
+
+  it('pauses as stale, without sending the write again, when a saved write has no tree and the read fails', async () => {
+    const ctx = setup(() =>
+      Promise.resolve({ ...responseFor(tree), tree: null }),
+    );
+    performMove(ctx);
+    expect(await ctx.runner.flush()).toBe(false);
+    expect(ctx.edit).toHaveBeenCalledTimes(1);
+    const { queue } = ctx.store.getState();
+    expect(queue.status).toBe('paused');
+    expect(queue.pauseReason).toBe('stale');
+  });
+
   it('pauses with the stale banner, not as a refused write, when its tree cannot be read', async () => {
     const ctx = setup(() =>
       Promise.resolve({

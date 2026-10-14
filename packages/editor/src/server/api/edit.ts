@@ -6,7 +6,9 @@
  *
  * The tree is read before and after the write: the planner needs both to
  * find the top level sections that held a touched block on either side of a
- * move.
+ * move. The read after is not part of the write's transaction, so when it
+ * fails the write is still answered as saved, with no tree, and the client
+ * reads the page again.
  */
 import {
   applyBlockEdit,
@@ -106,42 +108,62 @@ export async function editPage(
     basePageVersion: body.basePageVersion,
     ops: body.ops.map(toBlockEditOp),
   });
-  const after = await readPageForest(context, pageId);
+  // The batch is committed from here. Reading the page back is not part of
+  // that transaction, so a failure below must not be answered as a failed
+  // write: the client would retry it against the old version and be refused
+  // as stale, with nothing to tell it the write landed.
+  try {
+    const after = await readPageForest(context, pageId);
 
-  const beforeModel = toModelNodes(before.blocks, config);
-  const afterModel = toModelNodes(after.blocks, config);
+    const beforeModel = toModelNodes(before.blocks, config);
+    const afterModel = toModelNodes(after.blocks, config);
 
-  let patch: FragmentPatch | null = null;
-  if (body.fragments !== false) {
-    const plan = planFragmentTargets({
-      before: beforeModel,
-      after: afterModel,
-      result,
-      structural: body.ops.some((op) => op.op !== 'update'),
-    });
-    // A target the renderer cannot find is left out; the client reloads for
-    // a fragment it expected and did not get.
-    const rendered = renderBlockFragments({
-      blocks: after.blocks,
-      targets: plan.targets,
-      components: deps.components,
-      blockMeta: context.blockMeta,
-      pageId,
-      ...(deps.hooks === undefined ? {} : { hooks: deps.hooks }),
-    });
-    patch = {
-      fragments: rendered.fragments,
-      removed: plan.removed,
-      rootOrder: plan.rootOrder,
+    let patch: FragmentPatch | null = null;
+    if (body.fragments !== false) {
+      const plan = planFragmentTargets({
+        before: beforeModel,
+        after: afterModel,
+        result,
+        structural: body.ops.some((op) => op.op !== 'update'),
+      });
+      // A target the renderer cannot find is left out; the client reloads for
+      // a fragment it expected and did not get.
+      const rendered = renderBlockFragments({
+        blocks: after.blocks,
+        targets: plan.targets,
+        components: deps.components,
+        blockMeta: context.blockMeta,
+        pageId,
+        ...(deps.hooks === undefined ? {} : { hooks: deps.hooks }),
+      });
+      patch = {
+        fragments: rendered.fragments,
+        removed: plan.removed,
+        rootOrder: plan.rootOrder,
+      };
+    }
+
+    return {
+      ok: true,
+      pageVersion: result.pageVersion,
+      tree: afterModel,
+      createdIds: result.createdIds,
+      deletedIds: result.deletedIds,
+      patch,
+    };
+  } catch (error) {
+    // oxlint-disable-next-line no-console -- reports a read-back that failed after a committed write; the error name only
+    console.error(
+      '[@plakboek/editor] api edit read-back failed',
+      error instanceof Error ? error.name : typeof error,
+    );
+    return {
+      ok: true,
+      pageVersion: result.pageVersion,
+      tree: null,
+      createdIds: result.createdIds,
+      deletedIds: result.deletedIds,
+      patch: null,
     };
   }
-
-  return {
-    ok: true,
-    pageVersion: result.pageVersion,
-    tree: afterModel,
-    createdIds: result.createdIds,
-    deletedIds: result.deletedIds,
-    patch,
-  };
 }
