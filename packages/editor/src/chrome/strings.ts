@@ -335,6 +335,8 @@ export const STRINGS = Object.freeze({
   'panel.slugHint': 'Lowercase letters, numbers and hyphens.',
   'panel.jsonError': 'Enter valid JSON.',
   'panel.invalid': 'This value is not valid.',
+  'panel.jsonFallbackInvalid':
+    'This is valid JSON, but not a value this property accepts.',
   'panel.richTextNote':
     'Formatted text is edited on the page. Editing it there arrives in the next release.',
   'panel.mediaNote':

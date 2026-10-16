@@ -182,6 +182,22 @@ export function controlFor(source: ControlSource): ControlDescriptor {
   };
 }
 
+/**
+ * The message a refused value gets, as a strings key: the allowed values when
+ * the property is narrowed; that the text is valid JSON the property does not
+ * accept when the JSON fallback stands in for a host widget; else the plain
+ * one. Always a static message, so a refusal never repeats the value.
+ */
+export function refusalKey(
+  source: ControlSource,
+): 'panel.allowedError' | 'panel.jsonFallbackInvalid' | 'panel.invalid' {
+  if (source.constraint === 'narrowed') return 'panel.allowedError';
+  const descriptor = controlFor(source);
+  return descriptor.kind === 'json' && descriptor.customWidget
+    ? 'panel.jsonFallbackInvalid'
+    : 'panel.invalid';
+}
+
 /** Typographic double quotes a system may substitute for the straight one an editor typed. */
 const TYPOGRAPHIC_QUOTES = /[\u201c\u201d\u201e\u201f\u2033]/g;
 

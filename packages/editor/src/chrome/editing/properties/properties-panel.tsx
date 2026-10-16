@@ -11,6 +11,7 @@ import type {
   ModelNode,
   PreviewResponse,
 } from '../../../api-types.js';
+import { refusalKey } from '../../../client/session/control-map.js';
 import { catalogueByKey } from '../../../client/session/move-action.js';
 import type { MoveDirection } from '../../../client/session/move-targets.js';
 import {
@@ -251,13 +252,7 @@ function BlockProperties(props: {
                   : shownValue(drafts, node, property.key)
               }
               needsInput={needs.includes(property.key)}
-              error={
-                invalid
-                  ? property.constraint === 'narrowed'
-                    ? STRINGS['panel.allowedError']
-                    : STRINGS['panel.invalid']
-                  : null
-              }
+              error={invalid ? STRINGS[refusalKey(property)] : null}
               onChange={(value, immediate) => {
                 change(property, value, immediate);
               }}
