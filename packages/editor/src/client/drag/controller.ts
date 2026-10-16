@@ -117,7 +117,7 @@ export function startPointerDrag(options: PointerDragOptions): () => void {
     if (!inside || ctx === null || scene === null || doc === null) {
       return { slot: null, inside };
     }
-    const chain = hitChain(doc, x, y);
+    const chain = hitChain(doc, x, y, { ghosts: false });
     return {
       slot: resolveDropSlot(ctx, scene, subject, { x, y }, chain),
       inside,
