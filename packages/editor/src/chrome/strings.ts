@@ -390,11 +390,11 @@ export const STRINGS = Object.freeze({
 
   // The page region in Edit mode, and the rail's panel buttons
   'landmark.editRegion': 'Page being edited',
-  'rail.blocks': 'Blocks',
+  'rail.structure': 'Page structure',
   'rail.properties': 'Properties',
   'rail.notice': 'Page status',
   'rail.withNotice': '{label}, new notice',
-  'rail.drawer': 'Blocks and properties',
+  'rail.drawer': 'Page structure and properties',
 });
 
 /** A key of `STRINGS`. */

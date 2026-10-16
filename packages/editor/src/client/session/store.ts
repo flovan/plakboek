@@ -31,11 +31,11 @@ export type EditorMode = 'edit' | 'interact';
 export type EditorStatus = 'opening' | 'editing' | 'locked' | 'unavailable';
 
 /**
- * What opened the rail's panel drawer: the Blocks or Properties button, or the
+ * What opened the rail's panel drawer: the Page structure or Properties button, or the
  * notice button of a page that has no tools. Focus goes back to that button
  * when the drawer closes.
  */
-export type DrawerOpener = 'blocks' | 'properties' | 'notice';
+export type DrawerOpener = 'structure' | 'properties' | 'notice';
 
 /** What opened the picker: focus returns to it when the picker closes with nothing added. */
 export type PickerOpener =

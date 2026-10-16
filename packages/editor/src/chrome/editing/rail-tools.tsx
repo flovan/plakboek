@@ -107,8 +107,8 @@ export type RailToolsProps = {
 
 /**
  * The editing tools of the full-width rail, as 40px icon buttons with
- * tooltips: the mode button, Undo, Redo, the save status, and Blocks and
- * Properties, which open the panel drawer. A page this tab is not editing has
+ * tooltips: the mode button, Undo, Redo, the save status, and Page structure
+ * and Properties, which open the panel drawer. A page this tab is not editing has
  * no tools; if it has a notice, one button opens the drawer to read it. A dot
  * on the Properties (or that) button marks a notice nobody has opened the
  * drawer to read.
@@ -239,7 +239,12 @@ export function RailTools(props: RailToolsProps): ReactElement | null {
             canRetry={canRetry}
             onRetry={onRetry}
           />
-          {dotted('blocks', STRINGS['rail.blocks'], <BlocksIcon />, false)}
+          {dotted(
+            'structure',
+            STRINGS['rail.structure'],
+            <BlocksIcon />,
+            false,
+          )}
           {dotted(
             'properties',
             STRINGS['rail.properties'],

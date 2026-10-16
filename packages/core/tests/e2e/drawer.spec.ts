@@ -1,7 +1,7 @@
 /**
  * The full-width layout's rail tools and panel drawer, in a real browser: the
  * drawer pushes the framed site narrower instead of covering it, and everything
- * an editor needs (mode, undo, redo, save status, Blocks, Properties) works from
+ * an editor needs (mode, undo, redo, save status, Page structure, Properties) works from
  * the rail.
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
@@ -124,7 +124,7 @@ test.describe('the drawer at the edges', () => {
     await page.setViewportSize({ width: 1024, height: 800 });
     await openFullWidth(page);
 
-    await railButton(page, 'Blocks').click();
+    await railButton(page, 'Page structure').click();
     await expect(page.locator(DRAWER)).toBeVisible();
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
     const frame = await page.locator(FRAME).boundingBox();
@@ -154,7 +154,7 @@ test.describe('the drawer at the edges', () => {
   }) => {
     await openFullWidth(page);
 
-    await railButton(page, 'Blocks').click();
+    await railButton(page, 'Page structure').click();
     await expect(page.locator(DRAWER)).toBeVisible();
     expect((await focusIn(page)).inDrawer).toBe(true);
 
@@ -162,7 +162,7 @@ test.describe('the drawer at the edges', () => {
     await expect(page.locator(DRAWER)).toBeHidden();
     expect(await focusIn(page)).toEqual({
       inDrawer: false,
-      railButton: 'blocks',
+      railButton: 'structure',
     });
   });
 
@@ -186,7 +186,7 @@ test.describe('the drawer at the edges', () => {
     );
     await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(600);
 
-    await railButton(page, 'Blocks').click();
+    await railButton(page, 'Page structure').click();
     await expect(page.locator(DRAWER)).toBeVisible();
     await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(600);
 
@@ -199,9 +199,55 @@ test.describe('the drawer at the edges', () => {
     await expect(page.locator(SELECTED)).toHaveCount(1);
     await expect(page.locator(DRAWER)).toBeVisible();
 
-    await railButton(page, 'Blocks').click();
+    await railButton(page, 'Page structure').click();
     await expect(page.locator(DRAWER)).toBeHidden();
     await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(600);
+  });
+
+  test('opens on Page structure, and a row there selects its block and brings it into view in the pushed frame', async ({
+    page,
+  }) => {
+    const created = await createEditablePage({
+      blocks: [
+        section(
+          heading('Top'),
+          { type: 'spacer', props: { size: 'tall' } },
+          heading('Far'),
+        ),
+      ],
+    });
+    await openEditor(page, created.path);
+    await switchToFullWidth(page);
+    const frame = await framedSite(page);
+    const id = await frame
+      .locator('[data-pk-type="heading"]', { hasText: 'Far' })
+      .first()
+      .getAttribute('data-pk-block');
+    expect(id).not.toBeNull();
+
+    await railButton(page, 'Page structure').click();
+    await expect(page.locator(`${DRAWER} [data-page-tree]`)).toBeVisible();
+
+    await page.locator(`${DRAWER} [data-tree-row="${id}"]`).click();
+    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await expect(page.locator(DRAWER)).toBeVisible();
+    await expect
+      .poll(() => frame.evaluate(() => window.scrollY))
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        frame.evaluate((block) => {
+          const box = document
+            .querySelector(`[data-pk-block="${block}"]`)
+            ?.getBoundingClientRect();
+          return (
+            box !== undefined &&
+            box.top >= 0 &&
+            box.bottom <= document.documentElement.clientHeight
+          );
+        }, id),
+      )
+      .toBe(true);
   });
 });
 
@@ -307,7 +353,7 @@ test.describe('a notice in the full-width layout', () => {
       await expect(properties).toHaveAccessibleName(/new notice/);
       await expect(tabB.locator(`${HOST} [data-rail-dot]`)).toHaveCount(1);
 
-      await railButton(tabB, 'Blocks').click();
+      await railButton(tabB, 'Page structure').click();
       const first = tabB.locator(`${DRAWER} [data-drawer-content] > *`).first();
       await expect(first).toHaveAttribute('data-notice', 'stale');
       await expect(tabB.locator(`${HOST} [data-rail-dot]`)).toHaveCount(0);

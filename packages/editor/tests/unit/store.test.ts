@@ -210,7 +210,7 @@ describe('the rail drawer', () => {
     store.openDrawer('properties');
     store.openDrawer('notice');
     expect(store.getState().propertiesOpen).toBe(true);
-    store.openDrawer('blocks');
+    store.openDrawer('structure');
     expect(store.getState().propertiesOpen).toBe(false);
   });
 
