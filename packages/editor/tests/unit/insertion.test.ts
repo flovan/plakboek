@@ -3,10 +3,8 @@ import type { CatalogueEntry } from '../../src/api-types.js';
 import {
   defaultNode,
   insertActionFor,
-  insertionTarget,
   columnSlots,
   insertSlots,
-  paletteGroups,
   pickerGroups,
   slotAfter,
   soleSectionType,
@@ -206,57 +204,6 @@ describe('the picker types', () => {
   it('skips the picker for a section gap with exactly one legal type', () => {
     expect(soleSectionType(ctx, pageGap)?.key).toBe('section');
     expect(soleSectionType(ctx, columnGap)).toBeNull();
-  });
-
-  it('lists every type but the column in the palette', () => {
-    expect(
-      paletteGroups(ctx, '').flatMap((group) =>
-        group.entries.map((item) => item.key),
-      ),
-    ).toEqual([
-      'heading',
-      'text',
-      'hero',
-      'section',
-      'spacer',
-      'banner',
-      'card',
-    ]);
-  });
-});
-
-describe('where a palette row lands', () => {
-  it('puts a block right after the selected block', () => {
-    expect(
-      insertionTarget(ctx, { scopeId: 'ca', selectedId: 'h1' }, 'text'),
-    ).toEqual({ parentId: 'ca', previousId: 'h1', nextId: 'h2' });
-  });
-
-  it('climbs to the nearest level where the type is legal', () => {
-    // a selected column cannot take a text after it, nor can its section or the page
-    expect(
-      insertionTarget(ctx, { scopeId: 'A', selectedId: 'ca' }, 'text'),
-    ).toBeNull();
-    // a section type after a heading climbs out of the column and the section
-    expect(
-      insertionTarget(ctx, { scopeId: 'ca', selectedId: 'h2' }, 'section'),
-    ).toEqual({ parentId: null, previousId: 'A', nextId: 'B' });
-  });
-
-  it('sends a section type to the end of the page when nothing is selected, and has no place for anything else', () => {
-    const nothing = { scopeId: null, selectedId: null };
-    expect(insertionTarget(ctx, nothing, 'section')).toEqual({
-      parentId: null,
-      previousId: 'B',
-      nextId: null,
-    });
-    expect(insertionTarget(ctx, nothing, 'text')).toBeNull();
-  });
-
-  it('never places a column', () => {
-    expect(
-      insertionTarget(ctx, { scopeId: 'A', selectedId: 'ca' }, 'column'),
-    ).toBeNull();
   });
 });
 

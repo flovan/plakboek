@@ -294,8 +294,7 @@ export const STRINGS = Object.freeze({
   'leave.stay': 'Stay',
   'leave.confirm': 'Leave anyway',
 
-  // Side panel: the palette, the Properties sheet, empty states, Columns, Layout, Placement, controls
-  'panel.tab.blocks': 'Blocks',
+  // Side panel: the Properties sheet, empty states, Columns, Layout, Placement, controls
   'tree.heading': 'Page structure',
   'tree.empty':
     'This page has no sections yet. Add one with the button on the page.',
@@ -360,8 +359,6 @@ export const STRINGS = Object.freeze({
   'panel.repeater.moveEarlier': 'Move item {n} earlier',
   'panel.repeater.moveLater': 'Move item {n} later',
   'panel.repeater.remove': 'Remove item {n}',
-  'panel.palette.selectFirst': 'Select a place on the page first',
-  'panel.palette.notHere': "Can't be added here",
 
   // Page lock, conflict and session notices
   'notice.locked.heading': '{name} is editing this page',

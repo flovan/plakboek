@@ -1,10 +1,9 @@
 /**
  * Adding to the page, decided apart from the DOM: which gaps between siblings
  * take a new item, which types may go into a gap (the same placement rule the
- * engine enforces), how the picker and the palette group and search them,
- * where a palette row lands relative to the selection, and the node a new item
- * starts as. The insert points, the picker, the empty prompts, the toolbar and
- * the keyboard all read these, so they cannot disagree.
+ * engine enforces), how the picker groups and searches them, and the node a
+ * new item starts as. The insert points, the picker, the empty prompts, the
+ * toolbar and the keyboard all read these, so they cannot disagree.
  */
 import type {
   CatalogueEntry,
@@ -15,7 +14,6 @@ import { STRINGS } from '../../chrome/strings.js';
 import { buildUndoEntry, type UndoEntry } from './inverse.js';
 import { canPlace, legalTypesAt, type LegalityContext } from './legality.js';
 import type { Intent } from './save-queue.js';
-import type { Selection } from './scope.js';
 import type { TreeModel } from './tree-model.js';
 
 /** A gap in one sibling list: the parent, the neighbours on each side and what a new item there is called. */
@@ -211,14 +209,6 @@ export function pickerGroups(
   return groupEntries(ctx, legalTypesAt(ctx, slot.parentId), query);
 }
 
-/** Every type but the column, grouped and filtered, for the palette. */
-export function paletteGroups(
-  ctx: LegalityContext,
-  query: string,
-): readonly PickerGroup[] {
-  return groupEntries(ctx, [...ctx.catalogue.keys()], query);
-}
-
 /** The one type a section gap offers, when it offers exactly one: the picker is skipped. */
 export function soleSectionType(
   ctx: LegalityContext,
@@ -232,47 +222,6 @@ export function soleSectionType(
         entry !== undefined && entry.kind !== 'column',
     );
   return legal.length === 1 ? (legal[0] ?? null) : null;
-}
-
-/**
- * Where a palette row of `type` lands: right after the selection, at the
- * nearest level (the selection's own, then each container above it) where the
- * type is legal. With nothing selected a section type goes to the end of the
- * page and nothing else has a place. Null when there is none.
- */
-export function insertionTarget(
-  ctx: LegalityContext,
-  selection: Selection,
-  type: string,
-): EditPosition | null {
-  const entry = ctx.catalogue.get(type);
-  if (entry === undefined || entry.kind === 'column') return null;
-  const { selectedId } = selection;
-
-  if (selectedId === null || ctx.model.get(selectedId) === undefined) {
-    if (entry.kind !== 'section' || !canPlace(ctx, type, null)) return null;
-    return {
-      parentId: null,
-      previousId: ctx.model.roots().at(-1)?.id ?? null,
-      nextId: null,
-    };
-  }
-
-  let current = ctx.model.get(selectedId);
-  while (current !== undefined) {
-    const parentId = current.parentId;
-    if (canPlace(ctx, type, parentId)) {
-      const siblings = ctx.model.childrenOf(parentId);
-      const at = siblings.findIndex((sibling) => sibling.id === current?.id);
-      return {
-        parentId,
-        previousId: current.id,
-        nextId: siblings[at + 1]?.id ?? null,
-      };
-    }
-    current = parentId === null ? undefined : ctx.model.get(parentId);
-  }
-  return null;
 }
 
 /** The node a new item starts as: each property's default, and no children, so the server adds the starter ones. */

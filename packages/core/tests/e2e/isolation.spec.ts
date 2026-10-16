@@ -529,8 +529,8 @@ test.describe('chrome utilities compute inside the shadow root', () => {
           ? active?.localName
           : null;
       }, HOST);
-    // skip link, Mode, Undo, Redo, the Blocks palette's search and one row per
-    // block type, then the layout toggle
+    // skip link, Mode, Undo, Redo and Page structure (one tab stop), then the
+    // layout toggle
     for (let step = 0; step < 30 && (await focused()) !== 'button'; step += 1) {
       await page.keyboard.press(press);
     }
