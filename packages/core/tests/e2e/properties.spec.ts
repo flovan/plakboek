@@ -338,6 +338,32 @@ test.describe('every widget edits its property and the block re-renders live', (
   });
 });
 
+test.describe('a host widget the editor has no control for', () => {
+  test('is edited with its field type standard control, and the value renders live, is saved and is there after a reload', async ({
+    page,
+  }) => {
+    const frame = await openDemo(page);
+    const brand = page.getByRole('textbox', { name: 'Brand colour' });
+    await expect(brand).toBeVisible();
+    await expect(brand).toHaveValue('');
+    await expect(
+      page.getByText('This property uses a custom control'),
+    ).toBeVisible();
+
+    await brand.fill('#ff0000');
+    await expect(shown(frame, 'brand')).toHaveText('#ff0000');
+    await expectSaved(page);
+
+    await page.reload();
+    const reloaded = await framedSite(page);
+    await openPropertiesOf(reloaded, DEMO);
+    await expect(
+      page.getByRole('textbox', { name: 'Brand colour' }),
+    ).toHaveValue('#ff0000');
+    await expect(shown(reloaded, 'brand')).toHaveText('#ff0000');
+  });
+});
+
 test.describe('constraints', () => {
   test('a hidden property has no control, a fixed one is disabled with its hint, a narrowed one offers only the allowed choices', async ({
     page,

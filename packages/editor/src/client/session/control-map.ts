@@ -1,8 +1,10 @@
 /**
  * Which control the Properties panel draws for a property, decided from the
  * property's widget and options alone. Every widget of the field-type
- * registry has a control; a widget the editor has no control for (a host's
- * own) gets the JSON control and a note. The HTML attributes a control gets
+ * registry has a control. A widget the editor has no control for (a host's
+ * own) gets the standard control of its field type, and a note saying a
+ * standard field stands in; only a field type with no standard control gets
+ * the JSON control. The HTML attributes a control gets
  * from the options are hints for the browser: the server decides what is
  * valid, so nothing here validates a value.
  */
@@ -41,7 +43,7 @@ export type ControlDescriptor = {
   readonly kind: ControlKind;
   readonly hints: ControlHints;
   readonly choices: readonly ControlChoice[];
-  /** The widget is not one the editor knows: the JSON control stands in for it. */
+  /** The widget is not one the editor knows: its field type's standard control, or the JSON control, stands in for it. */
   readonly customWidget: boolean;
 };
 
@@ -159,7 +161,12 @@ function hintsOf(kind: ControlKind, source: ControlSource): ControlHints {
 
 /** The control for a property, with the hints, the choices it offers and whether the widget is custom. */
 export function controlFor(source: ControlSource): ControlDescriptor {
-  const known = KIND_BY_WIDGET[source.widget];
+  const own = KIND_BY_WIDGET[source.widget];
+  // A widget the editor has no control for is drawn as its field type's standard one.
+  const standIn =
+    own === undefined ? DEFAULT_WIDGET[source.fieldType] : undefined;
+  const known =
+    own ?? (standIn === undefined ? undefined : KIND_BY_WIDGET[standIn]);
   const isDateOnly =
     isRecord(source.options) && source.options['mode'] === 'date';
   const kind: ControlKind =
@@ -171,7 +178,7 @@ export function controlFor(source: ControlSource): ControlDescriptor {
       kind === 'select' || kind === 'radio' || kind === 'checkbox-group'
         ? choicesOf(source)
         : [],
-    customWidget: known === undefined,
+    customWidget: own === undefined,
   };
 }
 

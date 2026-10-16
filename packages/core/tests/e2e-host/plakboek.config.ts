@@ -30,6 +30,9 @@ export default defineConfig({
     // Edits pages but may not delete: Delete and the undo of an insert or copy are off.
     'editor-no-delete': ['pages:read', 'pages:read-drafts', 'pages:edit'],
   },
+  // A host widget the editor has no control for: its property is edited with
+  // the standard control of its field type.
+  widgets: [{ fieldType: 'short_text', widget: 'colour-wheel' }],
   blocks: [
     section,
     heading,

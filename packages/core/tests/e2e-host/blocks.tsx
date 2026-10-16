@@ -491,6 +491,12 @@ export const propsDemo = defineBlock({
       label: 'Related',
       options: { allowedTypeKeys: ['page'], cardinality: 'single' },
     },
+    brand: {
+      fieldType: 'short_text',
+      label: 'Brand colour',
+      widget: 'colour-wheel',
+      options: {},
+    },
     hiddenProp: { fieldType: 'short_text', label: 'Hidden', options: {} },
     fixedProp: { fieldType: 'short_text', label: 'Fixed', options: {} },
     narrowedProp: {
