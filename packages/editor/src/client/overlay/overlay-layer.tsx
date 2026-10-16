@@ -13,6 +13,7 @@ import { NeedsInputMarkers } from '../../chrome/editing/needs-input.js';
 import { Picker } from '../../chrome/editing/picker.js';
 import { Toolbar } from '../../chrome/editing/toolbar.js';
 import { formatString } from '../../chrome/strings.js';
+import { rowLabel } from '../session/page-tree.js';
 import { measureSiblingAxis } from '../frame/sibling-axis.js';
 import type { InsertSlot } from '../session/insertion.js';
 import type { MoveDirection } from '../session/move-targets.js';
@@ -65,12 +66,14 @@ export function chipText(state: {
  * The ids whose boxes the overlay needs: the children of the scope (the gaps
  * between them are the insert points) and their parent, the columns of a
  * selected section (the gaps between them add a column), the blocks that show a
- * needs-input marker, and what an open picker hangs from.
+ * needs-input marker, what an open picker hangs from and the item Page
+ * structure points at.
  */
 function wantedIds(state: EditorState): readonly string[] {
-  const { model, selection, picker } = state;
+  const { model, selection, picker, highlight } = state;
   if (model === null) return [];
   const ids = new Set<string>();
+  if (highlight !== null) ids.add(highlight);
   const addLevel = (parentId: string | null): void => {
     if (parentId !== null) ids.add(parentId);
     for (const child of model.childrenOf(parentId)) ids.add(child.id);
@@ -261,7 +264,8 @@ export function OverlayLayer(props: {
       if (
         next.selection !== previous.selection ||
         next.model !== previous.model ||
-        next.picker !== previous.picker
+        next.picker !== previous.picker ||
+        next.highlight !== previous.highlight
       ) {
         tracker.refresh();
       }
@@ -305,6 +309,46 @@ export function OverlayLayer(props: {
     return new Map([...placed].filter(([id]) => !fixed.has(id)));
   }, [measured, placed]);
   const picker = useEditorStore(store ?? NO_STORE, (current) => current.picker);
+  const highlight = useEditorStore(
+    store ?? NO_STORE,
+    (current) => current.highlight,
+  );
+  const highlightModel = useEditorStore(
+    store ?? NO_STORE,
+    (current) => current.model,
+  );
+  const highlightSession = useEditorStore(
+    store ?? NO_STORE,
+    (current) => current.session,
+  );
+  // What Page structure points at: the item's box and a chip with its name,
+  // drawn like the hover outline. An item the frame does not show draws nothing.
+  const highlightBox =
+    highlight === null || measured === null || pointerDragging
+      ? null
+      : (placed.get(highlight) ?? null);
+  const highlighted =
+    highlight === null ||
+    highlightBox === null ||
+    measured === null ||
+    highlightModel === null ||
+    !isVisibleIn(highlightBox, measured.frame)
+      ? null
+      : {
+          id: highlight,
+          outline: highlightBox,
+          chip: chipPlacement({ outline: highlightBox, frame: measured.frame }),
+          text: rowLabel(
+            highlightModel,
+            new Map(
+              (highlightSession?.catalogue ?? []).map((entry) => [
+                entry.key,
+                entry,
+              ]),
+            ),
+            highlight,
+          ),
+        };
 
   // The toolbar gives way to the delete confirmation while it is open.
   const confirming = useEditorStore(
@@ -408,6 +452,30 @@ export function OverlayLayer(props: {
                   )}
                 </div>
               </>
+            )}
+            {highlighted === null ? null : (
+              <div
+                key={highlighted.id}
+                className="pk-overlay-target"
+                data-overlay-highlight={highlighted.id}
+              >
+                <div
+                  className="pk-overlay-outline"
+                  style={boxStyle(highlighted.outline)}
+                />
+                {highlighted.chip.mode === 'hidden' ? null : (
+                  <div
+                    className="pk-overlay-chip"
+                    data-placement={highlighted.chip.mode}
+                    style={{
+                      left: highlighted.chip.left,
+                      top: highlighted.chip.top,
+                    }}
+                  >
+                    {highlighted.text}
+                  </div>
+                )}
+              </div>
             )}
             {store === undefined || origin === null ? null : (
               <DragDecoration

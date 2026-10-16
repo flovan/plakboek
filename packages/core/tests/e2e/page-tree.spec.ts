@@ -7,6 +7,7 @@ import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
   expectSelectedOver,
   framedSite,
+  frameBoxOf,
   HOST,
   LIVE_REGION,
   openEditor,
@@ -97,5 +98,49 @@ test.describe('Page structure', () => {
         }),
     );
     expect(await frame.evaluate(() => window.scrollY)).toBe(0);
+  });
+
+  test('hovering a row outlines its block on the page, and leaving removes the outline', async ({
+    page,
+  }) => {
+    await openLongPage(page);
+    const frame = await framedSite(page);
+    const top = await headingId(frame, 'Top');
+    const highlight = `${HOST} [data-overlay-highlight="${top}"]`;
+
+    await row(page, top).hover();
+    await expect(page.locator(highlight)).toHaveCount(1);
+    await expect
+      .poll(async () => {
+        const outline = await page
+          .locator(`${highlight} .pk-overlay-outline`)
+          .boundingBox();
+        const heading = await frameBoxOf(frame, `[data-pk-block="${top}"]`);
+        if (outline === null) return Number.POSITIVE_INFINITY;
+        return Math.max(
+          Math.abs(outline.x - heading.x),
+          Math.abs(outline.y - heading.y),
+          Math.abs(outline.width - heading.width),
+          Math.abs(outline.height - heading.height),
+        );
+      })
+      .toBeLessThanOrEqual(1);
+
+    await page.getByRole('heading', { name: 'Page structure' }).hover();
+    await expect(page.locator(highlight)).toHaveCount(0);
+  });
+
+  test('a double-click on a row opens its Properties in the sheet with the first control focused', async ({
+    page,
+  }) => {
+    await openLongPage(page);
+    const frame = await framedSite(page);
+    const top = await headingId(frame, 'Top');
+
+    await row(page, top).dblclick();
+    await expect(
+      page.locator(`${HOST} [data-properties-sheet][data-open]`),
+    ).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Text' })).toBeFocused();
   });
 });

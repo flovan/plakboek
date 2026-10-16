@@ -302,3 +302,25 @@ describe('announceSelection', () => {
     ).toBe('');
   });
 });
+
+describe('the Page structure highlight', () => {
+  it('points at an item until it is cleared, the mode changes or the lock is lost', () => {
+    const store = createEditorStore();
+    store.opened(sessionWith(MINE));
+    expect(store.getState().highlight).toBeNull();
+
+    store.setHighlight('h1');
+    expect(store.getState().highlight).toBe('h1');
+    store.setHighlight(null);
+    expect(store.getState().highlight).toBeNull();
+
+    store.setHighlight('h2');
+    store.setMode('interact');
+    expect(store.getState().highlight).toBeNull();
+
+    store.setMode('edit');
+    store.setHighlight('h2');
+    store.tookOver(OTHER);
+    expect(store.getState().highlight).toBeNull();
+  });
+});

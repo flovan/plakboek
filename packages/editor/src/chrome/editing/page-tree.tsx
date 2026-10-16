@@ -1,4 +1,4 @@
-import { useMemo, useRef, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, type ReactElement } from 'react';
 import { revealInFrame } from '../../client/frame/reveal.js';
 import { treeRows } from '../../client/session/page-tree.js';
 import { selectCrumb } from '../../client/session/scope.js';
@@ -60,6 +60,14 @@ export function PageTree(props: PageTreeProps): ReactElement | null {
     [model, catalogueByKey],
   );
 
+  // Whatever the tree points at on the page is let go when the tree goes.
+  useEffect(
+    () => () => {
+      store.setHighlight(null);
+    },
+    [store],
+  );
+
   if (!shown || model === null) return null;
 
   const focusable = rows.some((row) => row.id === selectedId)
@@ -93,6 +101,12 @@ export function PageTree(props: PageTreeProps): ReactElement | null {
           role="tree"
           aria-label={STRINGS['tree.heading']}
           data-page-tree=""
+          onBlur={(event) => {
+            const next = event.relatedTarget;
+            if (!(next instanceof Node && tree.current?.contains(next))) {
+              store.setHighlight(null);
+            }
+          }}
         >
           {rows.map((row) => (
             <div
@@ -109,6 +123,20 @@ export function PageTree(props: PageTreeProps): ReactElement | null {
               style={{ paddingLeft: (row.level - 1) * 16 }}
               onClick={() => {
                 choose(row.id);
+              }}
+              onDoubleClick={() => {
+                store.requestProperties(row.id);
+              }}
+              onPointerEnter={() => {
+                store.setHighlight(row.id);
+              }}
+              onPointerLeave={() => {
+                if (store.getState().highlight === row.id) {
+                  store.setHighlight(null);
+                }
+              }}
+              onFocus={() => {
+                store.setHighlight(row.id);
               }}
             >
               <span aria-hidden="true" className="w-6 shrink-0" />

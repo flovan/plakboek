@@ -92,6 +92,8 @@ export type EditorState = {
   readonly renewal: RenewState | null;
   /** The item a structural write just landed on; the overlay flashes it once per token. */
   readonly flash: { readonly id: string; readonly token: number } | null;
+  /** The item Page structure points at (a hovered or focused row); the overlay outlines it on the page. */
+  readonly highlight: string | null;
   /**
    * Whether the Properties sheet is open over the sidebar or the drawer. Only
    * an explicit ask opens it; while open it follows the selection.
@@ -175,6 +177,8 @@ export type EditorStore = {
   treeRefreshed(tree: readonly ModelNode[], pageVersion: number): void;
   flash(id: string): void;
   clearFlash(): void;
+  /** Points the overlay at an item of the page, or at nothing. */
+  setHighlight(id: string | null): void;
   /** Opens the rail's drawer; the Properties button also opens the sheet. */
   openDrawer(opener: DrawerOpener): void;
   /** Closes the drawer and, with it, the Properties sheet. */
@@ -212,6 +216,7 @@ export function initialEditorState(): EditorState {
     notice: null,
     renewal: null,
     flash: null,
+    highlight: null,
     propertiesOpen: false,
     drawer: null,
     noticeSeen: null,
@@ -251,6 +256,7 @@ export function openedState(
     lock: session.lock,
     notice: locked ? lockedNotice(session.lock) : null,
     renewal: null,
+    highlight: null,
     propertiesOpen: false,
     // A new session starts with nothing queued, whatever the last one left.
     queue: createQueue(),
@@ -292,6 +298,7 @@ export function createEditorStore(
         holderName: view.holder?.name ?? '',
       },
       renewal: null,
+      highlight: null,
       propertiesOpen: false,
       toast: null,
       picker: null,
@@ -318,6 +325,7 @@ export function createEditorStore(
         ...state,
         status: 'unavailable',
         mode: 'interact',
+        highlight: null,
         propertiesOpen: false,
       });
     },
@@ -329,6 +337,7 @@ export function createEditorStore(
         mode,
         selection: mode === 'interact' ? NO_SELECTION : state.selection,
         propertiesOpen: mode === 'interact' ? false : state.propertiesOpen,
+        highlight: null,
         picker: null,
       });
     },
@@ -406,6 +415,10 @@ export function createEditorStore(
     clearFlash() {
       if (state.flash === null) return;
       set({ ...state, flash: null });
+    },
+    setHighlight(id) {
+      if (id === state.highlight) return;
+      set({ ...state, highlight: id });
     },
     openDrawer(opener) {
       if (state.drawer === opener) return;
