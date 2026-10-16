@@ -102,7 +102,7 @@ test.describe('the Properties sheet in the full-width layout', () => {
     await expect(drawer).toBeVisible();
 
     // Escape inside the drawer closes it once the sheet is out of the way
-    await drawer.getByRole('textbox', { name: 'Search blocks' }).focus();
+    await drawer.getByRole('treeitem').first().focus();
     await page.keyboard.press('Escape');
     await expect(drawer).toBeHidden();
   });
