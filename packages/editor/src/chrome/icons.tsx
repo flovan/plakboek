@@ -176,6 +176,18 @@ export function GripIcon({ size = 16, className }: IconProps): ReactElement {
   );
 }
 
+/** A chevron pointing right: the disclosure toggle of a Page structure row. */
+export function ChevronRightIcon({
+  size = 16,
+  className,
+}: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M9 6l6 6-6 6" />
+    </Icon>
+  );
+}
+
 /** An arrow pointing up. */
 export function ArrowUpIcon({ size = 16, className }: IconProps): ReactElement {
   return (

@@ -151,6 +151,7 @@ describe('keyMove', () => {
       action: 'focus',
       id: 's1',
     });
-    expect(keyMove(rows, 's2', 'ArrowLeft')).toBeNull();
+    // a collapsed top-level row has no parent to go to
+    expect(keyMove(rowsWith(['s2']), 's2', 'ArrowLeft')).toBeNull();
   });
 });

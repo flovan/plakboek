@@ -155,9 +155,10 @@ test.describe('dragging a block type from the palette', () => {
     const frame = await framedSite(page);
     await frame.locator(H3).scrollIntoViewIfNeeded();
 
-    const row = await page
-      .locator(`${HOST} [data-palette-row="text"]`)
-      .boundingBox();
+    // Page structure sits above the palette, so the row may need scrolling to.
+    const paletteRow = page.locator(`${HOST} [data-palette-row="text"]`);
+    await paletteRow.scrollIntoViewIfNeeded();
+    const row = await paletteRow.boundingBox();
     if (row === null) throw new Error('The Text row has no box');
     await page.mouse.move(row.x + 20, row.y + 10);
     await page.mouse.down();

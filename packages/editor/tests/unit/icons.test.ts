@@ -9,6 +9,7 @@ import {
   ArrowUpIcon,
   BlocksIcon,
   CheckIcon,
+  ChevronRightIcon,
   CloseIcon,
   ColumnsIcon,
   DuplicateIcon,
@@ -58,6 +59,7 @@ const EDITING_ICONS = {
   LockIcon,
   CloseIcon,
   SearchIcon,
+  ChevronRightIcon,
 } as const;
 
 describe('icons', () => {
@@ -90,12 +92,12 @@ describe('icons', () => {
     expect(still).toContain('<path');
   });
 
-  it('adds the nineteen editing icons, each distinct, 16px, in currentColor and hidden from assistive technology', () => {
+  it('adds the twenty editing icons, each distinct, 16px, in currentColor and hidden from assistive technology', () => {
     const markups = Object.values(EDITING_ICONS).map((Icon) =>
       renderToStaticMarkup(createElement(Icon)),
     );
-    expect(markups).toHaveLength(19);
-    expect(new Set(markups).size).toBe(19);
+    expect(markups).toHaveLength(20);
+    expect(new Set(markups).size).toBe(20);
     for (const markup of markups) {
       expect(markup).toContain('width="16" height="16"');
       expect(markup).toContain('stroke="currentColor"');

@@ -75,3 +75,51 @@ export function treeRows(
   visit(null, 1);
   return rows;
 }
+
+/** The keys a tree row answers to by moving or expanding. */
+export type TreeKey =
+  | 'ArrowDown'
+  | 'ArrowUp'
+  | 'ArrowRight'
+  | 'ArrowLeft'
+  | 'Home'
+  | 'End';
+
+/** What a key does on a row: move focus to another row, or expand or collapse this one. */
+export type TreeMove =
+  | { readonly action: 'focus'; readonly id: string }
+  | { readonly action: 'expand' }
+  | { readonly action: 'collapse' };
+
+/**
+ * What `key` does with focus on row `from`, over the visible `rows`, or null
+ * when it does nothing (the end of the list, a leaf, a top-level row).
+ */
+export function keyMove(
+  rows: readonly TreeRow[],
+  from: string,
+  key: TreeKey,
+): TreeMove | null {
+  const at = rows.findIndex((row) => row.id === from);
+  const current = rows[at];
+  if (current === undefined) return null;
+  const focus = (row: TreeRow | undefined): TreeMove | null =>
+    row === undefined ? null : { action: 'focus', id: row.id };
+  switch (key) {
+    case 'ArrowDown':
+      return focus(rows[at + 1]);
+    case 'ArrowUp':
+      return focus(rows[at - 1]);
+    case 'Home':
+      return focus(rows[0]);
+    case 'End':
+      return focus(rows[rows.length - 1]);
+    case 'ArrowRight':
+      if (!current.hasChildren) return null;
+      // An expanded row's first child is the very next row.
+      return current.expanded ? focus(rows[at + 1]) : { action: 'expand' };
+    case 'ArrowLeft':
+      if (current.expanded) return { action: 'collapse' };
+      return focus(rows.find((row) => row.id === current.parentId));
+  }
+}

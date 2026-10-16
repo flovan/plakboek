@@ -11,6 +11,7 @@ import {
   HOST,
   LIVE_REGION,
   openEditor,
+  SELECTED,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
 import { createEditablePage, heading, section } from './helpers/pages.ts';
@@ -142,5 +143,68 @@ test.describe('Page structure', () => {
       page.locator(`${HOST} [data-properties-sheet][data-open]`),
     ).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Text' })).toBeFocused();
+  });
+
+  test('works from the keyboard: arrows move without selecting, Left and Right collapse and expand, Enter selects and opens Properties', async ({
+    page,
+  }) => {
+    const created = await createEditablePage({
+      blocks: [section(heading('H1'), { type: 'text', props: {} })],
+    });
+    await openEditor(page, created.path);
+    const rows = page.locator(`${HOST} [data-tree-row]`);
+    const focusedRow = page.locator(`${HOST} [data-tree-row]:focus`);
+
+    // a block with a required value still empty says so
+    await expect(rows).toHaveCount(4);
+    await expect(
+      rows.filter({ hasText: 'Needs input' }).filter({ hasText: 'Text' }),
+    ).toHaveCount(1);
+
+    // the tree is one tab stop, and the first row is it
+    for (let presses = 0; presses < 40; presses += 1) {
+      if ((await focusedRow.count()) === 1) break;
+      await page.keyboard.press('Tab');
+    }
+    await expect(focusedRow).toHaveAttribute('aria-level', '1');
+
+    await page.keyboard.press('ArrowDown');
+    await expect(focusedRow).toHaveAttribute('aria-level', '2');
+    await expect(page.locator(SELECTED)).toHaveCount(0);
+
+    await page.keyboard.press('ArrowUp');
+    await expect(focusedRow).toHaveAttribute('aria-level', '1');
+    await page.keyboard.press('ArrowLeft');
+    await expect(rows).toHaveCount(1);
+    await expect(focusedRow).toHaveAttribute('aria-expanded', 'false');
+    await page.keyboard.press('ArrowRight');
+    await expect(rows).toHaveCount(4);
+
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await expect(focusedRow).toContainText('Heading');
+    await page.keyboard.press('Enter');
+    await expect(page.locator(LIVE_REGION)).toHaveText(
+      'Selected Heading, 1 of 2 in Column 1.',
+    );
+    await expect(
+      page.locator(`${HOST} [data-properties-sheet][data-open]`),
+    ).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Text' })).toBeFocused();
+  });
+
+  test('marks the row of the item selected on the page', async ({ page }) => {
+    const created = await createEditablePage({
+      blocks: [section(heading('H1'))],
+    });
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    const id = await headingId(frame, 'H1');
+    const target = frame.getByRole('heading', { name: 'H1' });
+
+    // a section with one column selects the column, and the next level the heading
+    await target.dblclick();
+    await target.dblclick();
+    await expect(row(page, id)).toHaveAttribute('aria-selected', 'true');
   });
 });
