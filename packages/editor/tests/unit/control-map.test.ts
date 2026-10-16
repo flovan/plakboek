@@ -44,10 +44,39 @@ describe('controlFor', () => {
     expect(control.customWidget).toBe(false);
   });
 
-  it('gives a widget it does not know the JSON control and says it is custom', () => {
+  it('gives a widget it does not know on a field type with no standard control the JSON control and says it is custom', () => {
     const control = controlFor(source('host-colour-wheel', 'host_colour'));
     expect(control.kind).toBe('json');
     expect(control.customWidget).toBe(true);
+    expect(controlFor(source('json-editor', 'json')).customWidget).toBe(false);
+  });
+
+  it.each<[string, ControlKind]>([
+    ['short_text', 'text'],
+    ['long_text', 'textarea'],
+    ['integer', 'number'],
+    ['boolean', 'checkbox'],
+    ['select', 'select'],
+  ])(
+    "gives a widget it does not know on a %s property that field type's standard %s control",
+    (fieldType, kind) => {
+      const control = controlFor(source('host-colour-wheel', fieldType));
+      expect(control.kind).toBe(kind);
+      expect(control.customWidget).toBe(true);
+    },
+  );
+
+  it("keeps the standard control's hints and choices under a widget it does not know", () => {
+    expect(
+      controlFor(source('host-widget', 'integer', { min: 1, max: 5 })).hints,
+    ).toEqual({ min: 1, max: 5, step: 1 });
+    expect(
+      controlFor(
+        source('host-widget', 'select', {
+          choices: [{ value: 'a', labels: { en: 'Alpha' } }],
+        }),
+      ).choices,
+    ).toEqual([{ value: 'a', label: 'Alpha' }]);
   });
 
   it('draws a date-only field as a date even under the date-time widget', () => {
@@ -107,6 +136,30 @@ describe('parseJsonInput', () => {
     });
     expect(parseJsonInput('null')).toEqual({ ok: true, value: null });
     expect(parseJsonInput('{a:')).toEqual({ ok: false });
+  });
+
+  it('reads the typographic quotes a system substitutes as straight ones when the text would not parse otherwise', () => {
+    expect(parseJsonInput('\u201c#ff0000\u201d')).toEqual({
+      ok: true,
+      value: '#ff0000',
+    });
+    expect(parseJsonInput('\u201e#ff0000\u201f')).toEqual({
+      ok: true,
+      value: '#ff0000',
+    });
+    expect(parseJsonInput('\u2033#ff0000\u2033')).toEqual({
+      ok: true,
+      value: '#ff0000',
+    });
+  });
+
+  it('never rewrites text that is JSON, and still refuses what is not JSON either way', () => {
+    expect(parseJsonInput('"say \u201chi\u201d"')).toEqual({
+      ok: true,
+      value: 'say \u201chi\u201d',
+    });
+    expect(parseJsonInput('\u201c#ff0000')).toEqual({ ok: false });
+    expect(parseJsonInput('red')).toEqual({ ok: false });
   });
 });
 
