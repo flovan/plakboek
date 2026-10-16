@@ -5,7 +5,6 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import type { CatalogueEntry, EditPosition } from '../../api-types.js';
 import {
   useEditorStore,
   type EditorStore,
@@ -13,7 +12,6 @@ import {
 import { CloseIcon } from '../icons.js';
 import { STAGE_ID } from '../stage.js';
 import { STRINGS } from '../strings.js';
-import { Palette, type PaletteProps } from './palette.js';
 import { PageTree } from './page-tree.js';
 import {
   PropertiesPanel,
@@ -22,10 +20,6 @@ import {
 
 export type SidePanelProps = {
   readonly store: EditorStore;
-  /** The editor chose a block type and a place for it in the palette. */
-  readonly onInsert: (entry: CatalogueEntry, position: EditPosition) => void;
-  /** A palette row was pressed: it becomes a drag once the pointer has moved 4px. */
-  readonly onDragStart?: PaletteProps['onDragStart'];
 };
 
 /**
@@ -57,18 +51,17 @@ function focusStage(from: Element | null): void {
 }
 
 /**
- * The sidebar's panel region: Page structure above the Blocks palette. Properties are not a tab
+ * The sidebar's panel region: Page structure alone. Properties are not a tab
  * here; they open in the {@link PropertiesSheet} over this region.
  */
 export function SidePanel(props: SidePanelProps): ReactElement | null {
-  const { store, onInsert, onDragStart } = props;
+  const { store } = props;
   const editing = useEditorStore(store, (state) => state.status === 'editing');
   if (!editing) return null;
   return (
     <div data-side-panel="" className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
         <PageTree store={store} />
-        <Palette store={store} onInsert={onInsert} onDragStart={onDragStart} />
       </div>
     </div>
   );

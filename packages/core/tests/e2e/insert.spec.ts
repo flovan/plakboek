@@ -1,8 +1,8 @@
 /**
  * Adding to the page, in a real browser: the insert points between siblings,
  * the picker of only the types legal there, the prompts of empty places, the
- * toolbar's Add after and the `+` key, the markers of blocks that still need a
- * value, and the Blocks palette in the sidebar.
+ * toolbar's Add after and the `+` key, and the markers of blocks that still need
+ * a value.
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
@@ -298,78 +298,6 @@ test.describe('empty places and the blocks that need a value', () => {
     await expect(empty).toContainText('Nothing can be added here');
     await expect(empty).toContainText(
       'The page structure does not allow another block in this spot.',
-    );
-  });
-});
-
-test.describe('the Blocks palette', () => {
-  const row = (page: Page, key: string) =>
-    page.locator(`${HOST} [data-palette-row="${key}"]`);
-
-  test('with a heading selected, the Text row adds a Text block right after it and selects it', async ({
-    page,
-  }) => {
-    const created = await pageWithTwoHeadings();
-    await openEditor(page, created.path);
-    const frame = await framedSite(page);
-    await drillToHeading(frame, 0);
-    await expect(page.locator(SELECTED)).toHaveCount(1);
-
-    await row(page, 'text').click();
-
-    await expect
-      .poll(() => tagsInFirstColumn(frame))
-      .toEqual(['h2', 'p', 'h2']);
-    await expect(page.locator(LIVE_REGION)).toContainText('Added Text.');
-    await expectSaved(page);
-    await expect(page.locator(SELECTED)).toHaveCount(1);
-  });
-
-  test('with nothing selected only a section has a place, at the end of the page', async ({
-    page,
-  }) => {
-    const created = await pageWithTwoHeadings();
-    await openEditor(page, created.path);
-    const frame = await framedSite(page);
-
-    const text = row(page, 'text');
-    await expect(text).toHaveAttribute('aria-disabled', 'true');
-    await expect(text).toContainText('Select a place on the page first');
-    await text.click({ force: true });
-    await expect(frame.locator('section.section')).toHaveCount(1);
-
-    await expect(row(page, 'section')).not.toHaveAttribute(
-      'aria-disabled',
-      'true',
-    );
-    await row(page, 'section').click();
-    await expect(frame.locator('section.section')).toHaveCount(2);
-    await expect(page.locator(LIVE_REGION)).toContainText('Added Section.');
-    await expectSaved(page);
-    // the first section is the one that already held the headings
-    expect(await tagsInFirstColumn(frame)).toEqual(['h2', 'h2']);
-  });
-
-  test('a block type with no place relative to the selection says so, and the list narrows as you type', async ({
-    page,
-  }) => {
-    const created = await pageWithTwoHeadings();
-    await openEditor(page, created.path);
-    // a column takes no block after it
-    await tabToRegion(page);
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('ArrowRight');
-    await expect(page.locator(SELECTED)).toHaveCount(1);
-    const text = row(page, 'text');
-    await expect(text).toHaveAttribute('aria-disabled', 'true');
-    await expect(text).toContainText("Can't be added here");
-
-    await page.locator(`${HOST} [data-palette] input`).fill('head');
-    await expect(row(page, 'heading')).toBeVisible();
-    await expect(text).toHaveCount(0);
-    await page.locator(`${HOST} [data-palette] input`).fill('zzzz');
-    await expect(page.locator(`${HOST} [data-palette]`)).toContainText(
-      'No blocks match "zzzz".',
     );
   });
 });

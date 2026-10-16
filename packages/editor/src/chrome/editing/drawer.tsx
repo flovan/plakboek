@@ -58,7 +58,7 @@ export type PanelDrawerProps = {
   readonly notice: ReactNode;
   /** The lock row, under the notice. */
   readonly status: ReactNode;
-  /** The Blocks palette. */
+  /** Page structure. */
   readonly panel: ReactNode;
   /** The Properties sheet, a layer over the drawer's content. */
   readonly sheet?: ReactNode;
@@ -84,7 +84,7 @@ function focusSheet(root: HTMLElement | null): void {
 
 /**
  * The full-width layout's panel drawer: 280px beside the rail, holding the
- * notice slot, the lock row and the Blocks palette, with the Properties sheet
+ * notice slot, the lock row and Page structure, with the Properties sheet
  * sliding over all of it when Properties are asked for. It is a column of the
  * shell's grid, so opening it narrows the frame instead of covering it (the
  * host's `data-drawer` attribute carries the column's width). It stays mounted

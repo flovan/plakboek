@@ -1,6 +1,6 @@
 /**
- * Dragging on the page, in a real browser: the toolbar's handle and the
- * palette's rows start a drag after 4px, a capture surface in the shell takes
+ * Dragging on the page, in a real browser: the toolbar's handle starts a
+ * drag after 4px, a capture surface in the shell takes
  * the pointer over the frame, an insertion line shows only where the placement
  * rules allow, and the drop is one saved write. The keyboard does the same
  * with no pointer at all.
@@ -143,51 +143,6 @@ test.describe('dragging by the handle', () => {
     await expect
       .poll(() => headingsIn(reloaded, 2))
       .toEqual(['H3', 'H1', 'H4']);
-  });
-});
-
-test.describe('dragging a block type from the palette', () => {
-  test('a Text row dropped into a column puts a selected Text block there, saved and still there after a reload', async ({
-    page,
-  }) => {
-    const created = await twoSections();
-    await openEditor(page, created.path);
-    const frame = await framedSite(page);
-    await frame.locator(H3).scrollIntoViewIfNeeded();
-
-    // Page structure sits above the palette, so the row may need scrolling to.
-    const paletteRow = page.locator(`${HOST} [data-palette-row="text"]`);
-    await paletteRow.scrollIntoViewIfNeeded();
-    const row = await paletteRow.boundingBox();
-    if (row === null) throw new Error('The Text row has no box');
-    await page.mouse.move(row.x + 20, row.y + 10);
-    await page.mouse.down();
-    await page.mouse.move(row.x + 40, row.y + 30, { steps: 3 });
-    await expect(page.locator(SURFACE)).toBeVisible();
-    const target = await gapAfter(frame, H3);
-    await page.mouse.move(target.x, target.y, { steps: 8 });
-    await expect(page.locator(LINE)).toBeVisible();
-    await page.mouse.up();
-
-    const tags = (): Promise<string[]> =>
-      frame
-        .locator('section.section')
-        .nth(2)
-        .locator('h2, p')
-        .evaluateAll((elements) =>
-          elements.map((element) => element.tagName.toLowerCase()),
-        );
-    await expect.poll(tags).toEqual(['h2', 'p', 'h2']);
-    await expect(page.getByText(SAVED)).toBeVisible();
-    await expect(page.locator(SELECTED)).toHaveCount(1);
-
-    await page.reload();
-    const reloaded = await framedSite(page);
-    await expect
-      .poll(() =>
-        reloaded.locator('section.section').nth(2).locator('p').count(),
-      )
-      .toBe(1);
   });
 });
 

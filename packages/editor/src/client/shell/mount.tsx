@@ -824,23 +824,23 @@ function Shell(props: {
     [insertEntry, store],
   );
 
-  /** A palette row: focus stays on the row, as after any structural action from the sidebar. */
-  const insertFromPalette = useCallback(
+  /** Serves only the drag session: a dropped block type is inserted without moving focus. */
+  const insertDropped = useCallback(
     (entry: CatalogueEntry, position: EditPosition) => {
       insertEntry(entry, position, false);
     },
     [insertEntry],
   );
 
-  // Dragging: the toolbar's handle and the palette's rows start one, and a
-  // drop is a move or an insert like any other structural write.
+  // Dragging: the toolbar's handle starts one, and a drop is a move or an
+  // insert like any other structural write.
   const dragSession = useMemo(
     () =>
       createDragSession({
         store,
         frame: () => frameOf(host),
         onMove: moveTo,
-        onInsert: insertFromPalette,
+        onInsert: insertDropped,
         onKeyboardEnd: () => {
           // The handle is still there after a cancel and usually after a drop.
           requestAnimationFrame(() => {
@@ -851,7 +851,7 @@ function Shell(props: {
           });
         },
       }),
-    [host, store, moveTo, insertFromPalette],
+    [host, store, moveTo, insertDropped],
   );
   useEffect(() => {
     const unsubscribe = store.subscribe(() => {
@@ -866,12 +866,6 @@ function Shell(props: {
   const startDrag = useCallback(
     (id: string, origin: { x: number; y: number }) => {
       dragSession.startPointer({ kind: 'move', id }, origin);
-    },
-    [dragSession],
-  );
-  const startEntryDrag = useCallback(
-    (entry: CatalogueEntry, origin: { x: number; y: number }) => {
-      dragSession.startPointer({ kind: 'insert', type: entry.key }, origin);
     },
     [dragSession],
   );
@@ -1400,9 +1394,7 @@ function Shell(props: {
               onClosePicker: closePicker,
               onDismissPicker: dismissPicker,
               onPick: pickEntry,
-              onInsert: insertFromPalette,
               onDragStart: startDrag,
-              onDragEntry: startEntryDrag,
               onLiftDrag: liftDrag,
               onPropertiesChange: changeProperties,
               onPropertiesBlur: blurProperties,
