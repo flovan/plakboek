@@ -416,13 +416,6 @@ export function OverlayLayer(props: {
                 source={dragSource}
               />
             )}
-            {store === undefined || measured === null ? null : (
-              <NeedsInputMarkers
-                store={store}
-                boxes={placed}
-                frame={measured.frame}
-              />
-            )}
           </div>
         ) : null}
       </div>
@@ -446,6 +439,13 @@ export function OverlayLayer(props: {
             style={{ left: -frameBox.left, top: -frameBox.top }}
           >
             <DragSurface store={store} frame={frameBox} />
+            {measured === null ? null : (
+              <NeedsInputMarkers
+                store={store}
+                boxes={placed}
+                frame={measured.frame}
+              />
+            )}
             {confirming || measured === null || drag !== null ? null : (
               <>
                 <InsertPoints

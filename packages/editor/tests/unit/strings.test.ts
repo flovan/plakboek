@@ -30,6 +30,7 @@ const VARIABLES: Readonly<Record<string, readonly string[]>> = {
   'action.duplicated': ['label'],
   'action.changed': ['property', 'label'],
   'label.column': ['n'],
+  'marker.label': ['label'],
   'toolbar.label': ['label'],
   'toolbar.drag.label': ['label'],
   'toolbar.moveLeft.label': ['label'],

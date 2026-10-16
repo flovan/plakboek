@@ -327,6 +327,7 @@ export const STRINGS = Object.freeze({
   'panel.fill.label': 'Fill column height',
   'panel.fill.hint': 'Stretches this block to the full height of its column.',
   'panel.needsInput': 'Needs input',
+  'marker.label': '{label} needs input',
   'panel.openSectionLayout': 'Open section layout',
   'panel.columnWidthNote': "Column width comes from the section's layout.",
   'panel.fixedHint': "Set by the site. It can't be changed here.",

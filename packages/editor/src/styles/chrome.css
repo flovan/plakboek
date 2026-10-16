@@ -759,7 +759,7 @@
     pointer-events: auto;
   }
 
-  /* The needs-input marker: attention colour, white text, never takes the pointer. */
+  /* The needs-input marker: attention colour, white text, a pointer control that selects its block. */
   .pk-marker {
     position: absolute;
     box-sizing: border-box;
@@ -768,15 +768,28 @@
     gap: 4px;
     height: 20px;
     padding: 0 6px;
+    border: 0;
     border-radius: 4px;
     background: var(--pk-attention-marker);
     color: var(--pk-overlay-chip-text);
+    font: inherit;
     font-size: 12px;
     font-weight: 600;
     line-height: 1.2;
     white-space: nowrap;
-    pointer-events: none;
+    pointer-events: auto;
+    cursor: pointer;
     forced-color-adjust: none;
+  }
+
+  .pk-marker:focus-visible {
+    outline: 2px solid var(--pk-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* While a drag runs or the delete confirmation is open the markers stay drawn and take no pointer. */
+  [data-markers][data-inert] .pk-marker {
+    pointer-events: none;
   }
 
   @media (forced-colors: active) {
