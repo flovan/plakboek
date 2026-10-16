@@ -7,10 +7,12 @@
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
+  FRAME,
   framedSite,
   HOST,
   LIVE_REGION,
   openEditor,
+  waitForShell,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
 import {
@@ -25,9 +27,9 @@ import { signIn } from './helpers/session.ts';
 
 const SAVED = 'All changes saved';
 
-/** The panel's tab for Properties. */
-function propertiesTab(page: Page) {
-  return page.getByRole('tab', { name: 'Properties' });
+/** The Properties sheet: open only after an explicit ask. */
+function sheet(page: Page) {
+  return page.locator(`${HOST} [data-properties-sheet]`);
 }
 
 /** The Text control of the open Properties panel. */
@@ -81,7 +83,7 @@ test.describe('changing a heading in the panel', () => {
       .first();
 
     await openPropertiesOfHeading(frame, 0);
-    await expect(propertiesTab(page)).toHaveAttribute('aria-selected', 'true');
+    await expect(sheet(page)).toHaveAttribute('data-open', '');
     const control = textControl(page);
     await expect(control).toHaveValue('Hello');
     // the ask for Properties moves focus into the first control
@@ -110,16 +112,15 @@ test.describe('changing a heading in the panel', () => {
   });
 });
 
-test.describe('the panel and its tabs', () => {
-  test('selecting a block never switches the tab or moves focus into the panel', async ({
+test.describe('the Properties sheet', () => {
+  test('selecting a block never opens the sheet or moves focus into it', async ({
     page,
   }) => {
     await openPageWithHeading(page);
     const frame = await framedSite(page);
-    const blocks = page.getByRole('tab', { name: 'Blocks' });
-    await expect(blocks).toHaveAttribute('aria-selected', 'true');
+    await expect(sheet(page)).not.toHaveAttribute('data-open', '');
 
-    // drill to a heading by clicks: it is selected, the tab stays on Blocks
+    // drill to a heading by clicks: it is selected, the sheet stays closed
     const target = frame
       .locator('section.section')
       .first()
@@ -127,7 +128,7 @@ test.describe('the panel and its tabs', () => {
       .first();
     await target.dblclick();
     await target.dblclick();
-    await expect(blocks).toHaveAttribute('aria-selected', 'true');
+    await expect(sheet(page)).not.toHaveAttribute('data-open', '');
     expect(
       await page
         .locator(HOST)
@@ -153,7 +154,7 @@ async function openDemo(
   await openEditor(page, created.path);
   const frame = await framedSite(page);
   await openPropertiesOf(frame, DEMO);
-  await expect(propertiesTab(page)).toHaveAttribute('aria-selected', 'true');
+  await expect(sheet(page)).toHaveAttribute('data-open', '');
   return frame;
 }
 
@@ -355,6 +356,10 @@ test.describe('a host widget the editor has no control for', () => {
     await expectSaved(page);
 
     await page.reload();
+    await waitForShell(page);
+    // the frame's clicks are claimed once the editing session runs
+    await expect(page.locator(HOST)).toHaveAttribute('data-session', 'editing');
+    await expect(page.locator(FRAME)).toHaveAttribute('tabindex', '-1');
     const reloaded = await framedSite(page);
     await openPropertiesOf(reloaded, DEMO);
     await expect(
@@ -502,7 +507,7 @@ test.describe('undo and focus', () => {
     ).toHaveText('Hello');
   });
 
-  test('the toolbar Properties button opens the panel on its tab and focuses the first control', async ({
+  test('the toolbar Properties button opens the sheet and focuses the first control', async ({
     page,
   }) => {
     await openPageWithHeading(page);
@@ -515,13 +520,10 @@ test.describe('undo and focus', () => {
     // two double-clicks leave the heading selected without asking for Properties
     await target.dblclick();
     await target.dblclick();
-    await expect(page.getByRole('tab', { name: 'Blocks' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    await expect(sheet(page)).not.toHaveAttribute('data-open', '');
 
     await page.getByRole('button', { name: 'Properties of Heading' }).click();
-    await expect(propertiesTab(page)).toHaveAttribute('aria-selected', 'true');
+    await expect(sheet(page)).toHaveAttribute('data-open', '');
     await expect(textControl(page)).toBeFocused();
   });
 
@@ -543,7 +545,7 @@ test.describe('undo and focus', () => {
     await picker.getByRole('combobox').fill('head');
     await page.keyboard.press('Enter');
 
-    await expect(propertiesTab(page)).toHaveAttribute('aria-selected', 'true');
+    await expect(sheet(page)).toHaveAttribute('data-open', '');
     const control = textControl(page);
     await expect(control).toHaveValue('');
     await expect(control).toBeFocused();
@@ -564,6 +566,6 @@ test.describe('undo and focus', () => {
         .locator(HOST)
         .evaluate((host) => host.shadowRoot?.activeElement?.tagName ?? ''),
     ).not.toBe('INPUT');
-    await expect(propertiesTab(page)).toHaveAttribute('aria-selected', 'true');
+    await expect(sheet(page)).toHaveAttribute('data-open', '');
   });
 });

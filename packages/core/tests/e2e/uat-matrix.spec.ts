@@ -106,6 +106,9 @@ async function walk(page: Page, ...steps: readonly string[]): Promise<void> {
 }
 
 async function interact(page: Page): Promise<void> {
+  // An open Properties sheet covers the mode toggle; Close brings it back.
+  const close = page.getByRole('button', { name: 'Close properties' });
+  if (await close.isVisible()) await close.click();
   await page.getByRole('radio', { name: 'Interact' }).click();
   await expect(mode(page)).toHaveText('Interact');
   await expect(page.locator(FRAME)).not.toHaveAttribute('tabindex');

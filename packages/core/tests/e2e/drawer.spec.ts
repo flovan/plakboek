@@ -131,7 +131,7 @@ test.describe('the drawer at the edges', () => {
     expect(frame?.width).toBeCloseTo(1024 - 56 - 280, 0);
   });
 
-  test('switches to the sidebar layout on the same tab when the pushed frame would be under 320px wide', async ({
+  test('switches to the sidebar layout with the sheet open when the pushed frame would be under 320px wide', async ({
     page,
   }) => {
     await openFullWidth(page);
@@ -144,10 +144,9 @@ test.describe('the drawer at the edges', () => {
 
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'framed');
     await expect(page.locator(DRAWER)).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: 'Properties' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    await expect(
+      page.locator(`${HOST} [data-properties-sheet][data-open]`),
+    ).toBeVisible();
   });
 
   test('moves focus into the drawer on open and back to the rail button on Escape', async ({
@@ -308,10 +307,19 @@ test.describe('a notice in the full-width layout', () => {
       await expect(properties).toHaveAccessibleName(/new notice/);
       await expect(tabB.locator(`${HOST} [data-rail-dot]`)).toHaveCount(1);
 
-      await properties.click();
-      const first = tabB.locator(`${DRAWER} > *`).first();
+      await railButton(tabB, 'Blocks').click();
+      const first = tabB.locator(`${DRAWER} [data-drawer-content] > *`).first();
       await expect(first).toHaveAttribute('data-notice', 'stale');
       await expect(tabB.locator(`${HOST} [data-rail-dot]`)).toHaveCount(0);
+
+      // with the Properties sheet over the drawer, the notice moves into it
+      await railButton(tabB, 'Properties').click();
+      await expect(
+        tabB.locator(`${DRAWER} [data-properties-sheet] [data-notice="stale"]`),
+      ).toBeVisible();
+      await expect(
+        tabB.locator(`${DRAWER} [data-drawer-content] [data-notice]`),
+      ).toHaveCount(0);
     } finally {
       await context.close();
     }

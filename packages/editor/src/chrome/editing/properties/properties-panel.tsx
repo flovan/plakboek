@@ -357,7 +357,7 @@ export function PropertiesPanel(props: PropertiesPanelProps): ReactElement {
     const settings =
       entry.properties.length === 0 ? null : (
         <BlockProperties
-          key={node.id}
+          key={`${node.id}:settings`}
           store={store}
           node={node}
           entry={entry}
@@ -393,7 +393,7 @@ export function PropertiesPanel(props: PropertiesPanelProps): ReactElement {
           {settings}
           {fill ? (
             <PlacementGroup
-              key={node.id}
+              key={`${node.id}:placement`}
               store={store}
               node={node}
               onLayoutChange={onLayoutChange}

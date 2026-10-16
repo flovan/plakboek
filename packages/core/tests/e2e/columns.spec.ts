@@ -76,8 +76,20 @@ async function widthsOf(frame: Frame, sectionIndex = 0): Promise<number[]> {
   );
 }
 
-function propertiesTab(page: Page) {
-  return page.getByRole('tab', { name: 'Properties' });
+/** The floating toolbar's Properties button, which opens the sheet. */
+function propertiesButton(page: Page) {
+  return page.getByRole('button', { name: /^Properties of / });
+}
+
+/** Waits until the sheet has slid in, so a press on its controls lands where they are. */
+async function sheetSettled(page: Page): Promise<void> {
+  await expect
+    .poll(
+      async () =>
+        (await page.locator(`${HOST} [data-properties-sheet]`).boundingBox())
+          ?.x ?? -1,
+    )
+    .toBeGreaterThanOrEqual(0);
 }
 
 /** The group of the open Properties panel, named by its `data-properties-group`. */
@@ -89,7 +101,7 @@ async function expectSaved(page: Page): Promise<void> {
   await expect(page.getByText(SAVED)).toBeVisible();
 }
 
-/** Selects the first section by clicking inside it, and opens the Properties tab. */
+/** Selects the first section by clicking inside it, and opens its Properties. */
 async function selectSection(
   page: Page,
   frame: Frame,
@@ -101,8 +113,9 @@ async function selectSection(
     .locator('h2')
     .first()
     .click();
-  await propertiesTab(page).click();
+  await propertiesButton(page).click();
   await expect(group(page, 'columns')).toBeVisible();
+  await sheetSettled(page);
 }
 
 /** Reloads the editor and waits until its session runs and the frame's clicks are claimed again. */
@@ -393,7 +406,8 @@ test.describe('a block that fills its column', () => {
     // section, then its column, then the quote
     await quote.dblclick();
     await quote.dblclick();
-    await propertiesTab(page).click();
+    await propertiesButton(page).click();
+    await sheetSettled(page);
     const placement = group(page, 'placement');
     const fill = placement.getByRole('switch', { name: 'Fill column height' });
     await expect(fill).not.toBeChecked();
@@ -423,7 +437,8 @@ test.describe('a block that fills its column', () => {
 
     await reloaded.locator('blockquote.quote').dblclick();
     await reloaded.locator('blockquote.quote').dblclick();
-    await propertiesTab(page).click();
+    await propertiesButton(page).click();
+    await sheetSettled(page);
     await page.getByRole('switch', { name: 'Fill column height' }).click();
     await expect
       .poll(async () => {
@@ -446,7 +461,8 @@ test.describe('a block that fills its column', () => {
     const target = frame.locator('section.section h2').first();
     await target.dblclick();
     await target.dblclick();
-    await propertiesTab(page).click();
+    await propertiesButton(page).click();
+    await sheetSettled(page);
     await expect(page.locator(`${HOST} [data-properties-panel]`)).toBeVisible();
     await expect(group(page, 'placement')).toHaveCount(0);
   });
@@ -543,7 +559,9 @@ test.describe('copying and removing a column from the toolbar and the keyboard',
       .toEqual([null]);
     expect(await headingsByColumn(frame)).toEqual([['A'], ['B'], ['B'], ['C']]);
 
-    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    // the sheet covers the sidebar's Undo button, so Undo is the shortcut
+    await page.locator(`${HOST} #plakboek-stage`).focus();
+    await page.keyboard.press('ControlOrMeta+Z');
     await expect(columnsIn(frame)).toHaveCount(3);
     await expectSaved(page);
     await expect
