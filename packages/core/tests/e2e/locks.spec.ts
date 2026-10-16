@@ -229,6 +229,70 @@ test.describe('taking over', () => {
     }
   });
 
+  test('an edit the holder makes before hearing of the takeover is discarded and the page shows what is saved', async ({
+    browser,
+  }) => {
+    const created = await twoSections();
+    const holder = await personIn(
+      browser,
+      { roleKey: 'editor-no-delete', name: 'Hal Holder' },
+      { clock: true },
+    );
+    const taker = await personIn(browser, {
+      roleKey: 'editor',
+      name: 'Tess Taker',
+    });
+    try {
+      await openEditor(holder.page, created.path);
+      const holderFrame = await framedSite(holder.page);
+      await openShell(taker.page, created.path);
+      await taker.page.getByRole('button', { name: 'Take over' }).click();
+      await taker.page
+        .getByRole('dialog', { name: 'Take over editing?' })
+        .getByRole('button', { name: 'Take over' })
+        .click();
+      await expect(taker.page.locator(HOST)).toHaveAttribute(
+        'data-session',
+        'editing',
+      );
+
+      // the holder has not heard of it yet: the live preview takes no lock, so
+      // the change is rendered into their frame
+      await drillTo(holderFrame, 0, 0);
+      await holderFrame
+        .locator('section.section')
+        .first()
+        .locator('h2')
+        .first()
+        .dblclick();
+      const control = holder.page.getByRole('textbox', { name: 'Text' });
+      await expect(control).toHaveValue('H1');
+      await control.fill('Changed after takeover');
+      await holder.page.clock.fastForward(300);
+      await expect(
+        holderFrame.locator('section.section').first().locator('h2').first(),
+      ).toHaveText('Changed after takeover');
+
+      // the save is refused, and the page goes back to what is saved
+      await holder.page.clock.fastForward(1_500);
+      await expect(holder.page.locator(HOST)).toHaveAttribute(
+        'data-session',
+        'locked',
+      );
+      const alert = holder.page.getByRole('alert').filter({
+        hasText: 'Tess Taker took over this page',
+      });
+      await expect(alert).toBeVisible();
+      const reloaded = await framedSite(holder.page);
+      await expect.poll(() => headingsIn(reloaded, 0)).toEqual(['H1', 'H2']);
+      const takerFrame = await framedSite(taker.page);
+      await expect.poll(() => headingsIn(takerFrame, 0)).toEqual(['H1', 'H2']);
+    } finally {
+      await holder.context.close();
+      await taker.context.close();
+    }
+  });
+
   test('an editor whose permissions do not cover the holder is not offered Take over', async ({
     browser,
   }) => {

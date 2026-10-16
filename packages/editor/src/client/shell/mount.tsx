@@ -274,6 +274,30 @@ function Shell(props: {
     };
   }, [host, hydrated, editable, blockHooks, store]);
 
+  // Another editor taking the page over drops what this tab had not saved, so
+  // the frame must stop showing it: a property change rendered by the live
+  // preview stays on screen after its write is refused. The heartbeat, a 423
+  // refusal and a stale refusal after the takeover all end in this one store
+  // transition, so the frame is put back to the working tree here. An answer
+  // still in flight is cancelled first, so it cannot put the edit back.
+  useEffect(() => {
+    if (!hydrated || !editable) return undefined;
+    let previous = store.getState();
+    const unsubscribe = store.subscribe(() => {
+      const next = store.getState();
+      if (
+        previous.status === 'editing' &&
+        next.status === 'locked' &&
+        next.notice?.kind === 'taken-over'
+      ) {
+        previewRef.current?.cancel();
+        frameOf(host)?.contentWindow?.location.replace(island.frameUrl);
+      }
+      previous = next;
+    });
+    return unsubscribe;
+  }, [host, hydrated, editable, store, island.frameUrl]);
+
   // The lock watch starts again after a failed re-open.
   const [watchRound, setWatchRound] = useState(0);
   // The editor took the page over, so the answer is not "the holder stopped".
