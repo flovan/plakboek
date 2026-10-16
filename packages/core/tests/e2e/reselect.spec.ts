@@ -9,6 +9,7 @@ import {
   boxOf,
   frameBoxOf,
   framedSite,
+  HOST,
   LIVE_REGION,
   openEditor,
   SELECTED,
@@ -41,6 +42,21 @@ async function ghostPoint(frame: Frame): Promise<{ x: number; y: number }> {
   return { x: box.x + 40, y: box.y + 8 };
 }
 
+/** The outline settles to the paragraph's top and the 24px ghost height. */
+async function expectGhostBox(
+  page: Page,
+  frame: Frame,
+  selector: string,
+): Promise<void> {
+  const paragraph = await frameBoxOf(frame, EMPTY);
+  await expect
+    .poll(async () => {
+      const outline = await boxOf(page, selector);
+      return [Math.round(outline.y - paragraph.y), Math.round(outline.height)];
+    })
+    .toEqual([0, 24]);
+}
+
 async function drillTwice(frame: Frame, name: string): Promise<void> {
   const target = frame.getByRole('heading', { name });
   await target.dblclick();
@@ -66,10 +82,7 @@ test.describe('an empty block can be selected again', () => {
     await page.mouse.dblclick(x, y);
 
     await expect(page.locator(LIVE_REGION)).toHaveText(SELECTED_EMPTY);
-    const outline = await boxOf(page, SELECTED);
-    const paragraph = await frameBoxOf(frame, EMPTY);
-    expect(Math.abs(outline.height - 24)).toBeLessThanOrEqual(1);
-    expect(Math.abs(outline.y - paragraph.y)).toBeLessThanOrEqual(1);
+    await expectGhostBox(page, frame, SELECTED);
   });
 
   test('by a click when its column is the scope', async ({ page }) => {
@@ -80,5 +93,20 @@ test.describe('an empty block can be selected again', () => {
     await page.mouse.click(x, y);
 
     await expect(page.locator(LIVE_REGION)).toHaveText(SELECTED_EMPTY);
+  });
+
+  test('hover outlines it at its ghost box', async ({ page }) => {
+    const frame = await open(page);
+    const { x, y } = await ghostPoint(frame);
+    const id = await frame.locator(EMPTY).getAttribute('data-pk-block');
+
+    await drillTwice(frame, 'H1');
+    await page.mouse.move(x, y);
+
+    await expectGhostBox(
+      page,
+      frame,
+      `${HOST} [data-overlay-target="${id}"] [data-overlay-outline]`,
+    );
   });
 });

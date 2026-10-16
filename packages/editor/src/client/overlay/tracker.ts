@@ -27,6 +27,7 @@
  * through their own callback.
  */
 import { EDIT_ATTRIBUTE } from '@plakboek/render';
+import { blocksAt } from '../frame/hit-test.js';
 import { measureLoose } from './boxes.js';
 import { isMeasurable, sameBox, type Box, type Point } from './geometry.js';
 
@@ -81,18 +82,7 @@ export type HoverTracker = {
 /** How long the page must be quiet before the pointer is looked up again. */
 export const SETTLE_MS = 100;
 
-const BLOCK_SELECTOR = `[${EDIT_ATTRIBUTE.block}]`;
 const SECTION_SELECTOR = `[${EDIT_ATTRIBUTE.kind}="section"]`;
-
-function isElement(value: unknown): value is Element {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'nodeType' in value &&
-    value.nodeType === 1 &&
-    'closest' in value
-  );
-}
 
 /** A frame window that has the observer constructors, which every browser's
  * window does. */
@@ -120,37 +110,26 @@ function measure(element: Element, view: Window): Box | null {
     : null;
 }
 
-/** The measurable blocks that hold `from`, innermost first, climbing past any
- * that generate no box of their own. */
-function blocksAround(
-  from: Element | null,
-  view: Window,
-): readonly { readonly id: string; readonly element: Element }[] {
-  const found: { id: string; element: Element }[] = [];
-  let candidate = from?.closest(BLOCK_SELECTOR) ?? null;
-  while (candidate !== null) {
-    if (measure(candidate, view) !== null) {
-      found.push({
-        id: candidate.getAttribute(EDIT_ATTRIBUTE.block) ?? '',
-        element: candidate,
-      });
-    }
-    candidate = candidate.parentElement?.closest(BLOCK_SELECTOR) ?? null;
-  }
-  return found;
-}
-
-/** The block the hover is on: the innermost measurable one, or the one
+/** The block the hover is on: the innermost block under the frame-local point
+ * (a zero-size one through its ghost box, as a click finds it), or the one
  * `resolve` picks from the chain. */
 function resolveTarget(
-  from: Element | null,
-  view: Window,
+  frameDocument: Document,
+  x: number,
+  y: number,
   resolve: TrackerOptions['resolve'],
 ): Element | null {
-  const chain = blocksAround(from, view);
-  if (resolve === undefined) return chain[0]?.element ?? null;
-  const id = resolve(chain.map((entry) => entry.id));
-  return chain.find((entry) => entry.id === id)?.element ?? null;
+  const chain = blocksAt(frameDocument, x, y);
+  if (resolve === undefined) return chain[0] ?? null;
+  const ids = chain.map((element) =>
+    element.getAttribute(EDIT_ATTRIBUTE.block),
+  );
+  const id = resolve(ids.filter((value): value is string => value !== null));
+  return (
+    chain.find(
+      (element) => element.getAttribute(EDIT_ATTRIBUTE.block) === id,
+    ) ?? null
+  );
 }
 
 /** The element of a block id in a frame document, or null. */
@@ -288,7 +267,10 @@ function track(
       if (hovered !== null) setTarget(null);
       return null;
     }
-    const element = measure(hovered, current.view);
+    // A target that renders at no size is outlined at the ghost box a click on
+    // it would hit.
+    const element =
+      measure(hovered, current.view) ?? measureLoose(hovered, current.view);
     if (element === null) return null;
     const container = section;
     const sectionBox =
@@ -382,13 +364,7 @@ function track(
     if (x < 0 || y < 0 || x >= box.width || y >= box.height) {
       setTarget(null);
     } else {
-      setTarget(
-        resolveTarget(
-          current.document.elementFromPoint(x, y),
-          current.view,
-          options.resolve,
-        ),
-      );
+      setTarget(resolveTarget(current.document, x, y, options.resolve));
     }
     schedule();
   }
@@ -429,8 +405,9 @@ function track(
       pointer = { x: event.clientX + box.left, y: event.clientY + box.top };
       setTarget(
         resolveTarget(
-          isElement(event.target) ? event.target : null,
-          view,
+          frameDocument,
+          event.clientX,
+          event.clientY,
           options.resolve,
         ),
       );
