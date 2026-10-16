@@ -1331,7 +1331,7 @@ function Shell(props: {
 
   // A rail button opens the drawer, unless the pushed frame would be narrower
   // than the site can be used in: then the sidebar layout is shown instead,
-  // on the same tab.
+  // with the sheet open if Properties were asked for.
   const openDrawer = useCallback(
     (opener: DrawerOpener) => {
       const frame = frameOf(host);
@@ -1341,8 +1341,9 @@ function Shell(props: {
         frame !== null &&
         !drawerFits(frame.getBoundingClientRect().width)
       ) {
-        if (opener !== 'notice') store.setPanelTab(opener);
         showLayout('framed');
+        // The sheet belongs to the layout shown, so it opens after the switch.
+        if (opener === 'properties') store.openProperties();
         return;
       }
       store.openDrawer(opener);

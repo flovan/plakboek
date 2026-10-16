@@ -18,7 +18,7 @@ import { LeaveDialog } from './editing/leave-dialog.js';
 import { LiveRegion } from './editing/live-region.js';
 import { LockExpiry } from './editing/lock-expiry.js';
 import { NoticeSlot } from './editing/notices.js';
-import { SidePanel } from './editing/panel.js';
+import { PropertiesSheet, SidePanel } from './editing/panel.js';
 import { RailTools } from './editing/rail-tools.js';
 import type { PropertiesPanelProps } from './editing/properties/properties-panel.js';
 import { UndoToast } from './editing/toast.js';
@@ -134,6 +134,10 @@ export function ShellApp(props: ShellAppProps): ReactElement {
     editor?.store ?? NO_STORE,
     (state) => state.status === 'editing' && state.mode === 'edit',
   );
+  const propertiesOpen = useEditorStore(
+    editor?.store ?? NO_STORE,
+    (state) => state.propertiesOpen,
+  );
   const full = layout === 'full';
   const parts =
     editor === undefined || !hydrated
@@ -162,6 +166,11 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               store={editor.store}
               onInsert={editor.onInsert ?? noop}
               onDragStart={editor.onDragEntry}
+            />
+          ),
+          sheet: (
+            <PropertiesSheet
+              store={editor.store}
               onPropertiesChange={editor.onPropertiesChange}
               onPropertiesBlur={editor.onPropertiesBlur}
               onLayoutChange={editor.onLayoutChange}
@@ -220,6 +229,8 @@ export function ShellApp(props: ShellAppProps): ReactElement {
         layout={layout}
         onToggleLayout={onToggleLayout}
         onLeave={editor?.onLeave}
+        sheet={full ? undefined : parts?.sheet}
+        receded={!full && propertiesOpen}
       />
       {drawer}
       <Stage

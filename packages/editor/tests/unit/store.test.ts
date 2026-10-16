@@ -195,17 +195,23 @@ describe('the editor store', () => {
 });
 
 describe('the rail drawer', () => {
-  it('opens on a tab, closes, and keeps the tab the editor last looked at', () => {
+  it('opens the Properties sheet with the Properties button and closes it with the drawer', () => {
     const store = createEditorStore();
     store.openDrawer('properties');
     expect(store.getState().drawer).toBe('properties');
-    expect(store.getState().panelTab).toBe('properties');
+    expect(store.getState().propertiesOpen).toBe(true);
     store.closeDrawer();
     expect(store.getState().drawer).toBeNull();
-    expect(store.getState().panelTab).toBe('properties');
-    // the notice button opens the drawer without changing the tab
+    expect(store.getState().propertiesOpen).toBe(false);
+  });
+
+  it('leaves the sheet as it is for the notice button and closes it for Blocks', () => {
+    const store = createEditorStore();
+    store.openDrawer('properties');
     store.openDrawer('notice');
-    expect(store.getState().panelTab).toBe('properties');
+    expect(store.getState().propertiesOpen).toBe(true);
+    store.openDrawer('blocks');
+    expect(store.getState().propertiesOpen).toBe(false);
   });
 
   it('counts a notice as read once the drawer was opened or closed on it', () => {
@@ -219,6 +225,43 @@ describe('the rail drawer', () => {
     store.setNotice({ kind: 'lapsed', holderName: 'Edith' });
     store.closeDrawer();
     expect(store.getState().noticeSeen).toBe(store.getState().notice);
+  });
+});
+
+describe('the Properties sheet', () => {
+  it('opens on a request with a token and without one on openProperties', () => {
+    const store = createEditorStore();
+    store.openProperties();
+    expect(store.getState().propertiesOpen).toBe(true);
+    expect(store.getState().propertiesRequest).toBeNull();
+    store.closeProperties();
+    expect(store.getState().propertiesOpen).toBe(false);
+    store.requestProperties('h1');
+    expect(store.getState().propertiesOpen).toBe(true);
+    expect(store.getState().propertiesRequest?.id).toBe('h1');
+  });
+
+  it('closes when the editor enters Interact, and when another editor takes over', () => {
+    const store = createEditorStore();
+    store.opened(sessionWith(MINE));
+    store.openProperties();
+    store.setMode('interact');
+    expect(store.getState().propertiesOpen).toBe(false);
+    store.setMode('edit');
+    store.openProperties();
+    store.setLock(OTHER);
+    expect(store.getState().status).toBe('locked');
+    expect(store.getState().propertiesOpen).toBe(false);
+  });
+
+  it('closes when the page fails to open or a new session opens', () => {
+    const store = createEditorStore();
+    store.openProperties();
+    store.failedToOpen(null);
+    expect(store.getState().propertiesOpen).toBe(false);
+    store.openProperties();
+    store.opened(sessionWith(MINE));
+    expect(store.getState().propertiesOpen).toBe(false);
   });
 });
 

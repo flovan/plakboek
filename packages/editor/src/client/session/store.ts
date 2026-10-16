@@ -30,9 +30,6 @@ export type EditorMode = 'edit' | 'interact';
  */
 export type EditorStatus = 'opening' | 'editing' | 'locked' | 'unavailable';
 
-/** The two tabs of the sidebar's panel region. */
-export type PanelTab = 'blocks' | 'properties';
-
 /**
  * What opened the rail's panel drawer: the Blocks or Properties button, or the
  * notice button of a page that has no tools. Focus goes back to that button
@@ -95,8 +92,11 @@ export type EditorState = {
   readonly renewal: RenewState | null;
   /** The item a structural write just landed on; the overlay flashes it once per token. */
   readonly flash: { readonly id: string; readonly token: number } | null;
-  /** Which tab the panel region shows; only an explicit action changes it. */
-  readonly panelTab: PanelTab;
+  /**
+   * Whether the Properties sheet is open over the sidebar or the drawer. Only
+   * an explicit ask opens it; while open it follows the selection.
+   */
+  readonly propertiesOpen: boolean;
   /** The rail's panel drawer: what opened it, or null while it is closed. */
   readonly drawer: DrawerOpener | null;
   /** The notice that was showing when the drawer was last open or closed, so a newer one is unread. */
@@ -175,12 +175,14 @@ export type EditorStore = {
   treeRefreshed(tree: readonly ModelNode[], pageVersion: number): void;
   flash(id: string): void;
   clearFlash(): void;
-  /** Shows the panel's Properties or Blocks tab. */
-  setPanelTab(tab: PanelTab): void;
-  /** Opens the rail's drawer; Blocks and Properties also show their tab. */
+  /** Opens the rail's drawer; the Properties button also opens the sheet. */
   openDrawer(opener: DrawerOpener): void;
+  /** Closes the drawer and, with it, the Properties sheet. */
   closeDrawer(): void;
-  /** Opens Properties for `id` and asks the panel to focus its first control. */
+  /** Opens the Properties sheet without asking it to take focus. */
+  openProperties(): void;
+  closeProperties(): void;
+  /** Opens Properties for `id` and asks the sheet to focus its first control. */
   requestProperties(id: string): void;
   /** Shows the undo toast for a delete, replacing any earlier one. */
   showToast(entry: UndoEntry, label: string): void;
@@ -210,7 +212,7 @@ export function initialEditorState(): EditorState {
     notice: null,
     renewal: null,
     flash: null,
-    panelTab: 'blocks',
+    propertiesOpen: false,
     drawer: null,
     noticeSeen: null,
     propertiesRequest: null,
@@ -249,6 +251,7 @@ export function openedState(
     lock: session.lock,
     notice: locked ? lockedNotice(session.lock) : null,
     renewal: null,
+    propertiesOpen: false,
     // A new session starts with nothing queued, whatever the last one left.
     queue: createQueue(),
     undo: createUndoStack(),
@@ -289,6 +292,7 @@ export function createEditorStore(
         holderName: view.holder?.name ?? '',
       },
       renewal: null,
+      propertiesOpen: false,
       toast: null,
       picker: null,
       drag: null,
@@ -310,7 +314,12 @@ export function createEditorStore(
       set(openedState(state, session));
     },
     failedToOpen() {
-      set({ ...state, status: 'unavailable', mode: 'interact' });
+      set({
+        ...state,
+        status: 'unavailable',
+        mode: 'interact',
+        propertiesOpen: false,
+      });
     },
     setMode(mode) {
       if (mode === state.mode) return;
@@ -319,6 +328,7 @@ export function createEditorStore(
         ...state,
         mode,
         selection: mode === 'interact' ? NO_SELECTION : state.selection,
+        propertiesOpen: mode === 'interact' ? false : state.propertiesOpen,
         picker: null,
       });
     },
@@ -397,28 +407,42 @@ export function createEditorStore(
       if (state.flash === null) return;
       set({ ...state, flash: null });
     },
-    setPanelTab(tab) {
-      if (tab === state.panelTab) return;
-      set({ ...state, panelTab: tab });
-    },
     openDrawer(opener) {
       if (state.drawer === opener) return;
       set({
         ...state,
         drawer: opener,
         noticeSeen: state.notice,
-        panelTab: opener === 'notice' ? state.panelTab : opener,
+        propertiesOpen:
+          opener === 'notice' ? state.propertiesOpen : opener === 'properties',
       });
     },
     closeDrawer() {
-      if (state.drawer === null) return;
-      set({ ...state, drawer: null, noticeSeen: state.notice });
+      if (state.drawer === null) {
+        // Nothing to close but a sheet the sidebar holds.
+        if (state.propertiesOpen) set({ ...state, propertiesOpen: false });
+        return;
+      }
+      set({
+        ...state,
+        drawer: null,
+        noticeSeen: state.notice,
+        propertiesOpen: false,
+      });
+    },
+    openProperties() {
+      if (state.propertiesOpen) return;
+      set({ ...state, propertiesOpen: true });
+    },
+    closeProperties() {
+      if (!state.propertiesOpen) return;
+      set({ ...state, propertiesOpen: false });
     },
     requestProperties(id) {
       token += 1;
       set({
         ...state,
-        panelTab: 'properties',
+        propertiesOpen: true,
         propertiesRequest: { id, token },
       });
     },

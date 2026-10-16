@@ -294,10 +294,11 @@ export const STRINGS = Object.freeze({
   'leave.stay': 'Stay',
   'leave.confirm': 'Leave anyway',
 
-  // Side panel: tabs, empty states, Columns, Layout, Placement, controls
-  'panel.tabs.label': 'Side panel',
+  // Side panel: the palette, the Properties sheet, empty states, Columns, Layout, Placement, controls
   'panel.tab.blocks': 'Blocks',
-  'panel.tab.properties': 'Properties',
+  'sheet.heading': 'Properties',
+  'sheet.close': 'Close',
+  'sheet.closeLabel': 'Close properties',
   'panel.empty.heading': 'Nothing selected',
   'panel.empty.body': 'Select a block on the page to change its properties.',
   'panel.noProperties': 'This block has no properties.',

@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import {
   CONTROL,
   displayNameOf,
@@ -40,13 +46,20 @@ export type SidebarProps = {
   readonly onToggleLayout?: () => void;
   /** Called by Exit edit mode and Log out before they leave; it calls `proceed` to go. */
   readonly onLeave?: LeaveHandler;
+  /** The Properties sheet, a layer over the sidebar. */
+  readonly sheet?: ReactNode;
+  /** The sheet is open: the sidebar scales down behind it and is hidden at the end. */
+  readonly receded?: boolean;
 };
 
 /** The framed layer: shown in place until the host is in the full layout,
  * then hidden and nudged left. See the rail's layer for why both are always
- * in the markup. */
+ * in the markup. While the Properties sheet is open (`data-receded`) it
+ * scales to 94% and is hidden at the end of the transition; coming back it is
+ * visible at once, because `visibility` is in the transition only while
+ * receding. */
 const SIDEBAR_BODY =
-  'visible absolute inset-0 flex min-h-0 flex-col p-4 opacity-100 motion-safe:transition-[opacity,translate] motion-safe:duration-240 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-safe:[:host([data-layout=full])_&]:transition-[opacity,translate,visibility] [:host([data-layout=full])_&]:invisible [:host([data-layout=full])_&]:-translate-x-2 [:host([data-layout=full])_&]:opacity-0';
+  'visible absolute inset-0 flex min-h-0 flex-col p-4 opacity-100 motion-safe:transition-[opacity,translate,scale] motion-safe:duration-240 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-safe:[:host([data-layout=full])_&]:transition-[opacity,translate,visibility] [:host([data-layout=full])_&]:invisible [:host([data-layout=full])_&]:-translate-x-2 [:host([data-layout=full])_&]:opacity-0 data-receded:invisible data-receded:scale-[0.94] motion-safe:data-receded:transition-[opacity,translate,scale,visibility]';
 
 /** The user's name, clamped to two lines; once the client is running, a
  * clamped name also carries a tooltip with the whole of it. */
@@ -79,8 +92,17 @@ function UserName(props: { readonly name: string }): ReactElement {
  * come from classes.
  */
 export function Sidebar(props: SidebarProps): ReactElement {
-  const { island, slots, editing, hydrated, layout, onToggleLayout, onLeave } =
-    props;
+  const {
+    island,
+    slots,
+    editing,
+    hydrated,
+    layout,
+    onToggleLayout,
+    onLeave,
+    sheet,
+    receded,
+  } = props;
   const { leaving, onExitClick, onLogoutSubmit } = useLeaveGuard(onLeave);
   const displayName = displayNameOf(island.user);
   const pressed = layout === 'full';
@@ -89,7 +111,11 @@ export function Sidebar(props: SidebarProps): ReactElement {
       aria-label={STRINGS['landmark.sidebar']}
       className="pk-sidebar relative overflow-visible"
     >
-      <div className={SIDEBAR_BODY} data-sidebar="">
+      <div
+        className={SIDEBAR_BODY}
+        data-sidebar=""
+        data-receded={receded === true ? '' : undefined}
+      >
         <a
           href={`#${STAGE_ID}`}
           onClick={skipToPage}
@@ -171,6 +197,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
         onToggleLayout={onToggleLayout}
         onLeave={onLeave}
       />
+      {sheet}
     </aside>
   );
 }
