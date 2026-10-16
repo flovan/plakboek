@@ -227,6 +227,20 @@ function SaveRow(props: {
   }
 }
 
+/** The save status, read from the store: the row the Properties sheet's footer carries. */
+export function SaveStatusRow(props: {
+  readonly store: EditorStore;
+  readonly onRetry?: () => void;
+}): ReactElement {
+  const { store, onRetry } = props;
+  const status = useEditorStore(store, (state) => state.queue.status);
+  const canRetry = useEditorStore(
+    store,
+    (state) => state.queue.lastFailure === 'network',
+  );
+  return <SaveRow status={status} canRetry={canRetry} onRetry={onRetry} />;
+}
+
 /** What the Undo and Redo controls need from the store, in either layout. */
 export function useHistoryState(store: EditorStore): {
   readonly canUndo: boolean;
@@ -270,8 +284,18 @@ export function ToolGroup(props: {
   readonly onRedo?: () => void;
   /** Called by the lock row's Keep editing button; true when the lock was renewed. */
   readonly onKeepEditing?: () => Promise<boolean>;
+  /** False while the Properties sheet carries the save status and the lock row. */
+  readonly withStatus?: boolean;
 }): ReactElement | null {
-  const { store, onMode, onRetry, onUndo, onRedo, onKeepEditing } = props;
+  const {
+    store,
+    onMode,
+    onRetry,
+    onUndo,
+    onRedo,
+    onKeepEditing,
+    withStatus = true,
+  } = props;
   const editing = useEditorStore(store, (state) => state.status === 'editing');
   const mode = useEditorStore(store, (state) => state.mode);
   const saveStatus = useEditorStore(store, (state) => state.queue.status);
@@ -288,11 +312,15 @@ export function ToolGroup(props: {
     >
       <ModeToggle mode={mode} onMode={onMode} />
       <HistoryRow {...history} onUndo={onUndo} onRedo={onRedo} />
-      <SaveRow status={saveStatus} canRetry={canRetry} onRetry={onRetry} />
-      <LockExpiry
-        store={store}
-        onKeepEditing={onKeepEditing ?? (() => Promise.resolve(false))}
-      />
+      {withStatus ? (
+        <>
+          <SaveRow status={saveStatus} canRetry={canRetry} onRetry={onRetry} />
+          <LockExpiry
+            store={store}
+            onKeepEditing={onKeepEditing ?? (() => Promise.resolve(false))}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

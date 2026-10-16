@@ -58,24 +58,46 @@ export type PanelDrawerProps = {
   readonly notice: ReactNode;
   /** The lock row, under the notice. */
   readonly status: ReactNode;
-  /** The Blocks and Properties tabs. */
+  /** The Blocks palette. */
   readonly panel: ReactNode;
+  /** The Properties sheet, a layer over the drawer's content. */
+  readonly sheet?: ReactNode;
+  /** The sheet is open: the content scales down behind it and is hidden at the end. */
+  readonly receded?: boolean;
 };
+
+/** The drawer's content behind the sheet: like the framed sidebar's body, it
+ * scales to 94% and is hidden at the end of the transition, and is visible at
+ * once on the way back (`visibility` is in the transition only while receding). */
+const CONTENT =
+  'visible flex min-h-0 flex-1 flex-col motion-safe:transition-[scale] motion-safe:duration-240 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] data-receded:invisible data-receded:scale-[0.94] motion-safe:data-receded:transition-[scale,visibility]';
+
+/** Moves focus into the open sheet: its first control, else its Close button. */
+function focusSheet(root: HTMLElement | null): void {
+  const sheet = root?.querySelector('[data-properties-sheet]') ?? null;
+  const target =
+    sheet?.querySelector<HTMLElement>(
+      '[data-properties-panel] [data-control]:not(:disabled)',
+    ) ?? sheet?.querySelector<HTMLElement>('[data-sheet-close]');
+  target?.focus();
+}
 
 /**
  * The full-width layout's panel drawer: 280px beside the rail, holding the
- * notice slot and then the Blocks and Properties tabs. It is a column of the
+ * notice slot, the lock row and the Blocks palette, with the Properties sheet
+ * sliding over all of it when Properties are asked for. It is a column of the
  * shell's grid, so opening it narrows the frame instead of covering it (the
  * host's `data-drawer` attribute carries the column's width). It stays mounted
  * while closed, hidden, so what an editor typed in the panel and the panel's
  * answer to an explicit Properties request survive.
  *
- * Focus moves to the drawer's first control when a button opens it, and back
- * to that button when Escape or the button closes it. A request for an item's
- * Properties opens it too, and then the panel's own control gets focus instead.
+ * Focus moves to the drawer's first control when a button opens it (into the
+ * sheet when that is open), and back to that button when Escape or the button
+ * closes it. A request for an item's Properties opens it too, and then the
+ * sheet's own control gets focus instead.
  */
 export function PanelDrawer(props: PanelDrawerProps): ReactElement {
-  const { store, notice, status, panel } = props;
+  const { store, notice, status, panel, sheet, receded } = props;
   const open = useEditorStore(store, (state) => state.drawer !== null);
   const requestToken = useEditorStore(
     store,
@@ -88,9 +110,12 @@ export function PanelDrawer(props: PanelDrawerProps): ReactElement {
   useEffect(() => {
     const requested = requestToken !== seenRequest.current;
     seenRequest.current = requestToken;
-    if (open && !wasOpen.current && !requested) focusFirst(root.current);
+    if (open && !wasOpen.current && !requested) {
+      if (store.getState().propertiesOpen) focusSheet(root.current);
+      else focusFirst(root.current);
+    }
     wasOpen.current = open;
-  }, [open, requestToken]);
+  }, [open, requestToken, store]);
 
   return (
     <section
@@ -103,11 +128,18 @@ export function PanelDrawer(props: PanelDrawerProps): ReactElement {
         closeOnEscape(store, event);
       }}
     >
-      {notice}
-      {status}
-      <div data-slot="panel" className="min-h-0 flex-1 overflow-y-auto">
-        {panel}
+      <div
+        data-drawer-content=""
+        data-receded={receded === true ? '' : undefined}
+        className={CONTENT}
+      >
+        {notice}
+        {status}
+        <div data-slot="panel" className="min-h-0 flex-1 overflow-y-auto">
+          {panel}
+        </div>
       </div>
+      {sheet}
     </section>
   );
 }

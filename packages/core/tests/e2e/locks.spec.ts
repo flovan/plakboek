@@ -434,7 +434,7 @@ test.describe('conflicts and a lock that cannot be renewed', () => {
 test.describe('leaving with something unsaved', () => {
   const EDITS = '**/cms/api/pages/*/edit';
 
-  /** Opens a page with a heading "Hello", types into its text control and leaves the write unsent. */
+  /** Opens a page with a heading "Hello", types into its text control and closes the Properties sheet. */
   async function typeIntoHeading(page: Page): Promise<EditablePage> {
     const created = await createEditablePage({
       blocks: [section(heading('Hello'), paragraph('Below'))],
@@ -449,6 +449,8 @@ test.describe('leaving with something unsaved', () => {
     await expect(control).toHaveValue('Hello');
     await control.press('End');
     await control.pressSequentially(' there');
+    // The sheet covers the sidebar's Exit edit mode; Close brings it back.
+    await page.getByRole('button', { name: 'Close properties' }).click();
     return created;
   }
 

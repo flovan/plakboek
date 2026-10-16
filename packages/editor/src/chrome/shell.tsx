@@ -22,7 +22,7 @@ import { PropertiesSheet, SidePanel } from './editing/panel.js';
 import { RailTools } from './editing/rail-tools.js';
 import type { PropertiesPanelProps } from './editing/properties/properties-panel.js';
 import { UndoToast } from './editing/toast.js';
-import { ToolGroup } from './editing/tool-group.js';
+import { SaveStatusRow, ToolGroup } from './editing/tool-group.js';
 import type { ShellIsland } from './island.js';
 import { Sidebar, type SidebarLayout, type SidebarSlots } from './sidebar.js';
 import { Stage } from './stage.js';
@@ -139,18 +139,31 @@ export function ShellApp(props: ShellAppProps): ReactElement {
     (state) => state.propertiesOpen,
   );
   const full = layout === 'full';
+  // While the Properties sheet is open it carries the notice slot, the lock
+  // row and, in the framed layout, the save status, so none of them is hidden
+  // behind it and none is drawn twice.
+  const sheetOpen = propertiesOpen;
+  const noticeNode =
+    editor === undefined ? null : (
+      <NoticeSlot
+        store={editor.store}
+        onTakeOver={editor.onTakeOver ?? (() => Promise.resolve(false))}
+        onReload={onReload ?? noop}
+        signInHref={editor.signInHref ?? '/cms'}
+      />
+    );
+  const lockNode =
+    editor === undefined ? null : (
+      <LockExpiry
+        store={editor.store}
+        onKeepEditing={editor.onKeepEditing ?? (() => Promise.resolve(false))}
+      />
+    );
   const parts =
     editor === undefined || !hydrated
       ? undefined
       : {
-          notice: (
-            <NoticeSlot
-              store={editor.store}
-              onTakeOver={editor.onTakeOver ?? (() => Promise.resolve(false))}
-              onReload={onReload ?? noop}
-              signInHref={editor.signInHref ?? '/cms'}
-            />
-          ),
+          notice: sheetOpen ? null : noticeNode,
           tools: (
             <ToolGroup
               store={editor.store}
@@ -159,6 +172,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               onUndo={editor.onUndo}
               onRedo={editor.onRedo}
               onKeepEditing={editor.onKeepEditing}
+              withStatus={!sheetOpen || full}
             />
           ),
           panel: (
@@ -178,6 +192,22 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               onAddColumn={editor.onAddColumn}
               onMoveColumn={editor.onMoveColumn}
               onRemoveColumn={editor.onRemoveColumn}
+              top={
+                sheetOpen ? (
+                  <>
+                    {noticeNode}
+                    {lockNode}
+                  </>
+                ) : null
+              }
+              footer={
+                sheetOpen && !full ? (
+                  <SaveStatusRow
+                    store={editor.store}
+                    onRetry={editor.onRetry}
+                  />
+                ) : null
+              }
             />
           ),
         };
@@ -208,15 +238,10 @@ export function ShellApp(props: ShellAppProps): ReactElement {
       <PanelDrawer
         store={editor.store}
         notice={parts.notice}
-        status={
-          <LockExpiry
-            store={editor.store}
-            onKeepEditing={
-              editor.onKeepEditing ?? (() => Promise.resolve(false))
-            }
-          />
-        }
+        status={sheetOpen ? null : lockNode}
         panel={parts.panel}
+        sheet={parts.sheet}
+        receded={sheetOpen}
       />
     );
   return (
@@ -230,7 +255,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
         onToggleLayout={onToggleLayout}
         onLeave={editor?.onLeave}
         sheet={full ? undefined : parts?.sheet}
-        receded={!full && propertiesOpen}
+        receded={!full && sheetOpen}
       />
       {drawer}
       <Stage

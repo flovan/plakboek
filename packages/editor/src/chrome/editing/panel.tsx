@@ -1,4 +1,10 @@
-import { useEffect, useRef, type ReactElement, type ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  type KeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import type { CatalogueEntry, EditPosition } from '../../api-types.js';
 import {
   useEditorStore,
@@ -35,6 +41,11 @@ function focusFirstControl(root: HTMLElement | null): void {
       '[data-needs-input] [data-control]:not(:disabled)',
     ) ?? panel.querySelector<HTMLElement>('[data-control]:not(:disabled)');
   target?.focus();
+}
+
+/** Whether `element` is still on the page and can be seen and focused. */
+function usable(element: HTMLElement): boolean {
+  return element.isConnected && element.getClientRects().length > 0;
 }
 
 /** Puts focus on the page region, the editor's place to carry on from. */
@@ -101,6 +112,18 @@ export function PropertiesSheet(
   const root = useRef<HTMLElement>(null);
   // A request that was already there when the sheet mounted is not a new ask.
   const handled = useRef(request?.token ?? 0);
+  // Where focus was when the sheet opened, so closing can give it back.
+  const returnTo = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const shadow = root.current?.getRootNode();
+    const active = shadow instanceof ShadowRoot ? shadow.activeElement : null;
+    returnTo.current =
+      active instanceof HTMLElement && !root.current?.contains(active)
+        ? active
+        : null;
+  }, [open]);
 
   useEffect(() => {
     if (request === null || request.token === handled.current) return undefined;
@@ -117,7 +140,21 @@ export function PropertiesSheet(
 
   const close = (): void => {
     store.closeProperties();
-    focusStage(root.current);
+    const back = returnTo.current;
+    returnTo.current = null;
+    // After the store update lands, so an element the sheet hid is shown again.
+    const from = root.current;
+    requestAnimationFrame(() => {
+      if (back !== null && usable(back)) back.focus({ preventScroll: true });
+      else focusStage(from);
+    });
+  };
+
+  // Escape closes the sheet first; a key a control already used is left alone.
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    event.preventDefault();
+    close();
   };
 
   return (
@@ -133,6 +170,7 @@ export function PropertiesSheet(
         data-properties-sheet=""
         data-open={open ? '' : undefined}
         className={SHEET}
+        onKeyDown={onKeyDown}
       >
         {top}
         <div className="mb-4 flex shrink-0 items-center justify-between gap-2">

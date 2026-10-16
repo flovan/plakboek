@@ -1030,6 +1030,9 @@ function Shell(props: {
     };
 
     const onKey = (event: KeyboardEvent): void => {
+      // A key something already used (the Properties sheet closing on Escape)
+      // does nothing more here, so that Escape does not also climb the selection.
+      if (event.defaultPrevented) return;
       // The delete confirmation owns the keyboard while it is open.
       if (store.getState().deleteRequest !== null) return;
       const target = event.composedPath()[0] ?? event.target;
