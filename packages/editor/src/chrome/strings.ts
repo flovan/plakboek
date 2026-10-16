@@ -358,7 +358,7 @@ export const STRINGS = Object.freeze({
   'notice.lapsed': '{name} stopped editing. You can edit this page now.',
   'notice.takenOver.heading': '{name} took over this page',
   'notice.takenOver.body':
-    'Everything saved so far is kept. Anything you changed in the last few seconds may not have been saved.',
+    'Changes that were not saved yet were discarded. The page now shows the latest saved version.',
   'notice.stale.heading': 'This page changed elsewhere',
   'notice.stale.body':
     'It was edited in another tab or window. Reload to continue with the latest version.',

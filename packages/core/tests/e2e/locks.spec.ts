@@ -221,7 +221,9 @@ test.describe('taking over', () => {
       const alert = holder.page.getByRole('alert').filter({
         hasText: 'Tess Taker took over this page',
       });
-      await expect(alert).toContainText('Everything saved so far is kept.');
+      await expect(alert).toContainText(
+        'Changes that were not saved yet were discarded.',
+      );
       await expect(holder.page.locator(TOOLS)).toHaveCount(0);
     } finally {
       await holder.context.close();
@@ -282,7 +284,9 @@ test.describe('taking over', () => {
       const alert = holder.page.getByRole('alert').filter({
         hasText: 'Tess Taker took over this page',
       });
-      await expect(alert).toBeVisible();
+      await expect(alert).toContainText(
+        'Changes that were not saved yet were discarded.',
+      );
       const reloaded = await framedSite(holder.page);
       await expect.poll(() => headingsIn(reloaded, 0)).toEqual(['H1', 'H2']);
       const takerFrame = await framedSite(taker.page);
