@@ -1,11 +1,11 @@
 /**
  * Runs the drags of the shell: it wires the pointer controller and the
  * keyboard state machine to the session store, the framed page and the writes.
- * Only one drag runs at a time. A drop is a move or an insert at the resolved
+ * Only one drag runs at a time. A drop is a move to the resolved
  * position, saved at once like any structural action; a drop that would leave an
  * item where it is writes nothing, and a cancel changes nothing.
  */
-import type { CatalogueEntry, EditPosition } from '../../api-types.js';
+import type { EditPosition } from '../../api-types.js';
 import { startPointerDrag } from '../drag/controller.js';
 import { EMPTY_FEED } from '../drag/feed.js';
 import {
@@ -29,8 +29,6 @@ export type DragSessionOptions = {
   readonly frame: () => HTMLIFrameElement | null;
   /** Saves the move of an item to a position. */
   readonly onMove: (id: string, position: EditPosition) => void;
-  /** Saves a new item of a type at a position. */
-  readonly onInsert: (entry: CatalogueEntry, position: EditPosition) => void;
   /** Hands focus back once a keyboard drag has ended. */
   readonly onKeyboardEnd: () => void;
 };
@@ -76,9 +74,6 @@ export function createDragSession(options: DragSessionOptions): DragSession {
   function labelOf(subject: DragSubject): string | null {
     const ctx = legalityContextOf(store.getState());
     if (ctx === null) return null;
-    if (subject.kind === 'insert') {
-      return ctx.catalogue.get(subject.type)?.editor.label ?? subject.type;
-    }
     return ctx.model.get(subject.id) === undefined
       ? null
       : labelTextOf(ctx, subject.id);
@@ -88,16 +83,9 @@ export function createDragSession(options: DragSessionOptions): DragSession {
     const state = store.getState();
     if (state.status !== 'editing' || state.mode !== 'edit') return;
     if (state.model === null) return;
-    if (subject.kind === 'move') {
-      const here = currentPosition(state.model, subject.id);
-      if (here !== null && samePosition(here, position)) return;
-      options.onMove(subject.id, position);
-      return;
-    }
-    const entry = state.session?.catalogue.find(
-      (candidate) => candidate.key === subject.type,
-    );
-    if (entry !== undefined) options.onInsert(entry, position);
+    const here = currentPosition(state.model, subject.id);
+    if (here !== null && samePosition(here, position)) return;
+    options.onMove(subject.id, position);
   }
 
   function closeDrag(reader: SceneReader): void {

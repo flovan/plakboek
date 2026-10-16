@@ -824,23 +824,14 @@ function Shell(props: {
     [insertEntry, store],
   );
 
-  /** Serves only the drag session: a dropped block type is inserted without moving focus. */
-  const insertDropped = useCallback(
-    (entry: CatalogueEntry, position: EditPosition) => {
-      insertEntry(entry, position, false);
-    },
-    [insertEntry],
-  );
-
-  // Dragging: the toolbar's handle starts one, and a drop is a move or an
-  // insert like any other structural write.
+  // Dragging: the toolbar's handle starts one, and a drop is a move like any
+  // other structural write.
   const dragSession = useMemo(
     () =>
       createDragSession({
         store,
         frame: () => frameOf(host),
         onMove: moveTo,
-        onInsert: insertDropped,
         onKeyboardEnd: () => {
           // The handle is still there after a cancel and usually after a drop.
           requestAnimationFrame(() => {
@@ -851,7 +842,7 @@ function Shell(props: {
           });
         },
       }),
-    [host, store, moveTo, insertDropped],
+    [host, store, moveTo],
   );
   useEffect(() => {
     const unsubscribe = store.subscribe(() => {

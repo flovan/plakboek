@@ -164,10 +164,7 @@ export function createKeyboardDrag(options: KeyboardDragOptions): KeyboardDrag {
       if (ctx === null || scene === null) return false;
       slots = keyboardSlots(ctx, scene, options.subject);
       if (slots.length === 0) return false;
-      const origin =
-        options.subject.kind === 'move'
-          ? currentPosition(ctx.model, options.subject.id)
-          : null;
+      const origin = currentPosition(ctx.model, options.subject.id);
       const start =
         origin === null
           ? -1

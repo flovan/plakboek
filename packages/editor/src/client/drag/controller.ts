@@ -1,7 +1,7 @@
 /**
- * The pointer drag, for the toolbar's handle and the palette's rows.
+ * The pointer drag, started from the toolbar's handle. It only ever moves an item already on the page.
  *
- * A press on a source only becomes a drag after the pointer has moved 4px, so a
+ * A press on the handle only becomes a drag after the pointer has moved 4px, so a
  * click never starts one. From then on the shell covers the frame with a
  * transparent capture surface and every pointer event is a shell event: the
  * drag never depends on events crossing the iframe boundary, and the site never

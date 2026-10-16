@@ -157,7 +157,7 @@ describe('the slot under the pointer', () => {
       resolveDropSlot(
         ctx,
         scene,
-        { kind: 'insert', type: 'text' },
+        { kind: 'move', id: 't1' },
         { x: 5, y: 500 },
         [],
       ),

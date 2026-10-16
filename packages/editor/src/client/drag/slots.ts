@@ -6,8 +6,8 @@
  * where the write would be accepted.
  *
  * A slot is a gap between the children of one container. Its position is
- * given in model order (the neighbours on each side), so the drop is a move or
- * an insert exactly as the toolbar's buttons and the picker produce them. The
+ * given in model order (the neighbours on each side), so the drop is a move
+ * exactly as the toolbar's buttons produce one. The
  * boxes only decide which gap the pointer is nearest to and where the line is
  * drawn; an item the site renders at no size keeps its place in the order and
  * is skipped for geometry.
@@ -19,10 +19,8 @@ import { canPlace, type LegalityContext } from '../session/legality.js';
 import { labelOf, type TreeModel } from '../session/tree-model.js';
 import type { DragScene } from './scene.js';
 
-/** What is being dragged: an item already on the page, or a new one of a type. */
-export type DragSubject =
-  | { readonly kind: 'move'; readonly id: string }
-  | { readonly kind: 'insert'; readonly type: string };
+/** What is being dragged: an item already on the page. New items come only from the page's add controls. */
+export type DragSubject = { readonly kind: 'move'; readonly id: string };
 
 /** The line drawn at a slot: its thickness. */
 export const LINE_THICKNESS = 2;
@@ -47,12 +45,11 @@ export type KeyboardSlot = {
 };
 
 function typeOf(ctx: LegalityContext, subject: DragSubject): string | null {
-  if (subject.kind === 'insert') return subject.type;
   return ctx.model.get(subject.id)?.type ?? null;
 }
 
 function placeOptions(subject: DragSubject): { movingId?: string } {
-  return subject.kind === 'move' ? { movingId: subject.id } : {};
+  return { movingId: subject.id };
 }
 
 /** The children of a container the subject could sit among: the item being moved is not one of them. */
@@ -61,10 +58,9 @@ function siblingsFor(
   parentId: string | null,
   subject: DragSubject,
 ): readonly ModelNode[] {
-  const children = ctx.model.childrenOf(parentId);
-  return subject.kind === 'move'
-    ? children.filter((child) => child.id !== subject.id)
-    : children;
+  return ctx.model
+    .childrenOf(parentId)
+    .filter((child) => child.id !== subject.id);
 }
 
 function positionAt(

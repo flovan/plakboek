@@ -371,7 +371,6 @@ export function OverlayLayer(props: {
       : outlineRect(selection.selected, origin);
   const dragSource =
     drag === null ||
-    drag.subject.kind !== 'move' ||
     drag.subject.id !== selectedId ||
     selection === null ||
     selection.selected === null ||
