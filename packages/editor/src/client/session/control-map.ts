@@ -182,12 +182,28 @@ export function controlFor(source: ControlSource): ControlDescriptor {
   };
 }
 
-/** Reads what an editor typed into a JSON control; nothing here judges the value beyond its syntax. */
+/** Typographic double quotes a system may substitute for the straight one an editor typed. */
+const TYPOGRAPHIC_QUOTES = /[\u201c\u201d\u201e\u201f\u2033]/g;
+
+/**
+ * Reads what an editor typed into a JSON control; nothing here judges the
+ * value beyond its syntax. Text that is JSON is never rewritten. Text that is
+ * not is tried once more with typographic double quotes read as straight ones,
+ * because a system that substitutes them breaks the quotes a string needs.
+ */
 export function parseJsonInput(
   text: string,
 ): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
   try {
     return { ok: true, value: JSON.parse(text) as unknown };
+  } catch {
+    // fall through to the straight-quote reading
+  }
+  try {
+    return {
+      ok: true,
+      value: JSON.parse(text.replace(TYPOGRAPHIC_QUOTES, '"')) as unknown,
+    };
   } catch {
     return { ok: false };
   }

@@ -442,6 +442,8 @@ function JsonControl(
       data-control={fieldKey}
       value={text}
       spellCheck={false}
+      autoCorrect="off"
+      autoCapitalize="off"
       disabled={disabled}
       className={`${AREA} min-h-[160px] font-mono ${border(props)}`}
       {...aria(props)}
@@ -521,6 +523,11 @@ function layoutOf(kind: ControlDescriptor['kind']): FieldLayout {
   return 'stacked';
 }
 
+/** The JSON control stands in for a host widget on a field type with no standard control. */
+function isJsonFallback(descriptor: ControlDescriptor): boolean {
+  return descriptor.kind === 'json' && descriptor.customWidget;
+}
+
 function hintsOf(
   props: PropertyFieldProps,
   descriptor: ControlDescriptor,
@@ -542,7 +549,12 @@ function hintsOf(
       }),
     );
   }
-  if (descriptor.customWidget) hints.push(STRINGS['panel.customWidgetNote']);
+  if (isJsonFallback(descriptor)) {
+    hints.push(STRINGS['panel.customWidgetJsonNote']);
+    hints.push(STRINGS['panel.jsonFallbackHint']);
+  } else if (descriptor.customWidget) {
+    hints.push(STRINGS['panel.customWidgetNote']);
+  }
   return hints;
 }
 
@@ -557,8 +569,12 @@ export function PropertyField(props: PropertyFieldProps): ReactElement {
   const base = useId();
   // Text that is not JSON is the control's to report: it never reaches the server.
   const [syntaxBroken, setSyntaxBroken] = useState(false);
-  const error = syntaxBroken ? STRINGS['panel.jsonError'] : props.error;
   const descriptor = controlFor(source);
+  const error = syntaxBroken
+    ? isJsonFallback(descriptor)
+      ? STRINGS['panel.jsonFallbackError']
+      : STRINGS['panel.jsonError']
+    : props.error;
   const { kind } = descriptor;
   const hints = hintsOf(props, descriptor);
   const ids = {

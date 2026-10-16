@@ -341,7 +341,13 @@ export const STRINGS = Object.freeze({
     'Choosing a file is available once the media library ships.',
   'panel.entryNote': 'Choosing an entry is available once entry editing ships.',
   'panel.customWidgetNote':
-    'This property uses a custom control the editor does not have yet.',
+    'This property uses a custom control the editor does not have yet, so a standard field stands in for it.',
+  'panel.customWidgetJsonNote':
+    'This property uses a custom control the editor does not have yet. Enter its value as JSON.',
+  'panel.jsonFallbackHint':
+    'Write text in straight double quotes ("like this"), numbers and true or false as they are, a list as [ ] and a group of values as { }.',
+  'panel.jsonFallbackError':
+    'This is not valid JSON. Put text in straight double quotes, like "red".',
   'panel.none': 'None',
   'panel.repeater.add': 'Add item',
   'panel.repeater.moveEarlier': 'Move item {n} earlier',
