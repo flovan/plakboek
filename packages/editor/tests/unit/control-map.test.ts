@@ -5,6 +5,7 @@ import {
   instantToLocalInput,
   localInputToInstant,
   parseJsonInput,
+  refusalKey,
   subFieldsOf,
   valueSummary,
   type ControlKind,
@@ -125,6 +126,34 @@ describe('choiceLabel', () => {
     expect(choiceLabel({ nl: 'Een', en: 'One' }, 'one')).toBe('One');
     expect(choiceLabel({ nl: 'Een' }, 'one')).toBe('Een');
     expect(choiceLabel(undefined, 'one')).toBe('one');
+  });
+});
+
+describe('refusalKey', () => {
+  it('names the allowed-values message for a narrowed property', () => {
+    expect(
+      refusalKey({
+        ...source('dropdown', 'select'),
+        constraint: 'narrowed',
+        allowedValues: ['a'],
+      }),
+    ).toBe('panel.allowedError');
+  });
+
+  it('names the "valid JSON, but not accepted" message for the JSON fallback', () => {
+    expect(refusalKey(source('host-colour-wheel', 'host_colour'))).toBe(
+      'panel.jsonFallbackInvalid',
+    );
+  });
+
+  it('names the plain message for every other property, a stand-in control and the json-editor included', () => {
+    expect(refusalKey(source('host-colour-wheel', 'short_text'))).toBe(
+      'panel.invalid',
+    );
+    expect(refusalKey(source('json-editor', 'json'))).toBe('panel.invalid');
+    expect(refusalKey(source('text-input', 'short_text'))).toBe(
+      'panel.invalid',
+    );
   });
 });
 
