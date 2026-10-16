@@ -296,6 +296,9 @@ export const STRINGS = Object.freeze({
 
   // Side panel: the palette, the Properties sheet, empty states, Columns, Layout, Placement, controls
   'panel.tab.blocks': 'Blocks',
+  'tree.heading': 'Page structure',
+  'tree.empty':
+    'This page has no sections yet. Add one with the button on the page.',
   'sheet.heading': 'Properties',
   'sheet.close': 'Close',
   'sheet.closeLabel': 'Close properties',

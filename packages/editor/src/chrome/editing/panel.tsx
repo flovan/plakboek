@@ -14,6 +14,7 @@ import { CloseIcon } from '../icons.js';
 import { STAGE_ID } from '../stage.js';
 import { STRINGS } from '../strings.js';
 import { Palette, type PaletteProps } from './palette.js';
+import { PageTree } from './page-tree.js';
 import {
   PropertiesPanel,
   type PropertiesPanelProps,
@@ -56,7 +57,7 @@ function focusStage(from: Element | null): void {
 }
 
 /**
- * The sidebar's panel region: the Blocks palette. Properties are not a tab
+ * The sidebar's panel region: Page structure above the Blocks palette. Properties are not a tab
  * here; they open in the {@link PropertiesSheet} over this region.
  */
 export function SidePanel(props: SidePanelProps): ReactElement | null {
@@ -66,6 +67,7 @@ export function SidePanel(props: SidePanelProps): ReactElement | null {
   return (
     <div data-side-panel="" className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <PageTree store={store} />
         <Palette store={store} onInsert={onInsert} onDragStart={onDragStart} />
       </div>
     </div>

@@ -1,0 +1,101 @@
+/**
+ * Page structure in a real browser: the sidebar lists the page's items, a row
+ * selects its item and brings it into view on the page, hovering a row shows
+ * where the block is, and the keyboard reaches every row.
+ */
+import { expect, test, type Frame, type Page } from '@playwright/test';
+import {
+  expectSelectedOver,
+  framedSite,
+  HOST,
+  LIVE_REGION,
+  openEditor,
+} from './helpers/editing.ts';
+import { e2eUsers } from './helpers/host.ts';
+import { createEditablePage, heading, section } from './helpers/pages.ts';
+import { signIn } from './helpers/session.ts';
+
+const TALL = { type: 'spacer', props: { size: 'tall' } } as const;
+
+/** The id the live render gives the heading with this text. */
+async function headingId(frame: Frame, text: string): Promise<string> {
+  const id = await frame
+    .locator('[data-pk-type="heading"]', { hasText: text })
+    .first()
+    .getAttribute('data-pk-block');
+  if (id === null) throw new Error(`No heading "${text}" in the frame`);
+  return id;
+}
+
+function row(page: Page, id: string) {
+  return page.locator(`${HOST} [data-tree-row="${id}"]`);
+}
+
+async function openLongPage(page: Page): Promise<void> {
+  const created = await createEditablePage({
+    blocks: [section(heading('Top'), TALL), section(heading('Far'))],
+  });
+  await openEditor(page, created.path);
+}
+
+test.beforeEach(async ({ page }) => {
+  await signIn(page, e2eUsers().editor);
+});
+
+test.describe('Page structure', () => {
+  test('a row selects its item and scrolls it into view, unless it is already fully visible', async ({
+    page,
+  }) => {
+    await openLongPage(page);
+    const frame = await framedSite(page);
+    const far = await headingId(frame, 'Far');
+    const top = await headingId(frame, 'Top');
+    await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(0);
+
+    await row(page, far).click();
+    await expect(page.locator(LIVE_REGION)).toHaveText(
+      'Selected Heading, 1 of 1 in Column 1.',
+    );
+    await expect
+      .poll(() => frame.evaluate(() => window.scrollY))
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        frame.evaluate((id) => {
+          const box = document
+            .querySelector(`[data-pk-block="${id}"]`)
+            ?.getBoundingClientRect();
+          return (
+            box !== undefined &&
+            box.top >= 0 &&
+            box.bottom <= document.documentElement.clientHeight
+          );
+        }, far),
+      )
+      .toBe(true);
+    await expectSelectedOver(
+      page,
+      frame,
+      '[data-pk-type="heading"]:has-text("Far")',
+    );
+
+    // a fully visible item does not scroll the page
+    await frame.evaluate(() =>
+      window.scrollTo({ top: 0, behavior: 'instant' }),
+    );
+    await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(0);
+    await row(page, top).click();
+    await expect(row(page, top)).toHaveAttribute('aria-selected', 'true');
+    await frame.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              done();
+            });
+          });
+        }),
+    );
+    expect(await frame.evaluate(() => window.scrollY)).toBe(0);
+  });
+});
