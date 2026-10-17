@@ -82,6 +82,8 @@ export function PageTree(props: PageTreeProps): ReactElement | null {
   const [focused, setFocused] = useState<string | null>(null);
   // The selection the panel has yet to scroll its row into view for.
   const pendingScroll = useRef<string | null>(null);
+  // The selection whose collapsed ancestors have been opened.
+  const openedFor = useRef<string | null>(null);
 
   const catalogueByKey = useMemo(
     () =>
@@ -101,10 +103,27 @@ export function PageTree(props: PageTreeProps): ReactElement | null {
     [store],
   );
 
-  // A selection made anywhere opens the way to its row and shows it.
+  // A selection made anywhere shows its row.
   useEffect(() => {
     pendingScroll.current = selectedId;
-    if (selectedId === null || model === null) return;
+  }, [selectedId]);
+
+  // ...and opens the way to it, once the model holds the item: a selection that
+  // arrives before its row waits for the model. Only a new selection opens the
+  // way (a model change per edit must not undo a collapse the editor chose).
+  useEffect(() => {
+    if (selectedId === null) {
+      openedFor.current = null;
+      return;
+    }
+    if (
+      model === null ||
+      model.get(selectedId) === undefined ||
+      openedFor.current === selectedId
+    ) {
+      return;
+    }
+    openedFor.current = selectedId;
     const closed = model
       .ancestorsOf(selectedId)
       .filter((ancestor) => collapsed.has(ancestor.id));
@@ -114,8 +133,7 @@ export function PageTree(props: PageTreeProps): ReactElement | null {
       for (const ancestor of closed) next.delete(ancestor.id);
       return next;
     });
-    // Only a new selection opens the way; collapsing afterwards is the editor's.
-  }, [selectedId]);
+  }, [selectedId, model]);
 
   useEffect(() => {
     const id = pendingScroll.current;
