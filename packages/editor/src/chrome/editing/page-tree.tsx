@@ -225,8 +225,9 @@ export function PageTree(props: PageTreeProps): ReactElement | null {
                 store.setHighlight(row.id);
               }}
               onPointerLeave={() => {
+                // The row that still has keyboard focus keeps its outline.
                 if (store.getState().highlight === row.id) {
-                  store.setHighlight(null);
+                  store.setHighlight(focused);
                 }
               }}
               onFocus={() => {

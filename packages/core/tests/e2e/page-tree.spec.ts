@@ -131,6 +131,28 @@ test.describe('Page structure', () => {
     await expect(page.locator(highlight)).toHaveCount(0);
   });
 
+  test('leaving a hovered row gives the outline back to the row that has focus', async ({
+    page,
+  }) => {
+    const created = await createEditablePage({
+      blocks: [section(heading('One'), heading('Two'))],
+    });
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    const first = await headingId(frame, 'One');
+    const second = await headingId(frame, 'Two');
+    const highlight = (id: string) =>
+      page.locator(`${HOST} [data-overlay-highlight="${id}"]`);
+
+    await row(page, first).focus();
+    await row(page, second).hover();
+    await expect(highlight(second)).toHaveCount(1);
+
+    await page.getByRole('heading', { name: 'Page structure' }).hover();
+    await expect(highlight(second)).toHaveCount(0);
+    await expect(highlight(first)).toHaveCount(1);
+  });
+
   test('a double-click on a row opens its Properties in the sheet with the first control focused', async ({
     page,
   }) => {
