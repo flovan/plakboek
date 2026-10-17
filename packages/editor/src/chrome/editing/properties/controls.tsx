@@ -553,7 +553,12 @@ function hintsOf(
     hints.push(STRINGS['panel.customWidgetJsonNote']);
     hints.push(STRINGS['panel.jsonFallbackHint']);
   } else if (descriptor.customWidget) {
-    hints.push(STRINGS['panel.customWidgetNote']);
+    // A note-only control has no field to stand in; it says what it cannot do.
+    hints.push(
+      descriptor.kind.startsWith('note-')
+        ? STRINGS['panel.customWidgetNoteOnly']
+        : STRINGS['panel.customWidgetNote'],
+    );
   }
   return hints;
 }

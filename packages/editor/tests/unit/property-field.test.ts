@@ -60,4 +60,12 @@ describe('PropertyField for a widget the editor has no control for', () => {
       escaped(STRINGS['panel.customWidgetJsonNote']),
     );
   });
+
+  it('draws a rich_text property as its read-only note, with a note that no standard field stands in', () => {
+    const markup = render('rich_text', undefined);
+    expect(markup).toContain(escaped(STRINGS['panel.richTextNote']));
+    expect(markup).not.toContain('<textarea');
+    expect(markup).toContain(escaped(STRINGS['panel.customWidgetNoteOnly']));
+    expect(markup).not.toContain(escaped(STRINGS['panel.customWidgetNote']));
+  });
 });

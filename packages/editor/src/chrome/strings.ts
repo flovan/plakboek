@@ -348,6 +348,8 @@ export const STRINGS = Object.freeze({
   'panel.entryNote': 'Choosing an entry is available once entry editing ships.',
   'panel.customWidgetNote':
     'This property uses a custom control the editor does not have yet, so a standard field stands in for it.',
+  'panel.customWidgetNoteOnly':
+    'This property uses a custom control the editor does not have yet.',
   'panel.customWidgetJsonNote':
     'This property uses a custom control the editor does not have yet. Enter its value as JSON.',
   'panel.jsonFallbackHint':
