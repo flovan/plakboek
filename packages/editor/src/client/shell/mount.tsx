@@ -1348,7 +1348,10 @@ function Shell(props: {
       const token = store.getState().propertiesRequest?.token ?? 0;
       if (token === seen) return;
       seen = token;
-      if (layout === 'full') openDrawer('properties');
+      // An open drawer keeps the button that opened it, for focus to return to.
+      if (layout === 'full' && store.getState().drawer === null) {
+        openDrawer('properties');
+      }
     });
   }, [store, layout, openDrawer]);
 

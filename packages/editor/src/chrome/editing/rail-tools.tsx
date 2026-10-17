@@ -123,6 +123,7 @@ export function RailTools(props: RailToolsProps): ReactElement | null {
     (state) => state.queue.lastFailure === 'network',
   );
   const drawer = useEditorStore(store, (state) => state.drawer);
+  const sheetOpen = useEditorStore(store, (state) => state.propertiesOpen);
   const notice = useEditorStore(store, (state) => state.notice);
   const noticeSeen = useEditorStore(store, (state) => state.noticeSeen);
   const expiring = useEditorStore(
@@ -139,6 +140,22 @@ export function RailTools(props: RailToolsProps): ReactElement | null {
   const undoActs = history.canUndo && !history.undoNeedsDelete;
   const redoActs = history.canRedo && !history.redoNeedsDelete;
 
+  // What the drawer shows, not what opened it: a request for an item's
+  // Properties lays the sheet over a drawer that a Page structure click opened.
+  const showing = (opener: DrawerOpener): boolean => {
+    if (drawer === null) return false;
+    if (opener === 'properties') return sheetOpen;
+    if (opener === 'structure') return !sheetOpen;
+    return drawer === opener;
+  };
+
+  const press = (opener: DrawerOpener): void => {
+    if (drawer === null) onOpenDrawer(opener);
+    else if (showing(opener)) store.closeDrawer();
+    else if (opener === 'properties') store.openProperties();
+    else store.closeProperties();
+  };
+
   const dotted = (
     opener: DrawerOpener,
     label: string,
@@ -149,11 +166,10 @@ export function RailTools(props: RailToolsProps): ReactElement | null {
       <button
         type="button"
         aria-label={marked ? formatString('rail.withNotice', { label }) : label}
-        aria-expanded={drawer === opener}
+        aria-expanded={showing(opener)}
         data-rail-button={opener}
         onClick={() => {
-          if (drawer === opener) store.closeDrawer();
-          else onOpenDrawer(opener);
+          press(opener);
         }}
         className={DRAWER_CONTROL}
       >

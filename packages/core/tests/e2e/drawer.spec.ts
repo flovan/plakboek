@@ -251,6 +251,43 @@ test.describe('the drawer at the edges', () => {
   });
 });
 
+test.describe('the drawer and its two layers', () => {
+  test('a Properties request over Page structure and Close leave Page structure the one that shows, and the Properties button brings the sheet back', async ({
+    page,
+  }) => {
+    await openFullWidth(page);
+    const frame = await framedSite(page);
+    const id = await frame
+      .locator('[data-pk-type="heading"]')
+      .first()
+      .getAttribute('data-pk-block');
+    const structure = railButton(page, 'Page structure');
+    const properties = railButton(page, 'Properties');
+
+    await structure.click();
+    await page.locator(`${DRAWER} [data-tree-row="${id}"]`).dblclick();
+    await expect(
+      page.locator(`${DRAWER} [data-properties-sheet]`),
+    ).toBeVisible();
+    await expect(properties).toHaveAttribute('aria-expanded', 'true');
+    await expect(structure).toHaveAttribute('aria-expanded', 'false');
+
+    await page.locator(`${DRAWER} [data-sheet-close]`).click();
+    await expect(structure).toHaveAttribute('aria-expanded', 'true');
+    await expect(properties).toHaveAttribute('aria-expanded', 'false');
+
+    await properties.click();
+    await expect(
+      page.locator(`${DRAWER} [data-properties-sheet]`),
+    ).toBeVisible();
+    await expect(page.locator(DRAWER)).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator(DRAWER)).toBeHidden();
+    expect((await focusIn(page)).railButton).toBe('structure');
+  });
+});
+
 test.describe('the rail tools', () => {
   test('the mode button hands the accordion back to the site and takes it again', async ({
     page,
