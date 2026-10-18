@@ -334,14 +334,20 @@ describe('starter template host code', () => {
     expect(text.match(/type: '/g)).toHaveLength(2);
   });
 
-  it('writes one defineBlock definition per block file', async () => {
-    for (const file of ['blocks/section.tsx', 'blocks/heading.tsx']) {
+  it('spreads {...edit} on the root of every starter block, once per file definition', async () => {
+    const blockFiles = (await listFiles(TEMPLATE)).filter((file) =>
+      /^blocks\/[^/]+\.tsx$/.test(file),
+    );
+    expect(blockFiles.length).toBeGreaterThanOrEqual(2);
+    for (const file of blockFiles) {
       const text = await read(file);
       expect(text.match(/defineBlock\(/g)).toHaveLength(1);
       expect(text.match(/^export const /gm)).toHaveLength(1);
       // Plain function components only: the visitor handler rejects wrappers.
       expect(text).not.toMatch(/\b(memo|forwardRef)\(/);
-      expect(text).toContain('{...edit');
+      // A real identity spread on an intrinsic element. A field spread or a
+      // mention in a comment does not carry data-pk-block.
+      expect(text).toMatch(/<[a-z][a-z0-9]*\s[^>]*\{\.\.\.edit\}/);
     }
   });
 
@@ -382,7 +388,12 @@ describe('starter template host code', () => {
     expect(text).toContain('text-3xl font-semibold');
     expect(text).toContain('text-xl font-semibold');
     expect(text).toContain('text-sm font-semibold');
-    expect(text).toContain("{...edit.field('text')}");
+    const roots = [...text.matchAll(/<h([1-3])\b[^>]*>/g)];
+    expect(roots.map((m) => m[1]).sort()).toEqual(['1', '2', '3']);
+    for (const [tag] of roots) {
+      expect(tag).toContain('{...edit}');
+      expect(tag).toContain("{...edit.field('text')}");
+    }
   });
 
   it('lists host routes before the CMS routes', async () => {
@@ -661,6 +672,7 @@ describe('starter edit-mode conventions', () => {
     expect(text).toMatch(/media queries[^.]*frame/i);
     expect(text).toMatch(/first segment is `cms` or `api` is refused/);
     expect(text).toMatch(/In edit mode a block change reloads the edit page/);
+    expect(text).toContain('`{...edit}`');
   });
 });
 
