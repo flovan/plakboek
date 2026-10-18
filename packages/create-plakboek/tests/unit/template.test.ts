@@ -389,7 +389,9 @@ describe('starter template host code', () => {
     expect(text).toContain('text-xl font-semibold');
     expect(text).toContain('text-sm font-semibold');
     const roots = [...text.matchAll(/<h([1-3])\b[^>]*>/g)];
-    expect(roots.map((m) => m[1]).sort()).toEqual(['1', '2', '3']);
+    expect(
+      roots.map((m) => m[1]).toSorted((a, b) => Number(a) - Number(b)),
+    ).toEqual(['1', '2', '3']);
     for (const [tag] of roots) {
       expect(tag).toContain('{...edit}');
       expect(tag).toContain("{...edit.field('text')}");

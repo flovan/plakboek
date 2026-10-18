@@ -7,26 +7,27 @@ type HeadingProps = {
 };
 
 // A plain function component: the visitor renderer rejects memo and
-// forwardRef wrappers. `edit.field('text')` adds nothing on a visitor page
-// and lets the page editor make the text editable later.
+// forwardRef wrappers. Spreading `edit` on the root lets the page editor
+// outline, select and drill into the block, and `edit.field('text')` marks
+// its text. Neither adds anything to a visitor page.
 const Heading: BlockComponent<HeadingProps> = ({ props, edit }) => {
   const level = props.level ?? '2';
   if (level === '1') {
     return (
-      <h1 className="text-3xl font-semibold" {...edit.field('text')}>
+      <h1 className="text-3xl font-semibold" {...edit} {...edit.field('text')}>
         {props.text}
       </h1>
     );
   }
   if (level === '3') {
     return (
-      <h3 className="text-sm font-semibold" {...edit.field('text')}>
+      <h3 className="text-sm font-semibold" {...edit} {...edit.field('text')}>
         {props.text}
       </h3>
     );
   }
   return (
-    <h2 className="text-xl font-semibold" {...edit.field('text')}>
+    <h2 className="text-xl font-semibold" {...edit} {...edit.field('text')}>
       {props.text}
     </h2>
   );

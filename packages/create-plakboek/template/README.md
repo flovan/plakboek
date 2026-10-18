@@ -37,7 +37,7 @@ A block is one file in `blocks/` that exports one `defineBlock(...)` definition,
 blocks: [section, heading, myBlock],
 ```
 
-The component is a plain function component. Do not wrap it in `memo` or `forwardRef`; the visitor renderer refuses wrapped components. Spread the `edit` prop it receives onto the element that should become editable. It adds nothing on a visitor page.
+The component is a plain function component. Do not wrap it in `memo` or `forwardRef`; the visitor renderer refuses wrapped components. Spread `{...edit}` on the component's root element, because that is what the page editor outlines, selects and drills into, and a block without it cannot be reached on the page. Spread `{...edit.field('text')}` on the element that shows a property, as `blocks/heading.tsx` does. Neither adds anything to a visitor page.
 
 ## Editing the header, footer and menus
 
@@ -59,7 +59,7 @@ Editors sign in at `/cms`. There is no login link on the site, by design: a visi
 In edit mode the CMS shows your own document and blocks for the same URL inside a frame, next to the editor sidebar. The framed page is your site at its own address, rendered by your `renderDocument` and your blocks, not a separate preview. What you need to do as the developer:
 
 - `renderDocument` receives `mode`, which is `'visitor'` or `'edit'`. Leave analytics and third-party widgets out when it is `'edit'`, so editing never counts as a visit. `app/site/document.tsx` does this through one function, `thirdPartyScripts(mode)`; add your tags there. Scripts that a block owns keep running in edit mode, so the block still behaves as it does for a visitor.
-- Spread the `edit` prop in every block on the element that should be editable, so the editor can outline it. It adds nothing on a visitor page.
+- Spread `{...edit}` on every block's root element and `{...edit.field('name')}` on the element that shows a property, so the editor can outline, select and drill into the block. Neither adds anything on a visitor page.
 - Do not send `X-Frame-Options: DENY` or `Content-Security-Policy: frame-ancestors 'none'` on site pages. The CMS frames them from the same origin, so a header that allows the same origin (`SAMEORIGIN` or `'self'`) is fine.
 - Write responsive rules with container queries. The root element in `app/site/document.tsx` is a container (`@container`), so the `@sm:` to `@3xl:` variants follow the space the page actually has, in the frame and on the open web alike. Viewport media queries and the `sm:` to `2xl:` variants also work: in edit mode they follow the width of the frame, because the frame is a viewport of its own. The starter uses no viewport variants, and your theme is easier to reason about if it follows suit.
 
