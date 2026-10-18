@@ -75,6 +75,7 @@ expectEqual(
     'plakboek-setup',
     'plakboek-setup-test-email',
     'plakboek-cms-logout',
+    'plakboek-editor-api',
     'plakboek-cms-pages',
     'plakboek-robots',
     'plakboek-auth',

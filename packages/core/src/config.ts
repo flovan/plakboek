@@ -32,6 +32,7 @@ import {
   defineBlocks,
   definePagesConfig,
 } from '@plakboek/pages';
+import { CORE_COLUMN_BLOCK, CORE_COLUMN_KEY } from './column-block.js';
 import { validateMenus } from './menus.js';
 import { MODULE_NAME_PATTERN } from './modules.js';
 import type {
@@ -49,6 +50,7 @@ export type PlakboekConfigIssueCode =
   | 'INVALID_MENU_ITEM'
   | 'INVALID_MODULE'
   | 'DUPLICATE_MODULE'
+  | 'RESERVED_BLOCK_KEY'
   | 'INVALID_SEED'
   | 'UNKNOWN_SEED_BLOCK'
   | 'SEED_ROOT_NOT_SECTION';
@@ -166,6 +168,28 @@ function checkModules(modules: unknown, issues: PlakboekConfigIssue[]): void {
   });
 }
 
+/**
+ * The column is owned by the CMS (D-02): a host or module block may not take
+ * its key or its kind, or the registry would hold two column definitions.
+ */
+function checkReservedBlocks(
+  where: string,
+  blocks: unknown,
+  issues: PlakboekConfigIssue[],
+): void {
+  if (!Array.isArray(blocks)) return;
+  blocks.forEach((block: unknown, index) => {
+    if (!isRecord(block)) return;
+    if (block.key === CORE_COLUMN_KEY || block.kind === 'column') {
+      const name = typeof block.key === 'string' ? echo(block.key) : '?';
+      issues.push({
+        code: 'RESERVED_BLOCK_KEY',
+        message: `${where}[${index}]: block "${name}" cannot use the key or the kind "column"; the column block is owned by the CMS and registered for every installation`,
+      });
+    }
+  });
+}
+
 function checkSeedNodes(
   nodes: unknown,
   path: string,
@@ -228,6 +252,11 @@ function checkSeedShape(seed: unknown, issues: PlakboekConfigIssue[]): void {
   checkSeedNodes(seed.blocks, 'seed.blocks', 0, issues);
 }
 
+/**
+ * Seed sections may stay flat: bootstrap wraps their blocks in one column. A
+ * section's children are therefore either all columns or none; a column may
+ * only sit directly under a section.
+ */
 function checkSeedBlocks(
   seed: SeedPage,
   kinds: ReadonlyMap<string, string>,
@@ -236,8 +265,9 @@ function checkSeedBlocks(
   const walk = (
     nodes: SeedPage['blocks'],
     path: string,
-    isRoot: boolean,
+    parentKind: string | null,
   ): void => {
+    const isRoot = parentKind === null;
     nodes.forEach((node, index) => {
       const where = `${path}[${index}]`;
       const kind = kinds.get(node.type);
@@ -251,13 +281,29 @@ function checkSeedBlocks(
           code: 'SEED_ROOT_NOT_SECTION',
           message: `${where}: root block "${node.type}" must be a section`,
         });
+      } else if (kind === 'column' && parentKind !== 'section') {
+        issues.push({
+          code: 'INVALID_SEED',
+          message: `${where}: a column can only sit directly under a section`,
+        });
       }
-      if (node.children !== undefined) {
-        walk(node.children, `${where}.children`, false);
+      const children = node.children;
+      if (children === undefined) return;
+      if (kind === 'section') {
+        const columns = children.filter(
+          (child) => kinds.get(child.type) === 'column',
+        ).length;
+        if (columns > 0 && columns < children.length) {
+          issues.push({
+            code: 'INVALID_SEED',
+            message: `${where}: a section holds either columns or plain blocks, not both`,
+          });
+        }
       }
+      walk(children, `${where}.children`, kind ?? '');
     });
   };
-  walk(seed.blocks, 'seed.blocks', true);
+  walk(seed.blocks, 'seed.blocks', null);
   return issues;
 }
 
@@ -292,6 +338,14 @@ export function defineConfig(input: PlakboekConfigInput): PlakboekConfig {
   checkSiteName(input.siteName, issues);
   issues.push(...validateMenus(input.menus));
   checkModules(input.modules, issues);
+  checkReservedBlocks('blocks', input.blocks, issues);
+  if (Array.isArray(input.modules)) {
+    input.modules.forEach((entry: unknown, index) => {
+      if (isRecord(entry)) {
+        checkReservedBlocks(`modules[${index}].blocks`, entry.blocks, issues);
+      }
+    });
+  }
 
   const seedInput =
     input.seed === undefined
@@ -338,8 +392,11 @@ export function defineConfig(input: PlakboekConfigInput): PlakboekConfig {
 
   const pages = definePagesConfig({
     content,
-    blocks: defineBlocks(blocks),
+    blocks: defineBlocks([...blocks, CORE_COLUMN_BLOCK]),
     constraints,
+    ...(input.columnPresets === undefined
+      ? {}
+      : { columnPresets: input.columnPresets }),
     ...(input.sectionNestingDepth === undefined
       ? {}
       : { sectionNestingDepth: input.sectionNestingDepth }),

@@ -1,5 +1,5 @@
 import { defineBlock } from '@plakboek/core';
-import type { BlockComponent } from '@plakboek/render';
+import { Columns, type BlockComponent } from '@plakboek/render';
 
 type SectionProps = {
   width?: string;
@@ -20,19 +20,25 @@ const SPACING: Record<string, string> = {
 // A plain function component: the visitor renderer rejects memo and
 // forwardRef wrappers. Spreading `edit` adds nothing on a visitor page and
 // lets the page editor bind to this block later.
-const Section: BlockComponent<SectionProps> = ({ props, children, edit }) => (
+const Section: BlockComponent<SectionProps> = ({
+  props,
+  children,
+  edit,
+  layout,
+}) => (
   <section {...edit}>
     <div
       className={`${WIDTH[props.width ?? 'contained'] ?? WIDTH.contained} ${
         SPACING[props.spacing ?? 'lg'] ?? SPACING.lg
       }`}
     >
-      {children}
+      <Columns layout={layout}>{children}</Columns>
     </div>
   </section>
 );
 
-// A layout-only block: it holds other blocks and has no content of its own.
+// A layout-only block: it holds columns, which hold the page's other blocks.
+// The CMS owns the column block; this section only lays them out on a grid.
 export const section = defineBlock({
   key: 'section',
   kind: 'section',

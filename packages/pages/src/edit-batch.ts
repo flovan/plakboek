@@ -1,0 +1,799 @@
+/**
+ * The editor's one compound write (D-25): a batch of insert, update, move,
+ * delete and duplicate operations against a single page, applied in one transaction
+ * with one revision batch id, one audit row and one page version bump -- or
+ * not at all. Each autosave is one call here, so an action made of several
+ * steps (add a column and reset the layout, delete a section and later undo
+ * it under the original ids, move a block across a section boundary) can
+ * never be left half-applied.
+ *
+ * The single-operation functions in `tree.ts` open their own transaction and
+ * trust the ids they are given. A batch comes from a client, so every block
+ * id, parent id and sibling id it names is checked against the page being
+ * edited before anything is written: a block that belongs to another page,
+ * another locale, or does not exist refuses the whole batch, so a locked
+ * page's blocks can never be changed through an unlocked page's id.
+ *
+ * A batch changes the working tree only. It never writes a publication,
+ * never changes what a page serves and never registers a cache purge:
+ * visitors see a change only when the page is published (D-25).
+ *
+ * The transactional bodies the batch is built from (`insertBlockInTransaction`
+ * and friends in `tree.ts`) are internal wiring and stay out of the package
+ * barrel.
+ */
+import {
+  PermissionDeniedError,
+  type AuditActor,
+  type AuditTransaction,
+} from '@plakboek/auth';
+import { getRevisionCap } from '@plakboek/content';
+import { randomUUID } from 'node:crypto';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+import type { PagesDeps } from './config.js';
+import { BlockLayoutValidationError, readStoredLayout } from './layout.js';
+import { assertPageWritable } from './locks.js';
+import { loadPageForUpdate, StalePageVersionError } from './pages.js';
+import { newRevisionBatchId, pruneBlockRevisions } from './revisions.js';
+import {
+  getBlockDefinition,
+  getColumnDefinition,
+  type BlockDefinition,
+  type StarterNode,
+} from './registry.js';
+import { pageBlocks, pages } from './schema.js';
+import {
+  assertSectionsHaveColumns,
+  SectionColumnRequiredError,
+} from './section-columns.js';
+import { getPageEditLocking } from './settings.js';
+import { loadSubtreeRows } from './subtree.js';
+import {
+  BlockNotFoundError,
+  deleteSubtreeInTransaction,
+  insertBlockInTransaction,
+  loadBlockForUpdate,
+  moveBlockInTransaction,
+  StaleBlockVersionError,
+  updateBlockInTransaction,
+  type WriteContext,
+} from './tree.js';
+import type { OwnerRef, PageRecord } from './types.js';
+
+/** Re-exported from `section-columns.ts`, where the rule lives. */
+export { SectionColumnRequiredError };
+
+/** At most this many operations in one batch. */
+export const BLOCK_EDIT_MAX_OPS = 50;
+
+/** At most this many blocks inserted by one batch, subtrees included. */
+export const BLOCK_EDIT_MAX_NODES = 500;
+
+/** Where a block goes: under `parentId` (`null` for the page root), between
+ * the two named siblings. With neither named it goes last. */
+export type BlockEditPosition = {
+  readonly parentId: string | null;
+  readonly previousSiblingId?: string | null;
+  readonly nextSiblingId?: string | null;
+};
+
+/** One block to insert, with an optional subtree. A supplied `id` must be a
+ * lowercase uuid that no block uses yet; it lets a client name a block
+ * before the server has answered, and lets an undo put a deleted block back
+ * under its original id. */
+export type BlockEditNode = {
+  readonly id?: string;
+  readonly type: string;
+  readonly props?: unknown;
+  readonly layout?: unknown;
+  readonly children?: readonly BlockEditNode[];
+};
+
+export type BlockEditOp =
+  | {
+      readonly op: 'insert';
+      readonly position: BlockEditPosition;
+      readonly node: BlockEditNode;
+    }
+  | {
+      readonly op: 'update';
+      readonly blockId: string;
+      readonly baseVersion: number;
+      readonly props?: unknown;
+      readonly layout?: unknown;
+    }
+  | {
+      readonly op: 'move';
+      readonly blockId: string;
+      readonly baseVersion: number;
+      readonly position: BlockEditPosition;
+    }
+  | {
+      readonly op: 'delete';
+      readonly blockId: string;
+      readonly baseVersion: number;
+    }
+  | {
+      /** Copies a block and its whole subtree directly after it (D-22). The
+       * copy's root takes `newId` when given (a lowercase uuid no block
+       * uses), every other copied block a fresh id. */
+      readonly op: 'duplicate';
+      readonly blockId: string;
+      readonly newId?: string;
+    };
+
+export type BlockEditInput = {
+  readonly pageId: string;
+  readonly basePageVersion: number;
+  readonly ops: readonly BlockEditOp[];
+};
+
+export type BlockEditResult = {
+  /** The page's version after the batch. */
+  readonly pageVersion: number;
+  readonly revisionBatchId: string;
+  readonly createdIds: readonly string[];
+  readonly deletedIds: readonly string[];
+  readonly updatedIds: readonly string[];
+  readonly movedIds: readonly string[];
+  /** Every old and new parent of an inserted, moved or deleted block
+   * (`null` for the page root), so a caller can find the sections the
+   * batch touched. */
+  readonly touchedParentIds: readonly (string | null)[];
+};
+
+/** Thrown when a batch names a block that is not part of the page being
+ * edited: another page, another locale or another owner type. Nothing has
+ * been written. Carries the block id only. */
+export class BlockOwnershipError extends Error {
+  readonly blockId: string;
+
+  constructor(blockId: string) {
+    super(
+      `@plakboek/pages: block "${blockId}" does not belong to the page being edited`,
+    );
+    this.name = 'BlockOwnershipError';
+    this.blockId = blockId;
+  }
+}
+
+/** Thrown when an inserted node carries an id that is already in use,
+ * whether by an existing block or by another node of the same batch. A
+ * re-sent insert therefore never creates a second block. */
+export class BlockIdConflictError extends Error {
+  readonly blockId: string;
+
+  constructor(blockId: string) {
+    super(`@plakboek/pages: a block with id "${blockId}" already exists`);
+    this.name = 'BlockIdConflictError';
+    this.blockId = blockId;
+  }
+}
+
+/** Thrown before any query when a batch is empty, holds more than
+ * `BLOCK_EDIT_MAX_OPS` operations or inserts more than
+ * `BLOCK_EDIT_MAX_NODES` blocks. */
+export class BlockEditLimitError extends Error {
+  readonly limit: 'ops' | 'nodes' | 'empty';
+
+  constructor(limit: 'ops' | 'nodes' | 'empty') {
+    super(
+      limit === 'empty'
+        ? '@plakboek/pages: a block edit needs at least one operation'
+        : limit === 'ops'
+          ? `@plakboek/pages: a block edit holds at most ${BLOCK_EDIT_MAX_OPS} operations`
+          : `@plakboek/pages: a block edit inserts at most ${BLOCK_EDIT_MAX_NODES} blocks`,
+    );
+    this.name = 'BlockEditLimitError';
+    this.limit = limit;
+  }
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const UNIQUE_VIOLATION = '23505';
+const BLOCK_PRIMARY_KEY_CONSTRAINT = 'page_blocks_pkey';
+const MAX_CAUSE_DEPTH = 3;
+
+/** Walks the `cause` chain looking for a unique violation on the block
+ * primary key. */
+function isBlockPrimaryKeyViolation(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth += 1) {
+    if (!(current instanceof Error)) break;
+    const code: unknown = Reflect.get(current, 'code');
+    if (code === UNIQUE_VIOLATION) {
+      const constraint: unknown = Reflect.get(current, 'constraint_name');
+      return constraint === BLOCK_PRIMARY_KEY_CONSTRAINT;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
+/** What the batch refers to before it writes anything. */
+type BatchScan = {
+  /** Existing blocks the operations name: not created earlier in the
+   * batch, so they must exist and belong to the page. */
+  readonly externalIds: ReadonlySet<string>;
+  /** Every id an insert supplies, subtrees included. */
+  readonly suppliedIds: ReadonlySet<string>;
+};
+
+function referencedIds(op: BlockEditOp): readonly string[] {
+  const ids: string[] = [];
+  if (op.op !== 'insert') ids.push(op.blockId);
+  if (op.op === 'insert' || op.op === 'move') {
+    const { parentId, previousSiblingId, nextSiblingId } = op.position;
+    for (const id of [parentId, previousSiblingId, nextSiblingId]) {
+      if (typeof id === 'string') ids.push(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * The checks that need no database: the limits, the shape of every id, and
+ * which ids the batch refers to. An id naming an existing block that is not
+ * a uuid cannot exist (`BlockNotFoundError`); an id an insert supplies that
+ * is not a canonical lowercase uuid is a caller error (`TypeError`), and one
+ * supplied twice in the batch is a conflict.
+ */
+function scanBatch(input: BlockEditInput): BatchScan {
+  if (input.ops.length === 0) throw new BlockEditLimitError('empty');
+  if (input.ops.length > BLOCK_EDIT_MAX_OPS) {
+    throw new BlockEditLimitError('ops');
+  }
+
+  const externalIds = new Set<string>();
+  const suppliedIds = new Set<string>();
+  let nodeCount = 0;
+  for (const op of input.ops) {
+    for (const id of referencedIds(op)) {
+      if (!UUID_PATTERN.test(id)) throw new BlockNotFoundError(id);
+      if (!suppliedIds.has(id)) externalIds.add(id);
+    }
+    if (op.op === 'duplicate' && op.newId !== undefined) {
+      if (!UUID_PATTERN.test(op.newId)) {
+        throw new TypeError(
+          '@plakboek/pages: a supplied block id must be a lowercase uuid',
+        );
+      }
+      if (suppliedIds.has(op.newId)) throw new BlockIdConflictError(op.newId);
+      suppliedIds.add(op.newId);
+    }
+    if (op.op !== 'insert') continue;
+
+    const pending: BlockEditNode[] = [op.node];
+    for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+      nodeCount += 1;
+      if (nodeCount > BLOCK_EDIT_MAX_NODES) {
+        throw new BlockEditLimitError('nodes');
+      }
+      if (node.id !== undefined) {
+        if (!UUID_PATTERN.test(node.id)) {
+          throw new TypeError(
+            '@plakboek/pages: a supplied block id must be a lowercase uuid',
+          );
+        }
+        if (suppliedIds.has(node.id)) throw new BlockIdConflictError(node.id);
+        suppliedIds.add(node.id);
+      }
+      pending.push(...(node.children ?? []));
+    }
+  }
+  return { externalIds, suppliedIds };
+}
+
+/** Refuses the batch unless every existing block it names belongs to the
+ * page (research Pattern 5), and no id an insert supplies is taken. One
+ * query for both. */
+async function verifyReferences(
+  tx: AuditTransaction,
+  page: PageRecord,
+  scan: BatchScan,
+): Promise<void> {
+  const ids = [...new Set([...scan.externalIds, ...scan.suppliedIds])];
+  if (ids.length === 0) return;
+  const rows = await tx
+    .select({
+      id: pageBlocks.id,
+      ownerType: pageBlocks.ownerType,
+      ownerId: pageBlocks.ownerId,
+      locale: pageBlocks.locale,
+    })
+    .from(pageBlocks)
+    .where(inArray(pageBlocks.id, ids));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+
+  for (const id of scan.externalIds) {
+    const row = byId.get(id);
+    if (row === undefined) throw new BlockNotFoundError(id);
+    if (
+      row.ownerType !== 'page' ||
+      row.ownerId !== page.id ||
+      row.locale !== page.locale
+    ) {
+      throw new BlockOwnershipError(id);
+    }
+  }
+  for (const id of scan.suppliedIds) {
+    if (byId.has(id)) throw new BlockIdConflictError(id);
+  }
+}
+
+/** What the batch has done so far. */
+type BatchState = {
+  readonly createdIds: string[];
+  readonly deletedIds: Set<string>;
+  readonly updatedIds: Set<string>;
+  readonly movedIds: Set<string>;
+  readonly touchedParentIds: Set<string | null>;
+  /** Sections the batch created, or whose column was moved or deleted: the
+   * ones that must still hold a column when the batch ends. */
+  readonly sectionCandidates: Set<string>;
+  /** Sections whose column count or stored ratio the batch may have
+   * changed: created with a layout, given a layout by an update, or whose
+   * columns were inserted, copied, moved or deleted. The ones whose ratio
+   * must still name one term per column when the batch ends. */
+  readonly layoutCandidates: Set<string>;
+  /** The version each touched block was checked against the first time an
+   * operation of this batch touched it. */
+  readonly firstBaseVersions: Map<string, number>;
+};
+
+function refuseDeletedReferences(state: BatchState, op: BlockEditOp): void {
+  for (const id of referencedIds(op)) {
+    if (state.deletedIds.has(id)) throw new BlockNotFoundError(id);
+  }
+}
+
+/** Loads and locks a block an operation names and checks its version. A
+ * block an earlier operation of this batch already checked and bumped is
+ * checked against that first version instead of the stored one: the client
+ * built the whole batch from one snapshot and cannot know about the bumps
+ * its own operations cause. */
+async function touchBlock(
+  tx: AuditTransaction,
+  state: BatchState,
+  blockId: string,
+  baseVersion: number,
+): ReturnType<typeof loadBlockForUpdate> {
+  const first = state.firstBaseVersions.get(blockId);
+  if (first === undefined) {
+    const current = await loadBlockForUpdate(tx, blockId, baseVersion);
+    state.firstBaseVersions.set(blockId, baseVersion);
+    return current;
+  }
+  if (baseVersion !== first) {
+    throw new StaleBlockVersionError(blockId, baseVersion, first);
+  }
+  return await loadBlockForUpdate(tx, blockId, null);
+}
+
+async function insertNode(
+  tx: AuditTransaction,
+  ctx: WriteContext,
+  state: BatchState,
+  node: BlockEditNode,
+  parentBlockId: string | null,
+  previousSiblingId: string | null | undefined,
+  nextSiblingId: string | null | undefined,
+): Promise<void> {
+  let created: Awaited<ReturnType<typeof insertBlockInTransaction>>;
+  try {
+    created = await insertBlockInTransaction(tx, ctx, {
+      ...(node.id === undefined ? {} : { id: node.id }),
+      blockType: node.type,
+      parentBlockId,
+      ...(node.props === undefined ? {} : { props: node.props }),
+      ...(node.layout === undefined ? {} : { layout: node.layout }),
+      previousSiblingId,
+      nextSiblingId,
+    });
+  } catch (error) {
+    // Backstop for a block created by a concurrent transaction between the
+    // up-front check and this insert.
+    if (node.id !== undefined && isBlockPrimaryKeyViolation(error)) {
+      throw new BlockIdConflictError(node.id);
+    }
+    throw error;
+  }
+  state.createdIds.push(created.id);
+  const definition = getBlockDefinition(node.type);
+  if (definition.kind === 'section') {
+    state.sectionCandidates.add(created.id);
+    state.layoutCandidates.add(created.id);
+  }
+  if (definition.kind === 'column' && parentBlockId !== null) {
+    state.layoutCandidates.add(parentBlockId);
+  }
+  // A node sent without children starts with its definition's starter
+  // content (D-20); one sent with children, even none, is taken as is.
+  for (const child of node.children ?? starterNodesFor(definition)) {
+    await insertNode(tx, ctx, state, child, created.id, undefined, undefined);
+  }
+}
+
+/** One starter node as an insertable node under a fresh id. Its own
+ * children are the declared ones; a section with none gets a column, so a
+ * starter never builds a section the invariant would refuse. */
+function expandStarter(node: StarterNode): BlockEditNode {
+  const definition = getBlockDefinition(node.type);
+  return {
+    id: randomUUID(),
+    type: node.type,
+    ...(node.props === undefined ? {} : { props: node.props }),
+    children:
+      node.children === undefined
+        ? columnStarters(definition)
+        : node.children.map(expandStarter),
+  };
+}
+
+/** The column a section starts with, when the registry has a column kind. */
+function columnStarters(definition: BlockDefinition): readonly BlockEditNode[] {
+  const column = getColumnDefinition();
+  return definition.kind === 'section' && column !== null
+    ? [{ id: randomUUID(), type: column.key, children: [] }]
+    : [];
+}
+
+/** What a freshly inserted block holds under it: its declared starter
+ * children, or for a section with none the one column it always has. */
+function starterNodesFor(
+  definition: BlockDefinition,
+): readonly BlockEditNode[] {
+  return definition.starterChildren.length > 0
+    ? definition.starterChildren.map(expandStarter)
+    : columnStarters(definition);
+}
+
+/** The kind of a stored block type, or null when it is no longer
+ * registered (a degraded block never blocks a structural write). */
+function kindOf(blockType: string): BlockDefinition['kind'] | null {
+  try {
+    return getBlockDefinition(blockType).kind;
+  } catch {
+    return null;
+  }
+}
+
+/** Copies a block and its whole subtree under fresh ids directly after the
+ * original: same parent, props, layout and schema versions unchanged, every
+ * copy a create revision of the batch. The root takes `newId` when given. */
+async function duplicateSubtree(
+  tx: AuditTransaction,
+  ctx: WriteContext,
+  state: BatchState,
+  blockId: string,
+  newId: string | undefined,
+): Promise<void> {
+  const original = await loadBlockForUpdate(tx, blockId, null);
+  const rows = await loadSubtreeRows(tx, blockId);
+  if (state.createdIds.length + rows.length > BLOCK_EDIT_MAX_NODES) {
+    throw new BlockEditLimitError('nodes');
+  }
+  const copyIds = new Map<string, string>();
+  for (const row of rows) {
+    const isRoot = row.id === blockId;
+    const id = isRoot ? (newId ?? randomUUID()) : randomUUID();
+    copyIds.set(row.id, id);
+    const parentId = isRoot
+      ? original.parentBlockId
+      : (copyIds.get(row.parentBlockId ?? '') ?? null);
+    let created: Awaited<ReturnType<typeof insertBlockInTransaction>>;
+    try {
+      created = await insertBlockInTransaction(tx, ctx, {
+        id,
+        blockType: row.blockType,
+        parentBlockId: parentId,
+        props: row.props,
+        layout: row.layout,
+        verbatim: { schemaVersion: row.schemaVersion },
+        ...(isRoot ? { previousSiblingId: blockId } : {}),
+      });
+    } catch (error) {
+      if (isRoot && newId !== undefined && isBlockPrimaryKeyViolation(error)) {
+        throw new BlockIdConflictError(newId);
+      }
+      throw error;
+    }
+    state.createdIds.push(created.id);
+    if (kindOf(row.blockType) === 'section') {
+      state.sectionCandidates.add(created.id);
+    }
+  }
+  if (kindOf(original.blockType) === 'column' && original.parentBlockId) {
+    state.layoutCandidates.add(original.parentBlockId);
+  }
+  state.touchedParentIds.add(original.parentBlockId);
+}
+
+/** Refuses the batch when a section it touched ends with a stored column
+ * ratio that names a different number of terms than the section has columns
+ * (D-33: the count is derived from the columns, and an equal split is stored
+ * as no ratio at all). Without this, a ratio written for two columns would
+ * come alive again, applied to a third column nobody gave it to, the moment
+ * the section's column count changed back. The editor puts a section on the
+ * equal split in the same batch as every column change; this holds every
+ * other client to the same rule. Runs under the page lock, after the
+ * operations. Refused as an invalid `columns` layout value. */
+async function assertColumnCountsMatchLayout(
+  tx: AuditTransaction,
+  state: BatchState,
+): Promise<void> {
+  const column = getColumnDefinition();
+  if (column === null) return;
+  const candidates = [...state.layoutCandidates].filter(
+    (id) => !state.deletedIds.has(id),
+  );
+  if (candidates.length === 0) return;
+
+  const sections = await tx
+    .select({ id: pageBlocks.id, layout: pageBlocks.layout })
+    .from(pageBlocks)
+    .where(inArray(pageBlocks.id, candidates));
+  const ratios = new Map<string, number>();
+  for (const section of sections) {
+    const ratio = readStoredLayout(section.layout)?.columns;
+    if (ratio !== undefined) ratios.set(section.id, ratio.split(':').length);
+  }
+  if (ratios.size === 0) return;
+
+  const counts = new Map<string, number>();
+  const columns = await tx
+    .select({ parentId: pageBlocks.parentBlockId })
+    .from(pageBlocks)
+    .where(
+      and(
+        inArray(pageBlocks.parentBlockId, [...ratios.keys()]),
+        eq(pageBlocks.blockType, column.key),
+      ),
+    );
+  for (const { parentId } of columns) {
+    if (parentId !== null)
+      counts.set(parentId, (counts.get(parentId) ?? 0) + 1);
+  }
+  for (const [sectionId, terms] of ratios) {
+    if ((counts.get(sectionId) ?? 0) !== terms) {
+      throw new BlockLayoutValidationError([
+        { key: 'columns', code: 'INVALID' },
+      ]);
+    }
+  }
+}
+
+async function applyOperation(
+  tx: AuditTransaction,
+  ctx: WriteContext,
+  state: BatchState,
+  op: BlockEditOp,
+): Promise<void> {
+  refuseDeletedReferences(state, op);
+  switch (op.op) {
+    case 'insert': {
+      await insertNode(
+        tx,
+        ctx,
+        state,
+        op.node,
+        op.position.parentId,
+        op.position.previousSiblingId,
+        op.position.nextSiblingId,
+      );
+      state.touchedParentIds.add(op.position.parentId);
+      return;
+    }
+    case 'update': {
+      const current = await touchBlock(tx, state, op.blockId, op.baseVersion);
+      await updateBlockInTransaction(tx, ctx, {
+        current,
+        ...(op.props === undefined ? {} : { props: op.props }),
+        ...(op.layout === undefined ? {} : { layout: op.layout }),
+      });
+      state.updatedIds.add(op.blockId);
+      if (op.layout !== undefined && kindOf(current.blockType) === 'section') {
+        state.layoutCandidates.add(op.blockId);
+      }
+      return;
+    }
+    case 'move': {
+      const current = await touchBlock(tx, state, op.blockId, op.baseVersion);
+      await moveBlockInTransaction(tx, ctx, {
+        current,
+        newParentBlockId: op.position.parentId,
+        previousSiblingId: op.position.previousSiblingId,
+        nextSiblingId: op.position.nextSiblingId,
+      });
+      state.movedIds.add(op.blockId);
+      state.touchedParentIds.add(current.parentBlockId);
+      state.touchedParentIds.add(op.position.parentId);
+      if (kindOf(current.blockType) === 'column') {
+        if (current.parentBlockId !== null) {
+          state.sectionCandidates.add(current.parentBlockId);
+          state.layoutCandidates.add(current.parentBlockId);
+        }
+        if (op.position.parentId !== null) {
+          state.layoutCandidates.add(op.position.parentId);
+        }
+      }
+      return;
+    }
+    case 'delete': {
+      const current = await touchBlock(tx, state, op.blockId, op.baseVersion);
+      const { rows } = await deleteSubtreeInTransaction(tx, ctx, { current });
+      for (const row of rows) state.deletedIds.add(row.id);
+      state.touchedParentIds.add(current.parentBlockId);
+      if (
+        current.parentBlockId !== null &&
+        kindOf(current.blockType) === 'column'
+      ) {
+        state.sectionCandidates.add(current.parentBlockId);
+        state.layoutCandidates.add(current.parentBlockId);
+      }
+      return;
+    }
+    case 'duplicate': {
+      await duplicateSubtree(tx, ctx, state, op.blockId, op.newId);
+      return;
+    }
+  }
+}
+
+/**
+ * Applies a batch of block operations to one page atomically. Refuses an
+ * empty batch, more than `BLOCK_EDIT_MAX_OPS` operations or more than
+ * `BLOCK_EDIT_MAX_NODES` inserted blocks before any query, and a batch
+ * holding a delete when the actor lacks `pages:delete` (recorded through
+ * `recordDenied`, nothing written). Then, through `deps.recorder.run`
+ * (`pages:edit` / `block.edit`, one audit row for the whole batch carrying
+ * the batch id and the per-kind counts): loads and locks
+ * the page `FOR UPDATE`, throwing `StalePageVersionError` when its version
+ * is not `basePageVersion`; checks the page lock once; checks that every
+ * existing block the batch names belongs to the page and that no supplied
+ * id is taken; then applies the operations in order through the same
+ * transactional bodies the single-operation functions use, all under one
+ * `revisionBatchId`; bumps the page version once and prunes revisions once.
+ * Any refusal rolls everything back.
+ *
+ * Property writes accept empty required values (D-21); layout is validated
+ * against the column presets (D-33). Placement is checked per block exactly
+ * as an insert, a move or a delete would be on its own. A delete records a
+ * delete revision, props and layout included, for every block of the
+ * removed subtree before the rows go; an operation naming a block an
+ * earlier operation of the batch deleted is `BlockNotFoundError`.
+ *
+ * Structure (D-03, D-20, D-22): an inserted node sent without children gets
+ * its definition's starter children, and a section with none gets one
+ * column; a `duplicate` copies a block's whole subtree directly after it
+ * under fresh ids, as create revisions of the batch. Before the commit, a
+ * section the batch created, or whose column it moved or deleted, must still
+ * hold a column: otherwise `SectionColumnRequiredError` rolls the whole
+ * batch back. A section the batch touched (created, given a layout, or whose
+ * columns it added, copied, moved or deleted) must also end with a column
+ * ratio naming as many terms as it has columns, or none (D-33): otherwise
+ * `BlockLayoutValidationError` for `columns` rolls the batch back.
+ */
+export async function applyBlockEdit(
+  deps: PagesDeps,
+  actor: AuditActor,
+  input: BlockEditInput,
+): Promise<BlockEditResult> {
+  const scan = scanBatch(input);
+
+  // Removing content is a stronger act than editing it: a batch holding a
+  // delete needs `pages:delete` on top of the `pages:edit` the run below
+  // checks. Resolved up front, so a refusal writes only its denied audit row
+  // and no transaction ever opens (research Pitfall 10).
+  if (
+    input.ops.some((op) => op.op === 'delete') &&
+    !deps.resolver
+      .resolve(actor.roleKey, { userId: actor.userId })
+      .has('pages:delete')
+  ) {
+    await deps.recorder.recordDenied(actor, {
+      permission: 'pages:delete',
+      action: 'block.edit',
+      entityType: 'page',
+      entityId: input.pageId,
+    });
+    throw new PermissionDeniedError('pages:delete', actor.roleKey);
+  }
+
+  const now = deps.now ?? (() => new Date());
+  // Read once, before the transaction opens, like every other write path.
+  const revisionCap = await getRevisionCap(deps.db);
+
+  return await deps.recorder.run(
+    actor,
+    {
+      permission: 'pages:edit',
+      action: 'block.edit',
+      entityType: 'page',
+      entityId: input.pageId,
+    },
+    async (tx) => {
+      const page = await loadPageForUpdate(tx, input.pageId);
+      if (page.version !== input.basePageVersion) {
+        throw new StalePageVersionError(
+          page.id,
+          input.basePageVersion,
+          page.version,
+        );
+      }
+      assertPageWritable(
+        [page],
+        await getPageEditLocking(tx),
+        actor.userId,
+        now(),
+      );
+      await verifyReferences(tx, page, scan);
+
+      const ownerRef: OwnerRef = {
+        ownerType: 'page',
+        ownerId: page.id,
+        locale: page.locale,
+      };
+      const ctx: WriteContext = {
+        deps,
+        actor,
+        page,
+        ownerRef,
+        revisionBatchId: newRevisionBatchId(),
+        now: now(),
+      };
+      const state: BatchState = {
+        createdIds: [],
+        deletedIds: new Set(),
+        updatedIds: new Set(),
+        movedIds: new Set(),
+        touchedParentIds: new Set(),
+        sectionCandidates: new Set(),
+        layoutCandidates: new Set(),
+        firstBaseVersions: new Map(),
+      };
+      for (const op of input.ops) {
+        await applyOperation(tx, ctx, state, op);
+      }
+      await assertSectionsHaveColumns(
+        tx,
+        [...state.sectionCandidates].filter((id) => !state.deletedIds.has(id)),
+      );
+      await assertColumnCountsMatchLayout(tx, state);
+
+      await tx
+        .update(pages)
+        .set({ version: sql`${pages.version} + 1` })
+        .where(eq(pages.id, page.id));
+
+      await pruneBlockRevisions(tx, {
+        pageId: page.id,
+        locale: page.locale,
+        cap: revisionCap,
+      });
+
+      const result: BlockEditResult = {
+        pageVersion: page.version + 1,
+        revisionBatchId: ctx.revisionBatchId,
+        createdIds: Object.freeze([...state.createdIds]),
+        deletedIds: Object.freeze([...state.deletedIds]),
+        updatedIds: Object.freeze([...state.updatedIds]),
+        movedIds: Object.freeze([...state.movedIds]),
+        touchedParentIds: Object.freeze([...state.touchedParentIds]),
+      };
+      return {
+        result,
+        after: {
+          revisionBatchId: ctx.revisionBatchId,
+          counts: {
+            insert: result.createdIds.length,
+            update: result.updatedIds.length,
+            move: result.movedIds.length,
+            delete: result.deletedIds.length,
+          },
+        },
+      };
+    },
+  );
+}

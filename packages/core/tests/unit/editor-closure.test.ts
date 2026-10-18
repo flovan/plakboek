@@ -188,6 +188,7 @@ describe('findEditorLeaks', () => {
     ['a TipTap module', '/work/node_modules/@tiptap/react/dist/index.js'],
     ['a dnd-kit module', '/work/node_modules/@dnd-kit/core/dist/core.js'],
     ['a ProseMirror module', '/work/node_modules/prosemirror-model/dist/i.js'],
+    ['the block-edit virtual module', '\0virtual:plakboek/block-edit'],
     [
       'a Windows-style editor path',
       'C:\\work\\node_modules\\@plakboek\\editor\\dist\\client.js',
@@ -202,6 +203,54 @@ describe('findEditorLeaks', () => {
       }),
     };
     expect(findEditorLeaks(bundle)).toHaveLength(1);
+  });
+
+  it.each([
+    ['a module the glob matched', '/site/app/blocks/accordion.edit.tsx'],
+    ['the same module with a query', '/site/app/blocks/accordion.edit.tsx?v=1'],
+    [
+      'a module a custom glob matched under any name',
+      '/site/app/hooks/tabs.ts',
+    ],
+    ['a Windows-style path', 'C:\\site\\app\\blocks\\accordion.edit.tsx'],
+  ])('matches %s as a block edit module', (_label, moduleId) => {
+    const bundle: BundleLike = {
+      ...cleanBundle(),
+      'assets/home-2.js': chunk('assets/home-2.js', {
+        isEntry: true,
+        name: 'home',
+        moduleIds: [moduleId],
+      }),
+    };
+    const [leak] = findEditorLeaks(bundle, {
+      blockEditModules: [
+        '/site/app/blocks/accordion.edit.tsx',
+        '/site/app/hooks/tabs.ts',
+        'C:/site/app/blocks/accordion.edit.tsx',
+      ],
+    });
+    expect(leak?.module).toBe(moduleId);
+    expect(leak?.match).toBe('blockEdit glob');
+  });
+
+  it('does not take a host module for editor code because it is named like a hook module', () => {
+    const bundle: BundleLike = {
+      ...cleanBundle(),
+      'assets/home-2.js': chunk('assets/home-2.js', {
+        isEntry: true,
+        name: 'home',
+        moduleIds: [
+          '/work/app/routes/posts.$id.edit.tsx',
+          '/work/app/routes/profile.edit.tsx',
+        ],
+      }),
+    };
+    expect(findEditorLeaks(bundle)).toEqual([]);
+    expect(
+      findEditorLeaks(bundle, {
+        blockEditModules: ['/work/app/blocks/accordion.edit.tsx'],
+      }),
+    ).toEqual([]);
   });
 
   it('does not match look-alike module paths', () => {
@@ -220,10 +269,69 @@ describe('findEditorLeaks', () => {
           '/work/app/dnd-kit-helpers.ts',
           // A host's own folder named after a library.
           '/work/app/@tiptap/local.ts',
+          // Names that only resemble an edit module.
+          '/work/app/blocks/edit.ts',
+          '/work/app/editor-notes.ts',
+          '/work/app/blocks/credit.ts',
         ],
       }),
     };
     expect(findEditorLeaks(bundle)).toEqual([]);
+  });
+
+  it('reports a visitor route that imports an edit module, and not the editor chunk that holds it', () => {
+    const editModule = '/site/app/blocks/accordion.edit.tsx';
+    const clean: BundleLike = {
+      ...cleanBundle(),
+      'assets/plakboek-editor-4.js': chunk('assets/plakboek-editor-4.js', {
+        isEntry: true,
+        name: EDITOR_CHUNK_NAME,
+        imports: ['assets/react-3.js'],
+        dynamicImports: ['assets/auth-5.js', 'assets/accordion.edit-8.js'],
+        moduleIds: ['\0virtual:plakboek/editor-client', EDITOR_MODULE],
+      }),
+      'assets/accordion.edit-8.js': chunk('assets/accordion.edit-8.js', {
+        isDynamicEntry: true,
+        moduleIds: [editModule],
+      }),
+    };
+    const options = { blockEditModules: [editModule] };
+    expect(findEditorLeaks(clean, options)).toEqual([]);
+
+    expect(
+      findEditorLeaks(
+        {
+          ...clean,
+          'assets/home-2.js': chunk('assets/home-2.js', {
+            isEntry: true,
+            name: 'home',
+            imports: ['assets/react-3.js'],
+            dynamicImports: ['assets/accordion.edit-8.js'],
+            moduleIds: ['/work/app/routes/home.tsx'],
+          }),
+        },
+        options,
+      ),
+    ).toEqual([
+      {
+        entry: 'assets/home-2.js',
+        chunk: 'assets/accordion.edit-8.js',
+        module: editModule,
+        match: 'blockEdit glob',
+      },
+    ]);
+  });
+
+  it('reports the block-edit virtual module in a visitor chunk', () => {
+    const [leak] = findEditorLeaks({
+      ...cleanBundle(),
+      'assets/home-2.js': chunk('assets/home-2.js', {
+        isEntry: true,
+        name: 'home',
+        moduleIds: ['\0virtual:plakboek/block-edit'],
+      }),
+    });
+    expect(leak?.match).toBe('virtual:plakboek/block-edit');
   });
 
   it('names the fragment that made a module count, so a host can see why', () => {

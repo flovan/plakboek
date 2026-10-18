@@ -29,6 +29,19 @@ older browsers are not supported: without declarative shadow DOM the shell
 renders no chrome, and `bootEditor()` finds no shadow root and does nothing.
 Visitors never load this package, so the floor applies to editors only.
 
+## Dependencies
+
+Drag and drop is the editor's own pointer and keyboard controller, with no
+drag-and-drop library. Drop targets are derived from the page model and the
+geometry of the framed page: the shell covers the frame with a transparent
+surface while a drag runs, works out which gap the pointer is nearest to, runs
+that gap through the same placement rules the server enforces, and scrolls the
+frame window directly near its top and bottom edges. The keyboard drag steps
+through the same list of legal gaps in document order.
+
+TanStack Query is the client's network layer: it runs the saves (one write at a
+time per page, with retries), the live property previews and the lock polling.
+
 ## How edit mode shows the site
 
 Edit mode is two requests to the page's own address, both answered by the
@@ -194,6 +207,98 @@ in needs JavaScript in this release: the card's forms post to `/cms`, which
 answers `405`, so a browser that never runs the editor cannot put a password in
 an address.
 
+## The editor API
+
+`createEditorApi(deps)` returns `{ handle(request) }`, the handler behind core's
+`/cms/api` routes. It answers `null` for a path outside `/cms/api/` and a JSON
+`404` for an unknown path inside it. It takes the auth instance, the permission
+resolver, the pages dependencies, the home slug, the visitor handler's component
+map, optional render hooks and `siteOrigin`, the origin of this site.
+
+The client of the editor never imports the pages package, so everything it needs
+to draw legal drop targets and property controls comes from here: the block
+catalogue is built on the server from the resolved block properties, which means
+a property an installation hides never leaves the server, and a fixed or
+narrowed one carries its constraint.
+
+| Route                                                                 | Answer                                                                                                                                                                                                                    |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /cms/api/open` `{ path }`                                       | The page at that visitor path: id, version, locale, the catalogue, the flat tree, the lock, the column presets, whether the caller may delete, and the limits                                                             |
+| `GET /cms/api/pages/:id/tree`                                         | The page's current version and flat tree                                                                                                                                                                                  |
+| `GET /cms/api/pages/:id/lock`                                         | The lock as the caller may see it                                                                                                                                                                                         |
+| `POST /cms/api/pages/:id/lock/acquire`                                | Takes the lock when it is free or already the caller's                                                                                                                                                                    |
+| `POST /cms/api/pages/:id/lock/renew`                                  | The heartbeat; takes the lock again when nobody holds it any more                                                                                                                                                         |
+| `POST /cms/api/pages/:id/lock/release`                                | Releases the caller's lock                                                                                                                                                                                                |
+| `POST /cms/api/pages/:id/lock/take-over`                              | Takes the lock from its holder, allowed only when the caller's permissions are a superset of the holder's role, and audited                                                                                               |
+| `POST /cms/api/pages/:id/edit` `{ basePageVersion, ops, fragments? }` | One batch of insert, update, move, delete and duplicate ops, applied together or not at all: the new page version, the flat tree, the created and deleted ids and, unless `fragments` is `false`, the patch for the frame |
+| `POST /cms/api/pages/:id/preview` `{ blockId, props?, layout? }`      | One block's subtree rendered with candidate values, or the issues (keys and codes) a write would refuse them with. Writes nothing and takes no lock                                                                       |
+
+Opening takes the edit lock when locking is on and the page is free, and brings
+a page that predates columns into the column shape first. When someone else
+holds a live lock, opening still answers with the session: its lock state is
+`other`, with the holder's display name, when they were last active and whether
+the caller may take over, and nothing is taken. A lock view never carries the
+holder's email address, role or user id.
+
+### Editing and previewing
+
+An edit is one request. `ops` holds one to 50 operations against the page
+version the client last saw (`basePageVersion`) and, per block, the version it
+saw (`baseVersion`); a client may name the ids of blocks it inserts, so an undo
+puts a deleted block back under its original id. The batch is checked against
+the page it is posted to: a block of another page answers `404`. A batch with a
+delete needs `pages:delete` on top of `pages:edit`. Props are a whole-object
+replacement on `update`.
+
+The answer's `patch` is what the frame needs to follow the change, rendered by
+the blocks' own components. A batch of property updates patches only the updated
+blocks. Any structural batch patches every top level section that held a
+touched block before or after the change, lists the top level sections that are
+gone in `removed`, and sends `rootOrder` when the order of the top level
+changed. A fragment the server could not render is left out, and the client
+reloads for it.
+
+A preview checks the candidate values exactly as a write would, leniently for
+required properties, and answers either `{ ok: true, html, needsInput }`, with
+`needsInput` naming the required properties still empty, or `{ ok: false,
+issues }`. Nothing is stored, no lock is taken and the page version does not
+move, so a client can preview on every pause in typing.
+
+### The request gate
+
+Every request needs a session, read from the cookie on every request. A role
+that must have a second factor and has none is refused. A caller needs
+`pages:edit`. Every `POST` must be JSON and come from this site: its `Origin` is
+`siteOrigin` or the request's own origin, or, when `Origin` is missing or
+`null`, the browser's `Sec-Fetch-Site` is `same-origin`. A body is read through
+a 1 MiB cap and validated; every answer is `Cache-Control: no-store` JSON.
+
+An error answers `{ ok: false, error: { code } }`. A refused value adds `issues`
+(keys and codes, never values), and a locked page adds the `lock` view. Nothing
+else about the failure leaves the server.
+
+| Status | Code                      | When                                                               |
+| ------ | ------------------------- | ------------------------------------------------------------------ |
+| 400    | `invalid-request`         | The body is not JSON or fails validation                           |
+| 401    | `unauthenticated`         | No session                                                         |
+| 403    | `forbidden`               | Cross-site request, no `pages:edit`, a takeover the engine refuses |
+| 404    | `not-found`               | The page, block or route does not exist                            |
+| 405    | `invalid-request`         | The path exists for another method                                 |
+| 409    | `stale-page`              | The page changed since the version the request was made against    |
+| 409    | `stale-block`             | A block changed since the version the request was made against     |
+| 409    | `conflict`                | A client-chosen block id is already taken                          |
+| 409    | `lock-changed`            | The lock changed hands while a takeover was being decided          |
+| 409    | `locking-disabled`        | Page locking is switched off for this installation                 |
+| 413    | `too-large`               | The body or the batch is over its limit                            |
+| 415    | `invalid-request`         | The body is not `application/json`                                 |
+| 422    | `placement`               | The placement, depth or nesting rules refuse the change            |
+| 422    | `unknown-type`            | The block type is not declared                                     |
+| 422    | `invalid-props`           | A property value is refused; `issues` name the keys                |
+| 422    | `invalid-layout`          | A layout value is refused; `issues` name the keys                  |
+| 422    | `section-column-required` | The change would leave a section without a column                  |
+| 423    | `locked`                  | Another editor holds the page; `lock` says who, by display name    |
+| 500    | `server-error`            | Anything else, logged by error name only                           |
+
 ## The chrome stylesheet
 
 Chrome is styled by its own precompiled Tailwind v4 stylesheet, built at
@@ -253,26 +358,61 @@ updating them.
 
 ### Server entry: `@plakboek/editor/server`
 
-| Export                  | Kind     | Purpose                                                                          |
-| ----------------------- | -------- | -------------------------------------------------------------------------------- |
-| `createEditEntrypoint`  | function | The edit entrypoint for the visitor handler's `edit` option: the shell and frame |
-| `createCmsPages`        | function | The `/cms` pages handler: the login document and the email-link landings         |
-| `chromeStyleElement`    | function | The chrome stylesheet as `<style>` markup for a declarative shadow root          |
-| `CHROME_STYLE_CSP_HASH` | constant | The `sha256-...` of that markup's CSS, for a host's strict `style-src`           |
-| `EditEntrypointDeps`    | type     | What `createEditEntrypoint` needs                                                |
-| `CmsPages`              | type     | What `createCmsPages` returns: `handle(request)`, a response or `null`           |
-| `CmsPagesDeps`          | type     | What `createCmsPages` needs                                                      |
-| `EditorAssets`          | type     | The built client the shell loads: entry, preloads, stylesheets, dev scripts      |
-| `EditorDevScript`       | type     | A development-only script: a `src` URL or inline `code`                          |
+| Export                        | Kind     | Purpose                                                                           |
+| ----------------------------- | -------- | --------------------------------------------------------------------------------- |
+| `createEditEntrypoint`        | function | The edit entrypoint for the visitor handler's `edit` option: the shell and frame  |
+| `createCmsPages`              | function | The `/cms` pages handler: the login document and the email-link landings          |
+| `createEditorApi`             | function | The editor's JSON API under `/cms/api`: open a page, read its tree, keep its lock |
+| `EDITOR_API_BODY_LIMIT_BYTES` | constant | The most a request body to that API may hold: 1 MiB                               |
+| `chromeStyleElement`          | function | The chrome stylesheet as `<style>` markup for a declarative shadow root           |
+| `CHROME_STYLE_CSP_HASH`       | constant | The `sha256-...` of that markup's CSS, for a host's strict `style-src`            |
+| `EditEntrypointDeps`          | type     | What `createEditEntrypoint` needs                                                 |
+| `CmsPages`                    | type     | What `createCmsPages` returns: `handle(request)`, a response or `null`            |
+| `CmsPagesDeps`                | type     | What `createCmsPages` needs                                                       |
+| `EditorApi`                   | type     | What `createEditorApi` returns: `handle(request)`, a response or `null`           |
+| `EditorApiDeps`               | type     | What `createEditorApi` needs                                                      |
+| `EditorAssets`                | type     | The built client the shell loads: entry, preloads, stylesheets, dev scripts       |
+| `EditorDevScript`             | type     | A development-only script: a `src` URL or inline `code`                           |
 
 ### Client entry: `@plakboek/editor/client`
 
-| Export              | Kind     | Purpose                                                                       |
-| ------------------- | -------- | ----------------------------------------------------------------------------- |
-| `bootEditor`        | function | Hydrates the shell the server rendered inside the `plakboek-editor` host      |
-| `chromeStyleSheet`  | function | The chrome stylesheet for one document, built with that document's window     |
-| `adoptChromeStyles` | function | Adopts the chrome stylesheet into a shadow root, once                         |
-| `STRINGS`           | constant | Every edit-mode string, by stable dotted key, in English                      |
-| `formatString`      | function | A string with its `{name}` placeholders filled; the compiler checks the names |
-| `SidebarSlots`      | type     | The slots a later release fills the sidebar with                              |
-| `StringKey`         | type     | A key of `STRINGS`                                                            |
+| Export              | Kind     | Purpose                                                                                         |
+| ------------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `bootEditor`        | function | Hydrates the shell the server rendered inside the `plakboek-editor` host; takes `{ blockEdit }` |
+| `chromeStyleSheet`  | function | The chrome stylesheet for one document, built with that document's window                       |
+| `adoptChromeStyles` | function | Adopts the chrome stylesheet into a shadow root, once                                           |
+| `STRINGS`           | constant | Every edit-mode string, by stable dotted key, in English                                        |
+| `formatString`      | function | A string with its `{name}` placeholders filled; the compiler checks the names                   |
+| `SidebarSlots`      | type     | The slots a later release fills the sidebar with                                                |
+| `StringKey`         | type     | A key of `STRINGS`                                                                              |
+| `BootEditorOptions` | type     | The options of `bootEditor`: `blockEdit`, the host's block edit module loaders                  |
+| `BlockEditLoaders`  | type     | One lazy import per `*.edit.ts` block edit module, keyed by project path                        |
+
+`bootEditor(document, { blockEdit })` is called by the editor chunk the
+`plakboek()` Vite plugin builds, not by a host. `blockEdit` holds one lazy
+loader per `*.edit.ts` or `*.edit.tsx` module (the plugin's `blockEdit` option
+says where to look). After the shell hydrates it loads them once and keeps each
+module whose default export is `{ blockType, hooks }` with function hooks. A
+module that fails to load, has another shape, or repeats a block type is
+reported once by file key and skipped, and the first module per block type wins.
+
+### Hot entry: `@plakboek/editor/hot`
+
+| Export               | Kind     | Purpose                                                                                         |
+| -------------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `createDevBlockSwap` | function | Swaps the blocks whose own markup changed between two server renders, or reloads the page       |
+| `readSignatures`     | function | Every block of a document by id: its parent block and its own markup, nested blocks stood in    |
+| `diffSignatures`     | function | The outermost changed blocks between two signature maps, and whether the set or nesting changed |
+| `SignatureMap`       | type     | What `readSignatures` returns                                                                   |
+
+Development only, and loaded by the core dev client, never by a host or by
+the editor client. It has no React, server or chrome code in its graph. A swap
+fetches the page again and compares each block's own markup, with the blocks
+nested in it replaced by placeholders, so a change inside a child does not mark
+its parent. Only the outermost changed blocks are replaced, through the same
+fragment patch the editor uses: scripts in the new markup stay inert (a block
+re-binds through its `rendered` hook), the scroll position is put back, and a
+block that is being edited in place is left alone and tried again by the next
+swap. A change in which blocks exist or how they nest reloads the page. Each
+swap that replaces something fires `plakboek:blocks-swapped` on the document,
+with the swapped ids in `detail.ids`.

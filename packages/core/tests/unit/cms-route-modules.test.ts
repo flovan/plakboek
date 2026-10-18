@@ -88,6 +88,17 @@ describe('a failing runtime under /cms', () => {
   });
 });
 
+describe('a failing runtime under /cms/api', () => {
+  it('is a headered 500 from the editor API loader and action', async () => {
+    const { loader, action } =
+      await import('../../src/route-modules/editor-api.js');
+    expect(await facts(await loader(args() as never))).toEqual(GUARDED_500);
+    expect(await facts(await action(args('POST') as never))).toEqual(
+      GUARDED_500,
+    );
+  });
+});
+
 describe('a method health does not serve', () => {
   it('is a 405 that still says noindex', async () => {
     const { action } = await import('../../src/route-modules/health.js');

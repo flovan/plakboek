@@ -63,6 +63,7 @@ function render(
   options: {
     readonly components?: ComponentMap;
     readonly hooks?: Parameters<typeof renderPageSnapshot>[0]['hooks'];
+    readonly blockMeta?: Parameters<typeof renderPageSnapshot>[0]['blockMeta'];
   } = {},
 ) {
   return renderPageSnapshot({
@@ -70,6 +71,9 @@ function render(
     publicPath: '/test',
     components: options.components ?? components,
     hooks: options.hooks,
+    ...(options.blockMeta === undefined
+      ? {}
+      : { blockMeta: options.blockMeta }),
   });
 }
 
@@ -291,5 +295,30 @@ describe('the edit proxy on a visitor page (D-15)', () => {
     for (const edit of seen) expect(edit).toBe(NOOP_EDIT);
     expect(rendered.body).not.toMatch(/data-/);
     expect(rendered.body).toContain('<div><span>text</span>');
+  });
+});
+
+describe('development block markers', () => {
+  const spreading = new Map<string, BlockComponent>([
+    [
+      'spread',
+      ({ edit, children }) => createElement('div', { ...edit }, children),
+    ],
+  ]);
+  const tree = [block('a', 'spread', {}, [block('b', 'spread')])];
+
+  it('adds no data-pk attribute without block metadata', () => {
+    const rendered = render(tree, { components: spreading });
+    expect(rendered.body).not.toContain('data-pk-');
+  });
+
+  it('marks every block root when block metadata is given', () => {
+    const rendered = render(tree, {
+      components: spreading,
+      blockMeta: new Map([['spread', { label: 'Spread', kind: 'block' }]]),
+    });
+    expect(rendered.body.match(/data-pk-block=/g)).toHaveLength(2);
+    expect(rendered.body).toContain('data-pk-block="a"');
+    expect(rendered.body).toContain('data-pk-block="b"');
   });
 });

@@ -28,7 +28,7 @@ import type { ReactNode } from 'react';
 /** What the overlay needs to know about a block type. */
 export type BlockMeta = {
   readonly label: string;
-  readonly kind: 'section' | 'block';
+  readonly kind: 'section' | 'column' | 'block';
 };
 
 export type RenderPageTreeInput = {
@@ -64,7 +64,7 @@ export type RenderedTree = {
  * `unknown` (no such type or component), `degraded` (stored below the type's
  * compatibility floor) or `failed` (it threw or could not render).
  */
-function placeholderFor(
+export function placeholderFor(
   blockMeta: ReadonlyMap<string, BlockMeta>,
 ): (node: BlockNode, reason: PlaceholderReason) => ReactNode {
   return (node, reason) => {
@@ -84,6 +84,24 @@ function placeholderFor(
   };
 }
 
+/**
+ * The live proxy factory both the frame renderer and the fragment renderer
+ * hand to the shared recursion, so a block renders identically in either.
+ */
+export function liveEditFor(
+  blockMeta: ReadonlyMap<string, BlockMeta>,
+): (node: Pick<BlockNode, 'id' | 'blockType'>) => EditProxy {
+  return (node) => {
+    const meta = blockMeta.get(node.blockType);
+    return createLiveEdit({
+      id: node.id,
+      blockType: node.blockType,
+      kind: meta?.kind ?? 'block',
+      label: meta?.label ?? node.blockType,
+    });
+  };
+}
+
 /** Renders a live working tree; never touches the database. */
 export function renderPageTree(input: RenderPageTreeInput): RenderedTree {
   const { page, blockMeta } = input;
@@ -96,16 +114,9 @@ export function renderPageTree(input: RenderPageTreeInput): RenderedTree {
     siteUrl: input.siteUrl,
     resolveAssetUrl: input.resolveAssetUrl,
   });
-  const editFor = (node: BlockNode): EditProxy => {
-    if (!live) return NOOP_EDIT;
-    const meta = blockMeta.get(node.blockType);
-    return createLiveEdit({
-      id: node.id,
-      blockType: node.blockType,
-      kind: meta?.kind ?? 'block',
-      label: meta?.label ?? node.blockType,
-    });
-  };
+  const liveProxy = liveEditFor(blockMeta);
+  const editFor = (node: BlockNode): EditProxy =>
+    live ? liveProxy(node) : NOOP_EDIT;
   const { body, degraded } = renderBlocks(input.blocks, {
     components: input.components,
     hooks: input.hooks,

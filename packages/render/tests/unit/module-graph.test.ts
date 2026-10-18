@@ -24,6 +24,7 @@ const EDITOR_DENYLIST = [
   '@plakboek/admin',
   '@tiptap/',
   '@dnd-kit/',
+  '@tanstack/',
   'prosemirror',
 ] as const;
 

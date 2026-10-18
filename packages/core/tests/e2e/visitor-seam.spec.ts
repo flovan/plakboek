@@ -138,3 +138,15 @@ test.describe('the Edit pill on a visitor page', () => {
     ).toBe(0);
   });
 });
+
+test.describe('a production visitor response', () => {
+  test('carries no block marker and no dev script', async ({ request }) => {
+    const response = await request.get('/');
+    expect(response.status()).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('<h2');
+    expect(html).not.toContain('data-pk-');
+    expect(html).not.toContain('@vite/client');
+    expect(html).not.toContain('virtual:plakboek/dev-swap');
+  });
+});

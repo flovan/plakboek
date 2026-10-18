@@ -77,6 +77,20 @@ is declared in this file and checked when it is evaluated, so a bad
 configuration fails the process at start. A block file imports `defineBlock`
 from the package root, which stays safe for a client bundle.
 
+### Sections and columns
+
+The CMS owns one block, the column, and registers it for every installation
+after your own blocks; a block of yours with the key or kind `column` is
+refused when the config is evaluated. A section's children are always columns,
+and a column holds the page's other blocks. Your section component renders
+`<Columns layout={layout}>{children}</Columns>` from `@plakboek/render`, which
+lays the columns out on a CSS grid from the section's stored ratio and
+alignment; the gap comes from the `--plakboek-column-gap` custom property.
+A seed may stay flat: a seed section that lists blocks directly gets them
+wrapped in one column when the home page is created. To narrow or extend the
+ratios an editor can pick, pass `columnPresets` to `defineConfig`, for
+example `columnPresets: { add: ['3:1'] }`.
+
 The site module (`app/site/index.ts` in the starter) exports `renderDocument`
 and, optionally, `renderNotFound` and `renderError`; each receives a site
 context with the site name, locale, current path and `getMenu(name)`.
@@ -120,6 +134,7 @@ route module inside this package:
 | `/cms/setup`            | First-run setup of the first superadmin.                                                                                    |
 | `/cms/setup/test-email` | Sends a test email from the setup page.                                                                                     |
 | `/cms/logout`           | `POST` only: ends the session and returns to the page the user left.                                                        |
+| `/cms/api/*`            | The editor's JSON API (open a page, read its tree, take and keep its lock, apply edits, preview a block).                   |
 | `/cms/*`                | The email-link landings (set password, reset password, sign-in link, two-step set-up); anything else is the host's own 404. |
 | `/robots.txt`           | Disallows `/cms`. A host's own `public/robots.txt` is served instead.                                                       |
 | `/api/auth/*`           | The authentication API.                                                                                                     |
@@ -146,6 +161,18 @@ sanitised `next`, never to an address with `_edit`.
 
 The health body is a fixed `{"status":"ok"}` or `{"status":"unavailable"}`;
 a database error never reaches the response.
+
+`/cms/api/*` is a resource route (a loader and an action, no client chunk) that
+hands every request to the editor's API, composed on the first API request so a
+process that never receives one never loads the editor's server code. The API
+checks the session, the role and the request's origin itself; the route adds
+`X-Robots-Tag: noindex, nofollow` to every answer, errors included, and answers
+an unknown API path with a JSON `404`.
+
+When a host process starts, it upgrades stored page trees that predate columns
+to the column shape in the background, a few pages at a time, without ever
+holding up a request. A failure logs one line naming the error type and the
+next boot tries again.
 
 The visitor route reads only the published snapshot of a page and renders it on
 the server, with no client React. In production one in-process LRU cache per
@@ -184,6 +211,114 @@ the build in every host and in CI:
 
 A host's own route modules, components and client entry must therefore never
 import `@plakboek/editor`; the editor loads only through its own chunk.
+
+## Writing blocks for the editor
+
+The editor works on the page itself, so a block is both what visitors see and
+what an editor selects, moves and edits. A block that follows these rules works
+in both without a second version.
+
+**Render `Columns` in your section.** A section only draws the grid around the
+columns the CMS owns: `<Columns layout={layout}>{children}</Columns>`. Set
+`--plakboek-column-gap` for the gap and stack the columns with one container
+query on `--plakboek-columns-stack`; both are described in the
+`@plakboek/render` README (the Columns section).
+
+**Spread `{...edit}` on exactly one root element.** `edit` carries the
+attributes the editor selects by (`data-pk-*`) and is empty for visitors, so
+the same markup serves both. A block without it cannot be outlined or
+selected; two roots would be selected as one. Name an editable field with
+`{...edit.field('title')}` on the element that shows it. The editor adds no
+class, style or wrapper to your markup.
+
+```tsx
+const Quote: BlockComponent<{ text: string }> = ({ props, edit, layout }) => (
+  <blockquote
+    {...edit}
+    {...edit.field('text')}
+    style={layout.fill === true ? { flex: '1 1 auto' } : undefined}
+  >
+    {props.text}
+  </blockquote>
+);
+```
+
+**Declare what fills and what starts inside.** `layout: { fill: true }` marks a
+block that can stretch to its column's full height; it applies its own style
+when `layout.fill` is true. `starterChildren` is the content an editor gets
+when they add the block, so a new tabs block is not empty:
+
+```ts
+defineBlock({
+  key: 'tabs',
+  editor: { label: 'Tabs' },
+  schemaVersion: 1,
+  properties: {},
+  placement: { allowedChildren: ['tab'] },
+  starterChildren: [
+    { type: 'tab', props: { label: 'First tab' } },
+    { type: 'tab', props: { label: 'Second tab' } },
+  ],
+  component: Tabs,
+});
+```
+
+**Make the items of an accordion, tabs or carousel blocks of their own.**
+Entries, tabs and slides are child blocks: the container lists them in
+`placement.allowedChildren`, each item lists its container in
+`placement.allowedParents`, and the container renders `{children}`. Editors
+then add, remove, reorder, select and drill into items with the same tools as
+any block, and the placement rules decide where each may go. An item's root
+spreads `{...edit}` too.
+
+**React to the editor from a `*.edit.ts` module.** An interactive block that
+needs to know about selection or mode puts its hooks in a file next to it,
+`blocks/slides.edit.ts`, and default-exports `defineBlockEdit` from
+`@plakboek/render`:
+
+```ts
+import { defineBlockEdit } from '@plakboek/render';
+
+export default defineBlockEdit({
+  blockType: 'slides',
+  hooks: {
+    enter: ({ element }) => element.setAttribute('data-paused', ''), // Edit mode starts
+    leave: ({ element }) => element.removeAttribute('data-paused'), // Interact starts
+    // show the slide that holds the selected block
+    reveal: ({ element, targetId }) => {
+      element
+        .querySelector(`[data-pk-block="${targetId}"]`)
+        ?.closest('[data-slide]')
+        ?.removeAttribute('hidden');
+    },
+    // the editor replaced the element: start the block's script on the new one
+    rendered: ({ element, window }) => window.mySite.initSlides(element),
+  },
+});
+```
+
+The hooks are `enter`, `leave`, `select`, `deselect`, `reveal` and `rendered`
+(see the render README for when each runs). The `plakboek()` Vite plugin finds
+`/blocks/**/*.edit.{ts,tsx}` by default; its `blockEdit` option takes another
+glob or a list of globs, root-relative. These files load only into the
+editor's own chunk, and the client build fails, naming the module, if anything
+a visitor loads imports one, so keep hook code out of block definitions and
+components. Only the files the glob matches count: a host route named
+`profile.edit.tsx` outside it is ordinary code.
+
+**Bind scripts so they survive a re-render.** The editor replaces a block's
+element when a property changes, and a replaced element has none of the
+listeners the page's script gave the old one. Bind by delegation (one listener
+on a root that outlives the item) or make the block's init idempotent per
+element and call it again from `rendered`. Do not register `click` listeners
+on `window` in the capture phase: site scripts load before the editor claims
+the frame's clicks, so a window-capture listener runs first and cannot be told
+that the page is being edited. Listeners on elements, `document` and `body`
+are fine.
+
+**Under `pnpm dev`** a change to a block component swaps just that block in
+place, runs its `rendered` hook and keeps the selection and scroll position;
+a change to the config, the site module or a route reloads the page.
 
 ## The `plakboek` command
 

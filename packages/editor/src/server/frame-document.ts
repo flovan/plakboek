@@ -21,6 +21,7 @@
 import {
   resolveEditablePage,
   resolveVisitorPage,
+  type BlockDefinition,
   type PagesConfig,
 } from '@plakboek/pages';
 import {
@@ -40,6 +41,14 @@ import { editLocation, pathOf } from './locations.js';
 
 export { FRAME_ERROR_MARKER };
 
+/** The kind the overlay marks an item with; a column cell is its own kind so
+ * the live proxy can mark it as a drop target. */
+function metaKind(kind: BlockDefinition['kind']): BlockMeta['kind'] {
+  if (kind === 'section') return 'section';
+  if (kind === 'column') return 'column';
+  return 'block';
+}
+
 /** Block type key to the label and kind the overlay shows. */
 export function buildBlockMeta(
   config: Pick<PagesConfig, 'blocks'>,
@@ -49,7 +58,7 @@ export function buildBlockMeta(
       block.key,
       {
         label: block.editor.label,
-        kind: block.kind === 'section' ? 'section' : 'block',
+        kind: metaKind(block.kind),
       } satisfies BlockMeta,
     ]),
   );

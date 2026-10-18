@@ -455,7 +455,9 @@ describe('the rail', () => {
     expect(rail).toContain(
       'motion-safe:[:host([data-layout=full])_&amp;]:transition-[opacity,translate]',
     );
-    expect(sidebar).toContain('motion-safe:transition-[opacity,translate]');
+    expect(sidebar).toContain(
+      'motion-safe:transition-[opacity,translate,scale]',
+    );
     expect(sidebar).toContain(
       'motion-safe:[:host([data-layout=full])_&amp;]:transition-[opacity,translate,visibility]',
     );

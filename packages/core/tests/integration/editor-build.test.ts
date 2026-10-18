@@ -3,8 +3,9 @@
  * server build through the sidecar the client build writes.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { HEADING_EDIT_MARKER } from '../fixture-host/blocks/heading.edit.ts';
 import { FIXTURE_CLIENT_DIR, FIXTURE_SERVER_ENTRY } from './fixture-host.js';
 
 type Sidecar = {
@@ -52,7 +53,7 @@ describe('the editor client chunk in a host build', () => {
     for (const name of readdirSync(assets)) {
       if (own.has(`assets/${name}`)) continue;
       expect(readFileSync(join(assets, name), 'utf8')).not.toContain(
-        'plakboek-editor',
+        basename(file),
       );
     }
   });
@@ -68,7 +69,54 @@ describe('the editor client chunk in a host build', () => {
       .join('\n');
     expect(sources).toContain(`/${file}`);
   });
+
+  it('holds a host block-edit module only in chunks the editor chunk reaches', () => {
+    const assets = clientAssets();
+    const editor = basename(readSidecar().file);
+    const holders = [...assets]
+      .filter(([, source]) => source.includes(HEADING_EDIT_MARKER))
+      .map(([name]) => name);
+    expect(holders.length).toBeGreaterThan(0);
+
+    const editorSide = reachableFrom(editor, assets);
+    for (const holder of holders) expect(editorSide.has(holder)).toBe(true);
+
+    // Nothing outside the editor's own closure names a chunk that holds it.
+    for (const [name, source] of assets) {
+      if (editorSide.has(name)) continue;
+      expect(referencedBy(source, holders)).toEqual([]);
+    }
+  });
 });
+
+/** Every JS asset of the client build, by file name. */
+function clientAssets(): Map<string, string> {
+  const assets = join(FIXTURE_CLIENT_DIR, 'assets');
+  return new Map(
+    listJs(assets).map((path) => [basename(path), readFileSync(path, 'utf8')]),
+  );
+}
+
+/** The chunks a chunk names (static and dynamic imports both spell the file
+ * name of their target in its source). */
+function referencedBy(source: string, names: Iterable<string>): string[] {
+  return [...names].filter((name) => source.includes(name));
+}
+
+/** `start` and every chunk reachable from it. */
+function reachableFrom(
+  start: string,
+  assets: ReadonlyMap<string, string>,
+): Set<string> {
+  const seen = new Set<string>();
+  const queue = [start];
+  for (let name = queue.shift(); name !== undefined; name = queue.shift()) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    queue.push(...referencedBy(assets.get(name) ?? '', assets.keys()));
+  }
+  return seen;
+}
 
 function listJs(directory: string): string[] {
   return readdirSync(directory)

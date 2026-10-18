@@ -163,3 +163,85 @@ export async function rewriteDescendantDepths(
     WHERE page_blocks.id = v.id
   `);
 }
+
+/** One stored block of a subtree, with everything a copy needs. */
+export type SubtreeRow = {
+  readonly id: string;
+  readonly parentBlockId: string | null;
+  readonly blockType: string;
+  readonly props: unknown;
+  readonly layout: unknown;
+  readonly schemaVersion: number;
+  readonly depth: number;
+  readonly sortOrder: number;
+};
+
+/**
+ * Loads `rootBlockId` and every descendant in ONE recursive CTE query and
+ * returns them depth-first: the root first, then each child with its own
+ * descendants before the next sibling, siblings in `sort_order` (ties by id).
+ * A caller copying the subtree can therefore insert the rows in the order
+ * returned and every parent exists before its children.
+ */
+export async function loadSubtreeRows(
+  db: AuditDatabase,
+  rootBlockId: string,
+): Promise<readonly SubtreeRow[]> {
+  const result = await db.execute(sql`
+    WITH RECURSIVE subtree AS (
+      SELECT id, parent_block_id, block_type, props, layout, schema_version,
+        depth, sort_order
+      FROM page_blocks
+      WHERE id = ${rootBlockId}
+
+      UNION ALL
+
+      SELECT pb.id, pb.parent_block_id, pb.block_type, pb.props, pb.layout,
+        pb.schema_version, pb.depth, pb.sort_order
+      FROM page_blocks pb
+      JOIN subtree ON pb.parent_block_id = subtree.id
+    )
+    SELECT id, parent_block_id AS "parentBlockId", block_type AS "blockType",
+      props, layout, schema_version AS "schemaVersion", depth,
+      sort_order AS "sortOrder"
+    FROM subtree
+  `);
+  const rows: SubtreeRow[] = resultRows(result).map((row) => ({
+    id: asString(row.id, 'id'),
+    parentBlockId: asNullableString(row.parentBlockId),
+    blockType: asString(row.blockType, 'blockType'),
+    props: row.props,
+    layout: row.layout,
+    schemaVersion: asNumber(row.schemaVersion, 'schemaVersion'),
+    depth: asNumber(row.depth, 'depth'),
+    sortOrder: asNumber(row.sortOrder, 'sortOrder'),
+  }));
+
+  const childrenOf = new Map<string, SubtreeRow[]>();
+  let root: SubtreeRow | undefined;
+  for (const row of rows) {
+    if (row.id === rootBlockId) {
+      root = row;
+      continue;
+    }
+    const siblings = childrenOf.get(row.parentBlockId ?? '') ?? [];
+    siblings.push(row);
+    childrenOf.set(row.parentBlockId ?? '', siblings);
+  }
+  if (root === undefined) return [];
+
+  const ordered: SubtreeRow[] = [];
+  const pending: SubtreeRow[] = [root];
+  for (let row = pending.pop(); row !== undefined; row = pending.pop()) {
+    ordered.push(row);
+    const children = [...(childrenOf.get(row.id) ?? [])].sort(
+      (a, b) => a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : 1),
+    );
+    // Pushed in reverse so the first child is popped (visited) first.
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      const child = children[index];
+      if (child !== undefined) pending.push(child);
+    }
+  }
+  return ordered;
+}

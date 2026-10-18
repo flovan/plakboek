@@ -19,8 +19,16 @@
  * a resize moves the content under a pointer that did not move, and the
  * browser sends no pointer event for that, so once the page has been quiet
  * for 100ms the last pointer position is looked up again.
+ *
+ * Two optional inputs make it the editor's tracker. A `resolve` function
+ * decides which of the blocks under the pointer is the hover target (the one a
+ * click would select), and a `selection` reader names the selected item and
+ * the scope container, whose boxes are measured in the same pass and reported
+ * through their own callback.
  */
 import { EDIT_ATTRIBUTE } from '@plakboek/render';
+import { blocksAt } from '../frame/hit-test.js';
+import { measureLoose } from './boxes.js';
 import { isMeasurable, sameBox, type Box, type Point } from './geometry.js';
 
 /** What the overlay draws. Element boxes are in the frame's own coordinates,
@@ -38,7 +46,35 @@ export type HoverState = {
   readonly frame: Box;
 };
 
+/** The selected item and the scope container, measured in the same pass. */
+export type SelectionState = {
+  /** The selected item's box in the frame's own coordinates. */
+  readonly selected: Box | null;
+  /** The scope container's box, when the scope is not the page. */
+  readonly scope: Box | null;
+  readonly frame: Box;
+};
+
+/** Which items the editor has selected, read afresh on every measurement. */
+export type SelectionRead = {
+  readonly selectedId: string | null;
+  readonly scopeId: string | null;
+};
+
+export type TrackerOptions = {
+  /** Picks the hover target from the ids of the measurable blocks under the
+   * pointer, innermost first; `null` hovers nothing. Without it the innermost
+   * block is the target. */
+  readonly resolve?: (chain: readonly string[]) => string | null;
+  readonly selection?: {
+    readonly read: () => SelectionRead;
+    readonly onChange: (state: SelectionState | null) => void;
+  };
+};
+
 export type HoverTracker = {
+  /** Looks the pointer up again and measures again, after the inputs changed. */
+  readonly refresh: () => void;
   /** Stops listening and releases every observer. */
   readonly dispose: () => void;
 };
@@ -46,18 +82,7 @@ export type HoverTracker = {
 /** How long the page must be quiet before the pointer is looked up again. */
 export const SETTLE_MS = 100;
 
-const BLOCK_SELECTOR = `[${EDIT_ATTRIBUTE.block}]`;
 const SECTION_SELECTOR = `[${EDIT_ATTRIBUTE.kind}="section"]`;
-
-function isElement(value: unknown): value is Element {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'nodeType' in value &&
-    value.nodeType === 1 &&
-    'closest' in value
-  );
-}
 
 /** A frame window that has the observer constructors, which every browser's
  * window does. */
@@ -85,15 +110,36 @@ function measure(element: Element, view: Window): Box | null {
     : null;
 }
 
-/** The innermost measurable block that holds `from`, climbing past any that
- * generate no box of their own. */
-function resolveTarget(from: Element | null, view: Window): Element | null {
-  let candidate = from?.closest(BLOCK_SELECTOR) ?? null;
-  while (candidate !== null) {
-    if (measure(candidate, view) !== null) return candidate;
-    candidate = candidate.parentElement?.closest(BLOCK_SELECTOR) ?? null;
-  }
-  return null;
+/** The block the hover is on: the innermost block under the frame-local point
+ * (a zero-size one through its ghost box, as a click finds it), or the one
+ * `resolve` picks from the chain. */
+function resolveTarget(
+  frameDocument: Document,
+  x: number,
+  y: number,
+  resolve: TrackerOptions['resolve'],
+): Element | null {
+  const chain = blocksAt(frameDocument, x, y);
+  if (resolve === undefined) return chain[0] ?? null;
+  const ids = chain.map((element) =>
+    element.getAttribute(EDIT_ATTRIBUTE.block),
+  );
+  const id = resolve(ids.filter((value): value is string => value !== null));
+  return (
+    chain.find(
+      (element) => element.getAttribute(EDIT_ATTRIBUTE.block) === id,
+    ) ?? null
+  );
+}
+
+/** The element of a block id in a frame document, or null. */
+function elementOfBlock(frameDocument: Document, id: string): Element | null {
+  const css = frameDocument.defaultView?.CSS;
+  const escaped =
+    typeof css?.escape === 'function'
+      ? css.escape(id)
+      : id.replaceAll(/["\\]/g, '\\$&');
+  return frameDocument.querySelector(`[${EDIT_ATTRIBUTE.block}="${escaped}"]`);
 }
 
 /** The nearest measurable section above `target`. */
@@ -123,6 +169,18 @@ function sameState(a: HoverState | null, b: HoverState | null): boolean {
   );
 }
 
+function sameSelection(
+  a: SelectionState | null,
+  b: SelectionState | null,
+): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    sameBox(a.selected, b.selected) &&
+    sameBox(a.scope, b.scope) &&
+    sameBox(a.frame, b.frame)
+  );
+}
+
 /** What is attached to one document of the frame. */
 type Attached = {
   readonly document: Document;
@@ -139,16 +197,20 @@ type Attached = {
 export function createHoverTracker(
   frame: HTMLIFrameElement,
   onChange: (state: HoverState | null) => void,
+  options: TrackerOptions = {},
 ): HoverTracker {
   const topWindow = frame.ownerDocument.defaultView;
-  if (topWindow === null) return { dispose: () => undefined };
-  return track(frame, topWindow, onChange);
+  if (topWindow === null) {
+    return { refresh: () => undefined, dispose: () => undefined };
+  }
+  return track(frame, topWindow, onChange, options);
 }
 
 function track(
   frame: HTMLIFrameElement,
   topWindow: Window,
   onChange: (state: HoverState | null) => void,
+  options: TrackerOptions,
 ): HoverTracker {
   const topDocument = frame.ownerDocument;
   let attached: Attached | null = null;
@@ -158,6 +220,10 @@ function track(
    * sits (the layout toggle) can be followed. */
   let pointer: Point | null = null;
   let last: HoverState | null = null;
+  let lastSelection: SelectionState | null = null;
+  /** The selected item and its scope container, observed for size changes. */
+  let selectedElement: Element | null = null;
+  let scopeElement: Element | null = null;
   let animationFrame = 0;
   let settleTimer: number | null = null;
 
@@ -178,21 +244,34 @@ function track(
     onChange(next);
   }
 
-  function update(): void {
-    animationFrame = 0;
+  function emitSelection(next: SelectionState | null): void {
+    if (sameSelection(lastSelection, next)) return;
+    lastSelection = next;
+    options.selection?.onChange(next);
+  }
+
+  /** Watches the target, its section and the selection's elements for size
+   * changes. */
+  function observe(): void {
     const current = attached;
+    if (current === null) return;
+    current.resizeObserver.disconnect();
+    for (const element of [target, section, selectedElement, scopeElement]) {
+      if (element !== null) current.resizeObserver.observe(element);
+    }
+  }
+
+  function hoverState(current: Attached, frameBox: Box): HoverState | null {
     const hovered = target;
-    if (current === null || hovered === null || !hovered.isConnected) {
+    if (hovered === null || !hovered.isConnected) {
       if (hovered !== null) setTarget(null);
-      emit(null);
-      return;
+      return null;
     }
-    const element = measure(hovered, current.view);
-    const frameBox = contentBox();
-    if (element === null || frameBox.width === 0 || frameBox.height === 0) {
-      emit(null);
-      return;
-    }
+    // A target that renders at no size is outlined at the ghost box a click on
+    // it would hit.
+    const element =
+      measure(hovered, current.view) ?? measureLoose(hovered, current.view);
+    if (element === null) return null;
     const container = section;
     const sectionBox =
       container !== null && container.isConnected
@@ -202,7 +281,7 @@ function track(
       hovered.getAttribute(EDIT_ATTRIBUTE.kind) === 'section'
         ? 'section'
         : 'block';
-    emit({
+    return {
       blockId: hovered.getAttribute(EDIT_ATTRIBUTE.block) ?? '',
       label:
         nonEmpty(hovered.getAttribute(EDIT_ATTRIBUTE.label)) ??
@@ -213,7 +292,45 @@ function track(
       element,
       section: sectionBox,
       frame: frameBox,
-    });
+    };
+  }
+
+  function selectionState(
+    current: Attached,
+    frameBox: Box,
+  ): SelectionState | null {
+    const reader = options.selection;
+    if (reader === undefined) return null;
+    const { selectedId, scopeId } = reader.read();
+    const found = (id: string | null): Element | null =>
+      id === null ? null : elementOfBlock(current.document, id);
+    const nextSelected = found(selectedId);
+    const nextScope = found(scopeId);
+    if (nextSelected !== selectedElement || nextScope !== scopeElement) {
+      selectedElement = nextSelected;
+      scopeElement = nextScope;
+      observe();
+    }
+    // A selected item that takes up no room (a new block with no text yet) is
+    // still outlined, in a box big enough to see and to hang the toolbar from.
+    const selected =
+      nextSelected === null ? null : measureLoose(nextSelected, current.view);
+    const scope = nextScope === null ? null : measure(nextScope, current.view);
+    if (selected === null && scope === null) return null;
+    return { selected, scope, frame: frameBox };
+  }
+
+  function update(): void {
+    animationFrame = 0;
+    const current = attached;
+    const frameBox = contentBox();
+    if (current === null || frameBox.width === 0 || frameBox.height === 0) {
+      emit(null);
+      emitSelection(null);
+      return;
+    }
+    emit(hoverState(current, frameBox));
+    emitSelection(selectionState(current, frameBox));
   }
 
   /** Asks for a measurement in the next animation frame; any number of asks
@@ -232,9 +349,7 @@ function track(
         ? resolveSection(next, current.view)
         : null;
     if (current === null) return;
-    current.resizeObserver.disconnect();
-    if (target !== null) current.resizeObserver.observe(target);
-    if (section !== null) current.resizeObserver.observe(section);
+    observe();
   }
 
   /** The page moved under a pointer that did not: look the pointer up again
@@ -249,9 +364,7 @@ function track(
     if (x < 0 || y < 0 || x >= box.width || y >= box.height) {
       setTarget(null);
     } else {
-      setTarget(
-        resolveTarget(current.document.elementFromPoint(x, y), current.view),
-      );
+      setTarget(resolveTarget(current.document, x, y, options.resolve));
     }
     schedule();
   }
@@ -271,12 +384,15 @@ function track(
     attached = null;
     target = null;
     section = null;
+    selectedElement = null;
+    scopeElement = null;
     pointer = null;
   }
 
   function attach(): void {
     detach();
     emit(null);
+    emitSelection(null);
     const frameDocument = frame.contentDocument;
     if (frameDocument === null || frameDocument.URL === 'about:blank') return;
     const view = frameDocument.defaultView;
@@ -288,7 +404,12 @@ function track(
       const box = contentBox();
       pointer = { x: event.clientX + box.left, y: event.clientY + box.top };
       setTarget(
-        resolveTarget(isElement(event.target) ? event.target : null, view),
+        resolveTarget(
+          frameDocument,
+          event.clientX,
+          event.clientY,
+          options.resolve,
+        ),
       );
       schedule();
     };
@@ -327,6 +448,8 @@ function track(
         view.removeEventListener('resize', changed);
       },
     };
+    // A selection made before this document loaded is measured in it.
+    schedule();
   }
 
   // The pointer reaching anything of the shell but the frame ends the hover.
@@ -355,6 +478,12 @@ function track(
   if (frame.contentDocument?.readyState === 'complete') attach();
 
   return {
+    refresh: () => {
+      // The inputs changed under a pointer that did not move: look it up
+      // again and measure again.
+      if (attached !== null && pointer !== null) settle();
+      else schedule();
+    },
     dispose: () => {
       frame.removeEventListener('load', attach);
       frame.removeEventListener('pointerleave', onFrameLeave);

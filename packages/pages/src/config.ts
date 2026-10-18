@@ -37,6 +37,7 @@ import {
   applyBlockConstraints,
   type BlockConstraintSet,
 } from './constraints.js';
+import { resolveColumnPresets, type ColumnPresetsInput } from './layout.js';
 import { registerResolvedBlocks, type BlockDefinition } from './registry.js';
 import type { ReservedPagePathEvent } from './reserved.js';
 import {
@@ -64,6 +65,10 @@ export type PagesConfig = {
   readonly blocks: readonly BlockDefinition[];
   readonly sectionNestingDepth: number;
   readonly blockDepthCeiling: number;
+  /** The ratio presets a section's layout may use (D-05): the built-ins
+   * minus the host's exclusions plus its additions. Equal splits are always
+   * allowed on top of these. */
+  readonly columnPresets: readonly string[];
 };
 
 export type PagesConfigInput = {
@@ -74,13 +79,16 @@ export type PagesConfigInput = {
   readonly constraints?: readonly BlockConstraintSet[];
   readonly sectionNestingDepth?: number;
   readonly blockDepthCeiling?: number;
+  /** Excludes non-equal built-in column ratios and adds host ratios (D-05). */
+  readonly columnPresets?: ColumnPresetsInput;
   readonly hooks?: PagesHooks;
 };
 
 export type PagesConfigIssueCode =
   | 'NO_BLOCKS'
   | 'INVALID_SECTION_NESTING_DEPTH'
-  | 'INVALID_BLOCK_DEPTH_CEILING';
+  | 'INVALID_BLOCK_DEPTH_CEILING'
+  | 'INVALID_COLUMN_PRESETS';
 
 export type PagesConfigIssue = {
   readonly code: PagesConfigIssueCode;
@@ -174,6 +182,11 @@ export function definePagesConfig(input: PagesConfigInput): PagesConfig {
     });
   }
 
+  const columnPresets = resolveColumnPresets(input.columnPresets);
+  for (const message of columnPresets.issues) {
+    issues.push({ code: 'INVALID_COLUMN_PRESETS', message });
+  }
+
   if (issues.length > 0) {
     throw new PagesConfigError(issues);
   }
@@ -212,6 +225,7 @@ export function definePagesConfig(input: PagesConfigInput): PagesConfig {
     blocks,
     sectionNestingDepth,
     blockDepthCeiling,
+    columnPresets: columnPresets.presets,
   });
 }
 

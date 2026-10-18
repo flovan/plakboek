@@ -122,6 +122,7 @@ const serverOnlyReaches = (graph: ModuleGraph): string[] =>
 const distDir = fileURLToPath(new URL('../../dist/', import.meta.url));
 const clientEntry = path.join(distDir, 'client.js');
 const serverEntry = path.join(distDir, 'server.js');
+const hotEntry = path.join(distDir, 'hot.js');
 
 describe('collectModuleGraph (seeded leaks prove the walker can fail)', () => {
   let dir: string;
@@ -234,9 +235,13 @@ describe('collectModuleGraph (seeded leaks prove the walker can fail)', () => {
 
 describe('the built @plakboek/editor client entry', () => {
   beforeAll(() => {
-    if (!existsSync(clientEntry) || !existsSync(serverEntry)) {
+    if (
+      !existsSync(clientEntry) ||
+      !existsSync(serverEntry) ||
+      !existsSync(hotEntry)
+    ) {
       throw new Error(
-        'run pnpm run build before the editor unit tests: dist/client.js and dist/server.js are required by the client-safety invariant',
+        'run pnpm run build before the editor unit tests: dist/client.js, dist/server.js and dist/hot.js are required by the client-safety invariant',
       );
     }
   });
@@ -275,5 +280,54 @@ describe('the built @plakboek/editor client entry', () => {
     expect(graph.files.has(clientEntry)).toBe(true);
     const source = await readFile(clientEntry, 'utf8');
     expect(source).toContain('adoptedStyleSheets');
+  });
+});
+
+/** The dev swap is plain DOM code: nothing a framework or the chrome brings. */
+const HOT_FORBIDDEN = [
+  'react',
+  'react-dom',
+  '@tanstack/',
+  '@plakboek/render',
+] as const;
+
+const isHotForbidden = (specifier: string): boolean =>
+  HOT_FORBIDDEN.some((entry) =>
+    entry.endsWith('/')
+      ? specifier.startsWith(entry)
+      : specifier === entry || specifier.startsWith(`${entry}/`),
+  );
+
+describe('the built @plakboek/editor hot entry', () => {
+  it('reaches no server module, no framework and no other package', async () => {
+    const graph = await collectModuleGraph(hotEntry);
+    const reached = [...graph.bareSpecifiers.keys()];
+    expect(reached.filter(isServerOnly)).toEqual([]);
+    expect(reached.filter(isHotForbidden)).toEqual([]);
+    expect(graph.violations).toEqual([]);
+  });
+
+  it('walks the entry and holds the dev swap (the walker is not vacuous)', async () => {
+    const graph = await collectModuleGraph(hotEntry);
+    expect(graph.files.has(hotEntry)).toBe(true);
+    expect(await readFile(hotEntry, 'utf8')).toContain(
+      'plakboek:blocks-swapped',
+    );
+  });
+
+  it('is detected when a framework is imported (seeded)', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'plakboek-hot-graph-'));
+    try {
+      await writeFile(
+        path.join(dir, 'hot.js'),
+        "import { useState } from 'react';\nimport { x } from '@plakboek/render';\n",
+      );
+      const graph = await collectModuleGraph(path.join(dir, 'hot.js'));
+      expect(
+        [...graph.bareSpecifiers.keys()].filter(isHotForbidden).sort(),
+      ).toEqual(['@plakboek/render', 'react']);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

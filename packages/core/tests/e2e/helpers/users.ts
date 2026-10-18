@@ -21,12 +21,14 @@ export type TestUser = E2eAccount & { readonly name: string };
  */
 export async function createTestUser(input: {
   readonly roleKey: string;
+  /** The display name; specs that tell two people apart give each their own. */
+  readonly name?: string;
 }): Promise<TestUser> {
   const { default: config } = await import('../../e2e-host/plakboek.config.ts');
   const runtime = createRuntime({ config }, readRuntimeEnv(process.env));
   try {
     const user: TestUser = {
-      name: 'Test User',
+      name: input.name ?? 'Test User',
       email: `e2e-${randomBytes(6).toString('hex')}@example.com`,
       password: `a passphrase ${randomUUID()}`,
     };

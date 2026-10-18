@@ -578,6 +578,65 @@ describe('moveBlock/deleteBlock/computeBlockDeleteImpact (D-08, D-18, D-27, D-38
     expect(orderedIds).toEqual([destinationSibling.id, moving.id]);
   });
 
+  it('previous and next siblings named in the wrong order throw InvalidSiblingReferenceError, write nothing and renumber nothing (code review WR-D-05)', async () => {
+    const page = await freshPage('Inverted sibling references');
+    const owner = ownerOf(page);
+    const section = await insert(page, owner, 'section', null);
+    const a = await insert(page, owner, 'heading', section.id, 1000);
+    const b = await insert(page, owner, 'heading', section.id, 1001);
+    const c = await insert(page, owner, 'heading', section.id, 1002);
+    const d = await insert(page, owner, 'heading', section.id, 1003);
+    const moving = await insert(page, owner, 'heading', section.id, 5000);
+    const before = {
+      moving: await blockRow(moving.id),
+      a: await blockRow(a.id),
+      b: await blockRow(b.id),
+      c: await blockRow(c.id),
+      d: await blockRow(d.id),
+    };
+
+    for (const [previous, next] of [
+      [d.id, b.id],
+      [b.id, b.id],
+    ] as const) {
+      const error: unknown = await moveBlock(deps, actor, {
+        blockId: moving.id,
+        baseVersion: moving.version,
+        pageId: page.id,
+        basePageVersion: (await currentPage(page.id)).version,
+        newParentBlockId: section.id,
+        beforeSiblingId: previous,
+        afterSiblingId: next,
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(InvalidSiblingReferenceError);
+      expect((error as InvalidSiblingReferenceError).reason).toBe('inverted');
+    }
+
+    expect(await blockRow(moving.id)).toEqual(before.moving);
+    expect(await blockRow(a.id)).toEqual(before.a);
+    expect(await blockRow(b.id)).toEqual(before.b);
+    expect(await blockRow(c.id)).toEqual(before.c);
+    expect(await blockRow(d.id)).toEqual(before.d);
+
+    // The same neighbours in the right order still place the block between.
+    await moveBlock(deps, actor, {
+      blockId: moving.id,
+      baseVersion: moving.version,
+      pageId: page.id,
+      basePageVersion: (await currentPage(page.id)).version,
+      newParentBlockId: section.id,
+      beforeSiblingId: b.id,
+      afterSiblingId: d.id,
+    });
+    expect(await siblingIdsInOrder(section.id, page.id)).toEqual([
+      a.id,
+      b.id,
+      c.id,
+      moving.id,
+      d.id,
+    ]);
+  });
+
   it('deleting a block with two descendants removes three rows and writes three delete-kind revisions sharing one revision_batch_id', async () => {
     const page = await freshPage('Delete subtree, three revisions');
     const owner = ownerOf(page);

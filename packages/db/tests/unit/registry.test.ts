@@ -42,6 +42,18 @@ describe('shipped MIGRATIONS registry', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
+  it('ships 0004_block_layout as its fourth entry, with no duplicate names', () => {
+    expect(MIGRATIONS[3]?.name).toBe('0004_block_layout');
+    const names = MIGRATIONS.map((migration) => migration.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('ships 0005_revision_block_ref as its fifth entry, with no duplicate names', () => {
+    expect(MIGRATIONS[4]?.name).toBe('0005_revision_block_ref');
+    const names = MIGRATIONS.map((migration) => migration.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
   it("gives every entry the name of the file it is imported from, in the array's order", () => {
     const indexSource = readFileSync(INDEX_PATH, 'utf8');
     const fileByBinding = new Map(

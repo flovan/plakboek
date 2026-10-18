@@ -21,6 +21,8 @@ describe('EDIT_ATTRIBUTE', () => {
       label: 'data-pk-label',
       field: 'data-pk-field',
       unavailable: 'data-pk-unavailable',
+      empty: 'data-pk-empty',
+      inlineEditing: 'data-pk-inline-editing',
     });
     expect(Object.isFrozen(EDIT_ATTRIBUTE)).toBe(true);
   });

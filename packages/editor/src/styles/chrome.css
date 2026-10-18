@@ -88,6 +88,11 @@
   --color-input-fill: var(--pk-input-fill);
   --color-focus-ring: var(--pk-focus-ring);
   --color-frame-border: var(--pk-frame-border);
+  --color-overlay-selected-fill: var(--pk-overlay-selected-fill);
+  --color-overlay-drag-source: var(--pk-overlay-drag-source);
+  --color-attention: var(--pk-attention);
+  --color-attention-marker: var(--pk-attention-marker);
+  --color-destructive-contrast: var(--pk-destructive-contrast);
 }
 
 /*
@@ -125,6 +130,17 @@
   --pk-input-fill: #ffffff;
   --pk-focus-ring: var(--pk-accent);
   --pk-frame-border: var(--pk-border);
+
+  /*
+   * Editing tokens. The tint, the drag dim and the marker fill are drawn over
+   * the site, so they are the same in both schemes; attention and the
+   * destructive contrast text sit on chrome and follow the scheme.
+   */
+  --pk-overlay-selected-fill: rgba(79, 70, 229, 0.08);
+  --pk-overlay-drag-source: rgba(24, 24, 27, 0.16);
+  --pk-attention: #b45309;
+  --pk-attention-marker: #b45309;
+  --pk-destructive-contrast: #ffffff;
 }
 
 /* Tokens, dark, when the browser prefers it. */
@@ -142,6 +158,8 @@
     --pk-border: #3f3f46;
     --pk-scrim: rgba(0, 0, 0, 0.6);
     --pk-input-fill: #18181b;
+    --pk-attention: #fbbf24;
+    --pk-destructive-contrast: #09090b;
   }
 }
 
@@ -165,6 +183,8 @@
   --pk-border: #e4e4e7;
   --pk-scrim: rgba(24, 24, 27, 0.4);
   --pk-input-fill: #ffffff;
+  --pk-attention: #b45309;
+  --pk-destructive-contrast: #ffffff;
 }
 
 :host([data-theme='dark']) {
@@ -182,6 +202,8 @@
   --pk-border: #3f3f46;
   --pk-scrim: rgba(0, 0, 0, 0.6);
   --pk-input-fill: #18181b;
+  --pk-attention: #fbbf24;
+  --pk-destructive-contrast: #09090b;
 }
 
 /*
@@ -196,6 +218,8 @@
     --pk-overlay-halo: transparent;
     --pk-focus-ring: Highlight;
     --pk-frame-border: CanvasText;
+    --pk-overlay-selected-fill: transparent;
+    --pk-attention-marker: Highlight;
   }
 }
 
@@ -255,6 +279,7 @@
 
   /* 24px of stage on every side of the frame. */
   .pk-stage {
+    position: relative;
     min-width: 0;
     min-height: 0;
     padding: 24px;
@@ -282,6 +307,34 @@
 
   :host([data-layout='full']) .pk-stage {
     padding: 0;
+  }
+
+  /*
+   * The panel drawer of the full layout: a 280px column between the rail and
+   * the stage. It is not drawn over the site; opening it (the host's
+   * `data-drawer` attribute) takes the width from the frame's column in one
+   * step, so the site's own media queries flip once. It sits in the sidebar's
+   * stacking layer.
+   */
+  .pk-drawer {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    padding: 16px;
+    overflow: hidden;
+    background: var(--pk-surface);
+    border-right: 1px solid var(--pk-border);
+  }
+
+  .pk-drawer[hidden] {
+    display: none;
+  }
+
+  :host([data-layout='full'][data-drawer='open']) .pk-shell {
+    grid-template-columns: 56px 280px minmax(0, 1fr);
   }
 
   :host([data-layout='full']) .pk-frame {
@@ -411,13 +464,25 @@
   :host([data-layout='full']) .pk-frame {
     box-shadow: none;
   }
+
+  .pk-toolbar,
+  .pk-toolbar-menu,
+  .pk-toast {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
 }
 
-:host([data-theme='dark']) .pk-frame {
+:host([data-theme='dark']) .pk-frame,
+:host([data-theme='dark']) .pk-toolbar,
+:host([data-theme='dark']) .pk-toolbar-menu,
+:host([data-theme='dark']) .pk-toast {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-:host([data-theme='light']) .pk-frame {
+:host([data-theme='light']) .pk-frame,
+:host([data-theme='light']) .pk-toolbar,
+:host([data-theme='light']) .pk-toolbar-menu,
+:host([data-theme='light']) .pk-toast {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
@@ -456,7 +521,9 @@
   }
 
   .pk-overlay-outline,
-  .pk-overlay-section {
+  .pk-overlay-section,
+  .pk-overlay-selected,
+  .pk-overlay-scope {
     position: absolute;
     box-sizing: border-box;
     pointer-events: none;
@@ -468,8 +535,416 @@
     border: 2px solid var(--pk-overlay-outline);
   }
 
-  .pk-overlay-section {
+  .pk-overlay-section,
+  .pk-overlay-scope {
     border: 1px dashed var(--pk-overlay-outline);
+  }
+
+  /*
+   * The selected item: the same 2px border and 1px halo as the hover outline,
+   * and a tint inside. Forced colours drop the tint (its token becomes
+   * transparent) and widen the border to 4px, which the system highlight
+   * colour makes visible without the tint.
+   */
+  .pk-overlay-selected {
+    border: 2px solid var(--pk-overlay-outline);
+    background: var(--pk-overlay-selected-fill);
+  }
+
+  @media (forced-colors: active) {
+    .pk-overlay-selected {
+      border-width: 4px;
+      border-color: Highlight;
+    }
+
+    .pk-overlay-scope {
+      border-color: Highlight;
+    }
+  }
+
+  /*
+   * The interaction plane: the same box as the overlay, clipped to the frame,
+   * but part of the accessibility tree and the tab order. The plane itself
+   * takes no pointer events; only what it holds (the toolbar) does.
+   */
+  .pk-overlay-interaction {
+    position: absolute;
+    z-index: 3;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .pk-toolbar {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 40px;
+    padding: 4px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    pointer-events: auto;
+    width: max-content;
+  }
+
+  .pk-toolbar-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+    padding: 4px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  }
+
+  /*
+   * Insert points: a 16px band over the gap between siblings. It takes the
+   * pointer, and shows its line and its 24px round button (32px hit area)
+   * while hovered, holding focus or holding the open picker. The line and the
+   * button follow the accent colours; forced colours use the system ones.
+   */
+  .pk-insert {
+    position: absolute;
+    box-sizing: border-box;
+    opacity: 0;
+    pointer-events: auto;
+  }
+
+  .pk-insert:hover,
+  .pk-insert:focus-within,
+  .pk-insert[data-always],
+  .pk-insert[data-open] {
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .pk-insert {
+      transition: opacity 100ms linear;
+    }
+  }
+
+  .pk-insert-line {
+    position: absolute;
+    background: var(--pk-overlay-outline);
+    pointer-events: none;
+    forced-color-adjust: none;
+  }
+
+  .pk-insert[data-line='across'] .pk-insert-line {
+    top: 50%;
+    right: 0;
+    left: 0;
+    height: 2px;
+    margin-top: -1px;
+  }
+
+  .pk-insert[data-line='down'] .pk-insert-line {
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    margin-left: -1px;
+  }
+
+  /*
+   * The button's 32px hit area reaches past the 16px band, so it takes the
+   * pointer only while its band is hovered or holds focus or the picker: the
+   * rest of the time the page under it stays hoverable.
+   */
+  .pk-insert-button {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin: -16px 0 0 -16px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .pk-insert:hover .pk-insert-button,
+  .pk-insert:focus-within .pk-insert-button,
+  .pk-insert[data-always] .pk-insert-button,
+  .pk-insert[data-open] .pk-insert-button {
+    pointer-events: auto;
+  }
+
+  .pk-insert-dot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--pk-accent);
+    color: var(--pk-accent-contrast);
+    forced-color-adjust: none;
+  }
+
+  .pk-insert-button:focus-visible .pk-insert-dot {
+    outline: 2px solid var(--pk-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /*
+   * The prompts of empty places: a dashed box over an empty column and a card
+   * in the middle of an empty page. Only the buttons and the card take the
+   * pointer, so a click on the cell still selects the column.
+   */
+  .pk-empty-box {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--pk-overlay-outline);
+    pointer-events: none;
+    forced-color-adjust: none;
+  }
+
+  .pk-empty-box > button {
+    pointer-events: auto;
+  }
+
+  .pk-empty-page {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    pointer-events: none;
+  }
+
+  .pk-empty-card {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 320px;
+    padding: 24px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    pointer-events: auto;
+  }
+
+  /* The picker: a non-modal popover over the interaction plane. */
+  .pk-picker {
+    position: absolute;
+    z-index: 1;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    width: 320px;
+    overflow: hidden;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+    pointer-events: auto;
+  }
+
+  /* The needs-input marker: attention colour, white text, a pointer control that selects its block. */
+  .pk-marker {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 20px;
+    padding: 0 6px;
+    border: 0;
+    border-radius: 4px;
+    background: var(--pk-attention-marker);
+    color: var(--pk-overlay-chip-text);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    pointer-events: auto;
+    cursor: pointer;
+    forced-color-adjust: none;
+  }
+
+  .pk-marker:focus-visible {
+    outline: 2px solid var(--pk-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* While a drag runs or the delete confirmation is open the markers stay drawn and take no pointer. */
+  [data-markers][data-inert] .pk-marker {
+    pointer-events: none;
+  }
+
+  @media (forced-colors: active) {
+    .pk-insert-dot {
+      background: Highlight;
+      color: HighlightText;
+    }
+
+    .pk-insert-line {
+      background: Highlight;
+    }
+
+    .pk-picker,
+    .pk-empty-card {
+      border-color: CanvasText;
+      background: Canvas;
+    }
+  }
+
+  /*
+   * The undo toast: bottom centre of the frame, 16px above its bottom edge
+   * (the stage keeps 24px around the frame, none in the full layout), above
+   * the overlay and below the confirmation dialogs.
+   */
+  .pk-toast {
+    position: absolute;
+    z-index: 4;
+    bottom: 40px;
+    left: 50%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: max-content;
+    max-width: min(400px, calc(100% - 48px));
+    padding: 8px 8px 8px 16px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    transform: translateX(-50%);
+  }
+
+  :host([data-layout='full']) .pk-toast {
+    bottom: 16px;
+    max-width: min(400px, calc(100% - 32px));
+  }
+
+  /* Shown only while it animates; with reduced motion it has no fill at all. */
+  .pk-overlay-flash {
+    position: absolute;
+    box-sizing: border-box;
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  @media (forced-colors: active) {
+    .pk-toolbar,
+    .pk-toolbar-menu,
+    .pk-toast {
+      border-color: CanvasText;
+      background: Canvas;
+    }
+
+    .pk-overlay-flash {
+      display: none;
+    }
+  }
+
+  /*
+   * Dragging. The source is dimmed where it stands (the page does not reflow),
+   * the insertion line is 2px with a round 8px cap at each end, and the label
+   * follows the pointer in the shell's viewport, above everything else.
+   */
+  .pk-overlay-drag-source {
+    position: absolute;
+    pointer-events: none;
+    background: var(--pk-overlay-drag-source);
+    forced-color-adjust: none;
+  }
+
+  .pk-drag-line {
+    position: absolute;
+    pointer-events: none;
+    background: var(--pk-overlay-outline);
+    forced-color-adjust: none;
+  }
+
+  .pk-drag-line::before,
+  .pk-drag-line::after {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: inherit;
+  }
+
+  .pk-drag-line[data-axis='horizontal']::before {
+    top: -3px;
+    left: -4px;
+  }
+
+  .pk-drag-line[data-axis='horizontal']::after {
+    top: -3px;
+    right: -4px;
+  }
+
+  .pk-drag-line[data-axis='vertical']::before {
+    top: -4px;
+    left: -3px;
+  }
+
+  .pk-drag-line[data-axis='vertical']::after {
+    bottom: -4px;
+    left: -3px;
+  }
+
+  .pk-drag-surface {
+    position: absolute;
+    pointer-events: auto;
+    cursor: grabbing;
+    user-select: none;
+  }
+
+  .pk-drag-surface[data-legal='false'] {
+    cursor: no-drop;
+  }
+
+  .pk-drag-label {
+    position: fixed;
+    z-index: 6;
+    box-sizing: border-box;
+    height: 20px;
+    max-width: 240px;
+    padding: 0 8px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--pk-overlay-outline);
+    color: var(--pk-overlay-chip-text);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+    forced-color-adjust: none;
+  }
+
+  @media (forced-colors: active) {
+    .pk-drag-line,
+    .pk-drag-label {
+      background: Highlight;
+      color: HighlightText;
+    }
   }
 
   .pk-overlay-chip {
@@ -503,6 +978,30 @@
   .pk-overlay-section,
   .pk-overlay-chip {
     animation: pk-overlay-in 100ms ease-out;
+  }
+
+  .pk-toolbar {
+    animation: pk-overlay-in 100ms ease-out;
+  }
+
+  .pk-toast {
+    animation: pk-overlay-in 120ms ease-out;
+  }
+
+  /* The drop flash: the tint goes from 24% to the resting 8% over 400ms, by opacity only. */
+  .pk-overlay-flash {
+    background: rgba(79, 70, 229, 0.16);
+    animation: pk-overlay-flash 400ms ease-out;
+  }
+
+  @keyframes pk-overlay-flash {
+    from {
+      opacity: 1;
+    }
+
+    to {
+      opacity: 0;
+    }
   }
 
   @keyframes pk-overlay-in {

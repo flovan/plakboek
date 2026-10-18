@@ -42,10 +42,18 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   BlockConfigError: 'class',
   BlockPropsValidationError: 'class',
   defineBlocks: 'function',
+  findMissingRequiredProps: 'function',
   getBlockDefinition: 'function',
   listBlockDefinitions: 'function',
   resolveBlockProperties: 'function',
   UnknownBlockTypeError: 'class',
+  // layout
+  BlockLayoutValidationError: 'class',
+  BUILT_IN_COLUMN_PRESETS: 'constant',
+  COLUMN_ALIGN_VALUES: 'constant',
+  COLUMN_RATIO_PATTERN: 'constant',
+  previewBlockValues: 'function',
+  resolveColumnPresets: 'function',
   // constraints
   BlockConstraintError: 'class',
   constrainBlock: 'function',
@@ -60,6 +68,7 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   // placement
   BlockDepthExceededError: 'class',
   BlockPlacementError: 'class',
+  checkPlacement: 'function',
   ROOT_PARENT_SENTINEL: 'constant',
   SectionNestingDepthExceededError: 'class',
   SectionRequiredError: 'class',
@@ -129,6 +138,18 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   readBlockTree: 'function',
   StaleBlockVersionError: 'class',
   updateBlockProps: 'function',
+  // edit-batch
+  applyBlockEdit: 'function',
+  BLOCK_EDIT_MAX_NODES: 'constant',
+  BLOCK_EDIT_MAX_OPS: 'constant',
+  BlockEditLimitError: 'class',
+  BlockIdConflictError: 'class',
+  BlockOwnershipError: 'class',
+  SectionColumnRequiredError: 'class',
+  // columns
+  normaliseSnapshotColumns: 'function',
+  upgradeAllSectionColumns: 'function',
+  upgradeSectionColumns: 'function',
   // revisions
   computeBlockRestorePreview: 'function',
   DegradedRestoreError: 'class',
@@ -172,6 +193,7 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   PageLockNotFoundError: 'class',
   PageLockStateChangedError: 'class',
   PageLockTakeoverForbiddenError: 'class',
+  readPageLockView: 'function',
   releasePageLock: 'function',
   renewPageLock: 'function',
   takeOverPageLock: 'function',
@@ -224,6 +246,13 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'ResolvedBlockPlacement',
   'ResolvedBlockProperty',
   'ResolvedPropertyConstraint',
+  'StarterNode',
+  // layout
+  'BlockLayout',
+  'BlockLayoutValidationIssue',
+  'ColumnAlign',
+  'ColumnPresetsInput',
+  'PreviewBlockValuesResult',
   // constraints
   'BlockConstraintIssue',
   'BlockConstraintIssueCode',
@@ -240,6 +269,8 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'SectionLintReason',
   // placement
   'BlockPlacementReason',
+  'PlacementCheckInput',
+  'PlacementRefusalReason',
   // versioning
   'DegradedBlockEvent',
   'DegradedReason',
@@ -282,6 +313,12 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'InsertBlockInput',
   'MoveBlockInput',
   'UpdateBlockPropsInput',
+  // edit-batch
+  'BlockEditInput',
+  'BlockEditNode',
+  'BlockEditOp',
+  'BlockEditPosition',
+  'BlockEditResult',
   // revisions
   'BlockRevisionSummary',
   'ComputeBlockRestorePreviewInput',
@@ -316,6 +353,7 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'AcquirePageLockInput',
   'PageLockGrant',
   'PageLockState',
+  'PageLockView',
   'ReleasePageLockInput',
   'RenewPageLockInput',
   'TakeOverPageLockInput',
@@ -351,6 +389,13 @@ const WITHHELD: readonly string[] = Object.freeze([
   'recordBlockRevision',
   'pruneBlockRevisions',
   'newRevisionBatchId',
+  // tree.ts
+  'insertBlockInTransaction',
+  'updateBlockInTransaction',
+  'moveBlockInTransaction',
+  'deleteSubtreeInTransaction',
+  'resolvePositionSortOrder',
+  'loadBlockForUpdate',
   // pages.ts
   'loadPageForUpdate',
   'recordPageUrlHistory',
@@ -358,6 +403,7 @@ const WITHHELD: readonly string[] = Object.freeze([
   // placement.ts
   'assertPlacementAllowed',
   'countAncestorSections',
+  'loadParentForPlacement',
   // reserved.ts
   'assertNotReservedFirstSegment',
   'isReservedPageSlug',
@@ -375,6 +421,10 @@ const WITHHELD: readonly string[] = Object.freeze([
   'assertPageWritable',
   // registry.ts
   'validateBlockProps',
+  // layout.ts
+  'validateBlockLayout',
+  'readStoredLayout',
+  'isEqualRatio',
   'registerResolvedBlocks',
   // constraints.ts
   'applyBlockConstraints',
@@ -413,6 +463,8 @@ const ERROR_FACTORIES: Readonly<
     new (K as new (i: unknown[]) => unknown)([]),
   UnknownBlockTypeError: (K) =>
     new (K as new (t: string) => unknown)('made_up'),
+  BlockLayoutValidationError: (K) =>
+    new (K as new (i: unknown[]) => unknown)([]),
   BlockConstraintError: (K) => new (K as new (i: unknown[]) => unknown)([]),
   BlockCompatibilityError: (K) =>
     new (K as new (r: unknown) => unknown)({
@@ -486,6 +538,13 @@ const ERROR_FACTORIES: Readonly<
       1,
       2,
     ),
+  BlockOwnershipError: (K) =>
+    new (K as new (id: string) => unknown)('block-id'),
+  BlockIdConflictError: (K) =>
+    new (K as new (id: string) => unknown)('block-id'),
+  SectionColumnRequiredError: (K) =>
+    new (K as new (id: string) => unknown)('section-id'),
+  BlockEditLimitError: (K) => new (K as new (l: string) => unknown)('ops'),
   DegradedRestoreError: (K) =>
     new (K as new (o: unknown[]) => unknown)([
       { revisionId: 'rev-id', blockId: 'block-id', blockType: 'hero' },

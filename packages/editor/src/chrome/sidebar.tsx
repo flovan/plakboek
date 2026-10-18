@@ -1,36 +1,65 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import {
   CONTROL,
   displayNameOf,
-  forgetEditorFlag,
   skipToPage,
+  useLeaveGuard,
+  type LeaveHandler,
+  type SidebarEditing,
   type SidebarLayout,
   type SidebarSlots,
 } from './controls.js';
-import { ExitIcon, ExpandIcon, FrameIcon, LogOutIcon } from './icons.js';
+import {
+  ExitIcon,
+  ExpandIcon,
+  FrameIcon,
+  LogOutIcon,
+  SpinnerIcon,
+} from './icons.js';
 import type { ShellIsland } from './island.js';
 import { Rail } from './rail.js';
 import { STAGE_ID } from './stage.js';
 import { STRINGS } from './strings.js';
 import { Tooltip } from './tooltip.js';
 
-export type { SidebarLayout, SidebarSlots } from './controls.js';
+export type {
+  SidebarEditing,
+  SidebarLayout,
+  SidebarSlots,
+} from './controls.js';
 
 export type SidebarProps = {
   readonly island: ShellIsland;
   readonly slots?: SidebarSlots;
+  /** The editing regions; absent for a user who cannot edit. */
+  readonly editing?: SidebarEditing;
   /** The toggle only works once the client has hydrated. */
   readonly hydrated: boolean;
   /** The layout the shell is in now, for the toggle's pressed state. */
   readonly layout: SidebarLayout;
   readonly onToggleLayout?: () => void;
+  /** Called by Exit edit mode and Log out before they leave; it calls `proceed` to go. */
+  readonly onLeave?: LeaveHandler;
+  /** The Properties sheet, a layer over the sidebar. */
+  readonly sheet?: ReactNode;
+  /** The sheet is open: the sidebar scales down behind it and is hidden at the end. */
+  readonly receded?: boolean;
 };
 
 /** The framed layer: shown in place until the host is in the full layout,
  * then hidden and nudged left. See the rail's layer for why both are always
- * in the markup. */
+ * in the markup. While the Properties sheet is open (`data-receded`) it
+ * scales to 94% and is hidden at the end of the transition; coming back it is
+ * visible at once, because `visibility` is in the transition only while
+ * receding. */
 const SIDEBAR_BODY =
-  'visible absolute inset-0 flex min-h-0 flex-col p-4 opacity-100 motion-safe:transition-[opacity,translate] motion-safe:duration-240 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-safe:[:host([data-layout=full])_&]:transition-[opacity,translate,visibility] [:host([data-layout=full])_&]:invisible [:host([data-layout=full])_&]:-translate-x-2 [:host([data-layout=full])_&]:opacity-0';
+  'visible absolute inset-0 flex min-h-0 flex-col p-4 opacity-100 motion-safe:transition-[opacity,translate,scale] motion-safe:duration-240 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-safe:[:host([data-layout=full])_&]:transition-[opacity,translate,visibility] [:host([data-layout=full])_&]:invisible [:host([data-layout=full])_&]:-translate-x-2 [:host([data-layout=full])_&]:opacity-0 data-receded:invisible data-receded:scale-[0.94] motion-safe:data-receded:transition-[opacity,translate,scale,visibility]';
 
 /** The user's name, clamped to two lines; once the client is running, a
  * clamped name also carries a tooltip with the whole of it. */
@@ -63,7 +92,18 @@ function UserName(props: { readonly name: string }): ReactElement {
  * come from classes.
  */
 export function Sidebar(props: SidebarProps): ReactElement {
-  const { island, slots, hydrated, layout, onToggleLayout } = props;
+  const {
+    island,
+    slots,
+    editing,
+    hydrated,
+    layout,
+    onToggleLayout,
+    onLeave,
+    sheet,
+    receded,
+  } = props;
+  const { leaving, onExitClick, onLogoutSubmit } = useLeaveGuard(onLeave);
   const displayName = displayNameOf(island.user);
   const pressed = layout === 'full';
   return (
@@ -71,7 +111,11 @@ export function Sidebar(props: SidebarProps): ReactElement {
       aria-label={STRINGS['landmark.sidebar']}
       className="pk-sidebar relative overflow-visible"
     >
-      <div className={SIDEBAR_BODY} data-sidebar="">
+      <div
+        className={SIDEBAR_BODY}
+        data-sidebar=""
+        data-receded={receded === true ? '' : undefined}
+      >
         <a
           href={`#${STAGE_ID}`}
           onClick={skipToPage}
@@ -90,12 +134,18 @@ export function Sidebar(props: SidebarProps): ReactElement {
             {STRINGS['sidebar.readOnly']}
           </div>
         ) : null}
-        <div data-slot="nav" className="min-h-0 flex-1 overflow-y-auto">
+        {editing?.notice}
+        {editing?.tools}
+        <div data-slot="panel" className="min-h-0 flex-1 overflow-y-auto">
+          {editing?.panel}
+        </div>
+        <div data-slot="nav" className="max-h-[40%] shrink-0 overflow-y-auto">
           {slots?.nav?.({ layout: 'framed' })}
         </div>
         <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-4">
           <button
             type="button"
+            data-layout-toggle=""
             aria-pressed={pressed}
             disabled={!hydrated}
             onClick={onToggleLayout}
@@ -104,22 +154,35 @@ export function Sidebar(props: SidebarProps): ReactElement {
             {pressed ? <ExpandIcon /> : <FrameIcon />}
             {STRINGS['sidebar.fullWidth']}
           </button>
-          <a href={island.visitorLocation} className={CONTROL}>
-            <ExitIcon />
-            {STRINGS['sidebar.exit']}
+          <a
+            href={island.visitorLocation}
+            onClick={onExitClick}
+            aria-disabled={leaving === 'exit' ? true : undefined}
+            className={CONTROL}
+          >
+            {leaving === 'exit' ? <SpinnerIcon /> : <ExitIcon />}
+            {leaving === 'exit'
+              ? STRINGS['loading.saving']
+              : STRINGS['sidebar.exit']}
           </a>
           <div className="mt-2 flex flex-col gap-2">
             <UserName name={displayName} />
             <form
               method="post"
               action={island.logoutPath}
-              onSubmit={forgetEditorFlag}
+              onSubmit={onLogoutSubmit}
               className="m-0"
             >
               <input type="hidden" name="next" value={island.visitorLocation} />
-              <button type="submit" className={CONTROL}>
-                <LogOutIcon />
-                {STRINGS['sidebar.logOut']}
+              <button
+                type="submit"
+                aria-disabled={leaving === 'logout' ? true : undefined}
+                className={CONTROL}
+              >
+                {leaving === 'logout' ? <SpinnerIcon /> : <LogOutIcon />}
+                {leaving === 'logout'
+                  ? STRINGS['loading.saving']
+                  : STRINGS['sidebar.logOut']}
               </button>
             </form>
           </div>
@@ -128,10 +191,13 @@ export function Sidebar(props: SidebarProps): ReactElement {
       <Rail
         island={island}
         slots={slots}
+        editing={editing}
         hydrated={hydrated}
         layout={layout}
         onToggleLayout={onToggleLayout}
+        onLeave={onLeave}
       />
+      {sheet}
     </aside>
   );
 }

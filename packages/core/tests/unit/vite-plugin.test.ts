@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { EDIT_ATTRIBUTE } from '@plakboek/render';
 import type { Plugin } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -13,6 +14,8 @@ const VIRTUAL_ID = 'virtual:plakboek/host';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
 const EDITOR_CLIENT_ID = 'virtual:plakboek/editor-client';
 const RESOLVED_EDITOR_CLIENT_ID = `\0${EDITOR_CLIENT_ID}`;
+const BLOCK_EDIT_ID = 'virtual:plakboek/block-edit';
+const RESOLVED_BLOCK_EDIT_ID = `\0${BLOCK_EDIT_ID}`;
 const ROOT = '/work/host';
 
 type Hook = (this: unknown, ...args: unknown[]) => unknown;
@@ -109,7 +112,23 @@ describe('plakboek() editor chunk', () => {
     return plugin;
   }
 
-  const clientEnvironment = { environment: { name: 'client' } };
+  /** The block-edit module's info, as the bundler reports it when the
+   * host's glob matched `matched`. */
+  function moduleInfo(matched: readonly string[] = []): {
+    getModuleInfo: (id: string) => { dynamicallyImportedIds: string[] } | null;
+  } {
+    return {
+      getModuleInfo: (id) =>
+        id === '\0virtual:plakboek/block-edit'
+          ? { dynamicallyImportedIds: [...matched] }
+          : null,
+    };
+  }
+
+  const clientEnvironment = {
+    environment: { name: 'client' },
+    ...moduleInfo(),
+  };
 
   function bundleWithEditor(): Record<string, unknown> {
     return {
@@ -145,18 +164,59 @@ describe('plakboek() editor chunk', () => {
     ).toBe(RESOLVED_EDITOR_CLIENT_ID);
   });
 
-  it('loads a module that imports bootEditor from the editor client entry and calls it', () => {
+  it('loads a module that boots the editor with the host block edit loaders', () => {
     const source = callHook(
       instance().load,
       { environment: { name: 'client' } },
       RESOLVED_EDITOR_CLIENT_ID,
     ) as string;
     const lines = source.split('\n');
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
     expect(lines[0]).toMatch(
       /^import \{ bootEditor \} from ".*editor.*client\.js";$/,
     );
-    expect(lines[1]).toBe('bootEditor();');
+    expect(lines[1]).toBe(
+      `import { blockEditModules } from "${BLOCK_EDIT_ID}";`,
+    );
+    expect(lines[2]).toBe(
+      'bootEditor(document, { blockEdit: blockEditModules });',
+    );
+  });
+
+  it('resolves the block-edit id, and its resolved form, to one module', () => {
+    const plugin = instance();
+    expect(callHook(plugin.resolveId, undefined, BLOCK_EDIT_ID)).toBe(
+      RESOLVED_BLOCK_EDIT_ID,
+    );
+    expect(callHook(plugin.resolveId, undefined, RESOLVED_BLOCK_EDIT_ID)).toBe(
+      RESOLVED_BLOCK_EDIT_ID,
+    );
+  });
+
+  it('loads the default lazy glob for block edit modules', () => {
+    const source = callHook(
+      instance().load,
+      { environment: { name: 'client' } },
+      RESOLVED_BLOCK_EDIT_ID,
+    ) as string;
+    expect(source).toBe(
+      'export const blockEditModules = import.meta.glob(["/blocks/**/*.edit.{ts,tsx}"]);',
+    );
+  });
+
+  it('loads the host patterns from the blockEdit option, one or several', () => {
+    const load = (blockEdit: PlakboekPluginOptions['blockEdit']): string =>
+      callHook(
+        instance({ blockEdit }).load,
+        { environment: { name: 'client' } },
+        RESOLVED_BLOCK_EDIT_ID,
+      ) as string;
+    expect(load('/app/widgets/*.edit.tsx')).toBe(
+      'export const blockEditModules = import.meta.glob(["/app/widgets/*.edit.tsx"]);',
+    );
+    expect(load(['/a/*.edit.ts', '/b/*.edit.ts'])).toBe(
+      'export const blockEditModules = import.meta.glob(["/a/*.edit.ts","/b/*.edit.ts"]);',
+    );
   });
 
   it('emits the editor chunk when building the client, and only then', () => {
@@ -294,6 +354,46 @@ describe('plakboek() editor chunk', () => {
         bundle,
       ),
     ).toThrow(/matched "\/node_modules\/@dnd-kit\/"/);
+  });
+
+  it('counts the modules the blockEdit glob matched as editor code, and nothing else named like them', () => {
+    const bundle = bundleWithEditor();
+    bundle['assets/home-1.js'] = {
+      type: 'chunk',
+      name: 'home',
+      fileName: 'assets/home-1.js',
+      isEntry: true,
+      imports: [],
+      dynamicImports: [],
+      moduleIds: ['/work/app/routes/profile.edit.tsx'],
+    };
+    const emitFile = vi.fn();
+    // An ordinary host module that only shares the file name pattern passes.
+    callHook(
+      building().generateBundle,
+      { ...clientEnvironment, emitFile },
+      {},
+      bundle,
+    );
+    expect(emitFile).toHaveBeenCalledTimes(1);
+
+    // The same module is a leak when the glob is what matched it.
+    const error = vi.fn((message: string) => {
+      throw new Error(message);
+    });
+    expect(() =>
+      callHook(
+        building().generateBundle,
+        {
+          ...clientEnvironment,
+          ...moduleInfo(['/work/app/routes/profile.edit.tsx']),
+          emitFile: vi.fn(),
+          error,
+        },
+        {},
+        bundle,
+      ),
+    ).toThrow(/profile\.edit\.tsx \(matched "blockEdit glob"\)/);
   });
 
   it('writes no sidecar for a server bundle', () => {
@@ -464,5 +564,67 @@ describe('plakboek() development hooks', () => {
     const plugin = instance();
     expect(hotUpdate(plugin, 'client', [{ id: 'a' }])).toBe(0);
     expect(hotUpdate(plugin, 'ssr', [])).toBe(0);
+  });
+});
+
+describe('plakboek() dev swap module', () => {
+  const DEV_SWAP_ID = 'virtual:plakboek/dev-swap';
+  const RESOLVED_DEV_SWAP_ID = `\0${DEV_SWAP_ID}`;
+
+  function pluginFor(command: 'serve' | 'build'): Plugin {
+    const plugin = instance();
+    // `serve` also loads `.env` from the root; a nonexistent root loads none.
+    callHook(
+      plugin.config,
+      undefined,
+      { root: ROOT },
+      { mode: command === 'serve' ? 'development' : 'production', command },
+    );
+    return plugin;
+  }
+
+  const client = { environment: { name: 'client' } };
+
+  it('resolves its virtual id', () => {
+    expect(callHook(instance().resolveId, undefined, DEV_SWAP_ID)).toBe(
+      RESOLVED_DEV_SWAP_ID,
+    );
+  });
+
+  it('serves a module that swaps blocks on the plugin event, from the editor hot entry', () => {
+    const source = callHook(
+      pluginFor('serve').load,
+      client,
+      RESOLVED_DEV_SWAP_ID,
+    ) as string;
+    expect(source).toContain('createDevBlockSwap');
+    expect(source).toContain('plakboek:blocks-changed');
+    expect(source).toContain('/editor/dist/hot.js');
+    // The edit shell holds no blocks; only a visitor page or the frame swaps.
+    expect(source).toContain("mode === 'frame'");
+  });
+
+  it('names the same block attributes the renderer writes', () => {
+    const source = callHook(
+      pluginFor('serve').load,
+      client,
+      RESOLVED_DEV_SWAP_ID,
+    ) as string;
+    expect(source).toContain(`const BLOCK = '${EDIT_ATTRIBUTE.block}'`);
+    expect(source).toContain(`const TYPE = '${EDIT_ATTRIBUTE.type}'`);
+  });
+
+  it('is an empty module in a build', () => {
+    expect(
+      callHook(pluginFor('build').load, client, RESOLVED_DEV_SWAP_ID),
+    ).toBe('export {};');
+  });
+
+  it('exports devMode true on the server under serve and false in the client stub', () => {
+    const plugin = pluginFor('serve');
+    const hostSource = (name: 'ssr' | 'client') =>
+      callHook(plugin.load, { environment: { name } }, RESOLVED_ID) as string;
+    expect(hostSource('ssr')).toContain('export const devMode = true;');
+    expect(hostSource('client')).toContain('export const devMode = false;');
   });
 });

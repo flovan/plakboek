@@ -1,10 +1,37 @@
 import type { ReactElement } from 'react';
+import type { CatalogueEntry } from '../api-types.js';
+import type { Point } from '../client/overlay/geometry.js';
 import { OverlayLayer } from '../client/overlay/overlay-layer.js';
+import type { InsertSlot } from '../client/session/insertion.js';
+import type { MoveDirection } from '../client/session/move-targets.js';
+import {
+  NO_STORE,
+  useEditorStore,
+  type DrawerOpener,
+  type EditorMode,
+  type EditorStore,
+  type PickerOpener,
+} from '../client/session/store.js';
+import { DeleteDialog } from './editing/delete-dialog.js';
+import { PanelDrawer } from './editing/drawer.js';
+import { LeaveDialog } from './editing/leave-dialog.js';
+import { LiveRegion } from './editing/live-region.js';
+import { LockExpiry } from './editing/lock-expiry.js';
+import { NoticeSlot } from './editing/notices.js';
+import { PropertiesSheet, SidePanel } from './editing/panel.js';
+import { RailTools } from './editing/rail-tools.js';
+import type { PropertiesPanelProps } from './editing/properties/properties-panel.js';
+import { UndoToast } from './editing/toast.js';
+import { SaveStatusRow, ToolGroup } from './editing/tool-group.js';
 import type { ShellIsland } from './island.js';
 import { Sidebar, type SidebarLayout, type SidebarSlots } from './sidebar.js';
 import { Stage } from './stage.js';
 
 export type { SidebarSlots } from './sidebar.js';
+
+function noop(): void {
+  // Nothing to call: the shell was given no handler for this action.
+}
 
 export type ShellAppProps = {
   readonly island: ShellIsland;
@@ -21,6 +48,65 @@ export type ShellAppProps = {
   readonly frameFailed?: boolean;
   /** Called by the failure panel's Reload page button. */
   readonly onReload?: () => void;
+  /** The editing session, for a user who can edit once the client runs. */
+  readonly editor?: {
+    readonly store: EditorStore;
+    /** Called by the mode toggle. */
+    readonly onMode: (mode: EditorMode) => void;
+    /** Called by the save status's Retry button. */
+    readonly onRetry?: () => void;
+    /** Called by a rail button that opens the panel drawer. */
+    readonly onOpenDrawer?: (opener: DrawerOpener) => void;
+    /** Called by the Take over button of the lock notice; true when it worked. */
+    readonly onTakeOver?: () => Promise<boolean>;
+    /** Called by the lock row's Keep editing button; true when the lock was renewed. */
+    readonly onKeepEditing?: () => Promise<boolean>;
+    /** Where the session-ended notice's Sign in leads. */
+    readonly signInHref?: string;
+    /** Called by Exit edit mode and Log out before they leave the page. */
+    readonly onLeave?: (proceed: () => void) => void | Promise<void>;
+    /** Called by the leave confirmation's Stay and Leave anyway. */
+    readonly onStay?: () => void;
+    readonly onLeaveAnyway?: () => void;
+    /** Called by the Undo and Redo buttons. */
+    readonly onUndo?: () => void;
+    readonly onRedo?: () => void;
+    /** Called by the floating toolbar's move buttons. */
+    readonly onMove?: (id: string, direction: MoveDirection) => void;
+    /** Called by the floating toolbar's Duplicate and Delete buttons. */
+    readonly onDuplicate?: (id: string) => void;
+    readonly onDelete?: (id: string) => void;
+    /** Called by the delete confirmation's destructive button. */
+    readonly onConfirmDelete?: (id: string) => void;
+    /** Called when the delete confirmation closes with nothing deleted. */
+    readonly onCancelDelete?: () => void;
+    /** Called by the undo toast's button. */
+    readonly onToastUndo?: () => void;
+    /** Called by an insert point, an empty prompt and the toolbar's Add after. */
+    readonly onOpenPicker?: (slot: InsertSlot, opener: PickerOpener) => void;
+    /** Called when the picker closes with Escape. */
+    readonly onClosePicker?: () => void;
+    /** Called when the picker closes because a press or focus went elsewhere. */
+    readonly onDismissPicker?: () => void;
+    /** Called when a type is chosen in the picker. */
+    readonly onPick?: (entry: CatalogueEntry) => void;
+    /** Called when the toolbar's drag handle is pressed. */
+    readonly onDragStart?: (id: string, origin: Point) => void;
+    /** Called when Space or Enter on the drag handle lifts the item. */
+    readonly onLiftDrag?: (id: string) => void;
+    /** Called when a Properties control changes a value: render it and queue the save. */
+    readonly onPropertiesChange?: PropertiesPanelProps['onPropertiesChange'];
+    /** Called when a Properties control loses focus: save the block's edit now. */
+    readonly onPropertiesBlur?: PropertiesPanelProps['onPropertiesBlur'];
+    /** Called by the Layout and Placement groups: render the layout and queue its save. */
+    readonly onLayoutChange?: PropertiesPanelProps['onLayoutChange'];
+    /** Which way a section's columns run in the site, for the Columns group's arrows. */
+    readonly columnAxis?: PropertiesPanelProps['columnAxis'];
+    /** Called by the Columns group's Add column, move and Remove. */
+    readonly onAddColumn?: PropertiesPanelProps['onAddColumn'];
+    readonly onMoveColumn?: PropertiesPanelProps['onMoveColumn'];
+    readonly onRemoveColumn?: PropertiesPanelProps['onRemoveColumn'];
+  };
 };
 
 /**
@@ -39,22 +125,173 @@ export function ShellApp(props: ShellAppProps): ReactElement {
     onToggleLayout,
     frameFailed,
     onReload,
+    editor,
   } = props;
+  const editRegion = useEditorStore(
+    editor?.store ?? NO_STORE,
+    (state) => state.status === 'editing' && state.mode === 'edit',
+  );
+  const propertiesOpen = useEditorStore(
+    editor?.store ?? NO_STORE,
+    (state) => state.propertiesOpen,
+  );
+  const full = layout === 'full';
+  // While the Properties sheet is open it carries the notice slot, the lock
+  // row and, in the framed layout, the save status, so none of them is hidden
+  // behind it and none is drawn twice.
+  const sheetOpen = propertiesOpen;
+  const noticeNode =
+    editor === undefined ? null : (
+      <NoticeSlot
+        store={editor.store}
+        onTakeOver={editor.onTakeOver ?? (() => Promise.resolve(false))}
+        onReload={onReload ?? noop}
+        signInHref={editor.signInHref ?? '/cms'}
+      />
+    );
+  const lockNode =
+    editor === undefined ? null : (
+      <LockExpiry
+        store={editor.store}
+        onKeepEditing={editor.onKeepEditing ?? (() => Promise.resolve(false))}
+      />
+    );
+  const parts =
+    editor === undefined || !hydrated
+      ? undefined
+      : {
+          notice: sheetOpen ? null : noticeNode,
+          tools: (
+            <ToolGroup
+              store={editor.store}
+              onMode={editor.onMode}
+              onRetry={editor.onRetry}
+              onUndo={editor.onUndo}
+              onRedo={editor.onRedo}
+              onKeepEditing={editor.onKeepEditing}
+              withStatus={!sheetOpen || full}
+            />
+          ),
+          panel: <SidePanel store={editor.store} />,
+          sheet: (
+            <PropertiesSheet
+              store={editor.store}
+              onPropertiesChange={editor.onPropertiesChange}
+              onPropertiesBlur={editor.onPropertiesBlur}
+              onLayoutChange={editor.onLayoutChange}
+              columnAxis={editor.columnAxis}
+              onAddColumn={editor.onAddColumn}
+              onMoveColumn={editor.onMoveColumn}
+              onRemoveColumn={editor.onRemoveColumn}
+              top={
+                sheetOpen ? (
+                  <>
+                    {noticeNode}
+                    {lockNode}
+                  </>
+                ) : null
+              }
+              footer={
+                sheetOpen && !full ? (
+                  <SaveStatusRow
+                    store={editor.store}
+                    onRetry={editor.onRetry}
+                  />
+                ) : null
+              }
+            />
+          ),
+        };
+  // One copy of the editing controls is live at a time: the framed sidebar's
+  // notice, tools and panel, or the full-width rail's tools and the drawer.
+  const editing =
+    editor === undefined || parts === undefined
+      ? undefined
+      : full
+        ? {
+            notice: null,
+            tools: null,
+            panel: null,
+            rail: (
+              <RailTools
+                store={editor.store}
+                onMode={editor.onMode}
+                onRetry={editor.onRetry}
+                onUndo={editor.onUndo}
+                onRedo={editor.onRedo}
+                onOpenDrawer={editor.onOpenDrawer ?? noop}
+              />
+            ),
+          }
+        : parts;
+  const drawer =
+    editor === undefined || parts === undefined || !full ? null : (
+      <PanelDrawer
+        store={editor.store}
+        notice={parts.notice}
+        status={sheetOpen ? null : lockNode}
+        panel={parts.panel}
+        sheet={parts.sheet}
+        receded={sheetOpen}
+      />
+    );
   return (
     <>
       <Sidebar
         island={island}
         slots={slots}
+        editing={editing}
         hydrated={hydrated}
         layout={layout}
         onToggleLayout={onToggleLayout}
+        onLeave={editor?.onLeave}
+        sheet={full ? undefined : parts?.sheet}
+        receded={!full && sheetOpen}
       />
+      {drawer}
       <Stage
         frameUrl={island.frameUrl}
+        editRegion={hydrated && editor !== undefined && editRegion}
         frameFailed={frameFailed}
         onReload={onReload}
+        toast={
+          hydrated && editor !== undefined ? (
+            <UndoToast
+              store={editor.store}
+              onUndo={editor.onToastUndo ?? editor.onUndo ?? noop}
+            />
+          ) : null
+        }
       />
-      {hydrated && island.mode === 'edit' ? <OverlayLayer /> : null}
+      {hydrated && island.mode === 'edit' ? (
+        <OverlayLayer
+          store={editor?.store}
+          onMove={editor?.onMove}
+          onDuplicate={editor?.onDuplicate}
+          onDelete={editor?.onDelete}
+          onOpenPicker={editor?.onOpenPicker}
+          onClosePicker={editor?.onClosePicker}
+          onDismissPicker={editor?.onDismissPicker}
+          onPick={editor?.onPick}
+          onDragStart={editor?.onDragStart}
+          onLiftDrag={editor?.onLiftDrag}
+        />
+      ) : null}
+      {hydrated && editor !== undefined ? (
+        <>
+          <LiveRegion store={editor.store} />
+          <LeaveDialog
+            store={editor.store}
+            onStay={editor.onStay ?? noop}
+            onLeave={editor.onLeaveAnyway ?? noop}
+          />
+          <DeleteDialog
+            store={editor.store}
+            onConfirm={editor.onConfirmDelete ?? noop}
+            onCancel={editor.onCancelDelete ?? noop}
+          />
+        </>
+      ) : null}
     </>
   );
 }

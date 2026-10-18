@@ -251,7 +251,9 @@ describe('Phase 4 tracer: declare blocks, create a page, insert a section and a 
         {
           blockId: heading.id,
           baseVersion: updatedHeading?.version ?? -1,
-          props: { text: '' },
+          // An empty value is accepted on write (D-21); a wrongly typed one
+          // is not.
+          props: { text: 12 },
         },
       ).catch((caught: unknown) => caught);
       expect(validationError).toBeInstanceOf(BlockPropsValidationError);

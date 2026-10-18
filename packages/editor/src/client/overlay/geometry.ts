@@ -108,3 +108,92 @@ export function sameBox(a: Box | null, b: Box | null): boolean {
     a.height === b.height
   );
 }
+
+/** The floating toolbar's height (4px padding around 32px buttons). */
+export const TOOLBAR_HEIGHT = 40;
+
+/** How far the toolbar sits from the item it belongs to, and from the frame's edge. */
+export const TOOLBAR_GAP = 8;
+
+/** The frame room the toolbar needs above or below an item: its height and the gap. */
+export const TOOLBAR_ROOM = TOOLBAR_HEIGHT + TOOLBAR_GAP;
+
+/** Where the floating toolbar goes. `pinned` means it sits inside the item. */
+export type ToolbarPlacement = {
+  readonly mode: 'above' | 'below' | 'pinned';
+  readonly left: number;
+  readonly top: number;
+};
+
+/**
+ * Places the toolbar for the selected item. All boxes share one coordinate
+ * space, and so do the returned `left` and `top`.
+ *
+ * - `above`: 8px above the item's top edge, when at least 48px of frame room
+ *   lies above the item.
+ * - `below`: otherwise 8px below its bottom edge, when 48px of frame room
+ *   lies below it.
+ * - `pinned`: when neither fits (an item taller than the frame), 8px inside
+ *   the item's visible top-left corner.
+ *
+ * The toolbar's left edge follows the item's and is kept 8px inside the frame.
+ */
+export function toolbarPlacement(input: {
+  readonly item: Box;
+  readonly frame: Box;
+  readonly toolbar: { readonly width: number; readonly height: number };
+}): ToolbarPlacement {
+  const { item, frame, toolbar } = input;
+  const frameRight = frame.left + frame.width;
+  const frameBottom = frame.top + frame.height;
+  const itemBottom = item.top + item.height;
+
+  const clampLeft = (left: number): number =>
+    Math.max(
+      frame.left + TOOLBAR_GAP,
+      Math.min(left, frameRight - TOOLBAR_GAP - toolbar.width),
+    );
+
+  if (item.top - frame.top >= TOOLBAR_ROOM) {
+    return {
+      mode: 'above',
+      left: clampLeft(item.left),
+      top: item.top - TOOLBAR_GAP - toolbar.height,
+    };
+  }
+  if (frameBottom - itemBottom >= TOOLBAR_ROOM) {
+    return {
+      mode: 'below',
+      left: clampLeft(item.left),
+      top: itemBottom + TOOLBAR_GAP,
+    };
+  }
+  return {
+    mode: 'pinned',
+    left: clampLeft(Math.max(item.left, frame.left) + TOOLBAR_GAP),
+    top: Math.max(item.top, frame.top) + TOOLBAR_GAP,
+  };
+}
+
+/**
+ * Whether the siblings sit side by side or stacked, from where their boxes
+ * are: when their left edges differ more than their top edges they are
+ * horizontal. Fewer than two siblings stack, the toolbar's default.
+ */
+export function siblingAxis(rects: readonly Box[]): 'horizontal' | 'vertical' {
+  const first = rects[0];
+  const last = rects[rects.length - 1];
+  if (first === undefined || last === undefined || rects.length < 2) {
+    return 'vertical';
+  }
+  return Math.abs(last.left - first.left) > Math.abs(last.top - first.top)
+    ? 'horizontal'
+    : 'vertical';
+}
+
+/** Whether any part of the box lies within the frame's height. */
+export function isVisibleIn(item: Box, frame: Box): boolean {
+  return (
+    item.top + item.height > frame.top && item.top < frame.top + frame.height
+  );
+}

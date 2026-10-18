@@ -26,6 +26,10 @@
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
     },
+    "./hot": {
+      "types": "./dist/hot.d.ts",
+      "default": "./dist/hot.js"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -45,7 +49,9 @@
     "@plakboek/pages": "workspace:*",
     "@plakboek/permissions": "workspace:*",
     "@plakboek/render": "workspace:*",
-    "better-auth": "catalog:"
+    "@tanstack/react-query": "catalog:",
+    "better-auth": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "catalog:",

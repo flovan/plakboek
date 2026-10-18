@@ -1,6 +1,23 @@
 import {
   acquirePageLock,
   type AcquirePageLockInput,
+  applyBlockEdit,
+  BLOCK_EDIT_MAX_NODES,
+  BLOCK_EDIT_MAX_OPS,
+  BlockEditLimitError,
+  BlockIdConflictError,
+  BlockOwnershipError,
+  normaliseSnapshotColumns,
+  readPageLockView,
+  SectionColumnRequiredError,
+  upgradeAllSectionColumns,
+  upgradeSectionColumns,
+  type PageLockView,
+  type BlockEditInput,
+  type BlockEditNode,
+  type BlockEditOp,
+  type BlockEditPosition,
+  type BlockEditResult,
   AncestorTrashedError,
   assertBlockCompatibility,
   type BelowFloorBlockEntry,
@@ -9,6 +26,9 @@ import {
   BLOCK_KEY_PATTERN,
   BLOCK_PROPERTY_KEY_PATTERN,
   BLOCK_REVISION_KINDS,
+  BUILT_IN_COLUMN_PRESETS,
+  COLUMN_ALIGN_VALUES,
+  COLUMN_RATIO_PATTERN,
   OWNER_TYPES,
   type BlockChangeType,
   BlockCompatibilityError,
@@ -24,9 +44,19 @@ import {
   type BlockDefinitionInput,
   type BlockDeleteImpact,
   type BlockEditorMetadata,
+  type BlockLayout,
+  BlockLayoutValidationError,
+  type BlockLayoutValidationIssue,
+  type ColumnAlign,
+  type ColumnPresetsInput,
+  findMissingRequiredProps,
+  previewBlockValues,
+  type PreviewBlockValuesResult,
+  resolveColumnPresets,
   BlockNotFoundError,
   type BlockNode,
   BlockPlacementError,
+  type BlockDefinition,
   type BlockPlacementReason,
   type BlockPropertyDefinition,
   BlockPropsValidationError,
@@ -37,6 +67,7 @@ import {
   type BlockUpcaster,
   checkBlockCompatibility,
   checkPageLocales,
+  checkPlacement,
   checkReservedPagePaths,
   CircularMoveError,
   CircularPageMoveError,
@@ -213,6 +244,8 @@ import {
   RestoreTargetNotFoundError,
   RevisionBatchNotFoundError,
   type RevisionBatchSummary,
+  type PlacementCheckInput,
+  type PlacementRefusalReason,
   ROOT_PARENT_SENTINEL,
   schedulePage,
   type SchedulePageInput,
@@ -233,6 +266,7 @@ import {
   sortOrderBetween,
   StaleBlockVersionError,
   StalePageVersionError,
+  type StarterNode,
   takeOverPageLock,
   type TakeOverPageLockInput,
   toPublicPagePath,
@@ -258,9 +292,18 @@ import * as pages from '@plakboek/pages';
 
 const functions: Record<string, unknown> = {
   acquirePageLock,
+  applyBlockEdit,
+  normaliseSnapshotColumns,
+  readPageLockView,
+  upgradeAllSectionColumns,
+  upgradeSectionColumns,
+  findMissingRequiredProps,
+  previewBlockValues,
+  resolveColumnPresets,
   assertBlockCompatibility,
   checkBlockCompatibility,
   checkPageLocales,
+  checkPlacement,
   checkReservedPagePaths,
   compactBlockType,
   computeBlockDeleteImpact,
@@ -335,6 +378,11 @@ const functions: Record<string, unknown> = {
 
 const errorClasses: Record<string, unknown> = {
   AncestorTrashedError,
+  BlockEditLimitError,
+  BlockIdConflictError,
+  BlockOwnershipError,
+  SectionColumnRequiredError,
+  BlockLayoutValidationError,
   BlockCompatibilityError,
   BlockConfigError,
   BlockConstraintError,
@@ -380,6 +428,8 @@ const errorClasses: Record<string, unknown> = {
 };
 
 const numbers: Record<string, unknown> = {
+  BLOCK_EDIT_MAX_NODES,
+  BLOCK_EDIT_MAX_OPS,
   DEFAULT_BLOCK_DEPTH_CEILING,
   DEFAULT_SECTION_NESTING_DEPTH,
   PAGE_EDIT_LOCK_HEARTBEAT_SECONDS,
@@ -390,6 +440,7 @@ const numbers: Record<string, unknown> = {
 };
 
 const regexPatterns: Record<string, unknown> = {
+  COLUMN_RATIO_PATTERN,
   BLOCK_KEY_PATTERN,
   BLOCK_PROPERTY_KEY_PATTERN,
 };
@@ -401,6 +452,8 @@ const strings: Record<string, unknown> = {
 };
 
 const frozenArrays: Record<string, unknown> = {
+  BUILT_IN_COLUMN_PRESETS,
+  COLUMN_ALIGN_VALUES,
   BLOCK_CHANGE_TYPES,
   BLOCK_REVISION_KINDS,
   DEGRADED_REASONS,
@@ -491,6 +544,14 @@ for (const internal of [
   'assertPageAddressAvailable',
   'assertPageWritable',
   'validateBlockProps',
+  'validateBlockLayout',
+  'readStoredLayout',
+  'insertBlockInTransaction',
+  'updateBlockInTransaction',
+  'moveBlockInTransaction',
+  'deleteSubtreeInTransaction',
+  'resolvePositionSortOrder',
+  'loadBlockForUpdate',
   'applyBlockConstraints',
   'buildSnapshotTree',
   'pages',
@@ -526,6 +587,42 @@ if (blocks.length !== 1 || blocks[0]?.key !== 'hero') {
 const heroDefinition = getBlockDefinition('hero');
 if (listBlockDefinitions().length !== 1) {
   fail('listBlockDefinitions did not return the one registered block');
+}
+
+const probeColumn: BlockDefinition = {
+  key: 'column',
+  kind: 'column',
+  editor: { label: 'Column' },
+  properties: {},
+  placement: {
+    ownerTypes: OWNER_TYPES,
+    allowedParents: 'any',
+    allowedChildren: 'any',
+  },
+  schemaVersion: 1,
+  upcasters: {},
+  layoutSupport: { fill: false },
+  starterChildren: [],
+};
+const probeText: BlockDefinition = {
+  ...probeColumn,
+  key: 'text',
+  kind: 'block',
+  editor: { label: 'Text' },
+};
+const probeRefusal = checkPlacement({
+  ownerType: 'page',
+  child: probeColumn,
+  parent: probeText,
+  section: null,
+  parentDepth: 1,
+  parentSectionDepth: 1,
+  sectionNestingDepth: 2,
+  blockDepthCeiling: 12,
+  columnsEnabled: true,
+});
+if (probeRefusal !== 'column-requires-section') {
+  fail('checkPlacement did not refuse a column under a non-section');
 }
 
 const resolvedProperties = resolveBlockProperties(heroDefinition);
@@ -625,6 +722,12 @@ if (sortOrderBetween(null, null) !== SORT_ORDER_STEP) {
 if (nextSortOrder(null) !== SORT_ORDER_STEP) {
   fail('nextSortOrder did not return SORT_ORDER_STEP for an empty list');
 }
+if (BLOCK_EDIT_MAX_OPS !== 50) {
+  fail('BLOCK_EDIT_MAX_OPS is not 50');
+}
+if (BLOCK_EDIT_MAX_NODES !== 500) {
+  fail('BLOCK_EDIT_MAX_NODES is not 500');
+}
 if (needsRebalance(1000, 1001) !== true) {
   fail('needsRebalance did not detect a closed gap');
 }
@@ -652,6 +755,30 @@ const config: PagesConfig = definePagesConfig(pagesConfigInput);
 if (!Object.isFrozen(config)) {
   fail('definePagesConfig did not return a frozen config');
 }
+const columnPresetsInput: ColumnPresetsInput = { exclude: ['2:1'] };
+if (resolveColumnPresets(columnPresetsInput).presets.includes('2:1')) {
+  fail('resolveColumnPresets did not drop an excluded preset');
+}
+const probeLayout: BlockLayout = { columns: '2:1', align: 'center' };
+const probeAlign: ColumnAlign = 'center';
+const probeLayoutIssue: BlockLayoutValidationIssue = {
+  key: 'columns',
+  code: 'INVALID',
+};
+const previewOutcome: PreviewBlockValuesResult = previewBlockValues(config, {
+  blockType: 'made_up_block',
+  props: {},
+  layout: probeLayout,
+});
+if (previewOutcome.ok) {
+  fail('previewBlockValues accepted an unregistered block type');
+}
+if (probeAlign !== probeLayout.align || probeLayoutIssue.key !== 'columns') {
+  fail('layout types did not round-trip');
+}
+if (findMissingRequiredProps(heroDefinition, {}).length < 0) {
+  fail('findMissingRequiredProps did not return a list');
+}
 const pagesConfigIssueCode: PagesConfigIssueCode = 'NO_BLOCKS';
 const pagesConfigIssue: PagesConfigIssue = {
   code: 'NO_BLOCKS',
@@ -668,6 +795,7 @@ const blockNode: BlockNode = {
   parentBlockId: null,
   blockType: 'hero',
   props: {},
+  layout: null,
   schemaVersion: 1,
   depth: 0,
   sortOrder: 1000,
@@ -685,6 +813,7 @@ const blockRecord: BlockRecord = {
   parentBlockId: null,
   blockType: 'hero',
   props: {},
+  layout: null,
   schemaVersion: 1,
   depth: 0,
   sortOrder: 1000,
@@ -782,6 +911,22 @@ const sectionLintFinding: SectionLintFinding = {
 const sectionLintReason: SectionLintReason = 'exempt';
 
 const blockPlacementReason: BlockPlacementReason = 'owner-type';
+const placementRefusalReason: PlacementRefusalReason = 'section-nesting';
+const placementCheckInput: PlacementCheckInput = {
+  ownerType: 'page',
+  child: probeText,
+  parent: null,
+  section: null,
+  parentDepth: null,
+  parentSectionDepth: 0,
+  sectionNestingDepth: 2,
+  blockDepthCeiling: 12,
+  columnsEnabled: false,
+};
+const starterNode: StarterNode = {
+  type: 'text',
+  children: [{ type: 'text', props: {} }],
+};
 
 const degradedBlockEvent: DegradedBlockEvent = {
   blockId: 'block-id',
@@ -916,6 +1061,33 @@ const updateBlockPropsInput: UpdateBlockPropsInput = {
   blockId: 'block-id',
   baseVersion: 1,
   props: {},
+};
+const blockEditPosition: BlockEditPosition = {
+  parentId: null,
+  previousSiblingId: 'sibling-id',
+};
+const blockEditNode: BlockEditNode = {
+  type: 'section',
+  children: [{ type: 'column' }],
+};
+const blockEditOp: BlockEditOp = {
+  op: 'insert',
+  position: blockEditPosition,
+  node: blockEditNode,
+};
+const blockEditInput: BlockEditInput = {
+  pageId: 'page-id',
+  basePageVersion: 1,
+  ops: [blockEditOp],
+};
+const blockEditResult: BlockEditResult = {
+  pageVersion: 2,
+  revisionBatchId: 'batch-id',
+  createdIds: [],
+  deletedIds: [],
+  updatedIds: [],
+  movedIds: [],
+  touchedParentIds: [null],
 };
 
 const blockRevisionSummary: BlockRevisionSummary = {
@@ -1082,6 +1254,13 @@ const pageLockState: PageLockState = {
   lockedBy: null,
   lockedAt: null,
 };
+const pageLockView: PageLockView = {
+  enabled: true,
+  state: 'other',
+  holder: { name: 'Editor', lastActiveAt: new Date(0) },
+  canTakeOver: false,
+  expiresAt: null,
+};
 const releasePageLockInput: ReleasePageLockInput = { pageId: 'page-id' };
 const renewPageLockInput: RenewPageLockInput = { pageId: 'page-id' };
 const takeOverPageLockInput: TakeOverPageLockInput = { pageId: 'page-id' };
@@ -1199,6 +1378,9 @@ const typeProofs: unknown[] = [
   sectionLintFinding,
   sectionLintReason,
   blockPlacementReason,
+  placementRefusalReason,
+  placementCheckInput,
+  starterNode,
   degradedBlockEvent,
   degradedReason,
   upcastOutcome,
@@ -1233,6 +1415,11 @@ const typeProofs: unknown[] = [
   insertBlockInput,
   moveBlockInput,
   updateBlockPropsInput,
+  blockEditPosition,
+  blockEditNode,
+  blockEditOp,
+  blockEditInput,
+  blockEditResult,
   blockRevisionSummary,
   computeBlockRestorePreviewInput,
   listPageRevisionBatchesInput,
@@ -1262,6 +1449,7 @@ const typeProofs: unknown[] = [
   acquirePageLockInput,
   pageLockGrant,
   pageLockState,
+  pageLockView,
   releasePageLockInput,
   renewPageLockInput,
   takeOverPageLockInput,

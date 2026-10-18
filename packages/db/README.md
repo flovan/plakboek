@@ -83,7 +83,13 @@ content engine tables (`content_types`, `content_type_fields`,
 settings tables) used by `@plakboek/content`. `0003_page_block_engine`
 creates the page and block-tree tables (`pages`, `page_blocks`,
 `block_revisions`, `page_publications`, `page_url_history`,
-`page_engine_settings`) used by `@plakboek/pages`. See
+`page_engine_settings`) used by `@plakboek/pages`. `0004_block_layout` adds
+a nullable `layout` column to `page_blocks` and `block_revisions`, holding
+section column ratios and alignment and block fill separately from `props`.
+`0005_revision_block_ref` adds `block_revisions.subject_block_id`, which keeps
+the revised block's id once the block row is deleted, so a deleted subtree can
+be restored with its parent links intact.
+See
 [`MIGRATIONS.md`](./MIGRATIONS.md) for how later migrations are added, the
 transactional-vs-existence-guarded-statement decision, and what each thrown
 error class means.

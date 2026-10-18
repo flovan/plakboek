@@ -1,11 +1,21 @@
 import { defaultRoles, defineConfig } from '@plakboek/core/config';
 import {
   accordion,
+  accordionItem,
+  accordionList,
   badge,
   carousel,
   heading,
+  note,
+  propsDemo,
+  quote,
   section,
+  siteForm,
+  slide,
+  slides,
   spacer,
+  tab,
+  tabs,
   text,
 } from './blocks.tsx';
 
@@ -14,8 +24,47 @@ export default defineConfig({
   locales: ['en'],
   defaultLocale: 'en',
   timezone: 'Europe/Brussels',
-  roles: { ...defaultRoles, viewer: ['pages:read'] },
-  blocks: [section, heading, text, accordion, carousel, badge, spacer],
+  roles: {
+    ...defaultRoles,
+    viewer: ['pages:read'],
+    // Edits pages but may not delete: Delete and the undo of an insert or copy are off.
+    'editor-no-delete': ['pages:read', 'pages:read-drafts', 'pages:edit'],
+  },
+  // A host widget the editor has no control for: its property is edited with
+  // the standard control of its field type.
+  widgets: [{ fieldType: 'short_text', widget: 'colour-wheel' }],
+  blocks: [
+    section,
+    heading,
+    text,
+    accordion,
+    carousel,
+    badge,
+    spacer,
+    siteForm,
+    propsDemo,
+    quote,
+    accordionList,
+    accordionItem,
+    tabs,
+    tab,
+    slides,
+    slide,
+    note,
+  ],
+  // The constraints the Properties panel has to honour: one property is not
+  // shown, one has a fixed value, one offers only two of its three choices.
+  // Written as plain sets because this host imports only the core package.
+  constraints: [
+    {
+      blockKey: 'propsDemo',
+      properties: {
+        hiddenProp: 'hidden',
+        fixedProp: { fixed: 'fixed value' },
+        narrowedProp: { allow: ['alpha', 'beta'] },
+      },
+    },
+  ],
   seed: {
     title: 'Home',
     blocks: [

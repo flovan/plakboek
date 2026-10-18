@@ -30,6 +30,8 @@ function definition(overrides: Partial<BlockDefinition> = {}): BlockDefinition {
     }),
     schemaVersion: 3,
     upcasters: Object.freeze({}),
+    layoutSupport: Object.freeze({ fill: false }),
+    starterChildren: Object.freeze([]),
     ...overrides,
   });
 }

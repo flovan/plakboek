@@ -239,13 +239,16 @@ renders.
 
 - **The attribute contract.** In `live` mode each block's `edit` proxy
   (`createLiveEdit`) spreads `data-pk-block` (the block id), `data-pk-type`
-  (the type key), `data-pk-kind` (`section` or `block`) and `data-pk-label`
+  (the type key), `data-pk-kind` (`section`, `column` or `block`) and `data-pk-label`
   (the label from the block definition, else the type key). `edit.field(name)`
   yields `data-pk-field`; `field` is not enumerable, so spreading `{...edit}`
   never carries it. The names are exported as `EDIT_ATTRIBUTE`; the overlay
   and every later selection feature bind to exactly these.
 - **A block must spread `{...edit}` on its root element.** A block that does
-  not renders without attributes and cannot be outlined or selected.
+  not renders without attributes and cannot be outlined or selected. Outside
+  production, a live render warns once in the terminal for each block component
+  whose markup carries no element with its block's `data-pk-block`, naming the
+  block type.
 - **Nothing else is added.** No class, inline style or wrapper element is ever
   put on or around a block a host renders; only the `data-pk-*` attributes.
 - **Placeholders.** A block that would render nothing in the edit render (an
@@ -261,6 +264,107 @@ renders.
   visitor would receive.
 - **Paths.** `normalizeVisitorPath` is exported from the server entry so the
   editor canonicalises a frame request exactly like the visitor handler.
+
+## Block lifecycle hooks
+
+An interactive block (carousel, accordion, tabs) can react to the editor's
+selection and mode without its hook code reaching visitors. Declare the hooks
+with `defineBlockEdit`, an identity function with no runtime weight and no
+editor import, in a `*.edit.ts` or `*.edit.tsx` file next to the block:
+
+```ts
+// accordion.edit.ts
+import { defineBlockEdit } from '@plakboek/render';
+
+export default defineBlockEdit<{ readonly items: readonly unknown[] }>({
+  blockType: 'accordion',
+  hooks: {
+    // open the item that holds the selected block
+    reveal: ({ element, targetId }) => {
+      element
+        .querySelector(`[data-pk-block="${targetId}"]`)
+        ?.closest('details')
+        ?.setAttribute('open', '');
+    },
+    // the editor replaced the element: re-run the block's own init on it
+    rendered: ({ element }) => {
+      element.dispatchEvent(new CustomEvent('accordion:init'));
+    },
+  },
+});
+```
+
+- **Hooks.** `enter`, `leave`, `select`, `deselect`, `reveal` and `rendered`.
+  Each receives the block id and type, its element, the frame document and
+  window, its props and the current mode (`edit` or `interact`).
+- **When they run.** `enter` on every block with hooks when Edit mode starts
+  (frame load in Edit, switching from Interact, and after `rendered` while in
+  Edit); `leave` on switching to Interact; `select` and `deselect` when the
+  selection moves; `reveal` on the selected block and each ancestor with
+  hooks, outermost first, with `targetId` naming the selected block;
+  `rendered` after the editor or the dev swap replaced the block's element.
+- **Contained.** A hook that throws is logged by name and never blocks
+  selection.
+- **Delivery.** The CMS's Vite plugin loads `*.edit.ts` and `*.edit.tsx` files
+  only into the editor's own chunk, and the build fails if a visitor-facing
+  chunk reaches one.
+
+## Block fragments
+
+`renderBlockFragments` renders any block of a live tree, with its subtree, to
+the markup the frame document shows for it. The editor server uses it for live
+property rendering and structural patches.
+
+- **Same recursion.** It walks the same `BlockHost` recursion, live edit proxy
+  and edit placeholders as `renderPageTree`, so a fragment is byte-identical to
+  that block's markup in a full frame render.
+- **Input.** The page's whole live forest, the ids to render and the same
+  component and block metadata maps; fragments come back in the order the ids
+  were requested.
+- **Unknown ids.** An id that is not in the tree is listed in `missing`, never
+  thrown. A block that throws becomes the same inert `data-pk-unavailable`
+  placeholder the frame shows and sets `degraded`.
+
+## Columns
+
+A section divides its children into columns. The CMS owns the column cells; a
+host section only draws the grid around them (D-06).
+
+- **Render the helper inside your section's own markup:**
+  `<Columns layout={layout}>{children}</Columns>`. `layout` is the prop every
+  block component receives (`BlockLayout`: `columns`, `align`, `fill`); it is
+  the node's stored layout, an empty object when there is none, and never part
+  of `props`.
+- **What it renders.** One CSS grid. The tracks come from the stored ratio
+  (for example `2:1`) when its term count equals the live column count, and are
+  equal otherwise. `align-items` comes from `align` (`stretch` by default). The
+  gap is `var(--plakboek-column-gap, 24px)`, so a host theme sets one token
+  (D-07).
+- **Stacking.** The grid reads its tracks through `--plakboek-columns-stack`,
+  so one container-query rule in the host theme stacks the columns, and the
+  inline style never needs `!important` to be overridden:
+
+  ```css
+  @container (max-width: 640px) {
+    [data-plakboek-columns] {
+      --plakboek-columns-stack: 1fr;
+    }
+  }
+  ```
+
+- **The column cell.** `ColumnBlock` is the core column component: one
+  flex-column element that spreads `{...edit}`. In a live edit render an empty
+  column carries `data-pk-empty` and a 96px minimum height so it stays a drop
+  target; a visitor render adds nothing beyond the grid cell.
+- **Fill.** A block that declares `layout: { fill: true }` applies its own
+  full-height style when `layout.fill` is true (D-08). The renderer sets no
+  style for it.
+- **Inline editing.** `data-pk-inline-editing` (`EDIT_ATTRIBUTE.inlineEditing`)
+  on a block element means its text is being edited in place; a fragment
+  patcher must not replace that element (D-30).
+- `columnTracks(ratio, count)` is the pure function behind the tracks. A ratio
+  is used only when it is digits joined by colons; anything else yields equal
+  tracks, so a stored value can never inject CSS.
 
 ## Root versus server entry
 
@@ -282,24 +386,37 @@ updating them.
 
 ### Root entry: `@plakboek/render`
 
-| Export                  | Kind     | Purpose                                                                   |
-| ----------------------- | -------- | ------------------------------------------------------------------------- |
-| `CMS_LOGIN_PATH`        | constant | `/cms`: where the Edit pill sends a browser; the server decides there     |
-| `EDIT_PARAM`            | constant | `_edit`: the query parameter that asks for the editor entry               |
-| `EDITOR_FLAG_KEY`       | constant | The localStorage key marking a signed-in editor                           |
-| `NEXT_PARAM`            | constant | `next`: the query parameter carrying the page to return to after login    |
-| `TOOLBAR_DISMISSED_KEY` | constant | The localStorage key marking a dismissed toolbar                          |
-| `NOOP_EDIT`             | constant | The visitor-side edit proxy: spreads to nothing, costs nothing            |
-| `EDIT_ATTRIBUTE`        | constant | The `data-pk-*` attribute names the renderer writes and the overlay reads |
-| `BlockIdentity`         | type     | `id`, `blockType` and `schemaVersion` of a rendered block                 |
-| `BlockComponentProps`   | type     | What the renderer passes a block: `block`, `props`, `children`, `edit`    |
-| `BlockComponent`        | type     | A block's render function: a plain function of `BlockComponentProps`      |
-| `EditAttributes`        | type     | `data-` attributes the editor binds to                                    |
-| `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes        |
-| `PageHead`              | type     | What a document composer needs to write a page's `<head>`                 |
-| `DocumentInput`         | type     | `{ head, body, publicPath, mode }`: what a document composer receives     |
-| `DocumentMode`          | type     | `'visitor' \| 'edit'`: which rendering a document composer is producing   |
-| `RenderDocument`        | type     | A host's document composer: `(input) => string \| Promise<string>`        |
+| Export                  | Kind     | Purpose                                                                          |
+| ----------------------- | -------- | -------------------------------------------------------------------------------- |
+| `CMS_LOGIN_PATH`        | constant | `/cms`: where the Edit pill sends a browser; the server decides there            |
+| `EDIT_PARAM`            | constant | `_edit`: the query parameter that asks for the editor entry                      |
+| `EDITOR_FLAG_KEY`       | constant | The localStorage key marking a signed-in editor                                  |
+| `NEXT_PARAM`            | constant | `next`: the query parameter carrying the page to return to after login           |
+| `TOOLBAR_DISMISSED_KEY` | constant | The localStorage key marking a dismissed toolbar                                 |
+| `NOOP_EDIT`             | constant | The visitor-side edit proxy: spreads to nothing, costs nothing                   |
+| `EDIT_ATTRIBUTE`        | constant | The `data-pk-*` attribute names the renderer writes and the overlay reads        |
+| `isLiveEdit`            | function | Whether an edit proxy is a live one rather than `NOOP_EDIT`                      |
+| `Columns`               | function | The CSS grid a host section renders around its children                          |
+| `ColumnBlock`           | function | The core column cell component                                                   |
+| `defineBlockEdit`       | function | Declares a block's editor lifecycle hooks; returns its argument unchanged        |
+| `columnTracks`          | function | The `grid-template-columns` value for a ratio and a live column count            |
+| `BlockIdentity`         | type     | `id`, `blockType` and `schemaVersion` of a rendered block                        |
+| `BlockComponentProps`   | type     | What the renderer passes a block: `block`, `props`, `layout`, `children`, `edit` |
+| `BlockComponent`        | type     | A block's render function: a plain function of `BlockComponentProps`             |
+| `BlockLayout`           | type     | A node's stored layout: `columns`, `align` and `fill`                            |
+| `ColumnAlign`           | type     | `'stretch' \| 'start' \| 'center' \| 'end'`: cross-axis column alignment         |
+| `ColumnsProps`          | type     | `{ layout, children, className? }`: what `Columns` receives                      |
+| `BlockEditHooks`        | type     | The hooks a block can declare: enter, leave, select, deselect, reveal, rendered  |
+| `BlockEditContext`      | type     | What a hook receives: id, type, element, frame document and window, props, mode  |
+| `BlockRevealContext`    | type     | `BlockEditContext` plus the `targetId` being revealed                            |
+| `BlockEditModule`       | type     | `{ blockType, hooks }`: what `defineBlockEdit` takes and returns                 |
+| `BlockEditMode`         | type     | `'edit' \| 'interact'`: which editor mode is active                              |
+| `EditAttributes`        | type     | `data-` attributes the editor binds to                                           |
+| `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes               |
+| `PageHead`              | type     | What a document composer needs to write a page's `<head>`                        |
+| `DocumentInput`         | type     | `{ head, body, publicPath, mode }`: what a document composer receives            |
+| `DocumentMode`          | type     | `'visitor' \| 'edit'`: which rendering a document composer is producing          |
+| `RenderDocument`        | type     | A host's document composer: `(input) => string \| Promise<string>`               |
 
 ### Server entry: `@plakboek/render/server`
 
@@ -314,6 +431,7 @@ updating them.
 | `createComponentMap`         | function | Builds the block-type to component map from the host's block definitions |
 | `createLiveEdit`             | function | One block's live edit proxy: the `data-pk-*` identity attributes         |
 | `renderPageTree`             | function | Renders a live working tree for the editor, in `live` or `plain` mode    |
+| `renderBlockFragments`       | function | Renders chosen blocks of a live tree, subtree included, as frame markup  |
 | `normalizeVisitorPath`       | function | Canonicalises a request path exactly like the visitor handler            |
 | `PageHeadInput`              | type     | Input to `buildPageHead`                                                 |
 | `PageSeoInput`               | type     | The stored SEO set as a structural type                                  |
@@ -330,6 +448,9 @@ updating them.
 | `RenderPageTreeInput`        | type     | Input to `renderPageTree`                                                |
 | `BlockMeta`                  | type     | A block type's overlay label and its `section` or `block` kind           |
 | `RenderedTree`               | type     | The head, body and degraded flag of a rendered working tree              |
+| `RenderBlockFragmentsInput`  | type     | Input to `renderBlockFragments`                                          |
+| `RenderedFragment`           | type     | One block's `id` and its `html`                                          |
+| `RenderedFragments`          | type     | The fragments, the missing ids and the degraded flag                     |
 | `VisitorPathResult`          | type     | `ok`, `redirect` or `not-found`: what `normalizeVisitorPath` returns     |
 | `RenderedPage`               | type     | The head, body, cache tags and degraded flag of a rendered page          |
 | `RenderHooks`                | type     | Optional host hooks: unknown block, render error, cache error and more   |

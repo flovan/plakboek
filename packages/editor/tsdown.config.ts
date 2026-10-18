@@ -17,4 +17,15 @@ export default defineConfig([
     clean: false,
     fixedExtension: false,
   },
+  {
+    entry: { hot: 'src/hot.ts' },
+    format: 'esm',
+    platform: 'browser',
+    dts: true,
+    clean: false,
+    fixedExtension: false,
+    // The one value it needs from the render package is a constant; bundling
+    // it keeps React, which that package's root also exports, out of the graph.
+    deps: { alwaysBundle: ['@plakboek/render'] },
+  },
 ]);

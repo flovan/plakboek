@@ -23,6 +23,7 @@ function node(
     parentBlockId: null,
     blockType,
     props,
+    layout: null,
     schemaVersion: 1,
     depth: 0,
     sortOrder: 0,
@@ -62,12 +63,14 @@ const components: ComponentMap = new Map<string, BlockComponent>([
 const blockMeta: ReadonlyMap<string, BlockMeta> = new Map([
   ['section', { label: 'Section', kind: 'section' }],
   ['heading', { label: 'Heading', kind: 'block' }],
+  ['column', { label: 'Column', kind: 'column' }],
 ]);
 
 function render(
   blocks: readonly BlockNode[],
   mode: 'live' | 'plain' = 'live',
   hooks?: Parameters<typeof renderPageTree>[0]['hooks'],
+  componentMap: ComponentMap = components,
 ) {
   return renderPageTree({
     page: {
@@ -85,7 +88,7 @@ function render(
     },
     blocks,
     publicPath: '/test',
-    components,
+    components: componentMap,
     blockMeta,
     mode,
     hooks,
@@ -163,6 +166,23 @@ describe('live mode attributes', () => {
     ]);
     expect(body).not.toContain('<img');
     expect(body).not.toContain('<script>');
+  });
+});
+
+describe('column kind', () => {
+  it('reaches the attributes of a rendering column and of its placeholder', () => {
+    silenceConsole();
+    const { body } = render([
+      node('s1', 'section', {}, [
+        node('c1', 'column', {}, [node('h1', 'heading', { text: 'One' })]),
+        node('c2', 'column'),
+      ]),
+    ]);
+    // c1 has no component here, so it falls back to a placeholder that still
+    // carries the column kind from the block metadata.
+    expect(body).toContain('data-pk-block="c1"');
+    expect(body).toContain('data-pk-kind="column"');
+    expect(body).toContain('data-pk-label="Column"');
   });
 });
 
@@ -311,5 +331,53 @@ describe('plain mode', () => {
     expect(body).not.toContain('data-pk-');
     expect(degraded).toBe(true);
     consoleError.mockRestore();
+  });
+});
+
+describe('a block rendered without its identity', () => {
+  // The warning is deduplicated per component function, so each case owns one.
+  const fieldOnly = (): BlockComponent => (props) =>
+    createElement('h2', { ...props.edit.field('text') }, 'Hello');
+  const mapOf = (component: BlockComponent): ComponentMap =>
+    new Map([['heading', component]]);
+  const warn = () =>
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const tree = [
+    node('h1', 'heading', { text: 'One' }),
+    node('h2', 'heading', { text: 'Two' }),
+  ];
+
+  it('warns once per component, naming the block type and the spread', () => {
+    const consoleWarn = warn();
+    render(tree, 'live', undefined, mapOf(fieldOnly()));
+    expect(consoleWarn).toHaveBeenCalledTimes(1);
+    const message = String(consoleWarn.mock.calls[0]?.[0]);
+    expect(message).toContain('heading');
+    expect(message).toContain('{...edit}');
+    expect(message).not.toContain('One');
+    consoleWarn.mockRestore();
+  });
+
+  it('stays silent when the component spreads {...edit}', () => {
+    const consoleWarn = warn();
+    render(tree, 'live', undefined, mapOf(Heading));
+    expect(consoleWarn).not.toHaveBeenCalled();
+    consoleWarn.mockRestore();
+  });
+
+  it('stays silent in a plain render', () => {
+    const consoleWarn = warn();
+    render(tree, 'plain', undefined, mapOf(fieldOnly()));
+    expect(consoleWarn).not.toHaveBeenCalled();
+    consoleWarn.mockRestore();
+  });
+
+  it('stays silent in production', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const consoleWarn = warn();
+    render(tree, 'live', undefined, mapOf(fieldOnly()));
+    expect(consoleWarn).not.toHaveBeenCalled();
+    consoleWarn.mockRestore();
+    vi.unstubAllEnvs();
   });
 });

@@ -22,17 +22,25 @@ import { loadPageForUpdate, StalePageVersionError } from './pages.js';
 import {
   assertPlacementAllowed,
   BlockDepthExceededError,
-  countAncestorSections,
+  loadParentForPlacement,
   SectionNestingDepthExceededError,
 } from './placement.js';
 import {
+  BlockLayoutValidationError,
+  readStoredLayout,
+  validateBlockLayout,
+  type BlockLayout,
+} from './layout.js';
+import {
   BlockPropsValidationError,
   getBlockDefinition,
+  getColumnDefinition,
   resolveBlockProperties,
   validateBlockProps,
   type BlockDefinition,
 } from './registry.js';
 import { blockRevisions, pageBlocks, pages } from './schema.js';
+import { assertSectionsHaveColumns } from './section-columns.js';
 import { getPageEditLocking } from './settings.js';
 import {
   computeSubtreeShape,
@@ -59,6 +67,8 @@ export type RecordBlockRevisionInput = {
   readonly sortOrder: number;
   readonly depth: number;
   readonly props: unknown;
+  /** The block's layout at the moment of this revision (D-33). */
+  readonly layout: BlockLayout | null;
   readonly schemaVersion: number;
   readonly authorId: string | null;
   readonly createdAt: Date;
@@ -87,6 +97,7 @@ export async function recordBlockRevision(
     .insert(blockRevisions)
     .values({
       blockId: input.blockId,
+      subjectBlockId: input.blockId,
       ownerType: input.owner.ownerType,
       ownerId: input.owner.ownerId,
       locale: input.owner.locale,
@@ -98,6 +109,7 @@ export async function recordBlockRevision(
       sortOrder: input.sortOrder,
       depth: input.depth,
       props: input.props,
+      layout: input.layout,
       schemaVersion: input.schemaVersion,
       authorId: input.authorId,
       createdAt: input.createdAt,
@@ -512,6 +524,10 @@ export type RestoreBlockPreview = {
   readonly revisionId: string;
   readonly blockId: string | null;
   readonly blockType: string;
+  /** The layout the revision stored (narrowed, not re-validated here); the
+   * engine always sets it, `null` when the block had none. A restore writes
+   * it back, minus any key the current configuration no longer accepts. */
+  readonly layout?: BlockLayout | null;
   readonly changeType: BlockChangeType;
   readonly storedVersion: number;
   readonly currentVersion: number | null;
@@ -668,6 +684,7 @@ export async function computeBlockRestorePreview(
         revisionId: row.id,
         blockId: row.blockId,
         blockType: row.blockType,
+        layout: readStoredLayout(row.layout),
         changeType: asBlockChangeType(row.changeType),
         storedVersion: row.schemaVersion,
         currentVersion: null,
@@ -688,6 +705,7 @@ export async function computeBlockRestorePreview(
         revisionId: row.id,
         blockId: row.blockId,
         blockType: row.blockType,
+        layout: readStoredLayout(row.layout),
         changeType: asBlockChangeType(row.changeType),
         storedVersion: row.schemaVersion,
         currentVersion: definition.schemaVersion,
@@ -704,6 +722,7 @@ export async function computeBlockRestorePreview(
       revisionId: row.id,
       blockId: row.blockId,
       blockType: row.blockType,
+      layout: readStoredLayout(row.layout),
       changeType: asBlockChangeType(row.changeType),
       storedVersion: row.schemaVersion,
       currentVersion: definition.schemaVersion,
@@ -721,6 +740,32 @@ export async function computeBlockRestorePreview(
     droppedCount: counts.dropped,
     failedCount: counts.failed,
   });
+}
+
+/** Builds the layout a restore actually writes for one block: the stored
+ * layout, narrowed (`readStoredLayout`) and then validated key by key against
+ * the block's CURRENT definition and the configured presets. A key the
+ * current configuration no longer accepts (a removed ratio preset, a block
+ * type that stopped supporting fill) is left out rather than failing the
+ * whole restore -- layout is presentation, and an absent key reads as the
+ * default (equal split, stretch, no fill). */
+function buildRestoredLayout(
+  definition: BlockDefinition,
+  stored: unknown,
+  presets: readonly string[],
+): BlockLayout | null {
+  const narrowed = readStoredLayout(stored);
+  if (narrowed === null) return null;
+  const kept: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(narrowed)) {
+    try {
+      validateBlockLayout(definition, { [key]: value }, presets);
+      kept[key] = value;
+    } catch (error) {
+      if (!(error instanceof BlockLayoutValidationError)) throw error;
+    }
+  }
+  return validateBlockLayout(definition, kept, presets);
 }
 
 /** Builds the props a restore actually writes for one block: every `mapped`
@@ -767,13 +812,18 @@ export type RestoreBatchResult = {
  * batch's blocks in `created_at, id` order, each restored to the CURRENT
  * schema's shape (`buildRestoredProps` off the already-computed preview):
  * a `'delete'` revision re-creates the block with a fresh id and its
- * recorded `parent_block_id`/`sort_order`/`depth`, stamped with the
- * registry's current `schemaVersion`; a `'move'` revision re-parents the
+ * recorded `sort_order`, stamped with the registry's current
+ * `schemaVersion`, under its recorded parent -- or, when that parent was
+ * itself re-created by the same batch (a deleted subtree), under the
+ * parent's new id, matched through the revision's `subject_block_id` -- at
+ * `depth` one below the parent it lands under; a `'move'` revision re-parents the
  * still-live block to its recorded position, leaving its props untouched;
  * a `'create'`/`'update'` revision rewrites the still-live block's props.
  * Before each write, builds the `PlacementContext` for the recorded
  * position and calls `assertPlacementAllowed`, so a restore can never
- * recreate a shape the current registry forbids; as one more write-time
+ * recreate a shape the current registry forbids (and, at the end, refuses
+ * `SectionColumnRequiredError` when it would leave a section without a
+ * column, D-03: one a column was moved out of, or one it re-created bare); as one more write-time
  * safety net, `validateBlockProps` re-checks the built props (catching a
  * constraint this preview's own classification didn't model, e.g. a
  * property that became `fixed`/`narrowed` after the revision was
@@ -855,6 +905,13 @@ export async function restoreRevisionBatch(
       const restoreBatchId = newRevisionBatchId();
       const restoredAt = now();
       let restoredBlocks = 0;
+      // A deleted block is re-created under a fresh id, so a child restored
+      // from the same batch has to be re-parented to its parent's NEW id.
+      // Keyed by the id the block had when it was deleted.
+      const restoredIds = new Map<string, string>();
+      // Sections a restored block may have left without a column (D-03): one
+      // a column was re-parented out of, and one this batch re-created.
+      const sectionsToCheck = new Set<string>();
 
       for (const block of orderedBlocks) {
         const raw = rawByRevisionId.get(block.revisionId);
@@ -862,62 +919,73 @@ export async function restoreRevisionBatch(
         const definition = getBlockDefinition(block.blockType);
         const restoredProps = buildRestoredProps(block.properties);
 
+        // The parent the block goes back under: the recorded one, or its
+        // re-created replacement when the parent was restored by this batch.
+        const parentBlockId =
+          raw.parentBlockId === null
+            ? null
+            : (restoredIds.get(raw.parentBlockId) ?? raw.parentBlockId);
+
         let parentDefinition: BlockDefinition | null = null;
+        let sectionDefinition: BlockDefinition | null = null;
         let parentDepth: number | null = null;
         let parentSectionDepth = 0;
-        if (raw.parentBlockId !== null) {
-          const [parentRow] = await tx
-            .select({
-              depth: pageBlocks.depth,
-              blockType: pageBlocks.blockType,
-            })
-            .from(pageBlocks)
-            .where(eq(pageBlocks.id, raw.parentBlockId))
-            .for('update');
-          if (parentRow === undefined) {
+        if (parentBlockId !== null) {
+          const loaded = await loadParentForPlacement(tx, parentBlockId);
+          if (loaded === null) {
             throw new RestoreParentNotFoundError(
               block.revisionId,
-              raw.parentBlockId,
+              parentBlockId,
             );
           }
-          parentDepth = parentRow.depth;
-          parentDefinition = getBlockDefinition(parentRow.blockType);
-          parentSectionDepth = await countAncestorSections(
-            tx,
-            raw.parentBlockId,
-          );
+          parentDepth = loaded.parentDepth;
+          parentDefinition = loaded.parentDefinition;
+          sectionDefinition = loaded.sectionDefinition;
+          parentSectionDepth = loaded.parentSectionDepth;
         }
 
         assertPlacementAllowed({
           owner: ownerRef,
           child: definition,
           parent: parentDefinition,
+          section: sectionDefinition,
+          columnsEnabled: getColumnDefinition() !== null,
           parentDepth,
           parentSectionDepth,
           sectionNestingDepth: deps.config.sectionNestingDepth,
           blockDepthCeiling: deps.config.blockDepthCeiling,
         });
 
+        const restoredLayout = buildRestoredLayout(
+          definition,
+          raw.layout,
+          deps.config.columnPresets,
+        );
+
         if (block.changeType === 'delete') {
           let validatedProps: Record<string, unknown>;
           try {
-            validatedProps = validateBlockProps(definition, restoredProps);
+            validatedProps = validateBlockProps(definition, restoredProps, {
+              allowMissingRequired: true,
+            });
           } catch (error) {
             if (!(error instanceof BlockPropsValidationError)) throw error;
             throw new DegradedRestoreError([block]);
           }
 
           const newId = randomUUID();
+          const restoredDepth = (parentDepth ?? -1) + 1;
           await tx.insert(pageBlocks).values({
             id: newId,
             ownerType: ownerRef.ownerType,
             ownerId: ownerRef.ownerId,
             locale: ownerRef.locale,
-            parentBlockId: raw.parentBlockId,
+            parentBlockId,
             blockType: block.blockType,
             props: validatedProps,
+            layout: restoredLayout,
             schemaVersion: definition.schemaVersion,
-            depth: raw.depth,
+            depth: restoredDepth,
             sortOrder: raw.sortOrder,
             version: 1,
             createdBy: actor.userId,
@@ -933,14 +1001,18 @@ export async function restoreRevisionBatch(
             changeType: 'create',
             kind: 'save',
             blockType: block.blockType,
-            parentBlockId: raw.parentBlockId,
+            parentBlockId,
             sortOrder: raw.sortOrder,
-            depth: raw.depth,
+            depth: restoredDepth,
             props: validatedProps,
+            layout: restoredLayout,
             schemaVersion: definition.schemaVersion,
             authorId: actor.userId,
             createdAt: restoredAt,
           });
+          const deletedId = raw.subjectBlockId ?? raw.blockId;
+          if (deletedId !== null) restoredIds.set(deletedId, newId);
+          if (definition.kind === 'section') sectionsToCheck.add(newId);
           restoredBlocks += 1;
         } else if (block.changeType === 'move') {
           if (block.blockId === null) {
@@ -989,10 +1061,18 @@ export async function restoreRevisionBatch(
             );
           }
 
+          if (
+            definition.kind === 'column' &&
+            current.parentBlockId !== null &&
+            current.parentBlockId !== parentBlockId
+          ) {
+            sectionsToCheck.add(current.parentBlockId);
+          }
+
           await tx
             .update(pageBlocks)
             .set({
-              parentBlockId: raw.parentBlockId,
+              parentBlockId,
               sortOrder: raw.sortOrder,
               depth: restoredDepth,
               version: sql`${pageBlocks.version} + 1`,
@@ -1021,6 +1101,7 @@ export async function restoreRevisionBatch(
             sortOrder: current.sortOrder,
             depth: current.depth,
             props: current.props,
+            layout: readStoredLayout(current.layout),
             schemaVersion: current.schemaVersion,
             authorId: actor.userId,
             createdAt: restoredAt,
@@ -1032,7 +1113,9 @@ export async function restoreRevisionBatch(
           }
           let validatedProps: Record<string, unknown>;
           try {
-            validatedProps = validateBlockProps(definition, restoredProps);
+            validatedProps = validateBlockProps(definition, restoredProps, {
+              allowMissingRequired: true,
+            });
           } catch (error) {
             if (!(error instanceof BlockPropsValidationError)) throw error;
             throw new DegradedRestoreError([block]);
@@ -1042,6 +1125,7 @@ export async function restoreRevisionBatch(
             .update(pageBlocks)
             .set({
               props: validatedProps,
+              layout: restoredLayout,
               version: sql`${pageBlocks.version} + 1`,
               updatedAt: restoredAt,
               updatedBy: actor.userId,
@@ -1066,6 +1150,7 @@ export async function restoreRevisionBatch(
             sortOrder: updated.sortOrder,
             depth: updated.depth,
             props: updated.props,
+            layout: readStoredLayout(updated.layout),
             schemaVersion: updated.schemaVersion,
             authorId: actor.userId,
             createdAt: restoredAt,
@@ -1073,6 +1158,8 @@ export async function restoreRevisionBatch(
           restoredBlocks += 1;
         }
       }
+
+      await assertSectionsHaveColumns(tx, sectionsToCheck);
 
       await tx
         .update(pages)

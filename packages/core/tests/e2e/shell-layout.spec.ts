@@ -18,7 +18,7 @@ const SIDEBAR_BODY = `${HOST} [data-sidebar]`;
 // seen. While the 240ms swap runs both are briefly visible, so each toggle is
 // addressed through its own layer.
 const FRAMED_TOGGLE = `${SIDEBAR_BODY} button[aria-pressed]`;
-const RAIL_TOGGLE = `${RAIL} button[aria-pressed]`;
+const RAIL_TOGGLE = `${RAIL} [data-layout-toggle]`;
 const STORAGE_KEY = 'plakboek:editor-layout';
 
 // The viewport is 1400x900.
@@ -276,17 +276,21 @@ test.describe('the rail', () => {
     });
     await expect(tooltip).toHaveCSS('visibility', 'hidden');
 
-    // skip link, Full width, Exit edit mode
-    for (let step = 0; step < 3; step += 1) await tab(page, browserName);
-    expect(
-      await page.evaluate(
+    // The editing tools sit above Full width in the rail, and how many there
+    // are depends on the session, so Tab until Exit edit mode holds focus.
+    const focusedLabel = () =>
+      page.evaluate(
         (tag) =>
           document
             .querySelector(tag)
             ?.shadowRoot?.activeElement?.getAttribute('aria-label'),
         HOST,
-      ),
-    ).toBe('Exit edit mode');
+      );
+    for (let step = 0; step < 20; step += 1) {
+      if ((await focusedLabel()) === 'Exit edit mode') break;
+      await tab(page, browserName);
+    }
+    expect(await focusedLabel()).toBe('Exit edit mode');
     await expect(tooltip).toHaveCSS('visibility', 'visible');
     await expect(tooltip).toHaveCSS('opacity', '1');
     await expect(tooltip).toBeVisible();

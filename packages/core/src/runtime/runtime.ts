@@ -43,7 +43,7 @@ import {
   type SiteHooks,
 } from '../site.js';
 import type { HostModule, PlakboekConfig } from '../types.js';
-import { getDb } from './db.js';
+import { getDb, runInBackground } from './db.js';
 import { readRuntimeEnv, type RuntimeEnv } from './env.js';
 import { createLazyMailSender, type LazyMailSender } from './mail.js';
 
@@ -68,6 +68,11 @@ export type Runtime = {
    * without the editor's client assets.
    */
   cmsPages(): Promise<CmsPages>;
+  /**
+   * The editor's JSON API (`/cms/api`), composed on first use so the editor's
+   * server code loads only when the first API request arrives.
+   */
+  editorApi(): Promise<EditorServer.EditorApi>;
   /**
    * The visitor handler's sealed 404 (host page or default, status 404,
    * `no-store`) for routes outside the handler, such as the setup page.
@@ -182,6 +187,29 @@ function composeCmsPages(
   });
 }
 
+/** The editor API, built on first use from the same dependencies. */
+function composeEditorApi(
+  host: HostModule,
+  parts: Pick<EditorParts, 'env' | 'auth' | 'resolver'> & {
+    readonly pages: PagesDeps;
+  },
+  loadEditor: EditorLoader,
+): () => Promise<EditorServer.EditorApi> {
+  const { config } = host;
+  const { env, auth, resolver, pages } = parts;
+  return lazily(async () => {
+    const { createEditorApi } = await loadEditor();
+    return createEditorApi({
+      auth,
+      resolver,
+      pages,
+      homeSlug: config.homeSlug,
+      components: createComponentMap(config.pages.blocks),
+      siteOrigin: new URL(env.siteUrl).origin,
+    });
+  });
+}
+
 export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
   const { config, site } = host;
   const db = getDb(env.databaseUrl);
@@ -226,6 +254,7 @@ export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
     ...(cache === undefined ? {} : { cache }),
     ...(env.buildId === undefined ? {} : { buildId: env.buildId }),
     ...siteHooks,
+    ...(host.devMode === true ? { devBlockMarkers: true } : {}),
     edit:
       host.edit ??
       composeEditor(host, { env, db, auth, resolver, siteHooks }, loadEditor),
@@ -243,6 +272,11 @@ export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
     pages,
     visitor,
     cmsPages: composeCmsPages(host, { env, auth, resolver }, loadEditor),
+    editorApi: composeEditorApi(
+      host,
+      { env, auth, resolver, pages },
+      loadEditor,
+    ),
     notFoundResponse: (request) => sealedNotFoundResponse(siteHooks, request),
   };
 }
@@ -253,19 +287,48 @@ const runtimes = new WeakMap<object, Runtime>();
  * Starts, without waiting for it, the boot-time report of pages that already
  * sit at an address the CMS reserves (`/cms`, `/api`): they are kept and
  * flagged through the pages hook, never changed (D-23). A failure costs one
- * line naming only the error type and never reaches a request.
+ * line naming only the error type and never reaches a request. It runs as
+ * background work of the runtime's database handle, which shutdown waits for.
  */
 function reportReservedPagePaths(runtime: Runtime): void {
-  void pagesPackage
-    .checkReservedPagePaths(runtime.db.db)
-    .then((rows) => {
+  runInBackground(runtime.db, async () => {
+    try {
+      const rows = await pagesPackage.checkReservedPagePaths(runtime.db.db);
       pagesPackage.reportReservedPagePaths(runtime.pages, rows);
-    })
-    .catch((error: unknown) => {
+    } catch (error: unknown) {
       process.stderr.write(
         `[@plakboek/core] The check for pages at reserved addresses failed: ${error instanceof Error ? error.name : typeof error}\n`,
       );
-    });
+    }
+  });
+}
+
+/**
+ * Starts, without waiting for it, the upgrade of stored flat trees to the
+ * column shape (D-03), a few pages per call until none is left. A request
+ * never waits for it, and a page's upgrade is its own transaction. It runs as
+ * background work of the runtime's database handle: once the handle starts
+ * closing, the loop stops after the batch in hand, without a report, and
+ * shutdown waits for that batch. A page held by an editor's live lock is left
+ * alone (its upgrade would move the version under the open editor) and is
+ * picked up by a later boot or by that editor's next open. A failure costs one
+ * line naming only the error type.
+ */
+function upgradeColumnsInBackground(runtime: Runtime): void {
+  runInBackground(runtime.db, async (closing) => {
+    try {
+      let upgraded = 0;
+      do {
+        ({ upgraded } = await pagesPackage.upgradeAllSectionColumns(
+          runtime.pages,
+        ));
+      } while (upgraded > 0 && !closing.aborted);
+    } catch (error: unknown) {
+      process.stderr.write(
+        `[@plakboek/core] The column-shape upgrade failed: ${error instanceof Error ? error.name : typeof error}\n`,
+      );
+    }
+  });
 }
 
 /**
@@ -283,6 +346,7 @@ export function runtimeFor(
     runtime = createRuntime(host, readRuntimeEnv(source));
     runtimes.set(host.config, runtime);
     reportReservedPagePaths(runtime);
+    upgradeColumnsInBackground(runtime);
   }
   return runtime;
 }

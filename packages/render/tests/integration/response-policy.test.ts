@@ -432,6 +432,61 @@ describe('the page Cache-Control override', () => {
   });
 });
 
+describe('development block markers (code review WR-D-02)', () => {
+  async function markedPage(
+    extra: Partial<Parameters<typeof createVisitorHandler>[0]> = {},
+  ): Promise<{ markers: boolean; cacheControl: string | null }> {
+    const handler = createVisitorHandler({
+      db: fixture.handle.db,
+      config: fixtureConfig,
+      devBlockMarkers: true,
+      ...extra,
+    });
+    const response = await visit(handler, '/about-us');
+    expect(response.status).toBe(200);
+    return {
+      markers: (await response.text()).includes('data-pk-block'),
+      cacheControl: response.headers.get('Cache-Control'),
+    };
+  }
+
+  it('marks the blocks, and answers no-store so a proxy cannot keep the page', async () => {
+    expect(await markedPage()).toEqual({
+      markers: true,
+      cacheControl: 'no-store',
+    });
+  });
+
+  it('leaves a page without markers and with the normal policy when the flag is off', async () => {
+    const handler = createVisitorHandler({
+      db: fixture.handle.db,
+      config: fixtureConfig,
+    });
+    const response = await visit(handler, '/about-us');
+    expect(await response.text()).not.toContain('data-pk-block');
+    expect(response.headers.get('Cache-Control')).toBe(PAGE_CACHE_CONTROL);
+  });
+
+  it('leaves the markers out when NODE_ENV is production, even with the flag set', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    try {
+      expect(await markedPage()).toEqual({
+        markers: false,
+        cacheControl: PAGE_CACHE_CONTROL,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('leaves the markers out when a cache is configured', async () => {
+    expect(await markedPage({ cache: createMemoryCache() })).toEqual({
+      markers: false,
+      cacheControl: PAGE_CACHE_CONTROL,
+    });
+  });
+});
+
 describe('build-id staleness on cached entries', () => {
   it('re-renders an entry another build wrote and overwrites it', async () => {
     resetRenderCounts();

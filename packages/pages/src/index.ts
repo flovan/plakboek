@@ -15,15 +15,25 @@
  *   called only from this package's own write paths, inside an
  *   already-open audited transaction. One save call to this package's own
  *   revision history.
+ * - The transactional write bodies behind the single-operation functions and
+ *   the batch edit (`insertBlockInTransaction`, `updateBlockInTransaction`,
+ *   `moveBlockInTransaction`, `deleteSubtreeInTransaction`), the sibling
+ *   position resolver and the block row lock (`tree.ts`) -- they take an
+ *   already-open transaction and never bump the page version, so a caller
+ *   reaching them could write blocks without the version check, lock check
+ *   and audit row that `applyBlockEdit` and the single-operation functions
+ *   wrap around them.
  * - The row-locking page read (`pages.ts`) and the append-only URL-history
  *   writer -- every host-facing read excludes a removed locale and every
  *   history row is written inside the transaction that changed the address;
  *   a caller reaching either directly could lock a page row or write history
  *   outside any audited mutation.
- * - The write-time placement, depth and section guards (`placement.ts`) and
- *   the ancestor walk behind them -- reachable only through the write paths
- *   that must obey them, never callable standalone to pre-check a write a
- *   caller then performs some other way.
+ * - The throwing write-time placement, depth and section guard
+ *   (`assertPlacementAllowed`, `placement.ts`) and the ancestor walk and
+ *   parent loader behind it -- reachable only through the write paths that
+ *   must obey them. The pure, non-throwing `checkPlacement` is public so an
+ *   editor can draw legal drop targets from the same rule; it is advisory,
+ *   and every write still enforces the rule itself inside its transaction.
  * - Transaction-scoped slug generation and availability, and the
  *   address-availability check (`page-slug.ts`, `page-routing.ts`) -- the
  *   advisory-lock-serialised search a concurrent write must go through, not
@@ -40,16 +50,28 @@
  * - The shared publication materialiser (`publish.ts`) -- the single code
  *   path that makes a preview and a publish identical; a second caller could
  *   make them differ.
- * - The props validator and the constraint applier (`registry.ts`,
- *   `constraints.ts`) -- reachable only through `resolveBlockProperties` and
- *   the write paths; a caller validating props outside a real write could
- *   diverge from what the write path actually persists.
+ * - The props and layout validators and the constraint applier
+ *   (`registry.ts`, `layout.ts`, `constraints.ts`) -- reachable only through
+ *   `resolveBlockProperties` and the write paths; a caller validating
+ *   outside a real write could diverge from what the write path actually
+ *   persists. `previewBlockValues` is the read-only twin of those write-path
+ *   checks (props leniently, as the working tree accepts them, plus layout)
+ *   and `findMissingRequiredProps` names the required values still empty, so
+ *   an editor can show "needs input" and a live preview from the same rules
+ *   the engine enforces, without writing anything.
  * - The after-commit purge registration helpers (`purge.ts`) -- the single
  *   place every write path registers its cache purge; a caller reaching
  *   them could purge (or skip purging) for a write this package did not
  *   perform, out of step with the commit it follows.
  * - Every Drizzle schema table -- a consumer able to read or write these
  *   directly could bypass every guarantee above.
+ *
+ * One exception to the above is exported on purpose: `upgradeSectionColumns`
+ * and `upgradeAllSectionColumns` (`columns.ts`), because the editor and the
+ * host runtime run them from other packages. They are trusted system
+ * operations that take no actor, check no permission and write no audit row
+ * (the revision batch they record has no author), so a caller must have
+ * authorised the call itself and no HTTP route may expose them directly.
  *
  * A second tier of internal helpers stays unexported for the same reason,
  * even though the plan's own withheld list does not name every one
@@ -121,6 +143,7 @@ export {
   BlockConfigError,
   BlockPropsValidationError,
   defineBlocks,
+  findMissingRequiredProps,
   getBlockDefinition,
   listBlockDefinitions,
   resolveBlockProperties,
@@ -140,7 +163,25 @@ export type {
   ResolvedBlockPlacement,
   ResolvedBlockProperty,
   ResolvedPropertyConstraint,
+  StarterNode,
 } from './registry.js';
+
+// layout.ts
+export {
+  BUILT_IN_COLUMN_PRESETS,
+  BlockLayoutValidationError,
+  COLUMN_ALIGN_VALUES,
+  COLUMN_RATIO_PATTERN,
+  previewBlockValues,
+  resolveColumnPresets,
+} from './layout.js';
+export type {
+  BlockLayout,
+  BlockLayoutValidationIssue,
+  ColumnAlign,
+  ColumnPresetsInput,
+  PreviewBlockValuesResult,
+} from './layout.js';
 
 // constraints.ts
 export { BlockConstraintError, constrainBlock } from './constraints.js';
@@ -180,11 +221,16 @@ export type {
 export {
   BlockDepthExceededError,
   BlockPlacementError,
+  checkPlacement,
   ROOT_PARENT_SENTINEL,
   SectionNestingDepthExceededError,
   SectionRequiredError,
 } from './placement.js';
-export type { BlockPlacementReason } from './placement.js';
+export type {
+  BlockPlacementReason,
+  PlacementCheckInput,
+  PlacementRefusalReason,
+} from './placement.js';
 
 // versioning.ts
 export {
@@ -332,6 +378,31 @@ export type {
   UpdateBlockPropsInput,
 } from './tree.js';
 
+// edit-batch.ts
+export {
+  applyBlockEdit,
+  BLOCK_EDIT_MAX_NODES,
+  BLOCK_EDIT_MAX_OPS,
+  BlockEditLimitError,
+  BlockIdConflictError,
+  BlockOwnershipError,
+  SectionColumnRequiredError,
+} from './edit-batch.js';
+export type {
+  BlockEditInput,
+  BlockEditNode,
+  BlockEditOp,
+  BlockEditPosition,
+  BlockEditResult,
+} from './edit-batch.js';
+
+// columns.ts
+export {
+  normaliseSnapshotColumns,
+  upgradeAllSectionColumns,
+  upgradeSectionColumns,
+} from './columns.js';
+
 // revisions.ts
 export {
   computeBlockRestorePreview,
@@ -422,6 +493,7 @@ export {
   PageLockNotFoundError,
   PageLockStateChangedError,
   PageLockTakeoverForbiddenError,
+  readPageLockView,
   releasePageLock,
   renewPageLock,
   takeOverPageLock,
@@ -430,6 +502,7 @@ export type {
   AcquirePageLockInput,
   PageLockGrant,
   PageLockState,
+  PageLockView,
   ReleasePageLockInput,
   RenewPageLockInput,
   TakeOverPageLockInput,

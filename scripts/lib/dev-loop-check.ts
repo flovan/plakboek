@@ -4,11 +4,14 @@
 //   node scripts/lib/dev-loop-check.ts <base url> <site dir>
 //
 // It checks that the page and its stylesheet are served in development, then
-// edits a block and a template inside <site dir>, waits for the `full-reload`
+// edits a block and a template inside <site dir>, waits for the matching
 // message on Vite's HMR websocket after each edit, and confirms the next
-// response shows the change. Both files are restored, and the restore is
-// confirmed the same way. Edits happen only in <site dir>, a throwaway
-// project; never run this against a checkout you care about.
+// response shows the change. A block edit must send the custom
+// `plakboek:blocks-changed` event (the browser swaps just that block, with no
+// reload); a template edit must send a `full-reload`. Both files are
+// restored, and the restore is confirmed the same way. Edits happen only in
+// <site dir>, a throwaway project; never run this against a checkout you care
+// about.
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -63,10 +66,19 @@ async function pageEventually(
   }
 }
 
+/** What an edit is expected to make the dev server send. */
+type Message = 'full-reload' | 'blocks-changed';
+
+const MESSAGE_PATTERNS: Readonly<Record<Message, readonly string[]>> = {
+  'full-reload': ['"type":"full-reload"'],
+  'blocks-changed': ['"type":"custom"', '"event":"plakboek:blocks-changed"'],
+};
+
 type ReloadSocket = {
   /** Start counting from now: only messages after this call satisfy a wait. */
   mark(): void;
-  waitForReload(): Promise<void>;
+  /** Waits for a message of this kind; the other kind never satisfies it. */
+  waitFor(message: Message): Promise<void>;
   close(): void;
 };
 
@@ -88,14 +100,18 @@ async function openReloadSocket(): Promise<ReloadSocket> {
     );
   }
 
-  let reloads = 0;
-  let baseline = 0;
+  const counts: Record<Message, number> = {
+    'full-reload': 0,
+    'blocks-changed': 0,
+  };
+  const baseline: Record<Message, number> = { ...counts };
   socket.addEventListener('message', (event: MessageEvent) => {
-    if (
-      typeof event.data === 'string' &&
-      event.data.includes('"type":"full-reload"')
-    ) {
-      reloads += 1;
+    if (typeof event.data !== 'string') return;
+    const data = event.data;
+    for (const message of Object.keys(MESSAGE_PATTERNS) as Message[]) {
+      if (MESSAGE_PATTERNS[message].every((part) => data.includes(part))) {
+        counts[message] += 1;
+      }
     }
   });
 
@@ -120,14 +136,14 @@ async function openReloadSocket(): Promise<ReloadSocket> {
 
   return {
     mark() {
-      baseline = reloads;
+      Object.assign(baseline, counts);
     },
-    async waitForReload() {
+    async waitFor(message) {
       const deadline = Date.now() + RELOAD_TIMEOUT_MS;
-      while (reloads <= baseline) {
+      while (counts[message] <= baseline[message]) {
         if (Date.now() > deadline) {
           throw new Error(
-            `timed out after ${RELOAD_TIMEOUT_MS / 1000} seconds waiting for a full-reload message`,
+            `timed out after ${RELOAD_TIMEOUT_MS / 1000} seconds waiting for a ${message} message`,
           );
         }
         await sleep(50);
@@ -147,9 +163,11 @@ type Edit = {
   anchor: string;
   marker: string;
   label: string;
+  /** What the dev server must send for this edit (and for its restore). */
+  sends: Message;
 };
 
-/** Edits a file, proves the reload and the change, then proves the restore. */
+/** Edits a file, proves the message and the change, then proves the restore. */
 async function proveEdit(socket: ReloadSocket, edit: Edit): Promise<void> {
   const path = join(siteDir, edit.file);
   const original = await readFile(path, 'utf8');
@@ -162,8 +180,8 @@ async function proveEdit(socket: ReloadSocket, edit: Edit): Promise<void> {
   try {
     socket.mark();
     await writeFile(path, edited);
-    await socket.waitForReload();
-    log(`${edit.label}: full-reload received after editing ${edit.file}`);
+    await socket.waitFor(edit.sends);
+    log(`${edit.label}: ${edit.sends} received after editing ${edit.file}`);
     await pageEventually(
       (html) => html.includes(attribute),
       `show ${attribute}`,
@@ -175,7 +193,7 @@ async function proveEdit(socket: ReloadSocket, edit: Edit): Promise<void> {
     await writeFile(path, original);
   }
 
-  await socket.waitForReload();
+  await socket.waitFor(edit.sends);
   await pageEventually(
     (html) => !html.includes(attribute),
     `drop ${attribute} after the restore`,
@@ -224,12 +242,14 @@ async function main(): Promise<void> {
       anchor: '<h1',
       marker: 'block',
       label: 'block edit',
+      sends: 'blocks-changed',
     });
     await proveEdit(socket, {
       file: 'app/site/header.tsx',
       anchor: '<header',
       marker: 'header',
       label: 'template edit',
+      sends: 'full-reload',
     });
   } finally {
     socket.close();

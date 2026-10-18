@@ -1,0 +1,5 @@
+---
+'@plakboek/editor': minor
+---
+
+Drag and drop. Every selected item has a drag handle first in its toolbar, and the Blocks palette's rows can be dragged too. A press only becomes a drag after 4px of movement, so clicks still select and insert. While you drag, the page does not move: the item you carry is dimmed, a small label follows the pointer, and a 2px line shows the one place the drop would land, only where the placement rules allow it (between blocks of a column, between columns, between sections). Over a spot where nothing may go there is no line and the cursor says so. Dropping saves the move or the new block at once, selects it and flashes it; Escape or a release outside the page cancels, and a failed save leaves the page as it was. Near the top or bottom edge of the page the frame scrolls by itself. With the handle focused, Space or Enter picks the item up, the arrow keys step through the legal positions in document order (Left and Right jump across columns), Space or Enter drops and Escape cancels, with each step announced. No drag-and-drop library is added: the editor has its own controller.

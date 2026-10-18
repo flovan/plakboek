@@ -71,15 +71,31 @@ to spread the core blocks into its own array at all loses them entirely --
 this is the cost of a rule with no hidden behaviour, and it is deliberate
 (EXT-02, ROADMAP criterion 5).
 
-**A block declaration** carries a `key`, a `kind` (`'block'` or
-`'section'`), `editor` metadata (label, description, icon, category),
+**A block declaration** carries a `key`, a `kind` (`'block'`, `'section'`
+or `'column'`), `editor` metadata (label, description, icon, category),
 typed `properties`, a `placement` (which owner types, parents and children
 it accepts), a `schemaVersion`, an optional `minSupportedVersion`, and its
 `upcasters` (one function per version step). A property's `fieldType`
 reuses `@plakboek/content`'s field-type registry -- the same options
 schema, value schema and widget system content fields use -- so a host
 field type registered through `registerHostFieldType` (`@plakboek/content`)
-works in a block property with no further wiring.
+works in a block property with no further wiring. A `kind: 'block'` may
+also declare `layout: { fill: true }` (it stretches to fill its column) and
+`starterChildren`, a nested list of registered block types the editor
+inserts under it; a starter naming an unregistered type, or nesting deeper
+than eight levels, fails `defineBlocks` with `INVALID_STARTER_CHILDREN`.
+
+**Columns.** `column` is a third block kind. A registry holds at most one
+column kind and it declares no properties. When the registry holds a column
+kind, a section accepts only columns and a column sits only directly under a
+section; a block under a column is placement-checked against the column's
+_section_ (that section's `allowedChildren` and the block's `allowedParents`
+decide), so host sections never declare `column` themselves. Columns never
+count toward `sectionNestingDepth`, while a section nested in a column counts
+as before. A registry with no column kind behaves exactly as it did before
+columns existed. Every write path (insert, move and restore) enforces this,
+and `checkPlacement` exposes the same pure decision so an editor can draw
+legal drop targets; it is advisory only.
 
 **Constraining a built-in block:** an installation narrows a block it did
 not write, without editing core, by declaring a per-property constraint and
@@ -153,7 +169,7 @@ point, so an export cannot be added or removed without updating them.
 | `PagesConfig`                   | type     | The frozen, validated result of `definePagesConfig`                                                                           |
 | `PagesConfigInput`              | type     | Input to `definePagesConfig`                                                                                                  |
 | `PagesConfigIssue`              | type     | One `definePagesConfig` problem                                                                                               |
-| `PagesConfigIssueCode`          | type     | `NO_BLOCKS`, `INVALID_SECTION_NESTING_DEPTH`, `INVALID_BLOCK_DEPTH_CEILING`                                                   |
+| `PagesConfigIssueCode`          | type     | `NO_BLOCKS`, `INVALID_SECTION_NESTING_DEPTH`, `INVALID_BLOCK_DEPTH_CEILING`, `INVALID_COLUMN_PRESETS`                         |
 | `PagesDeps`                     | type     | The dependency bag every engine operation takes: `db`, `recorder`, `resolver`, `config`, optional `hooks`/`invalidator`/`now` |
 | `PagesHooks`                    | type     | Optional warning hooks a host passes on `PagesDeps`                                                                           |
 
@@ -176,30 +192,74 @@ point, so an export cannot be added or removed without updating them.
 
 ### Block registry
 
-| Export                       | Kind     | Purpose                                                                   |
-| ---------------------------- | -------- | ------------------------------------------------------------------------- |
-| `BLOCK_KEY_PATTERN`          | constant | Allowed shape of a block's `key`                                          |
-| `BLOCK_PROPERTY_KEY_PATTERN` | constant | Allowed shape of a block property's key                                   |
-| `BlockConfigError`           | class    | Thrown by `defineBlocks` with every problem found                         |
-| `BlockPropsValidationError`  | class    | Thrown when a block instance's props fail validation on write             |
-| `defineBlocks`               | function | Validates and registers a host's block declarations, collect-then-throw   |
-| `getBlockDefinition`         | function | The registered `BlockDefinition` for a block type, or throws              |
-| `listBlockDefinitions`       | function | Every currently registered `BlockDefinition`                              |
-| `resolveBlockProperties`     | function | A block's real, currently-applicable properties with constraints resolved |
-| `UnknownBlockTypeError`      | class    | A block type string has no registered definition                          |
-| `BlockConfigIssue`           | type     | One `defineBlocks` problem                                                |
-| `BlockConfigIssueCode`       | type     | One `defineBlocks` problem code                                           |
-| `BlockDefinition`            | type     | A block declaration's frozen, normalised form                             |
-| `BlockDefinitionInput`       | type     | Input to `defineBlocks`, one entry per block                              |
-| `BlockEditorMetadata`        | type     | A block's editor-facing label/description/icon/category                   |
-| `BlockKind`                  | type     | `'block'` or `'section'`                                                  |
-| `BlockPlacement`             | type     | Where a block may sit: owner types, allowed parents, allowed children     |
-| `BlockPropertyDefinition`    | type     | One typed block property                                                  |
-| `BlockPropsValidationIssue`  | type     | One `BlockPropsValidationError` problem                                   |
-| `BlockUpcaster`              | type     | A function upcasting one version step's props                             |
-| `ResolvedBlockPlacement`     | type     | The frozen, defaulted form of `BlockPlacement`                            |
-| `ResolvedBlockProperty`      | type     | A property as resolved for the editor/write path, with its constraint     |
-| `ResolvedPropertyConstraint` | type     | One property's resolved `hidden`/`fixed`/`narrowed` constraint            |
+| Export                       | Kind     | Purpose                                                                     |
+| ---------------------------- | -------- | --------------------------------------------------------------------------- |
+| `BLOCK_KEY_PATTERN`          | constant | Allowed shape of a block's `key`                                            |
+| `BLOCK_PROPERTY_KEY_PATTERN` | constant | Allowed shape of a block property's key                                     |
+| `BlockConfigError`           | class    | Thrown by `defineBlocks` with every problem found                           |
+| `BlockPropsValidationError`  | class    | Thrown when a block instance's props fail validation on write               |
+| `defineBlocks`               | function | Validates and registers a host's block declarations, collect-then-throw     |
+| `findMissingRequiredProps`   | function | The required properties still empty in a block's props, without writing     |
+| `getBlockDefinition`         | function | The registered `BlockDefinition` for a block type, or throws                |
+| `listBlockDefinitions`       | function | Every currently registered `BlockDefinition`                                |
+| `resolveBlockProperties`     | function | A block's real, currently-applicable properties with constraints resolved   |
+| `UnknownBlockTypeError`      | class    | A block type string has no registered definition                            |
+| `BlockConfigIssue`           | type     | One `defineBlocks` problem                                                  |
+| `BlockConfigIssueCode`       | type     | One `defineBlocks` problem code                                             |
+| `BlockDefinition`            | type     | A block declaration's frozen, normalised form                               |
+| `BlockDefinitionInput`       | type     | Input to `defineBlocks`, one entry per block                                |
+| `BlockEditorMetadata`        | type     | A block's editor-facing label/description/icon/category                     |
+| `BlockKind`                  | type     | `'block'`, `'section'` or `'column'`                                        |
+| `BlockPlacement`             | type     | Where a block may sit: owner types, allowed parents, allowed children       |
+| `BlockPropertyDefinition`    | type     | One typed block property                                                    |
+| `BlockPropsValidationIssue`  | type     | One `BlockPropsValidationError` problem                                     |
+| `BlockUpcaster`              | type     | A function upcasting one version step's props                               |
+| `ResolvedBlockPlacement`     | type     | The frozen, defaulted form of `BlockPlacement`                              |
+| `ResolvedBlockProperty`      | type     | A property as resolved for the editor/write path, with its constraint       |
+| `ResolvedPropertyConstraint` | type     | One property's resolved `hidden`/`fixed`/`narrowed` constraint              |
+| `StarterNode`                | type     | One node of a block's `starterChildren`: a registered type, props, children |
+
+### Layout (D-33, D-04, D-05, D-08)
+
+| Export                       | Kind     | Purpose                                                                                     |
+| ---------------------------- | -------- | ------------------------------------------------------------------------------------------- |
+| `BlockLayoutValidationError` | class    | Thrown when a layout write names an unknown key or an invalid value; carries keys and codes |
+| `BUILT_IN_COLUMN_PRESETS`    | constant | The built-in column ratios, `'1'` through `'1:1:1:1'`                                       |
+| `COLUMN_ALIGN_VALUES`        | constant | Frozen `['stretch', 'start', 'center', 'end']`                                              |
+| `COLUMN_RATIO_PATTERN`       | constant | The only shape a column ratio may take: colon-separated positive integers                   |
+| `previewBlockValues`         | function | What a write would accept for a block's props and layout, plus its missing required values  |
+| `resolveColumnPresets`       | function | The built-ins minus a host's exclusions plus its additions, with every problem found        |
+| `BlockLayout`                | type     | A block's layout: `columns`, `align`, `fill`                                                |
+| `BlockLayoutValidationIssue` | type     | One `BlockLayoutValidationError` problem: a key and `UNKNOWN` or `INVALID`                  |
+| `ColumnAlign`                | type     | One of `COLUMN_ALIGN_VALUES`                                                                |
+| `ColumnPresetsInput`         | type     | `{ exclude, add }`, the host's `columnPresets` config                                       |
+| `PreviewBlockValuesResult`   | type     | The result of `previewBlockValues`                                                          |
+
+Section layout and a block's fill flag live in a `layout` column beside
+`props` (D-33), never inside it, so property validation, upcasters and the
+snapshot's property order never see them. A section accepts `columns` (a
+ratio preset such as `'2:1'`) and `align` (`stretch`, `start`, `center`,
+`end`); a block accepts `fill` only when its declaration sets `layout: { fill:
+true }`; a column accepts nothing. The built-in presets are `1`, `1:1`,
+`2:1`, `1:2`, `1:1:1`, `2:1:1`, `1:2:1`, `1:1:2` and `1:1:1:1`. A host
+excludes non-equal built-ins and adds its own ratios through
+`columnPresets: { exclude, add }` on `definePagesConfig`; an equal split for
+any column count is always allowed and is stored as no `columns` value at
+all, as is `stretch`. Presets only gate new writes: changing them never
+changes how an already stored layout reads. Errors name the key and a code,
+never the value. Published snapshots carry a block's `layout` when it has one.
+
+### Working tree leniency (D-21)
+
+`insertBlock`, `updateBlockProps` and the restore replays accept a block
+whose required property has no value yet, so an editor can save an
+unfinished block. Type, shape, unknown-key, fixed and narrowed checks still
+apply on every write. Publishing and compaction stay strict: `publishPage`
+refuses the tree with a `DegradedBlockPublishError` entry whose reason is
+`invalid-props` and whose detail names the key and `REQUIRED`.
+`findMissingRequiredProps` and `previewBlockValues` answer the same
+questions without writing, so an editor's "needs input" flags never diverge
+from what publishing will refuse.
 
 ### Installation constraints (BLOCK-08)
 
@@ -235,16 +295,19 @@ point, so an export cannot be added or removed without updating them.
 | `SectionLintFinding`               | type     | One `lintSectionProperties` finding                                                      |
 | `SectionLintReason`                | type     | `'content-field-type'`, `'content-property-name'` or `'exempt'`                          |
 
-### Placement refusals (BLOCK-05, D-08, D-18, D-19)
+### Placement (BLOCK-05, D-08, D-18, D-19, EDIT-11)
 
-| Export                             | Kind     | Purpose                                                                 |
-| ---------------------------------- | -------- | ----------------------------------------------------------------------- |
-| `BlockDepthExceededError`          | class    | A write would exceed `blockDepthCeiling`                                |
-| `BlockPlacementError`              | class    | An owner-type/parent/child placement rule refused a write               |
-| `ROOT_PARENT_SENTINEL`             | constant | The `allowedParents`/`allowedChildren` key naming "the page's own root" |
-| `SectionNestingDepthExceededError` | class    | A write would exceed `sectionNestingDepth`                              |
-| `SectionRequiredError`             | class    | A non-section block was inserted with no parent directly under a page   |
-| `BlockPlacementReason`             | type     | `'owner-type'`, `'parent-rejects-child'` or `'child-rejects-parent'`    |
+| Export                             | Kind     | Purpose                                                                  |
+| ---------------------------------- | -------- | ------------------------------------------------------------------------ |
+| `BlockDepthExceededError`          | class    | A write would exceed `blockDepthCeiling`                                 |
+| `BlockPlacementError`              | class    | An owner-type/parent/child placement rule refused a write                |
+| `checkPlacement`                   | function | The pure placement decision: the refusal reason or `null`, never throws  |
+| `ROOT_PARENT_SENTINEL`             | constant | The `allowedParents`/`allowedChildren` key naming "the page's own root"  |
+| `SectionNestingDepthExceededError` | class    | A write would exceed `sectionNestingDepth`                               |
+| `SectionRequiredError`             | class    | A non-section block was inserted with no parent directly under a page    |
+| `BlockPlacementReason`             | type     | The reasons `BlockPlacementError` carries, including the two column ones |
+| `PlacementCheckInput`              | type     | What `checkPlacement` takes: child, parent, column section, depths       |
+| `PlacementRefusalReason`           | type     | Every reason `checkPlacement` can return                                 |
 
 ### Schema versioning and upcast-on-read (BLOCK-12, D-10..D-15)
 
@@ -370,23 +433,93 @@ A pattern's literal text may contain only lowercase letters, digits, hyphens and
 
 ### Block tree (reads and structural writes, D-38)
 
-| Export                         | Kind     | Purpose                                                                                             |
-| ------------------------------ | -------- | --------------------------------------------------------------------------------------------------- |
-| `BlockNotFoundError`           | class    | A block write names a block/parent id that no longer exists                                         |
-| `CircularMoveError`            | class    | `moveBlock` given a destination that is the block itself or its own descendant                      |
-| `computeBlockDeleteImpact`     | function | Previews what deleting a block (and its subtree) would touch                                        |
-| `deleteBlock`                  | function | Deletes a block and its whole subtree, keeping its revision history                                 |
-| `insertBlock`                  | function | Inserts a block, enforcing placement, section and depth rules on write                              |
-| `InvalidSiblingReferenceError` | class    | `moveBlock` given a `beforeSiblingId`/`afterSiblingId` that isn't a child of the destination parent |
-| `moveBlock`                    | function | Moves a block and its whole subtree to a new parent and sibling position                            |
-| `readBlockTree`                | function | Reads one owner's full block tree, upcasting each row's props on the way out                        |
-| `StaleBlockVersionError`       | class    | A block write's `baseVersion` no longer matches the block's stored version                          |
-| `updateBlockProps`             | function | Edits a block's properties, validated against its current declaration                               |
-| `BlockDeleteImpact`            | type     | The result of `computeBlockDeleteImpact`/`deleteBlock`                                              |
-| `DeleteBlockInput`             | type     | Input to `deleteBlock`                                                                              |
-| `InsertBlockInput`             | type     | Input to `insertBlock`                                                                              |
-| `MoveBlockInput`               | type     | Input to `moveBlock`                                                                                |
-| `UpdateBlockPropsInput`        | type     | Input to `updateBlockProps`                                                                         |
+| Export                         | Kind     | Purpose                                                                                                                          |
+| ------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `BlockNotFoundError`           | class    | A block write names a block/parent id that no longer exists                                                                      |
+| `CircularMoveError`            | class    | `moveBlock` given a destination that is the block itself or its own descendant                                                   |
+| `computeBlockDeleteImpact`     | function | Previews what deleting a block (and its subtree) would touch                                                                     |
+| `deleteBlock`                  | function | Deletes a block and its whole subtree, keeping its revision history                                                              |
+| `insertBlock`                  | function | Inserts a block, enforcing placement, section and depth rules on write                                                           |
+| `InvalidSiblingReferenceError` | class    | `moveBlock` given a `beforeSiblingId`/`afterSiblingId` that isn't a child of the destination parent, or named in the wrong order |
+| `moveBlock`                    | function | Moves a block and its whole subtree to a new parent and sibling position                                                         |
+| `readBlockTree`                | function | Reads one owner's full block tree, upcasting each row's props on the way out                                                     |
+| `StaleBlockVersionError`       | class    | A block write's `baseVersion` no longer matches the block's stored version                                                       |
+| `updateBlockProps`             | function | Edits a block's properties, validated against its current declaration                                                            |
+| `BlockDeleteImpact`            | type     | The result of `computeBlockDeleteImpact`/`deleteBlock`                                                                           |
+| `DeleteBlockInput`             | type     | Input to `deleteBlock`                                                                                                           |
+| `InsertBlockInput`             | type     | Input to `insertBlock`                                                                                                           |
+| `MoveBlockInput`               | type     | Input to `moveBlock`                                                                                                             |
+| `UpdateBlockPropsInput`        | type     | Input to `updateBlockProps`                                                                                                      |
+
+### Batch edits (D-25)
+
+`applyBlockEdit` is the editor's one compound write: a list of insert, update,
+move and delete operations against a single page, applied in one transaction
+with one revision batch id, one audit row (`block.edit`, with per-kind counts)
+and one page version bump, or not at all. An insert may carry a whole subtree
+and client-chosen lowercase uuids (an id already in use is refused as a
+conflict, so a re-sent insert never makes a second block, and an undo can put
+a deleted subtree back under its original ids). Every block id, parent id and
+sibling id an operation names must belong to the stated page and locale or be
+created earlier in the same batch; anything else is refused before any write,
+so a block of a locked page can never be changed through another page's id.
+Operations are version-checked per block (`baseVersion`) and the batch against
+the page (`basePageVersion`); a block touched twice in one batch is checked
+against the version the client saw. Writes accept empty required values and
+validate layout against the column presets, exactly as the single-operation
+functions do. A batch holding a delete needs `pages:delete` as well as
+`pages:edit`; without it the refusal is recorded and nothing is written. A
+batch is limited to `BLOCK_EDIT_MAX_OPS` operations and
+`BLOCK_EDIT_MAX_NODES` inserted blocks. A batch edits the working tree only:
+it never publishes, never changes what visitors receive and never purges a
+cache.
+
+| Export                       | Kind     | Purpose                                                                                                   |
+| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------- |
+| `applyBlockEdit`             | function | Applies a batch of insert, update, move, delete and duplicate operations to one page atomically           |
+| `BLOCK_EDIT_MAX_NODES`       | constant | `500`: the most blocks one batch may insert, subtrees included                                            |
+| `BLOCK_EDIT_MAX_OPS`         | constant | `50`: the most operations one batch may hold                                                              |
+| `BlockEditLimitError`        | class    | A batch is empty, holds too many operations or inserts too many blocks (`limit`: `empty`, `ops`, `nodes`) |
+| `BlockIdConflictError`       | class    | An inserted node supplies an id that is already in use                                                    |
+| `BlockOwnershipError`        | class    | A batch names a block that belongs to another page, locale or owner                                       |
+| `SectionColumnRequiredError` | class    | A batch, `moveBlock`, `deleteBlock` or history restore would leave a section without a column             |
+| `BlockEditInput`             | type     | Input to `applyBlockEdit`: page id, base page version and the operations                                  |
+| `BlockEditNode`              | type     | One block to insert, with an optional client id and subtree                                               |
+| `BlockEditOp`                | type     | One insert, update, move, delete or duplicate operation                                                   |
+| `BlockEditPosition`          | type     | A parent and the siblings a block goes between                                                            |
+| `BlockEditResult`            | type     | The new page version, the revision batch id and the created, updated, moved and deleted ids               |
+
+### Column shape upgrade (D-03)
+
+Trees written before the column kind existed have blocks directly under their
+sections. `upgradeSectionColumns` brings one page's working tree into the
+column shape without losing anything: each section holding a non-column child
+(or no child) gets one new column, the non-column children move into it in
+their existing order, every block below them sits one level deeper, the page
+version is bumped once and the change is recorded as one revision batch with no
+author (a create for each new column, a move for each re-parented child). It
+runs once per page: a second run changes nothing, and two runs racing on one
+page serialise on an advisory lock. It respects the page edit lock: while
+locking is on, a page held by a live lock of someone other than the optional
+`actorUserId` is left untouched (version included) and the batch upgrade does
+not pick it up until the lock is gone. It is a trusted system operation: it takes no actor, checks no permission
+and writes no audit row (the revision batch it records has no author, so the
+history shows it as a system change), so a caller must have authorised the call
+itself (the editor does, behind `pages:edit`) and no HTTP route may expose it
+directly. It never publishes and never purges a cache. It runs in the
+background at boot (`upgradeAllSectionColumns`, at most 50 pages per call) and
+when an editor opens a page; there is no guarantee beyond that. Published
+snapshots are immutable and never rewritten: `resolvePublishedPage` wraps a
+flat snapshot's section children in a synthetic column
+(`normaliseSnapshotColumns`) so old publications render on the column grid
+until the page is published again. All three are no-ops when the registry has
+no column kind.
+
+| Export                     | Kind     | Purpose                                                                             |
+| -------------------------- | -------- | ----------------------------------------------------------------------------------- |
+| `upgradeSectionColumns`    | function | Upgrades one page's flat tree to the column shape; idempotent and race-safe         |
+| `upgradeAllSectionColumns` | function | Upgrades pages that still need it, in bounded batches                               |
+| `normaliseSnapshotColumns` | function | Wraps a flat published snapshot's section children in a synthetic column, in memory |
 
 ### Block revisions and restore (D-26..D-29, D-13)
 
@@ -510,26 +643,36 @@ it is republished too (redirects over `page_url_history` arrive in Phase 16).
 
 ### Page+locale edit locking (D-39..D-41, D-44)
 
-| Export                             | Kind     | Purpose                                                              |
-| ---------------------------------- | -------- | -------------------------------------------------------------------- |
-| `acquirePageLock`                  | function | Acquires the lock on one page locale row -- the open call            |
-| `isPageLockLive`                   | function | Whether a lock is still live, given its holder, `lockedAt` and now   |
-| `PAGE_EDIT_LOCK_HEARTBEAT_SECONDS` | constant | `30`: how often a holder should renew                                |
-| `PAGE_EDIT_LOCK_TTL_SECONDS`       | constant | `120`: how long a lock stays live with no renewal                    |
-| `PageLockedError`                  | class    | A write, acquire or renew refused by another user's live lock        |
-| `PageLockingDisabledError`         | class    | `acquirePageLock` called while the project-wide toggle is off        |
-| `PageLockNotFoundError`            | class    | A lock operation names a page id that no longer exists               |
-| `PageLockStateChangedError`        | class    | A takeover's decision went stale between the pre-check and the write |
-| `PageLockTakeoverForbiddenError`   | class    | The caller's permissions are not a superset of the current holder's  |
-| `releasePageLock`                  | function | Releases the lock on one page locale row -- the navigate-away call   |
-| `renewPageLock`                    | function | Renews the current holder's lock -- the heartbeat call               |
-| `takeOverPageLock`                 | function | Takes over another user's live lock; needs a permission superset     |
-| `AcquirePageLockInput`             | type     | Input to `acquirePageLock`                                           |
-| `PageLockGrant`                    | type     | The result of `acquirePageLock`                                      |
-| `PageLockState`                    | type     | The lock's shape on a page row -- what `takeOverPageLock` returns    |
-| `ReleasePageLockInput`             | type     | Input to `releasePageLock`                                           |
-| `RenewPageLockInput`               | type     | Input to `renewPageLock`                                             |
-| `TakeOverPageLockInput`            | type     | Input to `takeOverPageLock`                                          |
+| Export                             | Kind     | Purpose                                                                 |
+| ---------------------------------- | -------- | ----------------------------------------------------------------------- |
+| `acquirePageLock`                  | function | Acquires the lock on one page locale row -- the open call               |
+| `isPageLockLive`                   | function | Whether a lock is still live, given its holder, `lockedAt` and now      |
+| `PAGE_EDIT_LOCK_HEARTBEAT_SECONDS` | constant | `30`: how often a holder should renew                                   |
+| `PAGE_EDIT_LOCK_TTL_SECONDS`       | constant | `120`: how long a lock stays live with no renewal                       |
+| `PageLockedError`                  | class    | A write, acquire or renew refused by another user's live lock           |
+| `PageLockingDisabledError`         | class    | `acquirePageLock` called while the project-wide toggle is off           |
+| `PageLockNotFoundError`            | class    | A lock operation names a page id that no longer exists                  |
+| `PageLockStateChangedError`        | class    | A takeover's decision went stale between the pre-check and the write    |
+| `PageLockTakeoverForbiddenError`   | class    | The caller's permissions are not a superset of the current holder's     |
+| `readPageLockView`                 | function | Reads a page's lock for the banner: state, holder name, takeover right  |
+| `releasePageLock`                  | function | Releases the lock on one page locale row -- the navigate-away call      |
+| `renewPageLock`                    | function | Renews the current holder's lock -- the heartbeat call                  |
+| `takeOverPageLock`                 | function | Takes over another user's live lock; needs a permission superset        |
+| `AcquirePageLockInput`             | type     | Input to `acquirePageLock`                                              |
+| `PageLockGrant`                    | type     | The result of `acquirePageLock`                                         |
+| `PageLockState`                    | type     | The lock's shape on a page row -- what `takeOverPageLock` returns       |
+| `PageLockView`                     | type     | What the editor may see of a lock: state, holder name and last activity |
+| `ReleasePageLockInput`             | type     | Input to `releasePageLock`                                              |
+| `RenewPageLockInput`               | type     | Input to `renewPageLock`                                                |
+| `TakeOverPageLockInput`            | type     | Input to `takeOverPageLock`                                             |
+
+**The lock view.** `readPageLockView` tells an editor whether locking is on,
+whether the page is free, theirs or someone else's, the holder's display name
+and last activity (`locked_at`, renewed by every heartbeat), when their own
+lock expires and whether they may take it over (their permissions are a
+superset of the holder's current role's). It needs `pages:edit`, like
+`acquirePageLock`. The holder is only ever a name and a last-active time: no
+email address, role or user id reaches another editor.
 
 **Deliberately lock-exempt.** `compactBlockType` (schema compaction),
 `setPageUrlPattern` (the project-wide URL pattern change) and `purgeLocale`
@@ -612,8 +755,8 @@ URLs and the previous-address history are not consulted.
 
 Nothing else is reachable from the entry point. In particular the block-
 revision writer and its cap-pruning sweep, the row-locking page read and the
-append-only URL-history writer, the write-time placement/depth/section
-guards and the ancestor walk behind them, transaction-scoped slug
+append-only URL-history writer, the throwing write-time placement/depth/section
+guard and the ancestor walk behind it, transaction-scoped slug
 generation and availability and the address-availability check, the
 edit-lock write guard every single-page mutation calls internally (see the
 lock-exempt bulk operations above), the shared

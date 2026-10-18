@@ -51,7 +51,8 @@ function sortColumnShapes(shapes: ColumnShape[]): ColumnShape[] {
   );
 }
 
-/** Every named constraint `0003_page_block_engine.ts` produces -- both the
+/** Every named constraint `0003_page_block_engine.ts` and
+ * `0004_block_layout.ts` produce -- both the
  * ones it names explicitly via `CONSTRAINT <name>` and the ones Postgres
  * auto-names for an inline (unnamed) `REFERENCES` clause
  * (`parent_page_id`, `parent_block_id`, `block_id`), confirmed against a
@@ -63,10 +64,12 @@ const EXPECTED_CONSTRAINT_NAMES = [
   'block_revisions_block_id_fkey',
   'block_revisions_change_type_check',
   'block_revisions_kind_check',
+  'block_revisions_layout_object_check',
   'block_revisions_pkey',
   'block_revisions_props_object_check',
   'page_blocks_created_by_user_id_fk',
   'page_blocks_depth_check',
+  'page_blocks_layout_object_check',
   'page_blocks_owner_type_check',
   'page_blocks_parent_block_id_fkey',
   'page_blocks_pkey',
@@ -331,9 +334,9 @@ async function insertBlockRevision(
   return id;
 }
 
-describe('schema parity: 0003_page_block_engine vs @plakboek/pages schema.ts', () => {
+describe('schema parity: 0003_page_block_engine through 0005_revision_block_ref vs @plakboek/pages schema.ts', () => {
   describe('migration application', () => {
-    it('applies 0001_auth_core, 0002_content_engine then 0003_page_block_engine, cleanly and idempotently', async () => {
+    it('applies 0001_auth_core through 0005_revision_block_ref, cleanly and idempotently', async () => {
       const testDatabase = await createTestDatabase();
       let handle: Db | undefined;
       try {
@@ -344,6 +347,8 @@ describe('schema parity: 0003_page_block_engine vs @plakboek/pages schema.ts', (
           '0001_auth_core',
           '0002_content_engine',
           '0003_page_block_engine',
+          '0004_block_layout',
+          '0005_revision_block_ref',
         ]);
 
         const secondRun = await runMigrations({
@@ -359,7 +364,7 @@ describe('schema parity: 0003_page_block_engine vs @plakboek/pages schema.ts', (
       }
     });
 
-    it('applies 0003_page_block_engine exactly once under two concurrent migrators', async () => {
+    it('applies 0004_block_layout and 0005_revision_block_ref exactly once under two concurrent migrators', async () => {
       const testDatabase = await createTestDatabase();
       try {
         const runs = await Promise.all([
@@ -368,10 +373,105 @@ describe('schema parity: 0003_page_block_engine vs @plakboek/pages schema.ts', (
         ]);
         const flattenedApplied = runs.flatMap((run) => run.applied);
         expect(
-          flattenedApplied.filter((name) => name === '0003_page_block_engine'),
+          flattenedApplied.filter((name) => name === '0004_block_layout'),
+        ).toHaveLength(1);
+        expect(
+          flattenedApplied.filter((name) => name === '0005_revision_block_ref'),
         ).toHaveLength(1);
         expect(new Set(flattenedApplied).size).toBe(flattenedApplied.length);
       } finally {
+        await testDatabase.drop();
+      }
+    });
+
+    it('adds layout to rows that already existed, leaving their data intact and layout null', async () => {
+      const testDatabase = await createTestDatabase();
+      const handle = createDb({
+        connectionString: testDatabase.connectionString,
+      });
+      try {
+        await runMigrations({
+          connectionString: testDatabase.connectionString,
+        });
+
+        // Put the database back into its pre-0004 shape: no layout columns,
+        // 0004 not recorded as applied, and a block row written without one.
+        await handle.sql`ALTER TABLE page_blocks DROP COLUMN layout`;
+        await handle.sql`ALTER TABLE block_revisions DROP COLUMN layout`;
+        await handle.sql`ALTER TABLE block_revisions DROP COLUMN subject_block_id`;
+        await handle.sql`DELETE FROM plakboek_migrations WHERE name IN ('0004_block_layout', '0005_revision_block_ref')`;
+        const blockId = await insertPageBlock(handle, {
+          props: { text: 'kept' },
+        });
+
+        const rerun = await runMigrations({
+          connectionString: testDatabase.connectionString,
+        });
+        expect(rerun.applied).toEqual([
+          '0004_block_layout',
+          '0005_revision_block_ref',
+        ]);
+
+        const rows = await handle.sql<
+          { props: unknown; layout: unknown }[]
+        >`SELECT props, layout FROM page_blocks WHERE id = ${blockId}`;
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.props).toEqual({ text: 'kept' });
+        expect(rows[0]?.layout).toBeNull();
+        await expectSchemaMatchesMigration(handle);
+      } finally {
+        await handle.close();
+        await testDatabase.drop();
+      }
+    });
+  });
+
+  describe('0005_revision_block_ref', () => {
+    it('backfills subject_block_id from block_id for revisions whose block still exists, and leaves an already orphaned revision null', async () => {
+      const testDatabase = await createTestDatabase();
+      const handle = createDb({
+        connectionString: testDatabase.connectionString,
+      });
+      try {
+        await runMigrations({
+          connectionString: testDatabase.connectionString,
+        });
+
+        // Back to the pre-0005 shape: no column, 0005 not recorded.
+        await handle.sql`ALTER TABLE block_revisions DROP COLUMN subject_block_id`;
+        await handle.sql`DELETE FROM plakboek_migrations WHERE name = '0005_revision_block_ref'`;
+        const blockId = await insertPageBlock(handle, {});
+        const ownerId = randomUUID();
+        const insertRevision = async (id: string | null): Promise<string> => {
+          const [row] = await handle.sql<{ id: string }[]>`
+            INSERT INTO block_revisions (
+              block_id, owner_type, owner_id, locale, revision_batch_id,
+              change_type, kind, block_type, sort_order, depth, props,
+              schema_version, created_at
+            ) VALUES (
+              ${id}, 'page', ${ownerId}, 'en', ${randomUUID()},
+              'update', 'save', 'text', 1000, 0, '{}'::jsonb, 1, now()
+            ) RETURNING id
+          `;
+          return row!.id;
+        };
+        const live = await insertRevision(blockId);
+        const orphaned = await insertRevision(null);
+
+        const rerun = await runMigrations({
+          connectionString: testDatabase.connectionString,
+        });
+        expect(rerun.applied).toEqual(['0005_revision_block_ref']);
+
+        const rows = await handle.sql<
+          { id: string; subjectBlockId: string | null }[]
+        >`SELECT id, subject_block_id AS "subjectBlockId" FROM block_revisions`;
+        const byId = new Map(rows.map((row) => [row.id, row.subjectBlockId]));
+        expect(byId.get(live)).toBe(blockId);
+        expect(byId.get(orphaned)).toBeNull();
+        await expectSchemaMatchesMigration(handle);
+      } finally {
+        await handle.close();
         await testDatabase.drop();
       }
     });
@@ -436,6 +536,34 @@ describe('schema parity: 0003_page_block_engine vs @plakboek/pages schema.ts', (
           VALUES
             (${id}, 'page', ${randomUUID()}, 'en', 'hero', '[]'::jsonb,
              1, 0, 1000, 1, now(), now())
+        `),
+      ).toBe('23514');
+    });
+
+    it('rejects a page_blocks row whose layout is a JSON array', async () => {
+      expect(
+        await sqlState(handle.sql`
+          INSERT INTO page_blocks
+            (id, owner_type, owner_id, locale, block_type, props, layout,
+             schema_version, depth, sort_order, version, created_at, updated_at)
+          VALUES
+            (${randomUUID()}, 'page', ${randomUUID()}, 'en', 'hero', '{}'::jsonb,
+             '[1]'::jsonb, 1, 0, 1000, 1, now(), now())
+        `),
+      ).toBe('23514');
+    });
+
+    it('rejects a block_revisions row whose layout is a JSON array', async () => {
+      expect(
+        await sqlState(handle.sql`
+          INSERT INTO block_revisions
+            (id, owner_type, owner_id, locale, revision_batch_id, change_type,
+             kind, block_type, sort_order, depth, props, layout, schema_version,
+             created_at)
+          VALUES
+            (${randomUUID()}, 'page', ${randomUUID()}, 'en', ${randomUUID()},
+             'create', 'save', 'hero', 1000, 0, '{}'::jsonb, '[1]'::jsonb, 1,
+             now())
         `),
       ).toBe('23514');
     });

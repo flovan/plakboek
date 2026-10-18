@@ -43,6 +43,7 @@ describe('NOOP_EDIT', () => {
       createElement(Fixture, {
         block: { id: 'b1', blockType: 'fixture', schemaVersion: 1 },
         props: {},
+        layout: {},
         children: null,
         edit: NOOP_EDIT,
       }),

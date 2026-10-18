@@ -17,6 +17,7 @@ function pathOf(relative: string): string {
 const README_PATH = pathOf('../../README.md');
 const SERVER_HEADING = '### Server entry: `@plakboek/editor/server`';
 const CLIENT_HEADING = '### Client entry: `@plakboek/editor/client`';
+const HOT_HEADING = '### Hot entry: `@plakboek/editor/hot`';
 
 type ValueKind = 'function' | 'class' | 'constant';
 
@@ -25,6 +26,9 @@ const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   createEditEntrypoint: 'function',
   // server/cms-pages
   createCmsPages: 'function',
+  // server/api
+  createEditorApi: 'function',
+  EDITOR_API_BODY_LIMIT_BYTES: 'constant',
   // chrome/styles
   chromeStyleElement: 'function',
   CHROME_STYLE_CSP_HASH: 'constant',
@@ -36,6 +40,9 @@ const SERVER_TYPES: readonly string[] = Object.freeze([
   // server/cms-pages
   'CmsPages',
   'CmsPagesDeps',
+  // server/api/handler
+  'EditorApi',
+  'EditorApiDeps',
   // server/assets
   'EditorAssets',
   'EditorDevScript',
@@ -53,11 +60,23 @@ const CLIENT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
 });
 
 const CLIENT_TYPES: readonly string[] = Object.freeze([
+  // client/boot
+  'BootEditorOptions',
+  // client/frame/block-edit-loader
+  'BlockEditLoaders',
   // chrome/shell
   'SidebarSlots',
   // chrome/strings
   'StringKey',
 ]);
+
+const HOT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
+  createDevBlockSwap: 'function',
+  readSignatures: 'function',
+  diffSignatures: 'function',
+});
+
+const HOT_TYPES: readonly string[] = Object.freeze(['SignatureMap']);
 
 type Documented = { readonly name: string; readonly kind: string };
 
@@ -168,24 +187,63 @@ for (const entry of ENTRIES) {
   });
 }
 
+describe('the @plakboek/editor hot entry (src/hot.ts)', () => {
+  it('exports exactly the documented values, each of its expected kind', async () => {
+    const api: Record<string, unknown> = await import('../../src/hot.js');
+    expect(
+      Object.fromEntries(
+        Object.keys(HOT_VALUES).map((name) => [name, kindOf(api[name])]),
+      ),
+    ).toEqual(HOT_VALUES);
+    expect(sorted(Object.keys(api))).toEqual(sorted(Object.keys(HOT_VALUES)));
+  });
+
+  it('declares exactly the documented types, with no wildcard or default export', () => {
+    const source = readFileSync(pathOf('../../src/hot.ts'), 'utf8');
+    expect(source).not.toMatch(/export \*/);
+    expect(source).not.toMatch(/export default/);
+    const declared = [...source.matchAll(/^export type (\w+)\b/gm)].map(
+      (match) => match[1]!,
+    );
+    expect(sorted(declared)).toEqual(sorted(HOT_TYPES));
+  });
+
+  it("documents exactly the entry's values and types in its own README table", () => {
+    const documented = documentedUnder(HOT_HEADING);
+    expect(
+      Object.fromEntries(
+        documented
+          .filter((row) => row.kind !== 'type')
+          .map((row) => [row.name, row.kind]),
+      ),
+    ).toEqual(HOT_VALUES);
+    expect(
+      sorted(
+        documented.filter((row) => row.kind === 'type').map((row) => row.name),
+      ),
+    ).toEqual(sorted(HOT_TYPES));
+  });
+});
+
 describe('the published subpaths', () => {
-  it('exposes exactly ./server, ./client and ./package.json', () => {
+  it('exposes exactly ./server, ./client, ./hot and ./package.json', () => {
     const manifest: { exports: Record<string, unknown> } = JSON.parse(
       readFileSync(pathOf('../../package.json'), 'utf8'),
     );
     expect(Object.keys(manifest.exports)).toEqual([
       './server',
       './client',
+      './hot',
       './package.json',
     ]);
   });
 
-  it('builds exactly the entries server and client', () => {
+  it('builds exactly the entries server, client and hot', () => {
     const config = readFileSync(pathOf('../../tsdown.config.ts'), 'utf8');
     const names = [...config.matchAll(/(\w+)\s*:\s*'src\//g)].map(
       (match) => match[1]!,
     );
-    expect(sorted(names)).toEqual(['client', 'server']);
+    expect(sorted(names)).toEqual(['client', 'hot', 'server']);
   });
 
   it('declares react and react-dom as catalog peers', () => {

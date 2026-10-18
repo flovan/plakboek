@@ -137,6 +137,7 @@ export const pageBlocks = pgTable(
       .$type<Record<string, unknown>>()
       .notNull()
       .default({}),
+    layout: jsonb('layout').$type<Record<string, unknown>>(),
     schemaVersion: integer('schema_version').notNull(),
     depth: integer('depth').notNull(),
     sortOrder: integer('sort_order').notNull(),
@@ -151,6 +152,10 @@ export const pageBlocks = pgTable(
     check(
       'page_blocks_props_object_check',
       sql`jsonb_typeof(${table.props}) = 'object'`,
+    ),
+    check(
+      'page_blocks_layout_object_check',
+      sql`${table.layout} IS NULL OR jsonb_typeof(${table.layout}) = 'object'`,
     ),
     check('page_blocks_schema_version_check', sql`${table.schemaVersion} >= 1`),
     check('page_blocks_depth_check', sql`${table.depth} >= 0`),
@@ -177,6 +182,11 @@ export const blockRevisions = pgTable(
     blockId: uuid('block_id').references((): AnyPgColumn => pageBlocks.id, {
       onDelete: 'set null',
     }),
+    /** The id of the revised block, kept as plain data: unlike `blockId` it is
+     * not nulled when the block row is deleted, so a restore can tell which
+     * deleted block a child's `parentBlockId` named. Null on a revision of a
+     * block that was already deleted when this column was added. */
+    subjectBlockId: uuid('subject_block_id'),
     ownerType: text('owner_type').notNull(),
     ownerId: uuid('owner_id').notNull(),
     locale: text('locale').notNull(),
@@ -188,6 +198,7 @@ export const blockRevisions = pgTable(
     sortOrder: integer('sort_order').notNull(),
     depth: integer('depth').notNull(),
     props: jsonb('props').notNull(),
+    layout: jsonb('layout').$type<Record<string, unknown>>(),
     schemaVersion: integer('schema_version').notNull(),
     authorId: text('author_id'),
     createdAt: timestamptz('created_at').notNull(),
@@ -204,6 +215,10 @@ export const blockRevisions = pgTable(
     check(
       'block_revisions_props_object_check',
       sql`jsonb_typeof(${table.props}) = 'object'`,
+    ),
+    check(
+      'block_revisions_layout_object_check',
+      sql`${table.layout} IS NULL OR jsonb_typeof(${table.layout}) = 'object'`,
     ),
     index('block_revisions_owner_created_idx').on(
       table.ownerType,

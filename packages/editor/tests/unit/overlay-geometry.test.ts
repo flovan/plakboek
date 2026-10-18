@@ -4,6 +4,8 @@ import {
   isMeasurable,
   outlineRect,
   sameBox,
+  siblingAxis,
+  toolbarPlacement,
 } from '../../src/client/overlay/geometry.js';
 import { chipText } from '../../src/client/overlay/overlay-layer.js';
 
@@ -149,6 +151,82 @@ describe('chipText', () => {
   it('adds the unavailable suffix to the stored type key', () => {
     expect(chipText({ label: 'retired-widget', unavailable: true })).toBe(
       'retired-widget (unavailable)',
+    );
+  });
+});
+
+describe('toolbarPlacement', () => {
+  const toolbar = { width: 200, height: 40 };
+
+  it('sits 8px above the item with its left edge aligned', () => {
+    expect(
+      toolbarPlacement({
+        item: { left: 400, top: 300, width: 300, height: 100 },
+        frame: FRAME,
+        toolbar,
+      }),
+    ).toEqual({ mode: 'above', left: 400, top: 252 });
+  });
+
+  it('flips below when less than 48px of frame room is above', () => {
+    expect(
+      toolbarPlacement({
+        item: { left: 400, top: 60, width: 300, height: 100 },
+        frame: FRAME,
+        toolbar,
+      }),
+    ).toEqual({ mode: 'below', left: 400, top: 168 });
+  });
+
+  it('pins inside the visible top-left corner when neither side has room', () => {
+    // taller than the frame and scrolled so its top is above the frame
+    expect(
+      toolbarPlacement({
+        item: { left: 400, top: -200, width: 300, height: 2000 },
+        frame: FRAME,
+        toolbar,
+      }),
+    ).toEqual({ mode: 'pinned', left: 408, top: 33 });
+  });
+
+  it('keeps the toolbar 8px inside the frame at both edges', () => {
+    const wide = { width: 400, height: 40 };
+    expect(
+      toolbarPlacement({
+        item: { left: 100, top: 300, width: 50, height: 50 },
+        frame: FRAME,
+        toolbar: wide,
+      }).left,
+    ).toBe(312);
+    expect(
+      toolbarPlacement({
+        item: { left: 1300, top: 300, width: 50, height: 50 },
+        frame: FRAME,
+        toolbar: wide,
+      }).left,
+    ).toBe(304 + 1070 - 8 - 400);
+  });
+});
+
+describe('siblingAxis', () => {
+  it('is horizontal when the left edges differ more than the top edges', () => {
+    expect(
+      siblingAxis([
+        { left: 0, top: 10, width: 100, height: 50 },
+        { left: 120, top: 12, width: 100, height: 50 },
+      ]),
+    ).toBe('horizontal');
+  });
+
+  it('is vertical for a stack, and for fewer than two siblings', () => {
+    expect(
+      siblingAxis([
+        { left: 0, top: 0, width: 100, height: 50 },
+        { left: 2, top: 60, width: 100, height: 50 },
+      ]),
+    ).toBe('vertical');
+    expect(siblingAxis([{ left: 0, top: 0, width: 1, height: 1 }])).toBe(
+      'vertical',
     );
   });
 });

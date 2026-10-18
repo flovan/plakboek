@@ -9,6 +9,7 @@
  */
 import type { ReactNode } from 'react';
 import type { EditProxy } from './edit-proxy.js';
+import type { BlockLayout } from './layout.js';
 
 /** Who a rendered block is. */
 export type BlockIdentity = {
@@ -21,6 +22,9 @@ export type BlockIdentity = {
 export type BlockComponentProps<P = Readonly<Record<string, unknown>>> = {
   readonly block: BlockIdentity;
   readonly props: P;
+  /** The node's stored layout (columns, alignment, fill); empty when it has
+   * none. Never part of `props`. */
+  readonly layout: Readonly<BlockLayout>;
   /** The block's already-rendered children, in order. */
   readonly children: ReactNode;
   /** `NOOP_EDIT` on a visitor page. */

@@ -9,10 +9,13 @@ import {
   assertPlacementAllowed,
   BlockDepthExceededError,
   BlockPlacementError,
+  checkPlacement,
   ROOT_PARENT_SENTINEL,
   SectionNestingDepthExceededError,
   SectionRequiredError,
+  type PlacementCheckInput,
   type PlacementContext,
+  type PlacementRefusalReason,
 } from '../../src/placement.js';
 import type { BlockDefinition } from '../../src/registry.js';
 
@@ -29,6 +32,8 @@ function definition(overrides: Partial<BlockDefinition> = {}): BlockDefinition {
     }),
     schemaVersion: 1,
     upcasters: Object.freeze({}),
+    layoutSupport: Object.freeze({ fill: false }),
+    starterChildren: Object.freeze([]),
     ...overrides,
   });
 }
@@ -51,10 +56,12 @@ function baseContext(overrides: Partial<PlacementContext>): PlacementContext {
     owner: { ownerType: 'page', ownerId: 'owner-1', locale: 'en' },
     child: definition(),
     parent: null,
+    section: null,
     parentDepth: null,
     parentSectionDepth: 0,
     sectionNestingDepth: 2,
     blockDepthCeiling: 12,
+    columnsEnabled: false,
     ...overrides,
   };
 }
@@ -356,4 +363,241 @@ describe('assertPlacementAllowed (BLOCK-05, D-08, D-18, D-19)', () => {
       assertPlacementAllowed(baseContext({ child: nestedOnly, parent: null })),
     ).toThrow(BlockPlacementError);
   });
+});
+
+function column(overrides: Partial<BlockDefinition> = {}): BlockDefinition {
+  return definition({
+    key: 'column',
+    kind: 'column',
+    placement: Object.freeze({
+      ownerTypes: Object.freeze(['page'] as const),
+      allowedParents: 'any',
+      allowedChildren: 'any',
+    }),
+    ...overrides,
+  });
+}
+
+function checkInput(
+  overrides: Partial<PlacementCheckInput>,
+): PlacementCheckInput {
+  return {
+    ownerType: 'page',
+    child: definition(),
+    parent: null,
+    section: null,
+    parentDepth: null,
+    parentSectionDepth: 0,
+    sectionNestingDepth: 2,
+    blockDepthCeiling: 12,
+    columnsEnabled: true,
+    ...overrides,
+  };
+}
+
+describe('checkPlacement: the pure decision behind every write (EDIT-11, D-01..D-03)', () => {
+  const cases: readonly {
+    readonly reason: PlacementRefusalReason;
+    readonly input: PlacementCheckInput;
+  }[] = [
+    {
+      reason: 'owner-type',
+      input: checkInput({
+        child: definition({
+          placement: Object.freeze({
+            ownerTypes: Object.freeze([]),
+            allowedParents: 'any',
+            allowedChildren: 'none',
+          }),
+        }),
+        parent: column(),
+        section: section(),
+      }),
+    },
+    { reason: 'section-required', input: checkInput({ child: column() }) },
+    {
+      reason: 'column-requires-section',
+      input: checkInput({
+        child: column(),
+        parent: definition({ key: 'text' }),
+        parentDepth: 1,
+        parentSectionDepth: 1,
+      }),
+    },
+    {
+      reason: 'section-requires-columns',
+      input: checkInput({
+        parent: section(),
+        parentDepth: 0,
+        parentSectionDepth: 1,
+      }),
+    },
+    {
+      reason: 'parent-rejects-child',
+      input: checkInput({
+        parent: column(),
+        section: section({
+          placement: Object.freeze({
+            ownerTypes: Object.freeze(['page'] as const),
+            allowedParents: 'any',
+            allowedChildren: Object.freeze(['other']),
+          }),
+        }),
+        parentDepth: 1,
+        parentSectionDepth: 1,
+      }),
+    },
+    {
+      reason: 'child-rejects-parent',
+      input: checkInput({
+        child: definition({
+          placement: Object.freeze({
+            ownerTypes: Object.freeze(['page'] as const),
+            allowedParents: Object.freeze(['list']),
+            allowedChildren: 'none',
+          }),
+        }),
+        parent: column(),
+        section: section(),
+        parentDepth: 1,
+        parentSectionDepth: 1,
+      }),
+    },
+    {
+      reason: 'section-nesting',
+      input: checkInput({
+        child: section({ key: 'third' }),
+        parent: column(),
+        section: section(),
+        parentDepth: 3,
+        parentSectionDepth: 2,
+      }),
+    },
+    {
+      reason: 'block-depth',
+      input: checkInput({
+        parent: column(),
+        section: section(),
+        parentDepth: 12,
+        parentSectionDepth: 1,
+      }),
+    },
+  ];
+
+  it.each(cases)('answers $reason', ({ reason, input }) => {
+    expect(checkPlacement(input)).toBe(reason);
+  });
+
+  it('judges a block under a column against the column section and accepts a legal one', () => {
+    expect(
+      checkPlacement(
+        checkInput({
+          parent: column(),
+          section: section(),
+          parentDepth: 1,
+          parentSectionDepth: 1,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('refuses a block under a column whose section is unknown', () => {
+    expect(
+      checkPlacement(
+        checkInput({
+          parent: column(),
+          section: null,
+          parentDepth: 1,
+          parentSectionDepth: 1,
+        }),
+      ),
+    ).toBe('column-requires-section');
+  });
+
+  it('applies none of the column rules when the registry holds no column kind', () => {
+    expect(
+      checkPlacement(
+        checkInput({
+          columnsEnabled: false,
+          parent: section(),
+          parentDepth: 0,
+          parentSectionDepth: 1,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('never counts a column toward the section nesting cap', () => {
+    expect(
+      checkPlacement(
+        checkInput({
+          child: column(),
+          parent: section(),
+          parentDepth: 0,
+          parentSectionDepth: 2,
+          sectionNestingDepth: 2,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('evaluates in the documented order: owner type, section-required, column rules, nesting, depth', () => {
+    const noOwner = definition({
+      kind: 'column',
+      placement: Object.freeze({
+        ownerTypes: Object.freeze([]),
+        allowedParents: 'any',
+        allowedChildren: 'any',
+      }),
+    });
+    expect(checkPlacement(checkInput({ child: noOwner }))).toBe('owner-type');
+    expect(checkPlacement(checkInput({ child: column() }))).toBe(
+      'section-required',
+    );
+    expect(
+      checkPlacement(
+        checkInput({
+          child: section({ key: 'deep' }),
+          parent: column(),
+          section: section(),
+          parentDepth: 20,
+          parentSectionDepth: 2,
+        }),
+      ),
+    ).toBe('section-nesting');
+  });
+
+  it.each(cases)(
+    'assertPlacementAllowed throws for $reason',
+    ({ reason, input }) => {
+      const error = captureError(() =>
+        assertPlacementAllowed({
+          owner: { ownerType: input.ownerType, ownerId: 'o', locale: 'en' },
+          child: input.child,
+          parent: input.parent,
+          section: input.section,
+          parentDepth: input.parentDepth,
+          parentSectionDepth: input.parentSectionDepth,
+          sectionNestingDepth: input.sectionNestingDepth,
+          blockDepthCeiling: input.blockDepthCeiling,
+          columnsEnabled: input.columnsEnabled,
+        }),
+      );
+      const mapped =
+        reason === 'section-required'
+          ? 'SectionRequiredError'
+          : reason === 'section-nesting'
+            ? 'SectionNestingDepthExceededError'
+            : reason === 'block-depth'
+              ? 'BlockDepthExceededError'
+              : `BlockPlacementError:${reason}`;
+      const actual =
+        error instanceof BlockPlacementError
+          ? `BlockPlacementError:${error.reason}`
+          : error instanceof Error
+            ? error.name
+            : 'none';
+      expect(actual).toBe(mapped);
+    },
+  );
 });

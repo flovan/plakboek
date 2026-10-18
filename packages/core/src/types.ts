@@ -6,6 +6,7 @@
 import type {
   BlockConstraintSet,
   BlockDefinitionInput,
+  ColumnPresetsInput,
   PagesConfig,
   PagesHooks,
 } from '@plakboek/pages';
@@ -85,6 +86,8 @@ export type PlakboekConfigInput = {
   readonly widgets?: readonly HostWidgetDefinition[];
   readonly sectionNestingDepth?: number;
   readonly blockDepthCeiling?: number;
+  /** Excludes non-equal built-in column ratios and adds host ratios. */
+  readonly columnPresets?: ColumnPresetsInput;
   readonly seed?: SeedPage | (() => SeedPage);
   readonly hooks?: PagesHooks;
 };
@@ -139,4 +142,10 @@ export type HostModule = {
   readonly edit?: EditEntrypoint | undefined;
   /** The built editor client, from the `plakboek()` Vite plugin. */
   readonly editorAssets?: EditorAssets | undefined;
+  /**
+   * Whether the host runs under the Vite dev server, from the `plakboek()`
+   * plugin. Visitor pages then carry block markers for the development block
+   * swap; it is `false` in every build.
+   */
+  readonly devMode?: boolean | undefined;
 };

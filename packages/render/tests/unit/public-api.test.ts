@@ -34,6 +34,14 @@ const ROOT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   NOOP_EDIT: 'constant',
   // live-edit
   EDIT_ATTRIBUTE: 'constant',
+  isLiveEdit: 'function',
+  // columns
+  Columns: 'function',
+  columnTracks: 'function',
+  // column-block
+  ColumnBlock: 'function',
+  // edit-hooks
+  defineBlockEdit: 'function',
 });
 
 const ROOT_TYPES: readonly string[] = Object.freeze([
@@ -41,6 +49,17 @@ const ROOT_TYPES: readonly string[] = Object.freeze([
   'BlockComponent',
   'BlockComponentProps',
   'BlockIdentity',
+  // layout
+  'BlockLayout',
+  'ColumnAlign',
+  // columns
+  'ColumnsProps',
+  // edit-hooks
+  'BlockEditContext',
+  'BlockEditHooks',
+  'BlockEditMode',
+  'BlockEditModule',
+  'BlockRevealContext',
   // head
   'DocumentInput',
   'DocumentMode',
@@ -65,6 +84,8 @@ const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   createLiveEdit: 'function',
   // render-tree
   renderPageTree: 'function',
+  // render-fragment
+  renderBlockFragments: 'function',
   // path
   normalizeVisitorPath: 'function',
   // handler
@@ -97,6 +118,10 @@ const SERVER_TYPES: readonly string[] = Object.freeze([
   'BlockMeta',
   'RenderedTree',
   'RenderPageTreeInput',
+  // render-fragment
+  'RenderBlockFragmentsInput',
+  'RenderedFragment',
+  'RenderedFragments',
   // path
   'VisitorPathResult',
   // handler
@@ -245,6 +270,7 @@ describe('the published subpaths', () => {
       'constants',
       'block-component',
       'edit-proxy',
+      'edit-hooks',
     ]) {
       const source = readFileSync(pathOf(`../../src/${file}.ts`), 'utf8');
       expect(source).not.toMatch(

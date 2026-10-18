@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { injectDevClient } from '../../src/dev-client.js';
 
-const TAG = '<script type="module" src="/@vite/client"></script>';
+const TAG =
+  '<script type="module" src="/@vite/client"></script><script type="module" src="/@id/__x00__virtual:plakboek/dev-swap"></script>';
 
 function html(init: ResponseInit = {}): Response {
   return new Response(
@@ -20,7 +21,7 @@ function html(init: ResponseInit = {}): Response {
 }
 
 describe('injectDevClient', () => {
-  it('inserts the Vite client immediately before </head>', async () => {
+  it('inserts the Vite client and the block swap module immediately before </head>', async () => {
     const result = await injectDevClient(html());
     expect(await result.text()).toBe(
       `<html><head><title>x</title>${TAG}</head><body>hi</body></html>`,

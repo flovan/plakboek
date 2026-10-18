@@ -35,6 +35,7 @@ import type { RenderDocument } from './head.js';
 import { reportRenderEvent, type RenderHooks } from './hooks.js';
 import { MAX_VISITOR_PATH_LENGTH, normalizeVisitorPath } from './path.js';
 import { renderPageSnapshot } from './render-snapshot.js';
+import type { BlockMeta } from './render-tree.js';
 import { createSingleFlight } from './single-flight.js';
 
 export type VisitorHandler = (request: Request) => Promise<Response>;
@@ -90,6 +91,17 @@ export type VisitorHandlerDeps = {
    * is bounced.
    */
   readonly edit?: EditEntrypoint;
+  /**
+   * Development only: render every block with the live edit markers
+   * (`data-pk-*`) so the development server's block swap can find blocks on a
+   * visitor page. The host sets it under the Vite dev server and never in a
+   * production build. The handler does not trust that alone: the markers are
+   * left out when `NODE_ENV` is `production` or a cache is configured, and a
+   * page rendered with them is always answered `no-store`, so a flag set by
+   * mistake can neither expose block ids and the block catalogue nor let a
+   * proxy keep such a page.
+   */
+  readonly devBlockMarkers?: boolean;
 };
 
 export type VisitorHandlerConfigIssue = {
@@ -127,6 +139,14 @@ const BUILD_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 const REDIRECT_CACHE_CONTROL = 'public, max-age=3600';
 const PAGE_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
 const NO_STORE = 'no-store';
+
+/** True when the process runs with `NODE_ENV=production`, the same signal the
+ * rest of the project treats as "this is a production deploy". */
+function isProductionEnvironment(): boolean {
+  return (
+    typeof process !== 'undefined' && process.env.NODE_ENV === 'production'
+  );
+}
 /** What an editor response is forced to: no shared cache may ever keep it. */
 const EDIT_CACHE_CONTROL = 'private, no-store';
 
@@ -206,6 +226,18 @@ function validate(deps: VisitorHandlerDeps): void {
     });
   }
   if (issues.length > 0) throw new VisitorHandlerConfigError(issues);
+}
+
+/** Label and kind per block type, for the development markers. */
+function devBlockMeta(
+  config: Pick<PagesConfig, 'blocks'>,
+): ReadonlyMap<string, BlockMeta> {
+  return new Map(
+    config.blocks.map((block) => [
+      block.key,
+      { label: block.editor.label, kind: block.kind } satisfies BlockMeta,
+    ]),
+  );
 }
 
 function etagOf(bytes: Uint8Array): string {
@@ -303,7 +335,10 @@ function toResponse(
     if (cacheControl !== null) notModified.set('Cache-Control', cacheControl);
     return new Response(null, { status: 304, headers: notModified });
   }
-  return new Response(outcome.body, { status: 200, headers });
+  // The copy gives the bytes an ArrayBuffer backing, which is what the DOM
+  // typings require of a response body; a cached body is only known as
+  // ArrayBufferLike.
+  return new Response(new Uint8Array(outcome.body), { status: 200, headers });
 }
 
 /** Builds a visitor request handler over frozen dependencies. */
@@ -316,6 +351,12 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
   const renderDocument = deps.renderDocument ?? renderDefaultDocument;
   const homeSlug = deps.homeSlug ?? DEFAULT_HOME_SLUG;
   const components = createComponentMap(config.blocks, hooks);
+  const blockMeta =
+    deps.devBlockMarkers === true &&
+    cache === undefined &&
+    !isProductionEnvironment()
+      ? devBlockMeta(config)
+      : undefined;
   const encoder = new TextEncoder();
   const flights = createSingleFlight<Outcome>();
 
@@ -382,6 +423,7 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
         hooks,
         siteUrl,
         resolveAssetUrl,
+        ...(blockMeta === undefined ? {} : { blockMeta }),
       });
       // The one script a visitor page carries is part of the cached bytes.
       const html = await renderDocument({
@@ -408,7 +450,11 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
       }
       return pageOutcome(
         entry,
-        rendered.degraded ? NO_STORE : healthyPageCacheControl,
+        // A degraded page, and one carrying development markers, never reaches
+        // a shared cache.
+        rendered.degraded || blockMeta !== undefined
+          ? NO_STORE
+          : healthyPageCacheControl,
         rendered.degraded,
       );
     } catch (error) {

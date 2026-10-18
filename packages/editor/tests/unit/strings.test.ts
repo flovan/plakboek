@@ -13,7 +13,61 @@ const VARIABLES: Readonly<Record<string, readonly string[]>> = {
   'login.password.new.hint': ['min'],
   'validation.newPassword.tooShort': ['min'],
   'overlay.unavailable': ['type'],
+  'lock.expiring': ['time'],
+  'announce.selected': ['label', 'position', 'total', 'parent'],
+  'announce.selectedSection': ['label', 'position', 'total'],
+  'announce.added': ['label'],
+  'announce.moved': ['label', 'position', 'total', 'parent'],
+  'announce.restored': ['label'],
+  'announce.undone': ['action'],
+  'announce.redone': ['action'],
+  'announce.drag.pickedUp': ['label'],
+  'announce.drag.position': ['position', 'total', 'parent'],
+  'announce.drag.dropped': ['label', 'position', 'total', 'parent'],
+  'action.added': ['label'],
+  'action.moved': ['label'],
+  'action.deleted': ['label'],
+  'action.duplicated': ['label'],
+  'action.changed': ['property', 'label'],
+  'label.column': ['n'],
+  'marker.label': ['label'],
+  'toolbar.label': ['label'],
+  'toolbar.drag.label': ['label'],
+  'toolbar.moveLeft.label': ['label'],
+  'toolbar.moveRight.label': ['label'],
+  'toolbar.moveUp.label': ['label'],
+  'toolbar.moveDown.label': ['label'],
+  'toolbar.addAfter.label': ['label'],
+  'toolbar.duplicate.label': ['label'],
+  'toolbar.properties.label': ['label'],
+  'toolbar.delete.label': ['label'],
+  'insert.blockAfter': ['label'],
+  'picker.noMatch': ['query'],
+  'rail.withNotice': ['label'],
+  'delete.heading': ['kind'],
+  'delete.body.other': ['count'],
+  'delete.confirm': ['kind'],
+  'toast.deleted': ['label'],
+  'panel.column.count.other': ['count'],
+  'panel.column.moveEarlier': ['label'],
+  'panel.column.moveLater': ['label'],
+  'panel.column.remove': ['label'],
+  'panel.repeater.moveEarlier': ['n'],
+  'panel.repeater.moveLater': ['n'],
+  'panel.repeater.remove': ['n'],
+  'panel.allowedHint': ['values'],
+  'notice.locked.heading': ['name'],
+  'notice.locked.body': ['time'],
+  'notice.lapsed': ['name'],
+  'notice.takenOver.heading': ['name'],
+  'takeover.body': ['name'],
 };
+
+/**
+ * The only values allowed to start or end with a space: each is joined onto
+ * other text by a component, so the space is part of the copy.
+ */
+const SPACED = ['announce.needsInput', 'panel.preset.separator'];
 
 const entries = Object.entries(STRINGS);
 
@@ -37,10 +91,10 @@ describe('STRINGS', () => {
   it('holds only non-empty, trimmed string values', () => {
     const bad = entries
       .filter(
-        ([, value]) =>
+        ([key, value]) =>
           typeof value !== 'string' ||
           value.length === 0 ||
-          value !== value.trim(),
+          (value !== value.trim() && !SPACED.includes(key)),
       )
       .map(([key]) => key);
     expect(bad).toEqual([]);
@@ -125,6 +179,85 @@ describe('STRINGS', () => {
     expect(STRINGS['landmark.frame']).toBe('Page being edited');
   });
 
+  it('carries the Phase 8 edit tools, save states and lock copy', () => {
+    expect(STRINGS['tools.mode.label']).toBe('Mode');
+    expect(STRINGS['tools.mode.edit']).toBe('Edit');
+    expect(STRINGS['tools.mode.interact']).toBe('Interact');
+    expect(STRINGS['tools.mode.railTooltip']).toBe('Interact mode (I)');
+    expect(STRINGS['save.saved']).toBe('All changes saved');
+    expect(STRINGS['save.saving']).toBe('Saving');
+    expect(STRINGS['save.failed']).toBe('Could not save your changes');
+    expect(STRINGS['save.paused']).toBe('Saving is paused');
+    expect(STRINGS['save.retry']).toBe('Retry');
+    expect(STRINGS['lock.renewing']).toBe('Renewing');
+    expect(STRINGS['takeover.inFlight']).toBe('Taking over');
+    expect(STRINGS['notice.retryFailed']).toBe("That didn't work. Try again.");
+  });
+
+  it('words the lock banner as the holder last activity, never as when the lock began', () => {
+    expect(formatString('notice.locked.body', { time: '5 minutes ago' })).toBe(
+      'Last active 5 minutes ago. You can look around. This page opens for editing automatically when they are done.',
+    );
+    const bad = entries
+      .filter(([, value]) => value.includes('Since {time}'))
+      .map(([key]) => key);
+    expect(bad).toEqual([]);
+    expect(formatString('notice.locked.heading', { name: 'Sam' })).toBe(
+      'Sam is editing this page',
+    );
+  });
+
+  it('carries the delete dialog pair and its plural keys', () => {
+    expect(formatString('delete.heading', { kind: 'section' })).toBe(
+      'Delete this section?',
+    );
+    expect(formatString('delete.confirm', { kind: 'column' })).toBe(
+      'Delete column',
+    );
+    expect(STRINGS['delete.body.one']).toBe('This removes 1 block inside it.');
+    expect(formatString('delete.body.other', { count: '3' })).toBe(
+      'This removes 3 blocks inside it.',
+    );
+    expect(STRINGS['delete.note']).toBe('You can undo this right after.');
+    expect(STRINGS['panel.column.count.one']).toBe('1 block');
+    expect(formatString('panel.column.count.other', { count: '5' })).toBe(
+      '5 blocks',
+    );
+  });
+
+  it('carries the toolbar disabled reasons, including the missing delete permission', () => {
+    expect(STRINGS['toolbar.reason.lastColumn']).toBe(
+      'A section needs at least one column.',
+    );
+    expect(STRINGS['toolbar.reason.noDeletePermission']).toBe(
+      "Your role can't delete content on this page.",
+    );
+    expect(formatString('toolbar.moveLeft.label', { label: 'Text' })).toBe(
+      'Move Text left',
+    );
+  });
+
+  it('pairs every .one key with an .other key', () => {
+    const keys = entries.map(([key]) => key);
+    const ones = keys.filter((key) => key.endsWith('.one'));
+    expect(ones.length).toBeGreaterThan(0);
+    for (const one of ones) {
+      expect(keys).toContain(one.replace(/\.one$/, '.other'));
+    }
+  });
+
+  it('keeps the interpolated name or time as plain text, never markup', () => {
+    expect(
+      formatString('notice.lapsed', { name: '<img src=x onerror=1>' }),
+    ).toBe(
+      '<img src=x onerror=1> stopped editing. You can edit this page now.',
+    );
+    const markup = entries
+      .filter(([, value]) => /<[a-z/]/i.test(value))
+      .map(([key]) => key);
+    expect(markup).toEqual([]);
+  });
+
   it('carries the two-step enrolment copy', () => {
     expect(STRINGS['enrol.confirm.heading']).toBe('Set up two-step sign-in');
     expect(STRINGS['enrol.confirm.submit']).toBe('Continue');
@@ -176,6 +309,11 @@ describe('formatString', () => {
     expect(missing).toContain('{email}');
     // @ts-expect-error a variable the key does not name is rejected
     formatString('sidebar.exit', { email: 'a@b.test' });
+    // @ts-expect-error the lock banner names {time}, so it is required
+    const noTime = formatString('notice.locked.body');
+    expect(noTime).toContain('{time}');
+    // @ts-expect-error the delete heading names {kind}, not {label}
+    formatString('delete.heading', { label: 'Text' });
   });
 
   it('returns a string without placeholders unchanged', () => {

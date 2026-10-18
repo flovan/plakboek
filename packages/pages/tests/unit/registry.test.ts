@@ -4,11 +4,14 @@ import { describe, expect, it } from 'vitest';
 import {
   BLOCK_KEY_PATTERN,
   BlockConfigError,
+  BlockPropsValidationError,
   defineBlocks,
+  findMissingRequiredProps,
   getBlockDefinition,
   UnknownBlockTypeError,
   validateBlockProps,
   type BlockDefinitionInput,
+  type StarterNode,
 } from '../../src/registry.js';
 
 const starRatingFieldType = {
@@ -257,5 +260,189 @@ describe('defineBlocks: the full block declaration contract (D-01, D-02, D-10)',
     expect(() => getBlockDefinition('does-not-exist')).toThrow(
       UnknownBlockTypeError,
     );
+  });
+});
+
+describe('defineBlocks: column kind, layout support and starter children (D-01, D-02, D-08, D-20)', () => {
+  const plain = (key: string): BlockDefinitionInput => ({
+    key,
+    editor: { label: key },
+    schemaVersion: 1,
+    properties: {},
+  });
+
+  function issueCodes(entries: readonly BlockDefinitionInput[]): string[] {
+    try {
+      defineBlocks(entries);
+    } catch (error) {
+      return (error as BlockConfigError).issues.map((issue) => issue.code);
+    }
+    return [];
+  }
+
+  it('defaults layoutSupport to { fill: false } and starterChildren to []', () => {
+    const [definition] = defineBlocks([plain('text')]);
+    expect(definition?.layoutSupport).toEqual({ fill: false });
+    expect(definition?.starterChildren).toEqual([]);
+  });
+
+  it('carries a declared fill flag and frozen starter children', () => {
+    const [, quote] = defineBlocks([
+      plain('text'),
+      {
+        ...plain('quote'),
+        layout: { fill: true },
+        starterChildren: [{ type: 'text', props: { value: 'x' } }],
+      },
+    ]);
+    expect(quote?.layoutSupport).toEqual({ fill: true });
+    expect(quote?.starterChildren).toHaveLength(1);
+    expect(Object.isFrozen(quote?.starterChildren)).toBe(true);
+  });
+
+  it('refuses a column kind that declares a property (COLUMN_PROPERTIES)', () => {
+    expect(
+      issueCodes([
+        {
+          ...plain('column'),
+          kind: 'column',
+          properties: {
+            gap: { fieldType: 'short_text', label: 'Gap' },
+          },
+        },
+      ]),
+    ).toEqual(['COLUMN_PROPERTIES']);
+  });
+
+  it('refuses a second column kind (MULTIPLE_COLUMN_KINDS)', () => {
+    expect(
+      issueCodes([
+        { ...plain('column'), kind: 'column' },
+        { ...plain('column2'), kind: 'column' },
+      ]),
+    ).toEqual(['MULTIPLE_COLUMN_KINDS']);
+  });
+
+  it('refuses layout.fill on a section or a column (INVALID_LAYOUT_SUPPORT)', () => {
+    expect(
+      issueCodes([
+        { ...plain('section'), kind: 'section', layout: { fill: true } },
+        { ...plain('column'), kind: 'column', layout: { fill: false } },
+      ]),
+    ).toEqual(['INVALID_LAYOUT_SUPPORT', 'INVALID_LAYOUT_SUPPORT']);
+  });
+
+  it('refuses an unregistered starter type and starter nesting beyond 8 (INVALID_STARTER_CHILDREN)', () => {
+    expect(
+      issueCodes([{ ...plain('a'), starterChildren: [{ type: 'missing' }] }]),
+    ).toEqual(['INVALID_STARTER_CHILDREN']);
+
+    let nested: StarterNode = { type: 'a' };
+    for (let level = 0; level < 8; level += 1) {
+      nested = { type: 'a', children: [nested] };
+    }
+    expect(issueCodes([{ ...plain('a'), starterChildren: [nested] }])).toEqual([
+      'INVALID_STARTER_CHILDREN',
+    ]);
+  });
+});
+
+describe('lenient required validation and findMissingRequiredProps (D-21, D-20)', () => {
+  const [definition] = defineBlocks([
+    {
+      key: 'leniencyProbe',
+      editor: { label: 'Leniency probe' },
+      schemaVersion: 1,
+      properties: {
+        title: {
+          fieldType: 'short_text',
+          label: 'Title',
+          required: true,
+          options: { maxLength: 40 },
+        },
+        subtitle: {
+          fieldType: 'short_text',
+          label: 'Subtitle',
+          options: { maxLength: 40 },
+        },
+        kicker: {
+          fieldType: 'short_text',
+          label: 'Kicker',
+          required: true,
+          options: { maxLength: 40 },
+        },
+        badge: {
+          fieldType: 'short_text',
+          label: 'Badge',
+          required: true,
+          options: { maxLength: 40 },
+        },
+      },
+    },
+  ]);
+  if (definition === undefined) throw new Error('fixture block missing');
+  const constrained = {
+    ...definition,
+    constraints: {
+      kicker: { kind: 'hidden' },
+      badge: { kind: 'fixed', value: 'new' },
+    },
+  } as const;
+
+  function codesOf(run: () => unknown): string[] {
+    try {
+      run();
+    } catch (error) {
+      if (error instanceof BlockPropsValidationError) {
+        return error.issues.map(
+          (issue) => `${issue.propertyKey}:${issue.code}`,
+        );
+      }
+      throw error;
+    }
+    return [];
+  }
+
+  it('refuses an empty required property by default and accepts it when asked to', () => {
+    expect(codesOf(() => validateBlockProps(definition, {}))).toEqual([
+      'title:REQUIRED',
+      'kicker:REQUIRED',
+      'badge:REQUIRED',
+    ]);
+    expect(
+      validateBlockProps(definition, {}, { allowMissingRequired: true }),
+    ).toEqual({});
+  });
+
+  it('still refuses a wrongly typed value, an unknown key and a too-long value when lenient', () => {
+    expect(
+      codesOf(() =>
+        validateBlockProps(
+          definition,
+          { title: 7, extra: 'x', subtitle: 'y'.repeat(41) },
+          { allowMissingRequired: true },
+        ),
+      ),
+    ).toEqual(['extra:UNKNOWN', 'title:INVALID', 'subtitle:INVALID']);
+  });
+
+  it('lists the required properties still empty, in declaration order', () => {
+    expect(findMissingRequiredProps(definition, {})).toEqual([
+      'title',
+      'kicker',
+      'badge',
+    ]);
+    expect(
+      findMissingRequiredProps(definition, { title: 'Hi', badge: 'x' }),
+    ).toEqual(['kicker']);
+    expect(findMissingRequiredProps(definition, 'not an object')).toEqual([
+      'title',
+      'kicker',
+      'badge',
+    ]);
+  });
+
+  it('never lists a fixed or a hidden property', () => {
+    expect(findMissingRequiredProps(constrained, {})).toEqual(['title']);
   });
 });

@@ -14,7 +14,7 @@
  *
  * Reserved paths: `/cms` and everything under it (the login page and its
  * email-link landings, health, first-run setup, logout) and `/api/auth/*`
- * belong to the CMS. `/cms/*` never falls through to the visitor route: a path
+ * belong to the CMS, `/cms/api/*` (the editor's JSON API) included. `/cms/*` never falls through to the visitor route: a path
  * under it that no specific route claims reaches the editor's pages handler
  * and ends in the host's own 404. The page engine refuses a page whose first
  * slug segment is `cms` or `api`, and reports any that already exists at boot,
@@ -37,6 +37,8 @@ export function cmsRoutes(): RouteConfigEntry[] {
       id: 'plakboek-setup-test-email',
     }),
     route('cms/logout', file('cms-logout'), { id: 'plakboek-cms-logout' }),
+    // The editor's JSON API; before `cms/*` so the pages route never sees it.
+    route('cms/api/*', file('editor-api'), { id: 'plakboek-editor-api' }),
     route('cms/*', file('cms'), { id: 'plakboek-cms-pages' }),
     route('robots.txt', file('robots'), { id: 'plakboek-robots' }),
     route('api/auth/*', file('auth-api'), { id: 'plakboek-auth' }),

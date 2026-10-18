@@ -62,6 +62,7 @@ function node(input: {
     parentBlockId: null,
     blockType: input.blockType,
     props: input.props,
+    layout: null,
     schemaVersion: input.schemaVersion ?? 1,
     depth: 0,
     sortOrder: input.sortOrder ?? 1000,

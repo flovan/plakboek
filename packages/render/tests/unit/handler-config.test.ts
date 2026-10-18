@@ -21,6 +21,7 @@ const CONFIG: PagesConfig = {
   blocks: [],
   sectionNestingDepth: 2,
   blockDepthCeiling: 12,
+  columnPresets: [],
 };
 
 const THROWING_DB = new Proxy(

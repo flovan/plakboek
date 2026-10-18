@@ -23,6 +23,26 @@ export type {
   BlockIdentity,
 } from './block-component.js';
 
+// layout
+export type { BlockLayout, ColumnAlign } from './layout.js';
+
+// columns
+export { Columns, columnTracks } from './columns.js';
+export type { ColumnsProps } from './columns.js';
+
+// column-block
+export { ColumnBlock } from './column-block.js';
+
+// edit-hooks
+export { defineBlockEdit } from './edit-hooks.js';
+export type {
+  BlockEditContext,
+  BlockEditHooks,
+  BlockEditMode,
+  BlockEditModule,
+  BlockRevealContext,
+} from './edit-hooks.js';
+
 // head
 export type {
   DocumentInput,
@@ -36,4 +56,4 @@ export { NOOP_EDIT } from './edit-proxy.js';
 export type { EditAttributes, EditProxy } from './edit-proxy.js';
 
 // live-edit
-export { EDIT_ATTRIBUTE } from './live-edit.js';
+export { EDIT_ATTRIBUTE, isLiveEdit } from './live-edit.js';
