@@ -26,10 +26,13 @@
  */
 import type { ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { BlockComponent } from './block-component.js';
 import type { ComponentMap } from './components.js';
+import { escapeHtmlAttribute } from './document.js';
 import type { EditProxy } from './edit-proxy.js';
 import { reportRenderEvent, type RenderHooks } from './hooks.js';
 import { toBlockLayout } from './layout.js';
+import { EDIT_ATTRIBUTE, isLiveEdit } from './live-edit.js';
 
 /** The node shape both a snapshot block and a live tree node satisfy. */
 export type HostNode<N> = {
@@ -112,6 +115,42 @@ function spliceBlocks(markup: string, state: RenderState): string {
   return expand(markup);
 }
 
+/** Components already reported for rendering without an identity element. */
+const warnedWithoutIdentity = new WeakSet<BlockComponent>();
+
+function isProductionEnvironment(): boolean {
+  return (
+    typeof process !== 'undefined' && process.env.NODE_ENV === 'production'
+  );
+}
+
+/**
+ * Outside production, a live render names a block component whose markup
+ * carries no element with the block's own identity: the page editor cannot
+ * outline, select or drill into it. Once per component function, and the
+ * message holds the block type only, never props or content.
+ */
+function warnMissingBlockIdentity(
+  component: BlockComponent,
+  edit: EditProxy,
+  block: { readonly id: string; readonly blockType: string },
+  html: string,
+): void {
+  if (
+    isProductionEnvironment() ||
+    !isLiveEdit(edit) ||
+    warnedWithoutIdentity.has(component) ||
+    html.includes(`${EDIT_ATTRIBUTE.block}="${escapeHtmlAttribute(block.id)}"`)
+  ) {
+    return;
+  }
+  warnedWithoutIdentity.add(component);
+  // oxlint-disable-next-line no-console -- dev-only hint for a host block that is unreachable in the page editor; carries the block type only
+  console.warn(
+    `[@plakboek/render] the "${block.blockType}" block rendered no element carrying {...edit}, so the page editor cannot outline, select or drill into it. Spread {...edit} on the block's root element.`,
+  );
+}
+
 /**
  * Renders one block. "No component" covers both a type the config never
  * declared and a type declared without a component.
@@ -138,6 +177,7 @@ function BlockHost<N extends HostNode<N>>({
     <BlockHost<N> key={child.id} block={child} context={context} />
   ));
   try {
+    const edit = context.editFor(block);
     const rendered: unknown = component({
       block: {
         id: block.id,
@@ -147,7 +187,7 @@ function BlockHost<N extends HostNode<N>>({
       props: isRecord(block.props) ? block.props : NO_PROPS,
       layout: toBlockLayout(block.layout),
       children,
-      edit: context.editFor(block),
+      edit,
     });
     if (isThenable(rendered)) {
       // Swallow the eventual rejection so it never becomes unhandled.
@@ -155,6 +195,7 @@ function BlockHost<N extends HostNode<N>>({
       throw new AsyncBlockComponentError();
     }
     const html = renderToStaticMarkup(<>{rendered as ReactNode}</>);
+    warnMissingBlockIdentity(component, edit, block, html);
     state.rendered.push(html);
     return sentinelFor(state, state.rendered.length - 1);
   } catch (error) {

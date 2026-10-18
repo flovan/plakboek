@@ -245,7 +245,10 @@ renders.
   never carries it. The names are exported as `EDIT_ATTRIBUTE`; the overlay
   and every later selection feature bind to exactly these.
 - **A block must spread `{...edit}` on its root element.** A block that does
-  not renders without attributes and cannot be outlined or selected.
+  not renders without attributes and cannot be outlined or selected. Outside
+  production, a live render warns once in the terminal for each block component
+  whose markup carries no element with its block's `data-pk-block`, naming the
+  block type.
 - **Nothing else is added.** No class, inline style or wrapper element is ever
   put on or around a block a host renders; only the `data-pk-*` attributes.
 - **Placeholders.** A block that would render nothing in the edit render (an
