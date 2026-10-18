@@ -70,6 +70,7 @@ function render(
   blocks: readonly BlockNode[],
   mode: 'live' | 'plain' = 'live',
   hooks?: Parameters<typeof renderPageTree>[0]['hooks'],
+  componentMap: ComponentMap = components,
 ) {
   return renderPageTree({
     page: {
@@ -87,7 +88,7 @@ function render(
     },
     blocks,
     publicPath: '/test',
-    components,
+    components: componentMap,
     blockMeta,
     mode,
     hooks,
@@ -330,5 +331,53 @@ describe('plain mode', () => {
     expect(body).not.toContain('data-pk-');
     expect(degraded).toBe(true);
     consoleError.mockRestore();
+  });
+});
+
+describe('a block rendered without its identity', () => {
+  // The warning is deduplicated per component function, so each case owns one.
+  const fieldOnly = (): BlockComponent => (props) =>
+    createElement('h2', { ...props.edit.field('text') }, 'Hello');
+  const mapOf = (component: BlockComponent): ComponentMap =>
+    new Map([['heading', component]]);
+  const warn = () =>
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const tree = [
+    node('h1', 'heading', { text: 'One' }),
+    node('h2', 'heading', { text: 'Two' }),
+  ];
+
+  it('warns once per component, naming the block type and the spread', () => {
+    const consoleWarn = warn();
+    render(tree, 'live', undefined, mapOf(fieldOnly()));
+    expect(consoleWarn).toHaveBeenCalledTimes(1);
+    const message = String(consoleWarn.mock.calls[0]?.[0]);
+    expect(message).toContain('heading');
+    expect(message).toContain('{...edit}');
+    expect(message).not.toContain('One');
+    consoleWarn.mockRestore();
+  });
+
+  it('stays silent when the component spreads {...edit}', () => {
+    const consoleWarn = warn();
+    render(tree, 'live', undefined, mapOf(Heading));
+    expect(consoleWarn).not.toHaveBeenCalled();
+    consoleWarn.mockRestore();
+  });
+
+  it('stays silent in a plain render', () => {
+    const consoleWarn = warn();
+    render(tree, 'plain', undefined, mapOf(fieldOnly()));
+    expect(consoleWarn).not.toHaveBeenCalled();
+    consoleWarn.mockRestore();
+  });
+
+  it('stays silent in production', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const consoleWarn = warn();
+    render(tree, 'live', undefined, mapOf(fieldOnly()));
+    expect(consoleWarn).not.toHaveBeenCalled();
+    consoleWarn.mockRestore();
+    vi.unstubAllEnvs();
   });
 });
