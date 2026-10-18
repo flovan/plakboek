@@ -1,5 +1,13 @@
 # @plakboek/db
 
+## 0.7.0
+
+### Minor Changes
+
+- [#22](https://github.com/flovan/plakboek/pull/22) [`babfd25`](https://github.com/flovan/plakboek/commit/babfd255ea45c81587fb87d1d3ca92f6b51d07e2) Thanks [@flovan](https://github.com/flovan)! - Add migration `0004_block_layout`: a nullable `layout` jsonb column on `page_blocks` and `block_revisions` for section column ratios and alignment and block fill. Additive and safe to run on existing data.
+
+- [#22](https://github.com/flovan/plakboek/pull/22) [`c352099`](https://github.com/flovan/plakboek/commit/c352099e3b6269c9b4514a2a3a3185a0d0d92736) Thanks [@flovan](https://github.com/flovan)! - Restoring a revision batch that deleted a whole subtree (a section with its columns and blocks) now works: each re-created block is re-parented to the new id of its re-created parent, where before every child past the root was refused with `RestoreParentNotFoundError` and nothing could be restored. A re-created block takes its depth from where it lands. Migration `0005_revision_block_ref` adds `block_revisions.subject_block_id`, the revised block's id kept as plain data after the block row is deleted (`block_id` is nulled by the foreign key), and backfills it for revisions whose block still exists. A batch that deleted a subtree before this migration cannot be restored below its root, as before.
+
 ## 0.6.0
 
 ## 0.5.1

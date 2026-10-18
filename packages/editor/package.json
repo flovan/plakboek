@@ -1,6 +1,6 @@
 {
   "name": "@plakboek/editor",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "On-page editing chrome for Plakboek: shadow-root styles, strings and icons, with a server and a client entry",
   "homepage": "https://github.com/flovan/plakboek/tree/main/packages/editor#readme",
   "bugs": {
