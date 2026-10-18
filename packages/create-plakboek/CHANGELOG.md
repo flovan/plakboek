@@ -1,5 +1,15 @@
 # create-plakboek
 
+## 0.7.0
+
+### Minor Changes
+
+- [#22](https://github.com/flovan/plakboek/pull/22) [`9263a62`](https://github.com/flovan/plakboek/commit/9263a624667b6ab53f0dffa6f04f6cd279fcbfc9) Thanks [@flovan](https://github.com/flovan)! - Every installation now registers the CMS-owned `column` block after the host's blocks, and a host block with the key or kind `column` is refused when the config is evaluated. Seed sections may stay flat: bootstrap wraps their blocks in one column. `defineConfig` accepts `columnPresets` to narrow or extend the column ratios. The starter section renders `Columns` around its children, sets `--plakboek-column-gap` and stacks columns below 640px of container width.
+
+### Patch Changes
+
+- [#22](https://github.com/flovan/plakboek/pull/22) [`5c14fbb`](https://github.com/flovan/plakboek/commit/5c14fbbace77abe1dae8cac40c1196c76c4d8016) Thanks [@flovan](https://github.com/flovan)! - The starter heading now spreads `{...edit}` on its h1, h2 or h3. On a new site the page editor can outline the heading, select it and reach it by double-clicking through its section and column; before, a double-click stopped at the column. The README now names the root spread and the field spread. A site created from an earlier starter gets the fix by adding `{...edit}` to the three heading elements in `blocks/heading.tsx`.
+
 ## 0.6.0
 
 ### Minor Changes
