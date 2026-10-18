@@ -31,8 +31,14 @@
     "check": "publint --strict"
   },
   "devDependencies": {
+    "@plakboek/core": "workspace:*",
+    "@plakboek/render": "workspace:*",
     "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
     "publint": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

@@ -544,12 +544,30 @@ importers:
 
   packages/create-plakboek:
     devDependencies:
+      '@plakboek/core':
+        specifier: workspace:*
+        version: link:../core
+      '@plakboek/render':
+        specifier: workspace:*
+        version: link:../render
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.2
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.3.0(@types/react@19.3.0)
       publint:
         specifier: 'catalog:'
         version: 0.3.24
+      react:
+        specifier: 'catalog:'
+        version: 19.3.0
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.3.0(react@19.3.0)
       tsdown:
         specifier: 'catalog:'
         version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(tsx@4.23.15)(typescript@7.0.2)
