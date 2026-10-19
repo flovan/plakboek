@@ -10,7 +10,12 @@
  * site's document.
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
-import { openEditor, SELECTED, tabToRegion } from './helpers/editing.ts';
+import {
+  chrome,
+  openEditor,
+  SELECTED,
+  tabToRegion,
+} from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
 import {
   createEditablePage,
@@ -365,12 +370,14 @@ test.describe('the site with every editing layer mounted', () => {
     for (const key of ['ArrowDown', 'ArrowRight', 'ArrowRight']) {
       await page.keyboard.press(key);
     }
-    await page.getByRole('button', { name: 'Properties of Note' }).click();
+    await chrome(page)
+      .getByRole('button', { name: 'Properties of Note' })
+      .click();
     await page.getByRole('textbox', { name: 'Note' }).fill('');
     await expect(page.getByText('All changes saved')).toBeVisible();
-    await expect(page.locator(SELECTED)).toHaveCount(1);
-    await expect(page.locator(`${HOST} [role="toolbar"]`)).toBeVisible();
-    await expect(page.locator(`${HOST} [data-marker]`)).toHaveCount(1);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
+    await expect(chrome(page).locator('[role="toolbar"]')).toBeVisible();
+    await expect(chrome(page).locator('[data-marker]')).toHaveCount(1);
     const first = await framed.locator('h2').nth(0).boundingBox();
     const second = await framed.locator('h2').nth(1).boundingBox();
     if (first === null || second === null) throw new Error('No headings');
@@ -379,7 +386,9 @@ test.describe('the site with every editing layer mounted', () => {
       (first.y + first.height + second.y) / 2,
     );
     await expect(
-      page.getByRole('button', { name: 'Add block after Heading' }).first(),
+      chrome(page)
+        .getByRole('button', { name: 'Add block after Heading' })
+        .first(),
     ).toBeVisible();
 
     const size = await framed.evaluate(() => ({

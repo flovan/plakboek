@@ -87,8 +87,9 @@ export async function selectedId(page: Page): Promise<string | null> {
 
 /**
  * Selects the item the target belongs to. Phase 8 drills: a click selects the
- * section, each further double-click goes one level in. Plan 09-14 makes it
- * one click, and only this function changes.
+ * section, each further double-click goes one level in (an accordion
+ * entry's text is four levels down). Plan 09-14 makes it one click, and only
+ * this function changes.
  */
 export async function selectItem(page: Page, target: Locator): Promise<void> {
   const id = await target.evaluate(
@@ -99,7 +100,7 @@ export async function selectItem(page: Page, target: Locator): Promise<void> {
   let current = await selectedId(page);
   await target.click();
   current = await settledSelection(page, current);
-  for (let drills = 0; drills < 3 && current !== id; drills += 1) {
+  for (let drills = 0; drills < 4 && current !== id; drills += 1) {
     const previous = current;
     await target.dblclick();
     current = await settledSelection(page, previous);

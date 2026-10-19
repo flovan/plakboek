@@ -14,6 +14,7 @@ import {
   type Page,
 } from '@playwright/test';
 import {
+  chrome,
   framedSite,
   FRAME,
   HOST,
@@ -21,6 +22,7 @@ import {
   MODE_GROUP,
   openEditor,
   SELECTED,
+  selectItem,
   tabToRegion,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -145,7 +147,7 @@ test.describe('a host hook module and the editor', () => {
 
     await expect(second).toBeVisible();
     await expect(first).toBeHidden();
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
     await expect(page.locator(LIVE_REGION)).toContainText('Selected Text');
 
     await interact(page);
@@ -176,22 +178,22 @@ async function expectSaved(page: Page): Promise<void> {
 /** Climbs with Escape until nothing is selected. */
 async function clearSelection(page: Page): Promise<void> {
   for (let climbs = 0; climbs < 8; climbs += 1) {
-    if ((await page.locator(SELECTED).count()) === 0) return;
+    if ((await chrome(page).locator(SELECTED).count()) === 0) return;
     await page.keyboard.press('Escape');
   }
-  await expect(page.locator(SELECTED)).toHaveCount(0);
+  await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
 }
 
-/**
- * Double-clicks `target` once per level: the column, the container, its item,
- * then the text itself. The next double-click would ask for its Properties.
- */
+/** Selects the block `target` belongs to and waits for its outline to sit on it. */
 async function drillOnto(page: Page, target: Locator): Promise<void> {
-  for (let level = 0; level < 4; level += 1) await target.dblclick();
-  await expect(page.locator(SELECTED)).toHaveCount(1);
+  await selectItem(page, target);
+  await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
   await expect
     .poll(async () => {
-      const selected = await page.locator(SELECTED).first().boundingBox();
+      const selected = await chrome(page)
+        .locator(SELECTED)
+        .first()
+        .boundingBox();
       const box = await target.boundingBox();
       if (selected === null || box === null) return Number.POSITIVE_INFINITY;
       return Math.max(
@@ -247,9 +249,9 @@ test.describe('the site’s own controls', () => {
     ];
     for (const control of inBlocks) {
       await control.click();
-      await expect(page.locator(SELECTED)).toHaveCount(1);
+      await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
       await page.keyboard.press('Escape');
-      await expect(page.locator(SELECTED)).toHaveCount(0);
+      await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
     }
 
     // the site's own header is outside every block: its controls are claimed too
@@ -260,7 +262,7 @@ test.describe('the site’s own controls', () => {
       '#open-site-dialog',
     ]) {
       await frame.locator(selector).click();
-      await expect(page.locator(SELECTED)).toHaveCount(0);
+      await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
     }
     expect(await frame.evaluate(() => window.scrollY)).toBe(0);
 
@@ -390,7 +392,9 @@ test.describe('hook modules reveal what is selected', () => {
 
     // list, first entry
     await walk(page, 'ArrowRight', 'ArrowRight');
-    await page.getByRole('button', { name: /^Properties of / }).click();
+    await chrome(page)
+      .getByRole('button', { name: /^Properties of / })
+      .click();
     await page.getByRole('textbox', { name: 'Title' }).fill('Renamed entry');
     await expect(frame.locator(TRIGGER).first()).toHaveText('Renamed entry');
     await expectSaved(page);
@@ -411,7 +415,9 @@ test.describe('hook modules reveal what is selected', () => {
     await expect(frame.getByText('Second slide text')).toBeHidden();
 
     await walk(page, 'ArrowRight');
-    await page.getByRole('button', { name: /^Properties of Slides/ }).click();
+    await chrome(page)
+      .getByRole('button', { name: /^Properties of Slides/ })
+      .click();
     await page.getByRole('checkbox', { name: 'Autoplay' }).check();
     await expect(frame.locator('[data-slides]')).toHaveAttribute(
       'data-autoplay',
@@ -447,8 +453,8 @@ test.describe('items are blocks like any other', () => {
     await expect(frame.locator(SLIDE)).toHaveCount(2);
 
     await walk(page, 'ArrowRight', 'ArrowRight');
-    await page.getByRole('button', { name: 'Add after Slide' }).click();
-    const picker = page.getByRole('dialog', { name: 'Add a block' });
+    await chrome(page).getByRole('button', { name: 'Add after Slide' }).click();
+    const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
     await expect(picker.getByRole('option')).toHaveCount(1);
     await page.keyboard.press('Enter');
 
@@ -472,7 +478,9 @@ test.describe('items are blocks like any other', () => {
 
     // tabs, first tab, second tab
     await walk(page, 'ArrowRight', 'ArrowRight', 'ArrowDown');
-    await page.getByRole('button', { name: /^Move Tab (left|up)$/ }).click();
+    await chrome(page)
+      .getByRole('button', { name: /^Move Tab (left|up)$/ })
+      .click();
 
     await expect
       .poll(() => frame.locator(TAB).allTextContents())
@@ -506,7 +514,9 @@ test.describe('items are blocks like any other', () => {
 
     // list, first entry, second, third
     await walk(page, 'ArrowRight', 'ArrowRight', 'ArrowDown', 'ArrowDown');
-    await page.getByRole('button', { name: 'Delete Accordion entry' }).click();
+    await chrome(page)
+      .getByRole('button', { name: 'Delete Accordion entry' })
+      .click();
 
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(frame.locator(TRIGGER)).toHaveCount(2);

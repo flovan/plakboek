@@ -14,12 +14,15 @@ import {
   type Page,
 } from '@playwright/test';
 import {
+  chrome,
   framedSite,
   FRAME,
   HOST,
   MODE_GROUP,
   openEditor,
+  openProperties,
   SELECTED,
+  selectItem,
   waitForShell,
 } from './helpers/editing.ts';
 import {
@@ -53,22 +56,26 @@ function headingsIn(frame: Frame, sectionIndex: number): Promise<string[]> {
     .allTextContents();
 }
 
-/** Double-click twice: section to column, column to the block under the pointer. */
-async function drillTo(frame: Frame, sectionIndex: number, at: number) {
-  const target = frame
-    .locator('section.section')
-    .nth(sectionIndex)
-    .locator('h2')
-    .nth(at);
-  await target.dblclick();
-  await target.dblclick();
+/** Selects the heading at the given position in a section. */
+async function selectHeading(
+  page: Page,
+  frame: Frame,
+  sectionIndex: number,
+  at: number,
+) {
+  await selectItem(
+    page,
+    frame.locator('section.section').nth(sectionIndex).locator('h2').nth(at),
+  );
 }
 
 /** H2 moves to the top of the next column, and the write is saved. */
 async function moveSecondHeadingDown(page: Page): Promise<void> {
   const frame = await framedSite(page);
-  await drillTo(frame, 0, 1);
-  await page.getByRole('button', { name: /^Move .* down$/ }).click();
+  await selectHeading(page, frame, 0, 1);
+  await chrome(page)
+    .getByRole('button', { name: /^Move .* down$/ })
+    .click();
   await expect.poll(() => headingsIn(frame, 1)).toEqual(['H2', 'H3']);
   await expect(page.getByText('All changes saved')).toBeVisible();
 }
@@ -141,7 +148,7 @@ test.describe('a page someone else holds', () => {
       await expect(waiting.page.locator(FRAME)).not.toHaveAttribute('tabindex');
       const frame = await framedSite(waiting.page);
       await frame.locator('section.section h2').first().click();
-      await expect(waiting.page.locator(SELECTED)).toHaveCount(0);
+      await expect(chrome(waiting.page).locator(SELECTED)).toHaveCount(0);
 
       // the holder leaves; the waiting editor's next poll finds the page free
       await holder.page.goto('/about');
@@ -260,13 +267,10 @@ test.describe('taking over', () => {
 
       // the holder has not heard of it yet: the live preview takes no lock, so
       // the change is rendered into their frame
-      await drillTo(holderFrame, 0, 0);
-      await holderFrame
-        .locator('section.section')
-        .first()
-        .locator('h2')
-        .first()
-        .dblclick();
+      await openProperties(
+        holder.page,
+        holderFrame.locator('section.section').first().locator('h2').first(),
+      );
       const control = holder.page.getByRole('textbox', { name: 'Text' });
       await expect(control).toHaveValue('H1');
       await control.fill('Changed after takeover');
@@ -347,8 +351,10 @@ test.describe('conflicts and a lock that cannot be renewed', () => {
       await moveSecondHeadingDown(tabA);
 
       const frameB = await framedSite(tabB);
-      await drillTo(frameB, 0, 1);
-      await tabB.getByRole('button', { name: /^Move .* down$/ }).click();
+      await selectHeading(tabB, frameB, 0, 1);
+      await chrome(tabB)
+        .getByRole('button', { name: /^Move .* down$/ })
+        .click();
       const alert = tabB.getByRole('alert').filter({
         hasText: 'This page changed elsewhere',
       });
@@ -380,8 +386,10 @@ test.describe('conflicts and a lock that cannot be renewed', () => {
       await editor.context.clearCookies();
 
       const frame = await framedSite(editor.page);
-      await drillTo(frame, 0, 1);
-      await editor.page.getByRole('button', { name: /^Move .* down$/ }).click();
+      await selectHeading(editor.page, frame, 0, 1);
+      await chrome(editor.page)
+        .getByRole('button', { name: /^Move .* down$/ })
+        .click();
 
       const alert = editor.page.getByRole('alert').filter({
         hasText: 'Your session ended',
@@ -442,9 +450,7 @@ test.describe('leaving with something unsaved', () => {
     await openEditor(page, created.path);
     const frame = await framedSite(page);
     const target = frame.locator('section.section >> h2').first();
-    await target.dblclick();
-    await target.dblclick();
-    await target.dblclick();
+    await openProperties(page, target);
     const control = page.getByRole('textbox', { name: 'Text' });
     await expect(control).toHaveValue('Hello');
     await control.press('End');
