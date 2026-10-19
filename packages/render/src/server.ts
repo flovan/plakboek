@@ -22,6 +22,7 @@ export type {
   MissingComponentEvent,
   RenderErrorEvent,
   RenderHooks,
+  RichTextIssueEvent,
   UnknownBlockEvent,
 } from './hooks.js';
 

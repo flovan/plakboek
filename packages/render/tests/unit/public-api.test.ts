@@ -50,6 +50,7 @@ const ROOT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   TextEnvironmentProvider: 'function',
   useTextEnvironment: 'function',
   RichText: 'function',
+  CtaButton: 'function',
 });
 
 const ROOT_TYPES: readonly string[] = Object.freeze([
@@ -105,6 +106,7 @@ const ROOT_TYPES: readonly string[] = Object.freeze([
   'TextEnvironmentInput',
   'TextEnvironmentMode',
   'RichTextProps',
+  'CtaButtonProps',
 ]);
 
 const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
@@ -145,6 +147,7 @@ const SERVER_TYPES: readonly string[] = Object.freeze([
   'MissingComponentEvent',
   'RenderErrorEvent',
   'RenderHooks',
+  'RichTextIssueEvent',
   'UnknownBlockEvent',
   // render-snapshot
   'RenderedPage',

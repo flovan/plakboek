@@ -424,6 +424,7 @@ updating them.
 | `TextEnvironmentProvider`     | function | Provides a text environment to every `RichText` below it                         |
 | `useTextEnvironment`          | function | The provided environment, or a default visitor one                               |
 | `RichText`                    | function | Renders a stored rich-text document with no wrapper element                      |
+| `CtaButton`                   | function | A standalone call-to-action button, rendered like an in-text CTA                 |
 | `TextRenderers`               | type     | One renderer per node and mark, plus the CTA and the CTA row                     |
 | `ParagraphRendererProps`      | type     | `children` and `textAlign`                                                       |
 | `HeadingRendererProps`        | type     | `level` (2 to 4), `textAlign` and `children`                                     |
@@ -452,6 +453,7 @@ updating them.
 | `TextEnvironment`             | type     | Theme, renderers, mode, page resolution and reporting                            |
 | `TextEnvironmentMode`         | type     | `'visitor' \| 'edit'`: whether an unfinished CTA is rendered                     |
 | `RichTextProps`               | type     | `{ value }`: what `RichText` receives                                            |
+| `CtaButtonProps`              | type     | `{ label, link, variant }`: what `CtaButton` receives                            |
 
 ### Server entry: `@plakboek/render/server`
 
@@ -494,3 +496,4 @@ updating them.
 | `BlockRenderErrorEvent`      | type     | What `onBlockRenderError` receives                                       |
 | `RenderErrorEvent`           | type     | What `onRenderError` receives                                            |
 | `CacheErrorEvent`            | type     | What `onCacheError` receives                                             |
+| `RichTextIssueEvent`         | type     | What `onRichTextIssue` receives: an unknown node or mark, by name        |

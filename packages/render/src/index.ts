@@ -104,3 +104,5 @@ export type {
 } from './rich-text/environment.js';
 export { RichText } from './rich-text/rich-text.js';
 export type { RichTextProps } from './rich-text/rich-text.js';
+export { CtaButton } from './rich-text/cta.js';
+export type { CtaButtonProps } from './rich-text/cta.js';
