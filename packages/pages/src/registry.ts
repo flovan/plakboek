@@ -734,6 +734,30 @@ function withinAllowedValues(
 }
 
 /**
+ * Deep equality of two stored JSON values that ignores object key order and
+ * compares arrays by position. Stored props come out of jsonb, which does not
+ * keep key order, so a plain serialised comparison would call an unchanged
+ * document changed.
+ */
+function sameStoredValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item: unknown, index) => sameStoredValue(item, b[index]))
+    );
+  }
+  if (!isPlainObject(a) || !isPlainObject(b)) return false;
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every((key) => key in b && sameStoredValue(a[key], b[key]))
+  );
+}
+
+/**
  * Validates a block instance's `props` against `resolveBlockProperties`
  * (T-04-01, T-04-22), reusing `@plakboek/content`'s field-type registry
  * (D-03): one validation engine serves both content fields and block props,
@@ -750,11 +774,23 @@ function withinAllowedValues(
  * editor can save a block it has not finished filling in. Type, shape,
  * unknown-key, fixed and narrowed checks are unchanged. Publishing and
  * compaction never pass it, so an unfinished block can never reach a visitor.
+ *
+ * `options.storedProps` is the block's stored props on a working-tree write
+ * (keep data, flag, never crash): a value that deep-equals, key order aside,
+ * what is already stored under the same key is held only to its field
+ * type's `buildStoredValueSchema` (shape and size), so a document a later-
+ * narrowed text theme no longer allows never blocks an edit to another
+ * property. A changed value is held to the full schema, and nothing new can
+ * enter this way. Publishing and compaction never pass it, so they stay
+ * strict and an out-of-theme document refuses publish as invalid props.
  */
 export function validateBlockProps(
   definition: BlockDefinition,
   props: unknown,
-  options: { readonly allowMissingRequired?: boolean } = {},
+  options: {
+    readonly allowMissingRequired?: boolean;
+    readonly storedProps?: unknown;
+  } = {},
 ): Record<string, unknown> {
   const input = isPlainObject(props) ? props : {};
   const resolved = resolveBlockProperties(definition);
@@ -800,9 +836,15 @@ export function validateBlockProps(
     const fieldOptions = optionsResult.success
       ? optionsResult.data
       : (property.options ?? {});
-    const result = fieldDefinition
-      .buildValueSchema(fieldOptions)
-      .safeParse(value);
+    const unchanged =
+      isPlainObject(options.storedProps) &&
+      propertyKey in options.storedProps &&
+      sameStoredValue(value, options.storedProps[propertyKey]);
+    const valueSchema =
+      unchanged && fieldDefinition.buildStoredValueSchema !== undefined
+        ? fieldDefinition.buildStoredValueSchema(fieldOptions)
+        : fieldDefinition.buildValueSchema(fieldOptions);
+    const result = valueSchema.safeParse(value);
     if (!result.success) {
       issues.push({ propertyKey, code: 'INVALID' });
       continue;

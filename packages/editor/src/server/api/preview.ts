@@ -67,6 +67,9 @@ export async function previewPage(
     blockType: node.blockType,
     props: body.props ?? stored,
     layout: body.layout === undefined ? node.layout : body.layout,
+    // The row as stored, so a document the theme no longer allows stays
+    // previewable while another property changes.
+    storedProps: node.props,
   });
   if (!checked.ok) return { ok: false, issues: checked.issues };
 

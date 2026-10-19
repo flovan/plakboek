@@ -873,6 +873,7 @@ export async function updateBlockInTransaction(
     'props' in input
       ? validateBlockProps(definition, input.props, {
           allowMissingRequired: true,
+          storedProps: current.props,
         })
       : undefined;
   const validatedLayout =
