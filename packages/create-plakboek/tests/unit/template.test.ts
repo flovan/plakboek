@@ -947,6 +947,7 @@ describe('starter README', () => {
     for (const title of [
       'Getting started',
       'Adding a block',
+      'Text and buttons',
       'Editing the header, footer and menus',
       'Edit mode',
       'Live reload in development',
@@ -977,7 +978,26 @@ describe('starter README', () => {
       '@plakboek/render/server',
       'blocks/heading.tsx',
       'app/site/header.tsx',
+      'text-theme.tsx',
       'DEPLOY.md',
+    ]) {
+      expect(text).toContain(needle);
+    }
+  });
+
+  it('documents the text theme, static tokens, narrowing and inline styles', async () => {
+    const text = await read('README.md');
+    expect(text.match(/^## Text and buttons$/gm)).toHaveLength(1);
+    for (const needle of [
+      '`defineConfig({ textTheme })`',
+      '`@theme static`',
+      '`renderers`',
+      "narrow: { marks: ['bold', 'italic', 'link'] }",
+      '{...edit.field(',
+      '`blocks/text.tsx`',
+      '`blocks/button.tsx`',
+      'allowCustomValues: false',
+      '`style-src`',
     ]) {
       expect(text).toContain(needle);
     }

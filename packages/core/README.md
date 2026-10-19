@@ -286,6 +286,17 @@ const Quote: BlockComponent<{ text: string }> = ({ props, edit, layout }) => (
 );
 ```
 
+**Text in blocks.** A `rich_text` property holds formatted text and follows
+the global text theme (see "The text theme" above). Mark the element that shows
+it with `{...edit.field('body')}` and render the value with
+`<RichText value={props.body} />` from `@plakboek/render`, which adds no wrapper
+of its own, so the editor edits it in place. A `short_text` property is marked
+the same way and shows a plain string. A property can narrow the theme with
+`options: { narrow: { marks: ['bold', 'italic', 'link'] } }` and never widen
+it. A button is a `link` property with `options: { labelProperty, variantProperty }`
+naming its sibling label and variant properties, rendered with `CtaButton`. The
+`@plakboek/render` README's "Rich text" section covers the renderers.
+
 **Declare what fills and what starts inside.** `layout: { fill: true }` marks a
 block that can stretch to its column's full height; it applies its own style
 when `layout.fill` is true. `starterChildren` is the content an editor gets

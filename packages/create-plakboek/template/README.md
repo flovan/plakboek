@@ -26,6 +26,7 @@ Either way the installation gets a published home page from `seed.ts`. The seed 
 - `blocks/` holds one file per block.
 - `app/site/` holds the header, footer, root template and error pages around every CMS page.
 - `app/app.css` holds the theme tokens.
+- `text-theme.tsx` holds the text theme: what an editor may do in a text field and how that text looks.
 - `app/routes.ts` and `app/root.tsx` belong to your own routes.
 - `public/` is served as it is, for example `robots.txt`.
 
@@ -34,16 +35,28 @@ Either way the installation gets a published home page from `seed.ts`. The seed 
 A block is one file in `blocks/` that exports one `defineBlock(...)` definition, plus one entry in the `blocks` list in `plakboek.config.ts`. Copy `blocks/heading.tsx`, change the key, the properties and the component, then add it to the list:
 
 ```ts
-blocks: [section, heading, myBlock],
+blocks: [section, heading, text, button, myBlock],
 ```
 
 The component is a plain function component. Do not wrap it in `memo` or `forwardRef`; the visitor renderer refuses wrapped components. Spread `{...edit}` on the component's root element, because that is what the page editor outlines, selects and drills into, and a block without it cannot be reached on the page. Spread `{...edit.field('text')}` on the element that shows a property, as `blocks/heading.tsx` does. Neither adds anything to a visitor page.
+
+## Text and buttons
+
+Editors write formatted text on the page itself, in the `body` of the Text block. One text theme governs every text field of the site. It lives in `text-theme.tsx`, which `plakboek.config.ts` passes to `defineConfig({ textTheme })` and which the Vite plugin finds by its default name, `/text-theme.{ts,tsx}`, so the server and the page editor read the same file. Keep its imports to `react` and `@plakboek/render`, because the file also loads in the editor.
+
+- The palettes name tokens of `app/app.css`: colours `text`, `text-muted` and `accent`, sizes `sm`, `xl` and `display` (the `--text-3xl` variable; a token starts with a letter, so the 28px size cannot be named `3xl`). The editor shows the labels, never the token names. To offer a new colour, add its token to `app/app.css` and an entry to the palette.
+- The token block in `app/app.css` stays `@theme static`. Text stores a colour or size as a token name and renders `var(--color-accent)` style references. With a plain `@theme` block, Tailwind leaves out every variable no rule uses, and a stored token would silently resolve to nothing on a page that has no matching utility.
+- Each node and mark has a renderer, and `text-theme.tsx` overrides the ones that carry the starter's look as Tailwind classes. Override one entry in `renderers` and every other entry keeps its default. A renderer shows its `children` inside exactly one element. The page, the editor and the Button block all render through the same map.
+- A text property can narrow the theme, never widen it: `options: { narrow: { marks: ['bold', 'italic', 'link'] } }` keeps only those marks on that field. A `narrow` that names something the theme lacks stops the site from starting.
+- Any block can make a `rich_text` or `short_text` property editable on the page with `{...edit.field('name')}` on the element that shows it. `blocks/text.tsx` does this and renders the value with `<RichText value={props.body} />`, with no wrapper of its own.
+- `blocks/button.tsx` is a standalone button: a label, a link and a style taken from the theme's call-to-action variants. It renders through the same `cta` renderer as a button typed into text, so the two look identical.
+- The Heading block offers Title, Heading and Subheading (`h2` to `h4`) with the same classes as headings in text, and no `h1`. The single `h1` of a page is the site name in `app/site/header.tsx`. If you want the page title there instead, change the header.
 
 ## Editing the header, footer and menus
 
 The header, footer and root template are ordinary files:
 
-- `app/site/header.tsx` shows the site name and the `main` menu.
+- `app/site/header.tsx` shows the site name, as the page's `h1`, and the `main` menu.
 - `app/site/footer.tsx` shows the same menu and the copyright line.
 - `app/site/document.tsx` is the root template: the skip link, header, `main`, footer and the stylesheet link.
 - `app/site/errors.tsx` holds the 404 and 500 pages. They use the root template and show no error details.
@@ -112,6 +125,8 @@ import { TOOLBAR_BOOTSTRAP_CSP_HASH } from '@plakboek/render/server';
 
 const scriptSrc = `script-src 'self' '${TOOLBAR_BOOTSTRAP_CSP_HASH}'`;
 ```
+
+Text can also need inline styles. A custom colour, a custom size and a paragraph or heading alignment an editor chose render as `style` attributes, which a strict `style-src` refuses. Colours and sizes picked from the palette render as CSS variable references, which are inline styles too. A host with a strict `style-src` sets `allowCustomValues: false` in `text-theme.tsx` and overrides the `textColor`, `textSize`, `paragraph` and `heading` renderers to emit classes instead, for example one class per palette token and per alignment.
 
 ## Deployment
 
