@@ -53,6 +53,9 @@ export type {
   RenderedFragments,
 } from './render-fragment.js';
 
+// text-links
+export { collectPageLinkIds } from './text-links.js';
+
 // path
 export { normalizeVisitorPath } from './path.js';
 export type { VisitorPathResult } from './path.js';

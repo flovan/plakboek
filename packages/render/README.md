@@ -407,6 +407,15 @@ resolvePage, hooks })` with `TextEnvironmentProvider`, once per render.
   page is gone, or whose address the shared href policy refuses, renders as
   plain text. Without a provider every field renders with the default theme in
   visitor mode.
+- **On a visitor page.** `createVisitorHandler` takes the installation's
+  `textTheme` and builds the environment itself: each block's markup renders
+  inside the provider (a block is rendered by its own static-markup call, so a
+  provider outside the recursion would never reach it). Every page id held by a
+  `rich_text` value, a call to action, a `link` field or a repeater sub-field is
+  found by `collectPageLinkIds` and resolved in one batch before the
+  synchronous render, and only when there is one, so a page with no page links
+  issues no extra statement. A page that is not live resolves to nothing: its
+  link renders as plain text. The resolved path is what the cached HTML holds.
 - **Tokens render as variables.** A colour or size token renders as
   `var(--color-<token>)` or `var(--text-<token>)`, so changing the theme
   re-colours stored text. A Tailwind v4 host declares its tokens with
@@ -528,6 +537,7 @@ updating them.
 | `createLiveEdit`             | function | One block's live edit proxy: the `data-pk-*` identity attributes         |
 | `renderPageTree`             | function | Renders a live working tree for the editor, in `live` or `plain` mode    |
 | `renderBlockFragments`       | function | Renders chosen blocks of a live tree, subtree included, as frame markup  |
+| `collectPageLinkIds`         | function | Lists the page ids a block forest links to, by property field type       |
 | `normalizeVisitorPath`       | function | Canonicalises a request path exactly like the visitor handler            |
 | `PageHeadInput`              | type     | Input to `buildPageHead`                                                 |
 | `PageSeoInput`               | type     | The stored SEO set as a structural type                                  |

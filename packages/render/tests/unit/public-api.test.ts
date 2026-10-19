@@ -125,6 +125,8 @@ const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   renderPageTree: 'function',
   // render-fragment
   renderBlockFragments: 'function',
+  // text-links
+  collectPageLinkIds: 'function',
   // path
   normalizeVisitorPath: 'function',
   // handler
