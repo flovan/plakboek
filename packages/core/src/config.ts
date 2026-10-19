@@ -6,11 +6,18 @@
  * the config is evaluated, so a bad config fails the process at start.
  *
  * Evaluation order: this module's own collect-then-throw checks (site name,
- * menus, module names, seed shape) raise one `PlakboekConfigError` before any
- * engine call; then the engines run in turn (`defineContentConfig`, host field
- * types and widgets, `defineBlocks`, `definePagesConfig`, `defineRoles`) and
- * each engine's own error class propagates unchanged; finally the seed is
- * checked against the registered blocks.
+ * menus, module names, text theme, seed shape) raise one
+ * `PlakboekConfigError` before any engine call; then the text theme is
+ * registered with the content engine, so every `rich_text` validation and the
+ * editor catalogue read the same theme, and the engines run in turn
+ * (`defineContentConfig`, the CMS `link` field type, host field types and
+ * widgets, `defineBlocks`, `definePagesConfig`, `defineRoles`) and each
+ * engine's own error class propagates unchanged; finally the seed is checked
+ * against the registered blocks.
+ *
+ * The CMS `link` field type is registered ahead of the host's field types, so
+ * a host field type with the key `link` replaces it (and is reported through
+ * the shadowed-field-type hook like any other replacement).
  *
  * Dev reload: every evaluation replaces the process-wide block registry (the
  * last call wins) and returns its own frozen object. That is why the runtime
@@ -23,8 +30,10 @@
  */
 import {
   defineContentConfig,
+  LINK_FIELD_TYPE,
   registerHostFieldType,
   registerHostWidget,
+  registerTextTheme,
 } from '@plakboek/content';
 import { defaultRoles, defineRoles } from '@plakboek/permissions';
 import {
@@ -32,6 +41,11 @@ import {
   defineBlocks,
   definePagesConfig,
 } from '@plakboek/pages';
+import {
+  defineTextTheme,
+  isTextThemeDefinition,
+  type TextThemeDefinition,
+} from '@plakboek/render';
 import { CORE_COLUMN_BLOCK, CORE_COLUMN_KEY } from './column-block.js';
 import { validateMenus } from './menus.js';
 import { MODULE_NAME_PATTERN } from './modules.js';
@@ -49,6 +63,8 @@ export type PlakboekConfigIssueCode =
   | 'INVALID_MENU'
   | 'INVALID_MENU_ITEM'
   | 'INVALID_MODULE'
+  | 'INVALID_TEXT_THEME'
+  | 'TEXT_THEME_NARROWING_WIDENS'
   | 'DUPLICATE_MODULE'
   | 'RESERVED_BLOCK_KEY'
   | 'INVALID_SEED'
@@ -333,11 +349,23 @@ function fromModules<T>(
   return modules.flatMap((module) => pick(module) ?? []);
 }
 
+function checkTextTheme(
+  textTheme: unknown,
+  issues: PlakboekConfigIssue[],
+): void {
+  if (textTheme === undefined || isTextThemeDefinition(textTheme)) return;
+  issues.push({
+    code: 'INVALID_TEXT_THEME',
+    message: 'textTheme must be the result of defineTextTheme(...)',
+  });
+}
+
 export function defineConfig(input: PlakboekConfigInput): PlakboekConfig {
   const issues: PlakboekConfigIssue[] = [];
   checkSiteName(input.siteName, issues);
   issues.push(...validateMenus(input.menus));
   checkModules(input.modules, issues);
+  checkTextTheme(input.textTheme, issues);
   checkReservedBlocks('blocks', input.blocks, issues);
   if (Array.isArray(input.modules)) {
     input.modules.forEach((entry: unknown, index) => {
@@ -357,6 +385,7 @@ export function defineConfig(input: PlakboekConfigInput): PlakboekConfig {
 
   if (issues.length > 0) throw new PlakboekConfigError(issues);
 
+  const textTheme: TextThemeDefinition = input.textTheme ?? defineTextTheme();
   const modules = input.modules ?? [];
   const blocks: HostBlockDefinition[] = [
     ...fromModules(modules, (m) => m.blocks),
@@ -381,11 +410,17 @@ export function defineConfig(input: PlakboekConfigInput): PlakboekConfig {
     timezone: input.timezone,
   });
 
+  // The theme is registered before any block is defined: `rich_text`
+  // validation reads it at write time, and the editor catalogue reads the same
+  // registry.
+  registerTextTheme(textTheme.theme);
+
   // Host field types and widgets are registered here, ahead of `defineBlocks`:
   // a block property may name a host field type, and `defineBlocks` resolves
   // it at declaration time. `definePagesConfig` is not handed them again, so
-  // the shadowed-field-type hook fires once.
-  registerHostFieldType(fieldTypes, {
+  // the shadowed-field-type hook fires once. The CMS `link` field type leads
+  // the list so a host type with the same key replaces it.
+  registerHostFieldType([LINK_FIELD_TYPE, ...fieldTypes], {
     onShadowedFieldType: input.hooks?.onShadowedFieldType,
   });
   registerHostWidget(widgets);
@@ -419,6 +454,7 @@ export function defineConfig(input: PlakboekConfigInput): PlakboekConfig {
     pages,
     roles,
     menus: freezeMenus(input.menus),
+    textTheme,
     modules: Object.freeze(modules.map((module) => module.name)),
     seed: seedInput,
     homeSlug: DEFAULT_HOME_SLUG,

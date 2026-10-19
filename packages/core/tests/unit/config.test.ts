@@ -1,4 +1,9 @@
-import { ContentConfigError, getFieldTypeDefinition } from '@plakboek/content';
+import {
+  ContentConfigError,
+  getFieldTypeDefinition,
+  getTextTheme,
+} from '@plakboek/content';
+import { defineTextTheme } from '@plakboek/render';
 import {
   BlockConfigError,
   getBlockDefinition,
@@ -517,5 +522,55 @@ describe('defineConfig: re-evaluation (dev reload)', () => {
     expect(two.pages.blocks.map((b) => b.key)).toEqual(
       one.pages.blocks.map((b) => b.key),
     );
+  });
+});
+
+describe('defineConfig: text theme', () => {
+  it('applies the lean default theme without a textTheme', () => {
+    const config = defineConfig(base);
+
+    expect(config.textTheme.theme.headingLevels).toEqual([2, 3, 4]);
+    expect(getTextTheme()).toBe(config.textTheme.theme);
+  });
+
+  it('registers the host theme for every rich_text validation', () => {
+    const config = defineConfig({
+      ...base,
+      textTheme: defineTextTheme({
+        colors: [{ label: 'Accent', token: 'accent' }],
+      }),
+    });
+
+    expect(getTextTheme().colors).toHaveLength(1);
+    expect(config.textTheme.theme.colors).toHaveLength(1);
+  });
+
+  it('refuses a textTheme that is not a defineTextTheme result', () => {
+    const error = catchError(() =>
+      defineConfig({
+        ...base,
+        textTheme: { headingLevels: [2] } as never,
+      }),
+    );
+
+    expect(error).toBeInstanceOf(PlakboekConfigError);
+    expect(issueCodes(error)).toEqual(['INVALID_TEXT_THEME']);
+  });
+
+  it('registers the CMS link field type so a block can declare a link property', () => {
+    const cta = defineBlock({
+      key: 'cta',
+      editor: { label: 'Call to action' },
+      schemaVersion: 1,
+      properties: {
+        target: { fieldType: 'link', label: 'Target' },
+      },
+      component: Render,
+    });
+
+    expect(() =>
+      defineConfig({ ...base, blocks: [section, cta] }),
+    ).not.toThrow();
+    expect(getFieldTypeDefinition('link').fieldType).toBe('link');
   });
 });
