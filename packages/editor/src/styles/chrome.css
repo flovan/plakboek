@@ -90,6 +90,7 @@
   --color-frame-border: var(--pk-frame-border);
   --color-overlay-selected-fill: var(--pk-overlay-selected-fill);
   --color-overlay-drag-source: var(--pk-overlay-drag-source);
+  --color-overlay-custom-style: var(--pk-overlay-custom-style);
   --color-attention: var(--pk-attention);
   --color-attention-marker: var(--pk-attention-marker);
   --color-destructive-contrast: var(--pk-destructive-contrast);
@@ -138,6 +139,7 @@
    */
   --pk-overlay-selected-fill: rgba(79, 70, 229, 0.08);
   --pk-overlay-drag-source: rgba(24, 24, 27, 0.16);
+  --pk-overlay-custom-style: #0f766e;
   --pk-attention: #b45309;
   --pk-attention-marker: #b45309;
   --pk-destructive-contrast: #ffffff;
@@ -160,6 +162,7 @@
     --pk-input-fill: #18181b;
     --pk-attention: #fbbf24;
     --pk-destructive-contrast: #09090b;
+    --pk-overlay-custom-style: #0f766e;
   }
 }
 
@@ -185,6 +188,7 @@
   --pk-input-fill: #ffffff;
   --pk-attention: #b45309;
   --pk-destructive-contrast: #ffffff;
+  --pk-overlay-custom-style: #0f766e;
 }
 
 :host([data-theme='dark']) {
@@ -204,6 +208,7 @@
   --pk-input-fill: #18181b;
   --pk-attention: #fbbf24;
   --pk-destructive-contrast: #09090b;
+  --pk-overlay-custom-style: #0f766e;
 }
 
 /*
@@ -220,6 +225,7 @@
     --pk-frame-border: CanvasText;
     --pk-overlay-selected-fill: transparent;
     --pk-attention-marker: Highlight;
+    --pk-overlay-custom-style: Highlight;
   }
 }
 

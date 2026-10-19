@@ -2,6 +2,25 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
+  BoldIcon,
+  ItalicIcon,
+  UnderlineIcon,
+  StrikethroughIcon,
+  ListBulletIcon,
+  ListNumberedIcon,
+  LinkIcon,
+  QuoteIcon,
+  DividerIcon,
+  CtaIcon,
+  ChevronDownIcon,
+  PaletteIcon,
+  AlignLeftIcon,
+  AlignCenterIcon,
+  AlignRightIcon,
+  ResetIcon,
+  ExternalIcon,
+  PageIcon,
+  MoreIcon,
   AlertIcon,
   ArrowDownIcon,
   ArrowLeftIcon,
@@ -62,6 +81,28 @@ const EDITING_ICONS = {
   ChevronRightIcon,
 } as const;
 
+const TEXT_ICONS = {
+  BoldIcon,
+  ItalicIcon,
+  UnderlineIcon,
+  StrikethroughIcon,
+  ListBulletIcon,
+  ListNumberedIcon,
+  LinkIcon,
+  QuoteIcon,
+  DividerIcon,
+  CtaIcon,
+  ChevronDownIcon,
+  PaletteIcon,
+  AlignLeftIcon,
+  AlignCenterIcon,
+  AlignRightIcon,
+  ResetIcon,
+  ExternalIcon,
+  PageIcon,
+  MoreIcon,
+} as const;
+
 describe('icons', () => {
   it('draws six distinct icons in currentColor, hidden from assistive technology', () => {
     const markups = Object.values(ICONS).map((Icon) =>
@@ -103,6 +144,19 @@ describe('icons', () => {
       expect(markup).toContain('stroke="currentColor"');
       expect(markup).toContain('aria-hidden="true"');
       expect(markup).toContain('focusable="false"');
+    }
+  });
+
+  it('adds the nineteen text icons, each distinct, 16px, in currentColor and hidden from assistive technology', () => {
+    const markups = Object.values(TEXT_ICONS).map((Icon) =>
+      renderToStaticMarkup(createElement(Icon)),
+    );
+    expect(markups).toHaveLength(19);
+    expect(new Set(markups).size).toBe(19);
+    for (const markup of markups) {
+      expect(markup).toContain('width="16" height="16"');
+      expect(markup).toContain('stroke="currentColor"');
+      expect(markup).toContain('aria-hidden="true"');
     }
   });
 });

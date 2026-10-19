@@ -1,7 +1,8 @@
 import type { ReactElement, ReactNode } from 'react';
 
 /**
- * The inline icons chrome uses: six for the shell and nineteen for editing.
+ * The inline icons chrome uses: six for the shell, twenty for structural
+ * editing and nineteen for text editing.
  * Each draws in `currentColor`, is hidden
  * from assistive technology (the control that holds it carries the name), and
  * comes in the two sizes the design allows: 16px inside buttons, 20px
@@ -347,6 +348,244 @@ export function SearchIcon({ size = 16, className }: IconProps): ReactElement {
     <Icon size={size} className={className}>
       <circle cx="11" cy="11" r="6" />
       <path d="M20 20l-4.5-4.5" />
+    </Icon>
+  );
+}
+
+/** Bold: a heavy letter B. */
+export function BoldIcon({ size = 16, className }: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M7 5h6a3.5 3.5 0 0 1 0 7H7z" />
+      <path d="M7 12h7a3.5 3.5 0 0 1 0 7H7z" />
+    </Icon>
+  );
+}
+
+/** Italic: a slanted letter between two bars. */
+export function ItalicIcon({ size = 16, className }: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M10 5h8" />
+      <path d="M6 19h8" />
+      <path d="M15 5l-6 14" />
+    </Icon>
+  );
+}
+
+/** Underline: a letter U above a line. */
+export function UnderlineIcon({
+  size = 16,
+  className,
+}: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M7 4v7a5 5 0 0 0 10 0V4" />
+      <path d="M5 21h14" />
+    </Icon>
+  );
+}
+
+/** Strikethrough: a line through a letter. */
+export function StrikethroughIcon({
+  size = 16,
+  className,
+}: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M4 12h16" />
+      <path d="M16.5 7.5C16 6 14.5 5 12 5c-2.5 0-4.5 1.2-4.5 3.2 0 1.4 1 2.3 2.5 2.8" />
+      <path d="M14 13c1.6.5 2.5 1.4 2.5 2.8C16.5 17.8 14.5 19 12 19c-2.5 0-4.2-1.1-4.8-3" />
+    </Icon>
+  );
+}
+
+/** Bulleted list: dots beside lines. */
+export function ListBulletIcon({
+  size = 16,
+  className,
+}: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M9 6h11" />
+      <path d="M9 12h11" />
+      <path d="M9 18h11" />
+      <path d="M4 6h.01" />
+      <path d="M4 12h.01" />
+      <path d="M4 18h.01" />
+    </Icon>
+  );
+}
+
+/** Numbered list: ordinal marks beside lines. */
+export function ListNumberedIcon({
+  size = 16,
+  className,
+}: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M11 6h9" />
+      <path d="M11 12h9" />
+      <path d="M11 18h9" />
+      <path d="M4 5l1.5-1v4" />
+      <path d="M3.5 13.5a1.5 1.5 0 1 1 2.6 1L3.5 17.5H6.5" />
+    </Icon>
+  );
+}
+
+/** Link: two joined chain links. */
+export function LinkIcon({ size = 16, className }: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+      <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+    </Icon>
+  );
+}
+
+/** Quote: an opening quotation mark. */
+export function QuoteIcon({ size = 16, className }: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M5 17v-4a5 5 0 0 1 5-5" />
+      <path d="M5 13h4v4H5z" />
+      <path d="M14 17v-4a5 5 0 0 1 5-5" />
+      <path d="M14 13h4v4h-4z" />
+    </Icon>
+  );
+}
+
+/** Divider: a horizontal rule between two blocks. */
+export function DividerIcon({ size = 16, className }: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M4 12h16" />
+      <path d="M8 6h8" />
+      <path d="M8 18h8" />
+    </Icon>
+  );
+}
+
+/** Button: a rounded button outline holding a line of text. */
+export function CtaIcon({ size = 16, className }: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <rect x="3" y="7" width="18" height="10" rx="5" />
+      <path d="M9 12h6" />
+    </Icon>
+  );
+}
+
+/** Chevron down: opens a menu. */
+export function ChevronDownIcon({
+  size = 16,
+  className,
+}: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M6 9l6 6 6-6" />
+    </Icon>
+  );
+}
+
+/** Palette: a painter's palette with colour dabs. */
+export function PaletteIcon({ size = 16, className }: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2 0-1.5-1-1.5-1-3 0-1 .8-2 2-2h2.5A3.5 3.5 0 0 0 21 10.5 8 8 0 0 0 12 3z" />
+      <path d="M7.5 11h.01" />
+      <path d="M10 7.5h.01" />
+      <path d="M14.5 7.5h.01" />
+    </Icon>
+  );
+}
+
+/** Align left: lines flush to the left edge. */
+export function AlignLeftIcon({
+  size = 16,
+  className,
+}: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M4 6h16" />
+      <path d="M4 10h10" />
+      <path d="M4 14h16" />
+      <path d="M4 18h10" />
+    </Icon>
+  );
+}
+
+/** Align center: lines centred on the middle. */
+export function AlignCenterIcon({
+  size = 16,
+  className,
+}: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M4 6h16" />
+      <path d="M7 10h10" />
+      <path d="M4 14h16" />
+      <path d="M7 18h10" />
+    </Icon>
+  );
+}
+
+/** Align right: lines flush to the right edge. */
+export function AlignRightIcon({
+  size = 16,
+  className,
+}: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M4 6h16" />
+      <path d="M10 10h10" />
+      <path d="M4 14h16" />
+      <path d="M10 18h10" />
+    </Icon>
+  );
+}
+
+/** Reset: a counter-clockwise arrow. */
+export function ResetIcon({ size = 16, className }: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M4 5v5h5" />
+      <path d="M4.6 14a8 8 0 1 0 1.8-8.4L4 10" />
+    </Icon>
+  );
+}
+
+/** External: an arrow leaving a box, for links that open elsewhere. */
+export function ExternalIcon({
+  size = 16,
+  className,
+}: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M14 4h6v6" />
+      <path d="M20 4l-9 9" />
+      <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+    </Icon>
+  );
+}
+
+/** Page: a sheet with a folded corner. */
+export function PageIcon({ size = 16, className }: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M6 3h8l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+      <path d="M14 3v5h5" />
+    </Icon>
+  );
+}
+
+/** More: three dots. */
+export function MoreIcon({ size = 16, className }: IconProps): ReactElement {
+  return (
+    <Icon size={size} className={className}>
+      <path d="M5 12h.01" />
+      <path d="M12 12h.01" />
+      <path d="M19 12h.01" />
     </Icon>
   );
 }
