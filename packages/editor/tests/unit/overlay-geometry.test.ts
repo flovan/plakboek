@@ -2,42 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   chipPlacement,
   isMeasurable,
-  outlineRect,
   sameBox,
   siblingAxis,
   toolbarPlacement,
 } from '../../src/client/overlay/geometry.js';
 import { chipText } from '../../src/client/overlay/overlay-layer.js';
 
-// A frame whose content box starts at (304, 25) in the shell and is 1070 by
-// 850 pixels.
-const FRAME = { left: 304, top: 25, width: 1070, height: 850 };
-
-describe('outlineRect', () => {
-  it('moves the element box by where the frame content starts', () => {
-    expect(
-      outlineRect(
-        { left: 37, top: 120.5, width: 400, height: 28 },
-        { x: 304, y: 25 },
-      ),
-    ).toEqual({ left: 341, top: 145.5, width: 400, height: 28 });
-  });
-
-  it('keeps the size and leaves the box alone for a zero origin', () => {
-    const box = { left: 5, top: 6, width: 7, height: 8 };
-    expect(outlineRect(box, { x: 0, y: 0 })).toEqual(box);
-  });
-
-  it('follows a frame that sits somewhere else, such as the full-width layout', () => {
-    const box = { left: 10, top: 10, width: 50, height: 20 };
-    expect(outlineRect(box, { x: 56, y: 0 })).toEqual({
-      left: 66,
-      top: 10,
-      width: 50,
-      height: 20,
-    });
-  });
-});
+// A 1070 by 850 frame scrolled down by 600: the part of the document it shows
+// starts at (0, 600). Every box below is in the document's coordinates.
+const VISIBLE = { left: 0, top: 600, width: 1070, height: 850 };
 
 describe('isMeasurable', () => {
   it('accepts a box with a size', () => {
@@ -56,80 +29,79 @@ describe('isMeasurable', () => {
 
 describe('chipPlacement', () => {
   it('rests the chip on the outline top when there are 20px of room above', () => {
-    const outline = { left: 400, top: 45, width: 200, height: 40 };
-    expect(chipPlacement({ outline, frame: FRAME })).toEqual({
+    const outline = { left: 96, top: 620, width: 200, height: 40 };
+    expect(chipPlacement({ outline, visible: VISIBLE })).toEqual({
       mode: 'above',
-      left: 400,
-      top: 25,
+      left: 96,
+      top: 600,
     });
   });
 
   it('keeps the chip above for a 21px gap and moves it inside for a 19px gap', () => {
     const above = chipPlacement({
-      outline: { left: 400, top: 46, width: 200, height: 40 },
-      frame: FRAME,
+      outline: { left: 96, top: 621, width: 200, height: 40 },
+      visible: VISIBLE,
     });
     expect(above.mode).toBe('above');
     const inside = chipPlacement({
-      outline: { left: 400, top: 44, width: 200, height: 40 },
-      frame: FRAME,
+      outline: { left: 96, top: 619, width: 200, height: 40 },
+      visible: VISIBLE,
     });
-    expect(inside).toEqual({ mode: 'inside', left: 404, top: 48 });
+    expect(inside).toEqual({ mode: 'inside', left: 100, top: 623 });
   });
 
-  it('puts the chip 4px into the top-left corner when the outline is at the frame top', () => {
-    const outline = { left: 341, top: 25, width: 300, height: 60 };
-    expect(chipPlacement({ outline, frame: FRAME })).toEqual({
+  it('puts the chip 4px into the top-left corner when the outline is at the visible top', () => {
+    const outline = { left: 37, top: 600, width: 300, height: 60 };
+    expect(chipPlacement({ outline, visible: VISIBLE })).toEqual({
       mode: 'inside',
-      left: 345,
-      top: 29,
+      left: 41,
+      top: 604,
     });
   });
 
-  it('pins the chip 4px below the frame top once the element top has scrolled out', () => {
-    const outline = { left: 341, top: -200, width: 300, height: 400 };
-    expect(chipPlacement({ outline, frame: FRAME })).toEqual({
-      mode: 'pinned',
-      left: 345,
-      top: 29,
+  it('makes the chip sticky, 4px below the visible top, once the element top has scrolled out', () => {
+    const outline = { left: 37, top: 375, width: 300, height: 400 };
+    expect(chipPlacement({ outline, visible: VISIBLE })).toEqual({
+      mode: 'sticky',
+      left: 41,
+      top: 604,
     });
   });
 
-  it('pins when only a sliver of the element is still visible', () => {
-    const outline = { left: 341, top: 0, width: 300, height: 26 };
-    expect(chipPlacement({ outline, frame: FRAME }).mode).toBe('pinned');
+  it('is sticky when only a sliver of the element is still visible', () => {
+    const outline = { left: 37, top: 575, width: 300, height: 26 };
+    expect(chipPlacement({ outline, visible: VISIBLE }).mode).toBe('sticky');
   });
 
-  it('draws no chip for an element that is wholly above the frame', () => {
-    const outline = { left: 341, top: -200, width: 300, height: 100 };
-    expect(chipPlacement({ outline, frame: FRAME }).mode).toBe('hidden');
-    const touching = { left: 341, top: -75, width: 300, height: 100 };
-    expect(chipPlacement({ outline: touching, frame: FRAME }).mode).toBe(
+  it('draws no chip for an element that is wholly above the visible part', () => {
+    const outline = { left: 37, top: 375, width: 300, height: 100 };
+    expect(chipPlacement({ outline, visible: VISIBLE }).mode).toBe('hidden');
+    const touching = { left: 37, top: 500, width: 300, height: 100 };
+    expect(chipPlacement({ outline: touching, visible: VISIBLE }).mode).toBe(
       'hidden',
     );
   });
 
-  it('never starts the chip left of the frame', () => {
-    const wide = { left: 100, top: 300, width: 500, height: 40 };
-    expect(chipPlacement({ outline: wide, frame: FRAME })).toMatchObject({
+  it('never starts the chip left of the visible part', () => {
+    const wide = { left: -204, top: 875, width: 500, height: 40 };
+    expect(chipPlacement({ outline: wide, visible: VISIBLE })).toMatchObject({
       mode: 'above',
-      left: 304,
+      left: 0,
     });
-    const scrolled = { left: 100, top: 0, width: 500, height: 400 };
-    expect(chipPlacement({ outline: scrolled, frame: FRAME })).toMatchObject({
-      mode: 'pinned',
-      left: 308,
-    });
+    const scrolled = { left: -204, top: 575, width: 500, height: 400 };
+    expect(
+      chipPlacement({ outline: scrolled, visible: VISIBLE }),
+    ).toMatchObject({ mode: 'sticky', left: 4 });
   });
 
   it('uses the chip height it is given', () => {
-    const outline = { left: 400, top: 60, width: 200, height: 40 };
-    expect(chipPlacement({ outline, frame: FRAME, chipHeight: 40 }).mode).toBe(
-      'inside',
-    );
-    expect(chipPlacement({ outline, frame: FRAME, chipHeight: 20 }).mode).toBe(
-      'above',
-    );
+    const outline = { left: 96, top: 635, width: 200, height: 40 };
+    expect(
+      chipPlacement({ outline, visible: VISIBLE, chipHeight: 40 }).mode,
+    ).toBe('inside');
+    expect(
+      chipPlacement({ outline, visible: VISIBLE, chipHeight: 20 }).mode,
+    ).toBe('above');
   });
 });
 
@@ -161,50 +133,50 @@ describe('toolbarPlacement', () => {
   it('sits 8px above the item with its left edge aligned', () => {
     expect(
       toolbarPlacement({
-        item: { left: 400, top: 300, width: 300, height: 100 },
-        frame: FRAME,
+        item: { left: 96, top: 875, width: 300, height: 100 },
+        visible: VISIBLE,
         toolbar,
       }),
-    ).toEqual({ mode: 'above', left: 400, top: 252 });
+    ).toEqual({ mode: 'above', left: 96, top: 827 });
   });
 
-  it('flips below when less than 48px of frame room is above', () => {
+  it('flips below when less than 48px of the visible part is above', () => {
     expect(
       toolbarPlacement({
-        item: { left: 400, top: 60, width: 300, height: 100 },
-        frame: FRAME,
+        item: { left: 96, top: 635, width: 300, height: 100 },
+        visible: VISIBLE,
         toolbar,
       }),
-    ).toEqual({ mode: 'below', left: 400, top: 168 });
+    ).toEqual({ mode: 'below', left: 96, top: 743 });
   });
 
   it('pins inside the visible top-left corner when neither side has room', () => {
-    // taller than the frame and scrolled so its top is above the frame
+    // taller than the frame and scrolled so its top is above the visible part
     expect(
       toolbarPlacement({
-        item: { left: 400, top: -200, width: 300, height: 2000 },
-        frame: FRAME,
+        item: { left: 96, top: 375, width: 300, height: 2000 },
+        visible: VISIBLE,
         toolbar,
       }),
-    ).toEqual({ mode: 'pinned', left: 408, top: 33 });
+    ).toEqual({ mode: 'pinned', left: 104, top: 608 });
   });
 
-  it('keeps the toolbar 8px inside the frame at both edges', () => {
+  it('keeps the toolbar 8px inside the visible part at both edges', () => {
     const wide = { width: 400, height: 40 };
     expect(
       toolbarPlacement({
-        item: { left: 100, top: 300, width: 50, height: 50 },
-        frame: FRAME,
+        item: { left: -204, top: 875, width: 50, height: 50 },
+        visible: VISIBLE,
         toolbar: wide,
       }).left,
-    ).toBe(312);
+    ).toBe(8);
     expect(
       toolbarPlacement({
-        item: { left: 1300, top: 300, width: 50, height: 50 },
-        frame: FRAME,
+        item: { left: 996, top: 875, width: 50, height: 50 },
+        visible: VISIBLE,
         toolbar: wide,
       }).left,
-    ).toBe(304 + 1070 - 8 - 400);
+    ).toBe(1070 - 8 - 400);
   });
 });
 

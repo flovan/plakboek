@@ -1,12 +1,12 @@
 /**
- * The geometry of the hover overlay, as pure functions.
+ * The geometry of the overlay, as pure functions.
  *
- * Two coordinate spaces meet here. The framed site measures its elements
- * against its own viewport (`getBoundingClientRect` inside the frame), and the
- * overlay is drawn in the shell's document. The two differ by where the
- * frame's content box sits in the shell, so every element rectangle is moved
- * by that origin on its way to the overlay. Nothing here touches a DOM, which
- * keeps every placement rule testable without a browser.
+ * Everything is in the framed document's own coordinates: the overlay is drawn
+ * inside that document, so a box measured there (moved by the scroll offset,
+ * see `documentBox`) is placed as it is and scrolls with the page. The part of
+ * the document the frame shows (`visible`) is only an input to the rules that
+ * pick a side. Nothing here touches a DOM, which keeps every placement rule
+ * testable without a browser.
  */
 
 /** A box in pixels. */
@@ -30,17 +30,6 @@ export const CHIP_HEIGHT = 20;
  * and how far below the frame top it is pinned. */
 export const CHIP_INSET = 4;
 
-/** The outline's box in the shell's coordinates: the element's box inside the
- * frame, moved by where the frame's content box starts in the shell. */
-export function outlineRect(elementRect: Box, frameContentOrigin: Point): Box {
-  return {
-    left: elementRect.left + frameContentOrigin.x,
-    top: elementRect.top + frameContentOrigin.y,
-    width: elementRect.width,
-    height: elementRect.height,
-  };
-}
-
 /** Whether an element can be outlined: it has a size and generates a box. An
  * element with `display: contents` reports an empty rectangle of its own and
  * its children are what is on screen, so it is skipped for them. */
@@ -51,10 +40,10 @@ export function isMeasurable(
   return display !== 'contents' && rect.width > 0 && rect.height > 0;
 }
 
-/** Where the label chip goes. `hidden` means no part of the outline is inside
- * the frame, so nothing is drawn. */
+/** Where the label chip goes. `hidden` means no part of the outline is in
+ * the visible part of the document, so nothing is drawn. */
 export type ChipPlacement = {
-  readonly mode: 'above' | 'inside' | 'pinned' | 'hidden';
+  readonly mode: 'above' | 'inside' | 'sticky' | 'hidden';
   readonly left: number;
   readonly top: number;
 };
@@ -63,35 +52,38 @@ export type ChipPlacement = {
  * Places the chip for an outline.
  *
  * - `above`: the chip's bottom edge rests on the outline's top edge, when
- *   there is room for the whole chip inside the frame above it.
+ *   there is room for the whole chip in the visible part above it.
  * - `inside`: not enough room above, so the chip sits 4px into the outline's
  *   top-left corner.
- * - `pinned`: the outline's top has scrolled out of the frame but some of it
- *   is still visible, so the chip stays 4px below the frame's top.
+ * - `sticky`: the outline's top is above the visible part but some of it is
+ *   still shown, so the chip is drawn with `position: sticky; top: 4px`
+ *   inside a wrapper over the outline and stays 4px below the visible top
+ *   while the page scrolls, with no script. `left` and `top` are where it sits
+ *   in the visible part when this is decided.
  *
- * `outline` and `frame` are in the same coordinate space, and so are the
- * returned `left` and `top`. The chip never starts left of the frame.
+ * `outline` and `visible` are in the same coordinate space, and so are the
+ * returned `left` and `top`. The chip never starts left of the visible part.
  */
 export function chipPlacement(input: {
   readonly outline: Box;
-  readonly frame: Box;
+  readonly visible: Box;
   readonly chipHeight?: number;
 }): ChipPlacement {
-  const { outline, frame } = input;
+  const { outline, visible } = input;
   const chipHeight = input.chipHeight ?? CHIP_HEIGHT;
   const outlineBottom = outline.top + outline.height;
-  const inside = Math.max(outline.left + CHIP_INSET, frame.left + CHIP_INSET);
+  const inside = Math.max(outline.left + CHIP_INSET, visible.left + CHIP_INSET);
 
-  if (outline.top < frame.top) {
-    if (outlineBottom <= frame.top) {
-      return { mode: 'hidden', left: inside, top: frame.top };
+  if (outline.top < visible.top) {
+    if (outlineBottom <= visible.top) {
+      return { mode: 'hidden', left: inside, top: visible.top };
     }
-    return { mode: 'pinned', left: inside, top: frame.top + CHIP_INSET };
+    return { mode: 'sticky', left: inside, top: visible.top + CHIP_INSET };
   }
-  if (outline.top - chipHeight >= frame.top) {
+  if (outline.top - chipHeight >= visible.top) {
     return {
       mode: 'above',
-      left: Math.max(outline.left, frame.left),
+      left: Math.max(outline.left, visible.left),
       top: outline.top - chipHeight,
     };
   }
@@ -112,13 +104,15 @@ export function sameBox(a: Box | null, b: Box | null): boolean {
 /** The floating toolbar's height (4px padding around 32px buttons). */
 export const TOOLBAR_HEIGHT = 40;
 
-/** How far the toolbar sits from the item it belongs to, and from the frame's edge. */
+/** How far the toolbar sits from the item it belongs to, and from the edge of the visible part. */
 export const TOOLBAR_GAP = 8;
 
-/** The frame room the toolbar needs above or below an item: its height and the gap. */
+/** The room the toolbar needs above or below an item: its height and the gap. */
 export const TOOLBAR_ROOM = TOOLBAR_HEIGHT + TOOLBAR_GAP;
 
-/** Where the floating toolbar goes. `pinned` means it sits inside the item. */
+/** Where the floating toolbar goes. `pinned` means it sits inside the item,
+ * drawn with `position: sticky` so it stays inside the visible top as the page
+ * scrolls. */
 export type ToolbarPlacement = {
   readonly mode: 'above' | 'below' | 'pinned';
   readonly left: number;
@@ -129,39 +123,40 @@ export type ToolbarPlacement = {
  * Places the toolbar for the selected item. All boxes share one coordinate
  * space, and so do the returned `left` and `top`.
  *
- * - `above`: 8px above the item's top edge, when at least 48px of frame room
- *   lies above the item.
- * - `below`: otherwise 8px below its bottom edge, when 48px of frame room
- *   lies below it.
+ * - `above`: 8px above the item's top edge, when at least 48px of the visible
+ *   part lies above the item.
+ * - `below`: otherwise 8px below its bottom edge, when 48px of the visible
+ *   part lies below it.
  * - `pinned`: when neither fits (an item taller than the frame), 8px inside
  *   the item's visible top-left corner.
  *
- * The toolbar's left edge follows the item's and is kept 8px inside the frame.
+ * The toolbar's left edge follows the item's and is kept 8px inside the
+ * visible part.
  */
 export function toolbarPlacement(input: {
   readonly item: Box;
-  readonly frame: Box;
+  readonly visible: Box;
   readonly toolbar: { readonly width: number; readonly height: number };
 }): ToolbarPlacement {
-  const { item, frame, toolbar } = input;
-  const frameRight = frame.left + frame.width;
-  const frameBottom = frame.top + frame.height;
+  const { item, visible, toolbar } = input;
+  const visibleRight = visible.left + visible.width;
+  const visibleBottom = visible.top + visible.height;
   const itemBottom = item.top + item.height;
 
   const clampLeft = (left: number): number =>
     Math.max(
-      frame.left + TOOLBAR_GAP,
-      Math.min(left, frameRight - TOOLBAR_GAP - toolbar.width),
+      visible.left + TOOLBAR_GAP,
+      Math.min(left, visibleRight - TOOLBAR_GAP - toolbar.width),
     );
 
-  if (item.top - frame.top >= TOOLBAR_ROOM) {
+  if (item.top - visible.top >= TOOLBAR_ROOM) {
     return {
       mode: 'above',
       left: clampLeft(item.left),
       top: item.top - TOOLBAR_GAP - toolbar.height,
     };
   }
-  if (frameBottom - itemBottom >= TOOLBAR_ROOM) {
+  if (visibleBottom - itemBottom >= TOOLBAR_ROOM) {
     return {
       mode: 'below',
       left: clampLeft(item.left),
@@ -170,8 +165,8 @@ export function toolbarPlacement(input: {
   }
   return {
     mode: 'pinned',
-    left: clampLeft(Math.max(item.left, frame.left) + TOOLBAR_GAP),
-    top: Math.max(item.top, frame.top) + TOOLBAR_GAP,
+    left: clampLeft(Math.max(item.left, visible.left) + TOOLBAR_GAP),
+    top: Math.max(item.top, visible.top) + TOOLBAR_GAP,
   };
 }
 
@@ -191,9 +186,10 @@ export function siblingAxis(rects: readonly Box[]): 'horizontal' | 'vertical' {
     : 'vertical';
 }
 
-/** Whether any part of the box lies within the frame's height. */
-export function isVisibleIn(item: Box, frame: Box): boolean {
+/** Whether any part of the box lies within the visible part's height. */
+export function isVisibleIn(item: Box, visible: Box): boolean {
   return (
-    item.top + item.height > frame.top && item.top < frame.top + frame.height
+    item.top + item.height > visible.top &&
+    item.top < visible.top + visible.height
   );
 }

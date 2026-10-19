@@ -93,14 +93,20 @@ export async function openEditor(
   await expect(page.locator(FRAME)).toHaveAttribute('tabindex', '-1');
 }
 
+/** The tag of the in-frame chrome host. */
+export const FRAME_CHROME = 'plakboek-chrome';
+
 /**
  * The scope of frame-anchored chrome: the outlines, chips, block toolbar,
- * insert points, picker, needs-input markers and empty prompts. Specs reach
- * all of it through here so that moving it (plan 09-16 points it into the
- * frame) changes this one function.
+ * insert points, picker, needs-input markers and empty prompts. It lives in
+ * the chrome host inside the framed document, which a spec reaches because
+ * `openEditor` makes that root open (see `exposeFrameChrome`). Specs reach all
+ * of it through here. What stays in the shell (the drag capture surface and
+ * label, the toast, the sidebar and the Properties sheet) is reached with
+ * `page.locator(HOST)`.
  */
 export function chrome(page: Page): Locator {
-  return page.locator(HOST);
+  return page.frameLocator(FRAME).locator(FRAME_CHROME);
 }
 
 /** A chrome element's box in the page's coordinates. */

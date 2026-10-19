@@ -2,10 +2,16 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
   type ReactElement,
 } from 'react';
+import {
+  frameElementOf,
+  frameOriginOf,
+  isNodeLike,
+} from '../../client/chrome-host/shape.js';
 import {
   toolbarPlacement,
   type Box,
@@ -44,6 +50,15 @@ import {
 } from '../icons.js';
 import { formatString, STRINGS } from '../strings.js';
 import { Tooltip } from '../tooltip.js';
+
+function boxStyle(box: Box): CSSProperties {
+  return {
+    left: box.left,
+    top: box.top,
+    width: box.width,
+    height: box.height,
+  };
+}
 
 /** The most crumbs shown; a longer path shows the first, "…", and the last two. */
 const MAX_CRUMBS = 4;
@@ -88,10 +103,10 @@ function shortcutModifier(): 'Meta' | 'Control' {
 
 export type ToolbarProps = {
   readonly store: EditorStore;
-  /** The selected item's box in the shell's coordinates. */
+  /** The selected item's box in the framed document's coordinates. */
   readonly item: Box;
-  /** The frame's content box in the shell's coordinates. */
-  readonly frame: Box;
+  /** The part of the document the frame shows, in the same coordinates. */
+  readonly visible: Box;
   /** Whether the item's siblings sit side by side or stacked in the site. */
   readonly axis: 'horizontal' | 'vertical';
   readonly onMove: (id: string, direction: MoveDirection) => void;
@@ -99,7 +114,7 @@ export type ToolbarProps = {
   readonly onDelete: (id: string) => void;
   /** Called with the gap right after the selected item. */
   readonly onAddAfter: (slot: InsertSlot) => void;
-  /** Called when the drag handle is pressed: the pointer drag starts once it has moved 4px. */
+  /** Called when the drag handle is pressed, with the press in the shell's coordinates: the pointer drag starts once it has moved 4px. */
   readonly onDragStart?: (id: string, origin: Point) => void;
   /** Called when Space or Enter on the drag handle lifts the item for a keyboard drag. */
   readonly onLiftDrag?: (id: string) => void;
@@ -109,15 +124,18 @@ export type ToolbarProps = {
  * The floating toolbar of the selected item: the path to it as a breadcrumb
  * and the buttons that move it one step earlier or later, add after it (a
  * column adds a column), duplicate it or delete it. It is pinned to the
- * item in the interaction plane, and is one tab stop with arrow keys roving
- * between its buttons. A button that cannot act stays focusable
+ * item in the interaction plane (in the framed document, so it scrolls with
+ * the page), and is one tab stop with arrow keys roving between its buttons.
+ * Where neither side has room it is pinned inside the item with
+ * `position: sticky`, so it stays inside the visible top without a scroll
+ * listener. A button that cannot act stays focusable
  * (`aria-disabled`) so its reason can be read.
  */
 export function Toolbar(props: ToolbarProps): ReactElement | null {
   const {
     store,
     item,
-    frame,
+    visible,
     axis,
     onMove,
     onDuplicate,
@@ -182,7 +200,7 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
     ];
   };
 
-  const placement = toolbarPlacement({ item, frame, toolbar: size });
+  const placement = toolbarPlacement({ item, visible, toolbar: size });
   // After a column the same button adds a column there, with no picker.
   const addSlot = ctx === null ? null : slotAfter(ctx, selectedId);
   const keys = [
@@ -271,7 +289,13 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
     event: PointerEvent<HTMLButtonElement>,
   ): void => {
     if (event.button !== 0 || !event.isPrimary) return;
-    onDragStart?.(selectedId, { x: event.clientX, y: event.clientY });
+    // The press is in the frame document's viewport; the drag is the shell's.
+    const frame = frameElementOf(event.currentTarget);
+    const origin = frame === null ? { x: 0, y: 0 } : frameOriginOf(frame);
+    onDragStart?.(selectedId, {
+      x: event.clientX + origin.x,
+      y: event.clientY + origin.y,
+    });
   };
   const onHandleKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
     if (event.key !== ' ' && event.key !== 'Enter') return;
@@ -288,225 +312,242 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
   const blocked = deleteBlockedReason(state, selectedId);
   const deleteReason = blocked === null ? null : STRINGS[blocked];
 
+  const pinned = placement.mode === 'pinned';
+  const maxWidth = Math.max(0, visible.width - 16);
   return (
+    // The wrapper is always there so the toolbar keeps its place in the tree
+    // (and its focus) when it changes side. Pinned, it spans the item and the
+    // toolbar sticks inside it; otherwise it is a point at the origin the
+    // toolbar's left and top are measured from.
     <div
-      ref={root}
-      className="pk-toolbar"
-      data-toolbar=""
-      data-placement={placement.mode}
-      role="toolbar"
-      aria-label={formatString('toolbar.label', { label: itemLabel })}
-      aria-orientation="horizontal"
-      onKeyDown={onKeyDown}
-      onBlur={(event) => {
-        // Focus leaving the toolbar closes the list of hidden levels.
-        const next = event.relatedTarget;
-        if (
-          menuOpen &&
-          !(next instanceof Node && event.currentTarget.contains(next))
-        ) {
-          setMenu(null);
-        }
-      }}
-      style={{
-        left: placement.left,
-        top: placement.top,
-        maxWidth: Math.max(0, frame.width - 16),
-      }}
+      className="pk-toolbar-pin"
+      data-pinned={pinned ? '' : undefined}
+      style={pinned ? boxStyle(item) : undefined}
     >
-      <Tooltip
-        label={STRINGS['toolbar.drag.tooltip']}
-        placement={placement.mode === 'below' ? 'top' : 'bottom'}
-      >
-        <button
-          type="button"
-          className={`${BUTTON} cursor-grab touch-none select-none`}
-          data-drag-handle=""
-          aria-label={formatString('toolbar.drag.label', { label: itemLabel })}
-          onPointerDown={onHandlePointerDown}
-          onKeyDown={onHandleKeyDown}
-          {...rove('drag')}
-        >
-          <GripIcon />
-        </button>
-      </Tooltip>
-      <nav
-        className="flex min-w-0 items-center gap-1 overflow-hidden px-1"
-        aria-label={STRINGS['toolbar.breadcrumb']}
-      >
-        {shown.map((entry, index) => {
-          const separator =
-            index === 0 ? null : (
-              <span aria-hidden="true" className="text-caption text-text-muted">
-                ›
-              </span>
-            );
-          if (entry === 'more') {
-            return (
-              <span key="more" className="flex items-center gap-1">
-                {separator}
-                <button
-                  ref={moreButton}
-                  type="button"
-                  className={CRUMB}
-                  aria-label={STRINGS['toolbar.more.label']}
-                  aria-expanded={menuOpen}
-                  onClick={(event) => {
-                    // The list hangs below the toolbar, under this button.
-                    setMenu(
-                      menuOpen
-                        ? null
-                        : {
-                            itemId: selectedId,
-                            left: event.currentTarget.offsetLeft,
-                          },
-                    );
-                  }}
-                  {...rove('more')}
-                >
-                  {STRINGS['toolbar.more']}
-                </button>
-              </span>
-            );
+      <div
+        ref={root}
+        className="pk-toolbar"
+        data-toolbar=""
+        data-placement={placement.mode}
+        role="toolbar"
+        aria-label={formatString('toolbar.label', { label: itemLabel })}
+        aria-orientation="horizontal"
+        onKeyDown={onKeyDown}
+        onBlur={(event) => {
+          // Focus leaving the toolbar closes the list of hidden levels.
+          const next = event.relatedTarget;
+          if (
+            menuOpen &&
+            !(isNodeLike(next) && event.currentTarget.contains(next))
+          ) {
+            setMenu(null);
           }
-          const last = entry.id === selectedId;
-          return (
-            <span key={entry.id} className="flex items-center gap-1">
-              {separator}
-              {last ? (
+        }}
+        style={
+          pinned
+            ? { maxWidth }
+            : { left: placement.left, top: placement.top, maxWidth }
+        }
+      >
+        <Tooltip
+          label={STRINGS['toolbar.drag.tooltip']}
+          placement={placement.mode === 'below' ? 'top' : 'bottom'}
+        >
+          <button
+            type="button"
+            className={`${BUTTON} cursor-grab touch-none select-none`}
+            data-drag-handle=""
+            aria-label={formatString('toolbar.drag.label', {
+              label: itemLabel,
+            })}
+            onPointerDown={onHandlePointerDown}
+            onKeyDown={onHandleKeyDown}
+            {...rove('drag')}
+          >
+            <GripIcon />
+          </button>
+        </Tooltip>
+        <nav
+          className="flex min-w-0 items-center gap-1 overflow-hidden px-1"
+          aria-label={STRINGS['toolbar.breadcrumb']}
+        >
+          {shown.map((entry, index) => {
+            const separator =
+              index === 0 ? null : (
                 <span
-                  aria-current="true"
-                  title={entry.text}
-                  className="inline-block h-6 max-w-[96px] truncate px-1 text-caption leading-6 font-semibold text-text"
+                  aria-hidden="true"
+                  className="text-caption text-text-muted"
                 >
-                  {entry.text}
+                  ›
                 </span>
-              ) : (
-                <button
-                  type="button"
-                  className={CRUMB}
-                  title={entry.text}
-                  aria-label={entry.text}
-                  onClick={() => {
-                    selectCrumbById(entry.id);
-                  }}
-                  {...rove(`crumb:${entry.id}`)}
-                >
-                  {entry.text}
-                </button>
-              )}
-            </span>
-          );
-        })}
-      </nav>
-      {open !== null && hidden.length > 0 ? (
-        // Outside the breadcrumb, which clips what overflows it: the toolbar does not.
-        <div
-          role="group"
-          data-toolbar-hidden-levels=""
-          className="pk-toolbar-menu"
-          aria-label={STRINGS['toolbar.more.label']}
-          style={{ left: open.left }}
-        >
-          {hidden.map((crumb) => (
+              );
+            if (entry === 'more') {
+              return (
+                <span key="more" className="flex items-center gap-1">
+                  {separator}
+                  <button
+                    ref={moreButton}
+                    type="button"
+                    className={CRUMB}
+                    aria-label={STRINGS['toolbar.more.label']}
+                    aria-expanded={menuOpen}
+                    onClick={(event) => {
+                      // The list hangs below the toolbar, under this button.
+                      setMenu(
+                        menuOpen
+                          ? null
+                          : {
+                              itemId: selectedId,
+                              left: event.currentTarget.offsetLeft,
+                            },
+                      );
+                    }}
+                    {...rove('more')}
+                  >
+                    {STRINGS['toolbar.more']}
+                  </button>
+                </span>
+              );
+            }
+            const last = entry.id === selectedId;
+            return (
+              <span key={entry.id} className="flex items-center gap-1">
+                {separator}
+                {last ? (
+                  <span
+                    aria-current="true"
+                    title={entry.text}
+                    className="inline-block h-6 max-w-[96px] truncate px-1 text-caption leading-6 font-semibold text-text"
+                  >
+                    {entry.text}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className={CRUMB}
+                    title={entry.text}
+                    aria-label={entry.text}
+                    onClick={() => {
+                      selectCrumbById(entry.id);
+                    }}
+                    {...rove(`crumb:${entry.id}`)}
+                  >
+                    {entry.text}
+                  </button>
+                )}
+              </span>
+            );
+          })}
+        </nav>
+        {open !== null && hidden.length > 0 ? (
+          // Outside the breadcrumb, which clips what overflows it: the toolbar does not.
+          <div
+            role="group"
+            data-toolbar-hidden-levels=""
+            className="pk-toolbar-menu"
+            aria-label={STRINGS['toolbar.more.label']}
+            style={{ left: open.left }}
+          >
+            {hidden.map((crumb) => (
+              <button
+                key={crumb.id}
+                type="button"
+                className={CRUMB}
+                title={crumb.text}
+                onClick={() => {
+                  selectCrumbById(crumb.id);
+                }}
+              >
+                {crumb.text}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
+        {moveButton('earlier')}
+        {moveButton('later')}
+        {addSlot === null ? null : (
+          <Tooltip
+            label={STRINGS['toolbar.addAfter']}
+            placement={placement.mode === 'below' ? 'top' : 'bottom'}
+          >
             <button
-              key={crumb.id}
               type="button"
-              className={CRUMB}
-              title={crumb.text}
+              className={BUTTON}
+              aria-label={formatString('toolbar.addAfter.label', {
+                label: itemLabel,
+              })}
+              aria-haspopup="dialog"
               onClick={() => {
-                selectCrumbById(crumb.id);
+                onAddAfter(addSlot);
               }}
+              {...rove('add')}
             >
-              {crumb.text}
+              <PlusIcon />
             </button>
-          ))}
-        </div>
-      ) : null}
-      <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
-      {moveButton('earlier')}
-      {moveButton('later')}
-      {addSlot === null ? null : (
+          </Tooltip>
+        )}
         <Tooltip
-          label={STRINGS['toolbar.addAfter']}
+          label={duplicateReason ?? STRINGS['toolbar.duplicate']}
           placement={placement.mode === 'below' ? 'top' : 'bottom'}
         >
           <button
             type="button"
             className={BUTTON}
-            aria-label={formatString('toolbar.addAfter.label', {
+            aria-label={formatString('toolbar.duplicate.label', {
               label: itemLabel,
             })}
-            aria-haspopup="dialog"
+            aria-disabled={duplicateReason !== null}
+            aria-keyshortcuts={`${shortcutModifier()}+D`}
             onClick={() => {
-              onAddAfter(addSlot);
+              if (duplicateReason === null) onDuplicate(selectedId);
             }}
-            {...rove('add')}
+            {...rove('duplicate')}
           >
-            <PlusIcon />
+            <DuplicateIcon />
           </button>
         </Tooltip>
-      )}
-      <Tooltip
-        label={duplicateReason ?? STRINGS['toolbar.duplicate']}
-        placement={placement.mode === 'below' ? 'top' : 'bottom'}
-      >
-        <button
-          type="button"
-          className={BUTTON}
-          aria-label={formatString('toolbar.duplicate.label', {
-            label: itemLabel,
-          })}
-          aria-disabled={duplicateReason !== null}
-          aria-keyshortcuts={`${shortcutModifier()}+D`}
-          onClick={() => {
-            if (duplicateReason === null) onDuplicate(selectedId);
-          }}
-          {...rove('duplicate')}
-        >
-          <DuplicateIcon />
-        </button>
-      </Tooltip>
-      {selected.kind === 'column' ? null : (
+        {selected.kind === 'column' ? null : (
+          <Tooltip
+            label={STRINGS['toolbar.properties']}
+            placement={placement.mode === 'below' ? 'top' : 'bottom'}
+          >
+            <button
+              type="button"
+              className={BUTTON}
+              aria-label={formatString('toolbar.properties.label', {
+                label: itemLabel,
+              })}
+              onClick={() => {
+                store.requestProperties(selectedId);
+              }}
+              {...rove('properties')}
+            >
+              <PropertiesIcon />
+            </button>
+          </Tooltip>
+        )}
         <Tooltip
-          label={STRINGS['toolbar.properties']}
+          label={deleteReason ?? STRINGS['toolbar.delete']}
           placement={placement.mode === 'below' ? 'top' : 'bottom'}
         >
           <button
             type="button"
-            className={BUTTON}
-            aria-label={formatString('toolbar.properties.label', {
+            className={deleteReason === null ? DELETE_BUTTON : BUTTON}
+            aria-label={formatString('toolbar.delete.label', {
               label: itemLabel,
             })}
+            aria-disabled={deleteReason !== null}
+            aria-keyshortcuts="Delete"
             onClick={() => {
-              store.requestProperties(selectedId);
+              if (deleteReason === null) onDelete(selectedId);
             }}
-            {...rove('properties')}
+            {...rove('delete')}
           >
-            <PropertiesIcon />
+            <TrashIcon />
           </button>
         </Tooltip>
-      )}
-      <Tooltip
-        label={deleteReason ?? STRINGS['toolbar.delete']}
-        placement={placement.mode === 'below' ? 'top' : 'bottom'}
-      >
-        <button
-          type="button"
-          className={deleteReason === null ? DELETE_BUTTON : BUTTON}
-          aria-label={formatString('toolbar.delete.label', {
-            label: itemLabel,
-          })}
-          aria-disabled={deleteReason !== null}
-          aria-keyshortcuts="Delete"
-          onClick={() => {
-            if (deleteReason === null) onDelete(selectedId);
-          }}
-          {...rove('delete')}
-        >
-          <TrashIcon />
-        </button>
-      </Tooltip>
+      </div>
     </div>
   );
 }

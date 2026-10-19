@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -13,6 +14,7 @@ import { NeedsInputMarkers } from '../../chrome/editing/needs-input.js';
 import { Picker } from '../../chrome/editing/picker.js';
 import { Toolbar } from '../../chrome/editing/toolbar.js';
 import { formatString } from '../../chrome/strings.js';
+import { frameElementOf } from '../chrome-host/shape.js';
 import { rowLabel } from '../session/page-tree.js';
 import { measureSiblingAxis } from '../frame/sibling-axis.js';
 import type { InsertSlot } from '../session/insertion.js';
@@ -26,11 +28,10 @@ import {
   type PickerOpener,
 } from '../session/store.js';
 import { createBoxTracker, type BoxesState } from './boxes.js';
-import { DragDecoration, DragLabel, DragSurface } from './drag-layer.js';
+import { DragDecoration } from './drag-layer.js';
 import {
   chipPlacement,
   isVisibleIn,
-  outlineRect,
   type Box,
   type ChipPlacement,
   type Point,
@@ -92,18 +93,52 @@ function wantedIds(state: EditorState): readonly string[] {
   return [...ids];
 }
 
-/** The frame the layer sits over: the one passed, else the one in its own root. */
+/** The frame the layer sits in: the one passed, else the one its document is shown in. */
 function frameFor(
   layer: HTMLDivElement | null,
   frame: HTMLIFrameElement | null | undefined,
 ): HTMLIFrameElement | null {
-  const root = layer?.getRootNode();
-  const target =
-    frame ??
-    (root instanceof ShadowRoot || root instanceof Document
-      ? root.querySelector('iframe')
-      : null);
-  return target instanceof HTMLIFrameElement ? target : null;
+  return frame ?? frameElementOf(layer);
+}
+
+/**
+ * A label chip. Above or inside its outline it sits at a fixed place; once the
+ * outline's top has scrolled out of the visible part it is drawn
+ * `position: sticky` inside a wrapper over the outline, so it stays 4px below
+ * the visible top as the page scrolls, with no script.
+ */
+function PlacedChip(props: {
+  readonly outline: Box;
+  readonly chip: ChipPlacement;
+  readonly text: string;
+  readonly marker: 'data-overlay-chip' | null;
+}): ReactElement | null {
+  const { outline, chip, text, marker } = props;
+  if (chip.mode === 'hidden') return null;
+  const attributes = marker === null ? {} : { [marker]: '' };
+  if (chip.mode === 'sticky') {
+    return (
+      <div className="pk-overlay-pin" style={boxStyle(outline)}>
+        <div
+          className="pk-overlay-chip"
+          data-placement="sticky"
+          {...attributes}
+        >
+          {text}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div
+      className="pk-overlay-chip"
+      data-placement={chip.mode}
+      style={{ left: chip.left, top: chip.top }}
+      {...attributes}
+    >
+      {text}
+    </div>
+  );
 }
 
 /**
@@ -111,21 +146,22 @@ function frameFor(
  * a label chip, plus the selected item's outline and the scope container's
  * dashed outline, drawn over the framed site.
  *
- * It is a layer of the shell, exactly over the frame's content box and
- * clipped to it, so everything it draws lives in the shell's shadow root and
- * the site's document is never touched. The layer does not take part in
- * pointer or keyboard interaction (`pointer-events: none`, `aria-hidden`);
- * hover is read from the frame by the tracker. Inside the clip, an
- * unclipped plane starts at the shell's origin, so boxes are placed with the
- * shell's own coordinates.
+ * It is rendered (by the shell's React tree, through a portal) into the chrome
+ * host's shadow root inside the framed document, so everything it draws is in
+ * the page's own coordinate space and scrolls with the page natively. Boxes
+ * are the document coordinates the trackers measured; a scroll changes none
+ * of them. The decoration layer does not take part in pointer or keyboard
+ * interaction (`pointer-events: none`, `aria-hidden`); hover is read from the
+ * frame by the tracker.
  *
  * With an editor store the overlay follows the session: it draws only while
  * the page is being edited in Edit mode, the hover outlines what a click would
  * select at the current scope, and the selection comes from the store. Without
  * one it is the plain hover overlay.
  *
- * The frame is looked up in the shadow root the layer sits in, unless one is
- * passed.
+ * The frame is the one the layer's document is shown in, unless one is passed.
+ * The pointer-anchored parts of a drag (the capture surface and the label)
+ * are not here: they stay in the shell (`ShellDragLayer`).
  */
 export function OverlayLayer(props: {
   readonly frame?: HTMLIFrameElement | null;
@@ -162,6 +198,12 @@ export function OverlayLayer(props: {
     onLiftDrag,
   } = props;
   const layer = useRef<HTMLDivElement>(null);
+  const [frameElement, setFrameElement] = useState<HTMLIFrameElement | null>(
+    null,
+  );
+  useLayoutEffect(() => {
+    setFrameElement(frameFor(layer.current, frame));
+  }, [frame]);
   const [state, setState] = useState<HoverState | null>(null);
   const [selection, setSelection] = useState<SelectionState | null>(null);
   const [axis, setAxis] = useState<'horizontal' | 'vertical'>('vertical');
@@ -287,25 +329,18 @@ export function OverlayLayer(props: {
     readonly chip: ChipPlacement;
   } | null = null;
   if (state !== null && !pointerDragging) {
-    const origin = { x: state.frame.left, y: state.frame.top };
-    const outline = outlineRect(state.element, origin);
     drawn = {
-      outline,
-      section:
-        state.section === null ? null : outlineRect(state.section, origin),
-      chip: chipPlacement({ outline, frame: state.frame }),
+      outline: state.element,
+      section: state.section,
+      chip: chipPlacement({ outline: state.element, visible: state.visible }),
     };
   }
-  const frameBox = measured?.frame ?? state?.frame ?? selection?.frame ?? null;
-  const origin =
-    frameBox === null ? null : { x: frameBox.left, y: frameBox.top };
-  const placed = useMemo((): ReadonlyMap<string, Box> => {
-    if (measured === null) return new Map();
-    const at = { x: measured.frame.left, y: measured.frame.top };
-    return new Map(
-      [...measured.boxes].map(([id, box]) => [id, outlineRect(box, at)]),
-    );
-  }, [measured]);
+  // The part of the document the frame showed when the boxes were measured.
+  const visible = measured?.visible ?? state?.visible ?? selection?.visible;
+  const placed: ReadonlyMap<string, Box> = useMemo(
+    () => measured?.boxes ?? new Map(),
+    [measured],
+  );
   // An item fixed to the viewport sits in no gap, so the gaps and the picker ignore it.
   const inFlow = useMemo((): ReadonlyMap<string, Box> => {
     if (measured === null || measured.fixed.length === 0) return placed;
@@ -336,12 +371,15 @@ export function OverlayLayer(props: {
     highlightBox === null ||
     measured === null ||
     highlightModel === null ||
-    !isVisibleIn(highlightBox, measured.frame)
+    !isVisibleIn(highlightBox, measured.visible)
       ? null
       : {
           id: highlight,
           outline: highlightBox,
-          chip: chipPlacement({ outline: highlightBox, frame: measured.frame }),
+          chip: chipPlacement({
+            outline: highlightBox,
+            visible: measured.visible,
+          }),
           text: rowLabel(
             highlightModel,
             new Map(
@@ -368,19 +406,16 @@ export function OverlayLayer(props: {
     selection === null ||
     selection.selected === null ||
     selectedId === null ||
-    origin === null ||
-    (drag === null &&
-      !isVisibleIn(outlineRect(selection.selected, origin), selection.frame))
+    (drag === null && !isVisibleIn(selection.selected, selection.visible))
       ? null
-      : outlineRect(selection.selected, origin);
+      : selection.selected;
   const dragSource =
     drag === null ||
     drag.subject.id !== selectedId ||
     selection === null ||
-    selection.selected === null ||
-    origin === null
+    selection.selected === null
       ? null
-      : outlineRect(selection.selected, origin);
+      : selection.selected;
 
   return (
     <>
@@ -389,25 +424,21 @@ export function OverlayLayer(props: {
         className="pk-overlay"
         aria-hidden="true"
         data-overlay=""
-        style={frameBox === null ? undefined : boxStyle(frameBox)}
       >
-        {frameBox !== null && origin !== null ? (
-          <div
-            className="pk-overlay-plane"
-            style={{ left: -frameBox.left, top: -frameBox.top }}
-          >
+        {visible === undefined ? null : (
+          <div className="pk-overlay-plane">
             {selection === null || selection.scope === null ? null : (
               <div
                 className="pk-overlay-scope"
                 data-overlay-scope={scopeId ?? ''}
-                style={boxStyle(outlineRect(selection.scope, origin))}
+                style={boxStyle(selection.scope)}
               />
             )}
             {selection === null || selection.selected === null ? null : (
               <div
                 className="pk-overlay-selected"
                 data-overlay-selected={selectedId ?? ''}
-                style={boxStyle(outlineRect(selection.selected, origin))}
+                style={boxStyle(selection.selected)}
               />
             )}
             {selection === null ||
@@ -418,7 +449,7 @@ export function OverlayLayer(props: {
                 key={flash.token}
                 className="pk-overlay-flash"
                 data-overlay-flash=""
-                style={boxStyle(outlineRect(selection.selected, origin))}
+                style={boxStyle(selection.selected)}
                 onAnimationEnd={() => {
                   store?.clearFlash();
                 }}
@@ -443,16 +474,12 @@ export function OverlayLayer(props: {
                     data-overlay-outline=""
                     style={boxStyle(drawn.outline)}
                   />
-                  {drawn.chip.mode === 'hidden' ? null : (
-                    <div
-                      className="pk-overlay-chip"
-                      data-overlay-chip=""
-                      data-placement={drawn.chip.mode}
-                      style={{ left: drawn.chip.left, top: drawn.chip.top }}
-                    >
-                      {chipText(state)}
-                    </div>
-                  )}
+                  <PlacedChip
+                    outline={drawn.outline}
+                    chip={drawn.chip}
+                    text={chipText(state)}
+                    marker="data-overlay-chip"
+                  />
                 </div>
               </>
             )}
@@ -466,29 +493,23 @@ export function OverlayLayer(props: {
                   className="pk-overlay-outline"
                   style={boxStyle(highlighted.outline)}
                 />
-                {highlighted.chip.mode === 'hidden' ? null : (
-                  <div
-                    className="pk-overlay-chip"
-                    data-placement={highlighted.chip.mode}
-                    style={{
-                      left: highlighted.chip.left,
-                      top: highlighted.chip.top,
-                    }}
-                  >
-                    {highlighted.text}
-                  </div>
-                )}
+                <PlacedChip
+                  outline={highlighted.outline}
+                  chip={highlighted.chip}
+                  text={highlighted.text}
+                  marker={null}
+                />
               </div>
             )}
-            {store === undefined || origin === null ? null : (
+            {store === undefined ? null : (
               <DragDecoration
                 store={store}
-                frame={frameBox}
+                view={frameElement?.contentWindow ?? null}
                 source={dragSource}
               />
             )}
           </div>
-        ) : null}
+        )}
       </div>
       {store === undefined ||
       onMove === undefined ||
@@ -499,23 +520,11 @@ export function OverlayLayer(props: {
       onDismissPicker === undefined ||
       onPick === undefined ||
       !active ||
-      frameBox === null ? null : (
-        <div
-          className="pk-overlay-interaction"
-          data-overlay-interaction=""
-          style={boxStyle(frameBox)}
-        >
-          <div
-            className="pk-overlay-plane"
-            style={{ left: -frameBox.left, top: -frameBox.top }}
-          >
-            <DragSurface store={store} frame={frameBox} />
+      visible === undefined ? null : (
+        <div className="pk-overlay-interaction" data-overlay-interaction="">
+          <div className="pk-overlay-plane">
             {measured === null ? null : (
-              <NeedsInputMarkers
-                store={store}
-                boxes={placed}
-                frame={measured.frame}
-              />
+              <NeedsInputMarkers store={store} boxes={placed} />
             )}
             {confirming || measured === null || drag !== null ? null : (
               <>
@@ -530,7 +539,7 @@ export function OverlayLayer(props: {
                   store={store}
                   empty={measured.empty}
                   boxes={placed}
-                  frame={measured.frame}
+                  visible={measured.visible}
                   onOpen={onOpenPicker}
                 />
               </>
@@ -539,7 +548,7 @@ export function OverlayLayer(props: {
               <Toolbar
                 store={store}
                 item={toolbarItem}
-                frame={frameBox}
+                visible={selection?.visible ?? visible}
                 axis={axis}
                 onMove={onMove}
                 onDuplicate={onDuplicate}
@@ -556,8 +565,8 @@ export function OverlayLayer(props: {
                 key={picker.token}
                 store={store}
                 slot={picker.slot}
-                anchor={slotAnchor(picker.slot, inFlow, frameBox)}
-                frame={frameBox}
+                anchor={slotAnchor(picker.slot, inFlow, visible)}
+                visible={visible}
                 onPick={onPick}
                 onClose={onClosePicker}
                 onDismiss={onDismissPicker}
@@ -566,7 +575,6 @@ export function OverlayLayer(props: {
           </div>
         </div>
       )}
-      {store === undefined ? null : <DragLabel store={store} />}
     </>
   );
 }

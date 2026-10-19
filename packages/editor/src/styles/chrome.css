@@ -286,11 +286,15 @@
   z-index: 2147483647 !important;
 }
 
-/* The frame's viewport, fixed inside the host: chrome that must stay in view. */
-.pk-chrome-viewport {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
+/*
+ * The frame's viewport, fixed inside the host: chrome that must stay in view.
+ * The page layers (the decoration and interaction planes of the overlay) sit
+ * beside it at document coordinates and share its font and colour, which the
+ * host's `all: initial` reset.
+ */
+.pk-chrome-viewport,
+.pk-overlay,
+.pk-overlay-interaction {
   color-scheme: light dark;
   font:
     400 14px/1.5 -apple-system,
@@ -302,11 +306,21 @@
   color: var(--pk-text);
 }
 
-:host([data-theme='light']) .pk-chrome-viewport {
+.pk-chrome-viewport {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+:host([data-theme='light']) .pk-chrome-viewport,
+:host([data-theme='light']) .pk-overlay,
+:host([data-theme='light']) .pk-overlay-interaction {
   color-scheme: light;
 }
 
-:host([data-theme='dark']) .pk-chrome-viewport {
+:host([data-theme='dark']) .pk-chrome-viewport,
+:host([data-theme='dark']) .pk-overlay,
+:host([data-theme='dark']) .pk-overlay-interaction {
   color-scheme: dark;
 }
 
@@ -346,7 +360,6 @@
     border: 1px solid var(--pk-frame-border);
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-    overscroll-behavior: contain;
   }
 
   /*
@@ -544,11 +557,11 @@
 }
 
 /*
- * The hover overlay. A layer of the shell exactly over the frame's content
- * box (its position and size are set from the frame on every update), clipped
- * to it. Inside, a zero-size plane starts at the shell's own origin, so the
- * outline and chip boxes are placed in the shell's coordinates. Nothing in
- * the layer takes part in pointer interaction.
+ * The overlay. A layer of the in-frame chrome host over the whole document
+ * (the host is as tall as the page), so it scrolls with the page natively.
+ * Inside, a zero-size plane starts at the document's origin, so the outline
+ * and chip boxes are placed in the document's coordinates. Nothing in the
+ * decoration layer takes part in pointer interaction.
  *
  * The outline is a 2px border drawn inside the element's border box plus a
  * 1px outline (the halo) around it. Borders and outlines survive forced
@@ -557,13 +570,15 @@
 @layer components {
   .pk-overlay {
     position: absolute;
+    inset: 0;
     z-index: 2;
-    overflow: hidden;
     pointer-events: none;
   }
 
   .pk-overlay-plane {
     position: absolute;
+    top: 0;
+    left: 0;
     width: 0;
     height: 0;
     pointer-events: none;
@@ -616,15 +631,60 @@
   }
 
   /*
-   * The interaction plane: the same box as the overlay, clipped to the frame,
-   * but part of the accessibility tree and the tab order. The plane itself
-   * takes no pointer events; only what it holds (the toolbar) does.
+   * The interaction plane: the same box as the overlay, but part of the
+   * accessibility tree and the tab order. The plane itself takes no pointer
+   * events; only what it holds (the toolbar) does.
    */
   .pk-overlay-interaction {
     position: absolute;
+    inset: 0;
     z-index: 3;
-    overflow: hidden;
     pointer-events: none;
+  }
+
+  /*
+   * Pinning. A wrapper over an item's box holds a chip, a marker or the
+   * toolbar that must stay inside the visible top while the item's own top
+   * has scrolled out: the child is `position: sticky`, so the browser keeps it
+   * there with no script. The padding is the child's inset from the item and
+   * the child cannot leave the wrapper's content box.
+   */
+  .pk-overlay-pin,
+  .pk-marker-pin,
+  .pk-toolbar-pin[data-pinned] {
+    position: absolute;
+    box-sizing: border-box;
+    pointer-events: none;
+  }
+
+  .pk-overlay-pin,
+  .pk-marker-pin {
+    padding: 4px;
+  }
+
+  .pk-toolbar-pin {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .pk-toolbar-pin[data-pinned] {
+    padding: 8px;
+  }
+
+  .pk-overlay-chip[data-placement='sticky'] {
+    position: sticky;
+    top: 4px;
+    width: max-content;
+    max-width: 100%;
+  }
+
+  .pk-toolbar[data-placement='pinned'] {
+    position: sticky;
+    top: 8px;
+    left: 8px;
   }
 
   .pk-toolbar {
@@ -813,8 +873,19 @@
   }
 
   /* The needs-input marker: attention colour, white text, a pointer control that selects its block. */
+  .pk-marker-pin {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+  }
+
+  .pk-marker-pin[data-side='left'] {
+    justify-content: flex-start;
+  }
+
   .pk-marker {
-    position: absolute;
+    position: sticky;
+    top: 4px;
     box-sizing: border-box;
     display: flex;
     align-items: center;
@@ -963,6 +1034,7 @@
 
   .pk-drag-surface {
     position: absolute;
+    z-index: 3;
     pointer-events: auto;
     cursor: grabbing;
     user-select: none;

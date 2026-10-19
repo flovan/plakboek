@@ -1,7 +1,10 @@
 import type { ReactElement } from 'react';
+import { createPortal } from 'react-dom';
 import type { CatalogueEntry } from '../api-types.js';
+import type { ChromeHost } from '../client/chrome-host/host.js';
 import type { Point } from '../client/overlay/geometry.js';
 import { OverlayLayer } from '../client/overlay/overlay-layer.js';
+import { ShellDragLayer } from '../client/overlay/shell-drag-layer.js';
 import type { InsertSlot } from '../client/session/insertion.js';
 import type { MoveDirection } from '../client/session/move-targets.js';
 import {
@@ -44,6 +47,10 @@ export type ShellAppProps = {
   readonly layout?: SidebarLayout;
   /** Called by the Full width toggle. */
   readonly onToggleLayout?: () => void;
+  /** The in-frame chrome host the page-anchored overlay is rendered into; none outside Edit mode. */
+  readonly chromeHost?: ChromeHost | null;
+  /** The stage's iframe, which the pointer-anchored parts of a drag measure. */
+  readonly frameElement?: HTMLIFrameElement | null;
   /** The frame holds the render-failure page: the stage shows its panel. */
   readonly frameFailed?: boolean;
   /** Called by the failure panel's Reload page button. */
@@ -112,9 +119,11 @@ export type ShellAppProps = {
 /**
  * The edit shell: the sidebar and the stage that holds the framed site. It is
  * rendered to markup on the server and hydrated on the client from the same
- * island, so the first client render matches the server's. The hover overlay
- * is mounted only for a user who can edit, and only once the client has
- * hydrated: it reads the frame, which the server cannot.
+ * island, so the first client render matches the server's. The overlay is
+ * rendered, through a portal, into the chrome host inside the framed
+ * document, and only once the client has hydrated and the host exists: it
+ * reads the frame, which the server cannot. What is anchored to the pointer
+ * during a drag stays in the shell.
  */
 export function ShellApp(props: ShellAppProps): ReactElement {
   const {
@@ -123,6 +132,8 @@ export function ShellApp(props: ShellAppProps): ReactElement {
     hydrated,
     layout = 'framed',
     onToggleLayout,
+    chromeHost = null,
+    frameElement = null,
     frameFailed,
     onReload,
     editor,
@@ -263,19 +274,25 @@ export function ShellApp(props: ShellAppProps): ReactElement {
           ) : null
         }
       />
-      {hydrated && island.mode === 'edit' ? (
-        <OverlayLayer
-          store={editor?.store}
-          onMove={editor?.onMove}
-          onDuplicate={editor?.onDuplicate}
-          onDelete={editor?.onDelete}
-          onOpenPicker={editor?.onOpenPicker}
-          onClosePicker={editor?.onClosePicker}
-          onDismissPicker={editor?.onDismissPicker}
-          onPick={editor?.onPick}
-          onDragStart={editor?.onDragStart}
-          onLiftDrag={editor?.onLiftDrag}
-        />
+      {hydrated && island.mode === 'edit' && chromeHost !== null
+        ? createPortal(
+            <OverlayLayer
+              store={editor?.store}
+              onMove={editor?.onMove}
+              onDuplicate={editor?.onDuplicate}
+              onDelete={editor?.onDelete}
+              onOpenPicker={editor?.onOpenPicker}
+              onClosePicker={editor?.onClosePicker}
+              onDismissPicker={editor?.onDismissPicker}
+              onPick={editor?.onPick}
+              onDragStart={editor?.onDragStart}
+              onLiftDrag={editor?.onLiftDrag}
+            />,
+            chromeHost.root,
+          )
+        : null}
+      {hydrated && island.mode === 'edit' && editor !== undefined ? (
+        <ShellDragLayer store={editor.store} frame={frameElement} />
       ) : null}
       {hydrated && editor !== undefined ? (
         <>

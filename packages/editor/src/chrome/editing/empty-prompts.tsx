@@ -27,10 +27,10 @@ export type EmptyPromptsProps = {
   readonly store: EditorStore;
   /** The ids of the columns the render marked empty (`data-pk-empty`, read by the box tracker). */
   readonly empty: readonly string[];
-  /** The boxes of those columns, in the shell's coordinates. */
+  /** The boxes of those columns, in the framed document's coordinates. */
   readonly boxes: ReadonlyMap<string, Box>;
-  /** The frame's content box in the shell's coordinates. */
-  readonly frame: Box;
+  /** The part of the document the frame shows: an empty page's card is centred in it. */
+  readonly visible: Box;
   /** Called with the gap whose prompt was pressed. */
   readonly onOpen: (
     slot: InsertSlot,
@@ -46,7 +46,7 @@ export type EmptyPromptsProps = {
  * the column.
  */
 export function EmptyPrompts(props: EmptyPromptsProps): ReactElement | null {
-  const { store, empty, boxes, frame, onOpen } = props;
+  const { store, empty, boxes, visible, onOpen } = props;
   const model = useEditorStore(store, (state) => state.model);
   if (model === null) return null;
 
@@ -94,7 +94,7 @@ export function EmptyPrompts(props: EmptyPromptsProps): ReactElement | null {
         );
       })}
       {pageEmpty ? (
-        <div className="pk-empty-page" style={boxStyle(frame)}>
+        <div className="pk-empty-page" style={boxStyle(visible)}>
           <div className="pk-empty-card" data-empty-page="">
             <h2 className="m-0 text-heading font-semibold text-text">
               {STRINGS['empty.page.heading']}

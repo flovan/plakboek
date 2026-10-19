@@ -21,6 +21,7 @@ import { STAGE_ID } from '../../chrome/stage.js';
 import { formatString, STRINGS } from '../../chrome/strings.js';
 import type { BlockEditHooks } from '@plakboek/render';
 import type { BootEditorOptions } from '../boot.js';
+import { isFocusable } from '../chrome-host/shape.js';
 import { useChromeHost } from '../chrome-host/use-chrome-host.js';
 import { attachClaim } from '../frame/claim.js';
 import { loadBlockEditModules } from '../frame/block-edit-loader.js';
@@ -222,6 +223,14 @@ function Shell(props: {
   useEffect(() => {
     chromeHostRef.current = chromeHost;
   }, [chromeHost]);
+  /** The first control of the in-frame chrome that matches, else the shell's own. */
+  const findControl = useCallback(
+    (selector: string): Element | null =>
+      chromeHostRef.current?.root.querySelector(selector) ??
+      host.shadowRoot?.querySelector(selector) ??
+      null,
+    [host],
+  );
 
   // The host's block edit modules load once, after hydration and in edit mode
   // only. The frame runtime below calls their hooks.
@@ -706,16 +715,16 @@ function Shell(props: {
     requestAnimationFrame(() => {
       const button =
         request.opener === 'toolbar'
-          ? host.shadowRoot?.querySelector('[data-roving="delete"]')
+          ? findControl('[data-roving="delete"]')
           : request.opener === 'panel'
             ? host.shadowRoot?.querySelector(
                 `[data-column-remove="${request.id}"]`,
               )
             : null;
-      if (button instanceof HTMLElement) button.focus({ preventScroll: true });
+      if (isFocusable(button)) button.focus({ preventScroll: true });
       else focusRegion(host);
     });
-  }, [host, store]);
+  }, [findControl, host, store]);
 
   const deleteFromToolbar = useCallback(
     (id: string) => {
@@ -822,7 +831,6 @@ function Shell(props: {
     store.closePicker();
     if (picker === null) return;
     requestAnimationFrame(() => {
-      const root = host.shadowRoot;
       const selector =
         picker.opener === 'insert-point'
           ? `[data-slot="${slotKey(picker.slot)}"]`
@@ -833,12 +841,11 @@ function Shell(props: {
               : picker.opener === 'empty-page'
                 ? '[data-empty-page-add]'
                 : null;
-      const trigger = selector === null ? null : root?.querySelector(selector);
-      if (trigger instanceof HTMLElement)
-        trigger.focus({ preventScroll: true });
+      const trigger = selector === null ? null : findControl(selector);
+      if (isFocusable(trigger)) trigger.focus({ preventScroll: true });
       else focusRegion(host);
     });
-  }, [host, store]);
+  }, [findControl, host, store]);
 
   const dismissPicker = useCallback(() => {
     store.closePicker();
@@ -864,14 +871,13 @@ function Shell(props: {
         onKeyboardEnd: () => {
           // The handle is still there after a cancel and usually after a drop.
           requestAnimationFrame(() => {
-            const handle = host.shadowRoot?.querySelector('[data-drag-handle]');
-            if (handle instanceof HTMLElement)
-              handle.focus({ preventScroll: true });
+            const handle = findControl('[data-drag-handle]');
+            if (isFocusable(handle)) handle.focus({ preventScroll: true });
             else focusRegion(host);
           });
         },
       }),
-    [host, store, moveTo],
+    [findControl, host, store, moveTo],
   );
   useEffect(() => {
     const unsubscribe = store.subscribe(() => {
@@ -943,15 +949,30 @@ function Shell(props: {
     let releaseClaim: (() => void) | null = null;
     let releaseKeys: (() => void) | null = null;
 
+    /** The control with focus in the in-frame chrome, for a key pressed on it. */
+    const focusedChrome = (event: KeyboardEvent): Element | null => {
+      const chrome = chromeHostRef.current;
+      if (chrome === null || event.target !== chrome.element) return null;
+      return chrome.root.activeElement;
+    };
+
     const structureKey = (event: KeyboardEvent, target: unknown): void => {
       const state = store.getState();
       const { model, selection } = state;
       if (state.mode !== 'edit' || model === null) return;
       const path = event.composedPath();
       const inRegion = path[0] instanceof Element && path[0].id === STAGE_ID;
-      const inToolbar = path.some(
-        (node) => node instanceof Element && node.hasAttribute('data-toolbar'),
-      );
+      // A key pressed on in-frame chrome reaches this window's listener with
+      // the (closed) host as its target, so the focused control is read from
+      // the host's own root.
+      const focused = focusedChrome(event);
+      const inToolbar =
+        focused === null
+          ? path.some(
+              (node) =>
+                node instanceof Element && node.hasAttribute('data-toolbar'),
+            )
+          : focused.closest('[data-toolbar]') !== null;
       const frameDocument = frame.contentDocument;
       const selected =
         selection.selectedId === null
@@ -1049,7 +1070,8 @@ function Shell(props: {
       if (event.defaultPrevented) return;
       // The delete confirmation owns the keyboard while it is open.
       if (store.getState().deleteRequest !== null) return;
-      const target = event.composedPath()[0] ?? event.target;
+      const target =
+        focusedChrome(event) ?? event.composedPath()[0] ?? event.target;
       const action = keyAction(event, target);
       if (action === null) {
         structureKey(event, target);
@@ -1378,6 +1400,8 @@ function Shell(props: {
       hydrated={hydrated}
       layout={layout}
       onToggleLayout={toggleLayout}
+      chromeHost={chromeHost}
+      frameElement={frameElement}
       frameFailed={frameFailed}
       onReload={reload}
       editor={

@@ -7,6 +7,7 @@ import {
   type ReactElement,
 } from 'react';
 import type { CatalogueEntry } from '../../api-types.js';
+import { frameElementOf, rootOfNode } from '../../client/chrome-host/shape.js';
 import {
   pickerPlacement,
   type PickerPlacement,
@@ -32,10 +33,10 @@ export type PickerProps = {
   readonly store: EditorStore;
   /** The gap the chosen type is added to. */
   readonly slot: InsertSlot;
-  /** What the picker hangs from, in the shell's coordinates. */
+  /** What the picker hangs from, in the framed document's coordinates. */
   readonly anchor: Box;
-  /** The frame's content box in the shell's coordinates. */
-  readonly frame: Box;
+  /** The part of the document the frame shows, in the same coordinates. */
+  readonly visible: Box;
   /** The editor chose a type. */
   readonly onPick: (entry: CatalogueEntry) => void;
   /** Escape: closes and hands focus back to what opened the picker. */
@@ -107,11 +108,11 @@ function Rows(props: {
  * one gap, grouped by category. The arrow keys move the active option, Enter
  * adds it and Escape closes. Focus stays in the search field, which names the
  * active option for assistive technology, so the keyboard needs no more than
- * the field. It is drawn in the interaction plane, so it never leaves the
- * frame.
+ * the field. It is drawn in the interaction plane inside the framed document,
+ * placed inside the part of it the frame shows.
  */
 export function Picker(props: PickerProps): ReactElement | null {
-  const { store, slot, anchor, frame, onPick, onClose, onDismiss } = props;
+  const { store, slot, anchor, visible, onPick, onClose, onDismiss } = props;
   const state = useEditorStore(store, (current) => current);
   const ctx = legalityContextOf(state);
   const root = useRef<HTMLDivElement>(null);
@@ -126,20 +127,22 @@ export function Picker(props: PickerProps): ReactElement | null {
     input.current?.focus({ preventScroll: true });
   }, []);
 
-  // A press outside the picker closes it. A press in the framed site never
-  // reaches the shell, so the shell closes the picker for its own clicks.
+  // A press outside the picker closes it: one in the chrome (this root) or one
+  // in the shell around the frame. A press in the framed site never reaches
+  // either, so the claim closes the picker for those clicks.
   useEffect(() => {
-    const rootNode = root.current?.getRootNode();
-    if (!(rootNode instanceof ShadowRoot || rootNode instanceof Document)) {
-      return undefined;
-    }
+    const chromeRoot = rootOfNode(root.current);
+    if (chromeRoot === null) return undefined;
+    const shell = frameElementOf(root.current)?.ownerDocument ?? null;
     const onPointerDown = (event: Event): void => {
       if (event.composedPath().includes(root.current as EventTarget)) return;
       onDismiss();
     };
-    rootNode.addEventListener('pointerdown', onPointerDown);
+    chromeRoot.addEventListener('pointerdown', onPointerDown);
+    shell?.addEventListener('pointerdown', onPointerDown);
     return () => {
-      rootNode.removeEventListener('pointerdown', onPointerDown);
+      chromeRoot.removeEventListener('pointerdown', onPointerDown);
+      shell?.removeEventListener('pointerdown', onPointerDown);
     };
   }, [onDismiss]);
 
@@ -160,7 +163,7 @@ export function Picker(props: PickerProps): ReactElement | null {
   const anyLegal = legalTypesAt(ctx, slot.parentId).some(
     (key) => ctx.catalogue.get(key)?.kind !== 'column',
   );
-  const placement: PickerPlacement = pickerPlacement(anchor, frame);
+  const placement: PickerPlacement = pickerPlacement(anchor, visible);
   const step = (by: 1 | -1): void => {
     if (flat.length === 0) return;
     const at = flat.findIndex((entry) => entry.key === activeKey);

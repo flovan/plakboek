@@ -5,8 +5,9 @@
  * and a label chip over the block the pointer is on: the deepest item a click
  * there would select. It is
  * measured, not looked at: each outline's box is compared with the box the
- * site element has inside the frame, moved by where the frame's content box
- * sits in the shell.
+ * site element has inside the frame. The overlay is drawn inside the framed
+ * document (in the chrome host), so it scrolls with the page and both boxes
+ * are in the same coordinate space.
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
@@ -363,49 +364,49 @@ test.describe('over the adversarial theme', () => {
     });
   }
 
-  test('draws the layer above the frame, over exactly its content box and clipped to it', async ({
+  test("draws the layer inside the frame document's chrome host, over the whole page", async ({
     page,
   }) => {
     await openShell(page, '/?_edit=1', '.spacer');
     const frame = await framedSite(page);
     await hoverSpacer(page);
 
-    const facts = await page.evaluate((host) => {
-      const root = document.querySelector(host)?.shadowRoot;
+    const facts = await frame.evaluate(() => {
+      const host = document.querySelector('plakboek-chrome');
+      const root = host?.shadowRoot;
       const layer = root?.querySelector('[data-overlay]');
-      const iframe = root?.querySelector('iframe');
-      const stage = iframe?.closest('[role="region"]');
-      if (!layer || !iframe || !stage) throw new Error('shell parts missing');
+      if (!host || !root || !layer) throw new Error('no chrome host');
       const computed = getComputedStyle(layer);
+      const html = document.documentElement.getBoundingClientRect();
+      const box = layer.getBoundingClientRect();
       return {
+        hostParent: host.parentElement === document.documentElement,
         zIndex: computed.zIndex,
         position: computed.position,
-        overflow: computed.overflow,
         pointerEvents: computed.pointerEvents,
         ariaHidden: layer.getAttribute('aria-hidden'),
-        frameZIndex: getComputedStyle(iframe).zIndex,
-        afterTheStage: Boolean(
-          stage.compareDocumentPosition(layer) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-        ),
-        inShadowRoot: layer.getRootNode() === root,
+        inHostRoot: layer.getRootNode() === root,
+        coversPage:
+          Math.abs(box.top - html.top) <= 1 &&
+          Math.abs(box.height - html.height) <= 1 &&
+          Math.abs(box.width - html.width) <= 1,
       };
-    }, HOST);
+    });
     expect(facts).toEqual({
+      hostParent: true,
       zIndex: '2',
       position: 'absolute',
-      overflow: 'hidden',
       pointerEvents: 'none',
       ariaHidden: 'true',
-      frameZIndex: 'auto',
-      afterTheStage: true,
-      inShadowRoot: true,
+      inHostRoot: true,
+      coversPage: true,
     });
+    // the shell itself holds no layer any more
+    await expect(page.locator(`${HOST} ${LAYER}`)).toHaveCount(0);
 
+    // the spacer's top is scrolled out of the frame, and its outline is not
+    // clipped to the frame: it reaches above it, as the page does
     const content = await frameContentBox(page);
-    expectNear(await chromeBoxOf(page, LAYER), content);
-    // the spacer's top is scrolled out, so its outline reaches above the
-    // layer, which clips it
     const outline = await chromeBoxOf(page, OUTLINE);
     expect(outline.y).toBeLessThan(content.y);
     expect(outline.height).toBeGreaterThan(content.height);
@@ -414,19 +415,20 @@ test.describe('over the adversarial theme', () => {
 });
 
 test.describe('the outline follows its element', () => {
-  test('through a scroll of the frame', async ({ page }) => {
+  test('after scrolling by 300 and by 600 and back', async ({ page }) => {
     await openShell(page, '/?_edit=1', '.spacer');
     const frame = await framedSite(page);
     await hoverSpacer(page);
     await expectOutlineOver(page, frame, '.spacer');
-    const before = await chromeBoxOf(page, OUTLINE);
+    const start = await frame.evaluate(() => window.scrollY);
 
-    await frame.evaluate(() => {
-      window.scrollBy({ top: 300, behavior: 'instant' });
-    });
-    await expectOutlineOver(page, frame, '.spacer');
-    const after = await chromeBoxOf(page, OUTLINE);
-    expect(Math.abs(before.y - after.y - 300)).toBeLessThanOrEqual(1);
+    // the pointer stays over the 1600px spacer for all of these
+    for (const top of [start + 300, start + 600, start]) {
+      await frame.evaluate((wanted) => {
+        window.scrollTo({ top: wanted, behavior: 'instant' });
+      }, top);
+      await expectOutlineOver(page, frame, '.spacer');
+    }
   });
 
   test('through a resize of the window', async ({ page }) => {
@@ -440,7 +442,6 @@ test.describe('the outline follows its element', () => {
       .poll(async () => (await frameContentBox(page)).height)
       .not.toBe(before.height);
     await expectOutlineOver(page, frame, '.spacer');
-    expectNear(await chromeBoxOf(page, LAYER), await frameContentBox(page));
   });
 
   test('through the layout toggle, both ways', async ({ page }) => {
@@ -457,7 +458,6 @@ test.describe('the outline follows its element', () => {
     await expectOutlineOver(page, frame, '.spacer');
     const full = await chromeBoxOf(page, OUTLINE);
     expect(framed.x - full.x).toBeGreaterThan(100);
-    expectNear(await chromeBoxOf(page, LAYER), await frameContentBox(page));
 
     await page.keyboard.press('Enter');
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'framed');
@@ -544,7 +544,7 @@ test.describe('the outline follows its element', () => {
 });
 
 test.describe('the chip', () => {
-  test('rests above the outline, moves inside it near the frame top, and pins to the frame top once the element top scrolls out', async ({
+  test('rests above the outline, moves inside it near the frame top, and sticks to the frame top once the element top scrolls out', async ({
     page,
   }) => {
     await openShell(page, '/?_edit=1', '.spacer');
@@ -552,10 +552,10 @@ test.describe('the chip', () => {
     await hoverSpacer(page);
     const content = await frameContentBox(page);
 
-    // the spacer's top is far above the frame's: pinned 4px below its top
+    // the spacer's top is far above the frame's: sticky, 4px below its top
     await expect(chrome(page).locator(CHIP)).toHaveAttribute(
       'data-placement',
-      'pinned',
+      'sticky',
     );
     const pinned = await chromeBoxOf(page, CHIP);
     expect(Math.abs(pinned.y - (content.y + 4))).toBeLessThanOrEqual(1);
