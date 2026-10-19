@@ -21,7 +21,14 @@ export type {
   TextThemeIssueCode,
 } from './theme.js';
 export { HREF_MAX_LENGTH, isAllowedHref } from './href.js';
-export { validateRichTextDocument } from './document.js';
+export {
+  collectRichTextPageIds,
+  isCompleteCta,
+  isEmptyRichTextDocument,
+  isRichTextDocumentInTheme,
+  stripOutOfTheme,
+  validateRichTextDocument,
+} from './document.js';
 export type {
   RichTextDocument,
   RichTextIssue,
@@ -29,4 +36,18 @@ export type {
   RichTextMarkJson,
   RichTextNodeJson,
 } from './document.js';
-export { TOKEN_PATTERN } from './values.js';
+export {
+  isCompleteLinkTarget,
+  linkTargetSchema,
+  PAGE_ID_PATTERN,
+} from './link.js';
+export type { LinkTarget } from './link.js';
+export {
+  CUSTOM_SIZE_MAX,
+  CUSTOM_SIZE_MIN,
+  isCustomColorValue,
+  isCustomSizeValue,
+  parseCustomColor,
+  parseCustomSize,
+  TOKEN_PATTERN,
+} from './values.js';
