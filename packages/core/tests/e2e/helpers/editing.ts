@@ -136,7 +136,29 @@ export async function selectItem(page: Page, target: Locator): Promise<void> {
   );
   if (id === null) throw new Error('The target is not inside a block');
   await target.click();
+  // A click on editable text also starts a field session; it is left again
+  // (the block stays selected) so the specs that only select are not typing.
+  if ((await page.locator(HOST).getAttribute('data-text-field')) !== null) {
+    await page.keyboard.press('Escape');
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+  }
   await expect.poll(() => selectedId(page)).toBe(id);
+}
+
+/**
+ * Clicks a text field the way an editor does (one click selects the block and
+ * puts the caret under the pointer), waits for the field session, and types.
+ * `position` is relative to the target's top-left corner.
+ */
+export async function typeInField(
+  page: Page,
+  target: Locator,
+  text: string,
+  position?: { readonly x: number; readonly y: number },
+): Promise<void> {
+  await target.click(position === undefined ? {} : { position });
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+  await page.keyboard.type(text);
 }
 
 /**

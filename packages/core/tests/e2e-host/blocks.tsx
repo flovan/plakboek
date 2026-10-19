@@ -1,5 +1,5 @@
 import { defineBlock } from '@plakboek/core';
-import { Columns, type BlockComponent } from '@plakboek/render';
+import { Columns, RichText, type BlockComponent } from '@plakboek/render';
 
 const VARIANTS = ['plain', 'transform', 'filter', 'contain', 'isolation'];
 
@@ -170,6 +170,18 @@ const Slide: BlockComponent<Record<string, never>> = ({ children, edit }) => (
   </div>
 );
 
+/**
+ * A block with one rich text field. The field element is the editor's mount
+ * point, so it holds `<RichText>` directly, with no wrapper of its own.
+ */
+const Prose: BlockComponent<{ body?: unknown }> = ({ props, edit }) => (
+  <div {...edit} className="prose-block">
+    <div {...edit.field('body')} className="prose-flow">
+      <RichText value={props.body} />
+    </div>
+  </div>
+);
+
 /** Renders the same whatever its required note says, so a spec can leave it empty. */
 const Note: BlockComponent<{ note: string }> = ({ edit }) => (
   <div {...edit} className="note" aria-hidden="true" style={{ height: 24 }} />
@@ -305,6 +317,16 @@ export const quote = defineBlock({
     },
   },
   component: Quote,
+});
+
+export const prose = defineBlock({
+  key: 'prose',
+  editor: { label: 'Prose' },
+  schemaVersion: 1,
+  properties: {
+    body: { fieldType: 'rich_text', label: 'Body', options: {} },
+  },
+  component: Prose,
 });
 
 export const accordion = defineBlock({

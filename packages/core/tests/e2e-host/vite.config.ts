@@ -27,7 +27,12 @@ export default defineConfig({
   // the dev specs cannot wait out, so it is optimized at startup. An installed
   // editor is optimized as a whole and needs no such line.
   optimizeDeps: {
-    include: ['@plakboek/core > @plakboek/editor > @tanstack/react-query'],
+    include: [
+      '@plakboek/core > @plakboek/editor > @tanstack/react-query',
+      '@plakboek/core > @plakboek/editor > @tiptap/core',
+      '@plakboek/core > @plakboek/editor > @tiptap/pm/state',
+      '@plakboek/core > @plakboek/editor > @tiptap/starter-kit',
+    ],
   },
   plugins: [
     plakboek({

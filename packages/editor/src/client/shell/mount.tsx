@@ -93,6 +93,8 @@ import {
   type EditorState,
   type PickerOpener,
 } from '../session/store.js';
+import { createTextController } from '../text/controller.js';
+import { findEditableField } from '../text/field-target.js';
 import { createDragSession } from './drag-session.js';
 import { drawerFits, setDrawerColumn } from './drawer.js';
 import { watchFrame } from './frame-watch.js';
@@ -527,6 +529,50 @@ function Shell(props: {
     runnerRef.current?.ready(blockId);
   }, []);
 
+  // Rich text fields are edited in place on the page. The controller owns one
+  // session at a time and writes through the same preview and save path as the
+  // Properties controls; the wiring here is only what it cannot reach itself.
+  const textController = useMemo(
+    () =>
+      createTextController({
+        store,
+        changeProperties,
+        ready: blurProperties,
+        focusRegion: () => {
+          focusRegion(host);
+        },
+        announce: (text) => {
+          store.announce(text);
+        },
+      }),
+    [store, changeProperties, blurProperties, host],
+  );
+  useEffect(() => () => textController.dispose(), [textController]);
+  // The marker specs and tools wait on while a field session runs.
+  useEffect(() => {
+    const sync = (): void => {
+      const field = store.getState().textField;
+      host.toggleAttribute('data-text-field', field?.unsupported === false);
+    };
+    sync();
+    return store.subscribe(sync);
+  }, [host, store]);
+  /**
+   * Runs an action that writes to the page after the text session, if any, has
+   * flushed its pending save: the typed words are queued first, so the action
+   * (a move, a copy, a delete, an undo) sees them.
+   */
+  const afterTextSession = useCallback(
+    (reason: 'structure' | 'undo', action: () => void) => {
+      if (textController.active() === null) {
+        action();
+        return;
+      }
+      void textController.exit(reason).then(action);
+    },
+    [textController],
+  );
+
   /**
    * A layout choice (column widths, alignment, fill): render the item with it
    * and, when the engine accepts it, queue the save like a picked property
@@ -630,28 +676,32 @@ function Shell(props: {
   /** A column's move from its section's panel: the section stays selected, so more moves can follow. */
   const moveColumnFromPanel = useCallback(
     (id: string, direction: MoveDirection) => {
-      runnerRef.current?.whenSaved(() => {
-        const state = store.getState();
-        const action = moveActionFor(state, id, direction);
-        if (action === null) return;
-        runnerRef.current?.perform(action.intent, action.entry, {
-          selectId: state.selection.selectedId,
-          flash: false,
+      afterTextSession('structure', () => {
+        runnerRef.current?.whenSaved(() => {
+          const state = store.getState();
+          const action = moveActionFor(state, id, direction);
+          if (action === null) return;
+          runnerRef.current?.perform(action.intent, action.entry, {
+            selectId: state.selection.selectedId,
+            flash: false,
+          });
         });
       });
     },
-    [store],
+    [afterTextSession, store],
   );
 
   const moveItem = useCallback(
     (id: string, direction: MoveDirection) => {
-      runnerRef.current?.whenSaved(() => {
-        const action = moveActionFor(store.getState(), id, direction);
-        if (action !== null)
-          runnerRef.current?.perform(action.intent, action.entry);
+      afterTextSession('structure', () => {
+        runnerRef.current?.whenSaved(() => {
+          const action = moveActionFor(store.getState(), id, direction);
+          if (action !== null)
+            runnerRef.current?.perform(action.intent, action.entry);
+        });
       });
     },
-    [store],
+    [afterTextSession, store],
   );
 
   /** Deletes at once and offers to undo it; the caller has settled any confirmation. */
@@ -694,9 +744,9 @@ function Shell(props: {
         return;
       }
       if (needsDeleteConfirmation(model, id)) store.askDelete(id, opener);
-      else performDelete(id, opener);
+      else afterTextSession('structure', () => performDelete(id, opener));
     },
-    [store, performDelete],
+    [store, performDelete, afterTextSession],
   );
 
   const confirmDelete = useCallback(
@@ -745,22 +795,24 @@ function Shell(props: {
     (id: string) => {
       const first = store.getState();
       if (first.status !== 'editing' || first.mode !== 'edit') return;
-      runnerRef.current?.whenSaved(() => {
-        const state = store.getState();
-        if (state.status !== 'editing' || state.mode !== 'edit') return;
-        const newId = crypto.randomUUID();
-        const action = duplicateActionFor(state, id, newId);
-        if (action === null) {
-          store.announce(STRINGS['toolbar.reason.noDuplicate']);
-          return;
-        }
-        // A copied column also resets its section's ratio, so the copy is named.
-        runnerRef.current?.perform(action.intent, action.entry, {
-          selectId: newId,
+      afterTextSession('structure', () => {
+        runnerRef.current?.whenSaved(() => {
+          const state = store.getState();
+          if (state.status !== 'editing' || state.mode !== 'edit') return;
+          const newId = crypto.randomUUID();
+          const action = duplicateActionFor(state, id, newId);
+          if (action === null) {
+            store.announce(STRINGS['toolbar.reason.noDuplicate']);
+            return;
+          }
+          // A copied column also resets its section's ratio, so the copy is named.
+          runnerRef.current?.perform(action.intent, action.entry, {
+            selectId: newId,
+          });
         });
       });
     },
-    [store],
+    [afterTextSession, store],
   );
 
   /** Adds a new item of a type at a position; the runner selects it once it is saved. */
@@ -906,17 +958,23 @@ function Shell(props: {
   const retrySave = useCallback(() => {
     runnerRef.current?.retry();
   }, []);
+  // The sidebar's and the rail's Undo and Redo first end a text session, so
+  // the typing burst is one entry they act on.
   const undo = useCallback(() => {
-    runnerRef.current?.undo();
-  }, []);
+    afterTextSession('undo', () => {
+      runnerRef.current?.undo();
+    });
+  }, [afterTextSession]);
   /** Undo from the toast: its button is about to go, so focus goes to the page. */
   const undoFromToast = useCallback(() => {
     runnerRef.current?.undo();
     focusRegion(host);
   }, [host]);
   const redo = useCallback(() => {
-    runnerRef.current?.redo();
-  }, []);
+    afterTextSession('undo', () => {
+      runnerRef.current?.redo();
+    });
+  }, [afterTextSession]);
 
   const changeMode = useCallback(
     (next: EditorMode) => {
@@ -1157,19 +1215,43 @@ function Shell(props: {
             onClick: (x, y) => {
               // The click that follows a drag's release is not a selection.
               if (dragSession.justEnded()) return;
+              // Nor is the click that ends a text selection dragged out of the field.
+              if (textController.pressEndedOutside()) return;
               store.closePicker();
+              void textController.exit('click');
               const hit = read(x, y);
               if (hit === null) return;
               selectAndAnnounce(
                 store,
                 selectByClick(hit.model, hit.selection, hit.chain),
               );
-              focusRegion(host);
+              // One click on editable text selects its block and puts the
+              // caret at the pointer; anywhere else the region takes focus.
+              const latest = store.getState();
+              const field =
+                latest.model === null
+                  ? null
+                  : findEditableField(
+                      claimed.document.elementFromPoint(x, y),
+                      latest.model,
+                      latest.session?.catalogue ?? [],
+                    );
+              if (
+                field !== null &&
+                field.blockId === latest.selection.selectedId
+              ) {
+                textController.enter(field, { x, y });
+              } else {
+                focusRegion(host);
+              }
             },
           },
           {
             isExempt: (event) =>
               event.target === chromeHostRef.current?.element ||
+              // The active text field keeps its own clicks, selections and
+              // double-clicks; the claim still owns every other site event.
+              textController.ownsEvent(event) ||
               // The release of a pointer drag is the drag's: the frame keeps
               // the mouse from the press on the in-frame handle until then.
               (event.type === 'pointerup' &&
@@ -1195,6 +1277,8 @@ function Shell(props: {
       ) {
         return;
       }
+      // A new document: the field of the old one is gone.
+      void textController.exit('reload');
       releaseClaim?.();
       releaseClaim = null;
       releaseKeys?.();
@@ -1232,6 +1316,7 @@ function Shell(props: {
     deleteItem,
     duplicateItem,
     openPicker,
+    textController,
   ]);
 
   // The lock is held while editing: renewed on a heartbeat, again when the tab

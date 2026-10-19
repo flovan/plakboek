@@ -8,6 +8,7 @@ import {
   heading,
   note,
   propsDemo,
+  prose,
   quote,
   section,
   siteForm,
@@ -18,6 +19,7 @@ import {
   tabs,
   text,
 } from './blocks.tsx';
+import textTheme from './text-theme.tsx';
 
 export default defineConfig({
   siteName: 'Adversarial fixture',
@@ -33,6 +35,8 @@ export default defineConfig({
   // A host widget the editor has no control for: its property is edited with
   // the standard control of its field type.
   widgets: [{ fieldType: 'short_text', widget: 'colour-wheel' }],
+  // The one theme every rich text property is held to unless it narrows it.
+  textTheme,
   blocks: [
     section,
     heading,
@@ -43,6 +47,7 @@ export default defineConfig({
     spacer,
     siteForm,
     propsDemo,
+    prose,
     quote,
     accordionList,
     accordionItem,

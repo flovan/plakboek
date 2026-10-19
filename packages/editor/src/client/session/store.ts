@@ -73,6 +73,18 @@ export type DragState = {
   readonly active: boolean;
 };
 
+/**
+ * The text field being edited in place, or one the editor refused to mount
+ * because its stored content holds formatting the theme no longer allows
+ * (`unsupported`: the field stays read-only).
+ */
+export type TextFieldState = {
+  readonly blockId: string;
+  readonly key: string;
+  readonly kind: 'rich' | 'plain';
+  readonly unsupported: boolean;
+};
+
 export type EditorState = {
   readonly status: EditorStatus;
   readonly session: EditorSession | null;
@@ -133,6 +145,8 @@ export type EditorState = {
   } | null;
   /** Leaving while a save failed: the editor is asked whether to stay. */
   readonly leaveRequest: { readonly token: number } | null;
+  /** The text field in a session, or null. */
+  readonly textField: TextFieldState | null;
 };
 
 /** What a successful write changes in one step, so no one reads a half-applied state. */
@@ -199,6 +213,8 @@ export type EditorStore = {
   closePicker(): void;
   /** A drag starts, becomes active or ends; the picker closes while one runs. */
   setDrag(drag: DragState | null): void;
+  /** A text field session starts or ends. */
+  setTextField(field: TextFieldState | null): void;
 };
 
 export function initialEditorState(): EditorState {
@@ -226,6 +242,7 @@ export function initialEditorState(): EditorState {
     drag: null,
     deleteRequest: null,
     leaveRequest: null,
+    textField: null,
   };
 }
 
@@ -266,6 +283,7 @@ export function openedState(
     drag: null,
     deleteRequest: null,
     leaveRequest: null,
+    textField: null,
   };
 }
 
@@ -305,6 +323,7 @@ export function createEditorStore(
       drag: null,
       deleteRequest: null,
       leaveRequest: null,
+      textField: null,
     });
   }
 
@@ -487,6 +506,10 @@ export function createEditorStore(
     setDrag(drag) {
       if (drag === null && state.drag === null) return;
       set({ ...state, drag, picker: drag === null ? state.picker : null });
+    },
+    setTextField(textField) {
+      if (textField === null && state.textField === null) return;
+      set({ ...state, textField });
     },
   };
 }
