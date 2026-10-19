@@ -101,6 +101,28 @@ describe('attachClaim', () => {
     expect(claim.onClick).not.toHaveBeenCalled();
   });
 
+  it('leaves an exempt event alone and routes nothing', () => {
+    const { added, frameWindow } = fakeWindow();
+    const claim = handlers();
+    attachClaim(frameWindow, claim, { isExempt: () => true });
+    const event = fakeEvent('click', 5, 6);
+    dispatch(added, event);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(event.stopPropagation).not.toHaveBeenCalled();
+    expect(event.stopImmediatePropagation).not.toHaveBeenCalled();
+    expect(claim.onClick).not.toHaveBeenCalled();
+  });
+
+  it('still claims an event the exemption refuses', () => {
+    const { added, frameWindow } = fakeWindow();
+    const claim = handlers();
+    attachClaim(frameWindow, claim, { isExempt: () => false });
+    const event = fakeEvent('click', 5, 6);
+    dispatch(added, event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(claim.onClick).toHaveBeenCalledExactlyOnceWith(5, 6);
+  });
+
   it('detaching removes exactly what was added', () => {
     const { added, removed, frameWindow } = fakeWindow();
     const detach = attachClaim(frameWindow, handlers());

@@ -555,6 +555,47 @@ test.describe('the editor adds one closed chrome host to the site document', () 
   });
 });
 
+test.describe('the chrome host follows the editing session', () => {
+  test('is rebuilt for a reloaded frame document and shows the shell theme', async ({
+    page,
+  }) => {
+    await openShell(page, '/?_edit=1');
+    const framed = await framedSite(page);
+    await expect(framed.locator('plakboek-chrome')).toHaveCount(1);
+
+    await page.evaluate((host) => {
+      document.querySelector(host)?.setAttribute('data-theme', 'dark');
+    }, HOST);
+    await expect(framed.locator('plakboek-chrome')).toHaveAttribute(
+      'data-theme',
+      'dark',
+    );
+
+    // a reload is a new document: it gets its own host, still exactly one,
+    // with the theme the shell has now
+    await framed.evaluate(() => {
+      (window as Window & { __firstDocument?: boolean }).__firstDocument = true;
+      location.reload();
+    });
+    await expect
+      .poll(
+        async () =>
+          await framed.evaluate(
+            () =>
+              (window as Window & { __firstDocument?: boolean })
+                .__firstDocument === undefined &&
+              document.readyState === 'complete' &&
+              document.querySelectorAll('plakboek-chrome').length,
+          ),
+      )
+      .toBe(1);
+    await expect(framed.locator('plakboek-chrome')).toHaveAttribute(
+      'data-theme',
+      'dark',
+    );
+  });
+});
+
 test.describe('chrome utilities compute inside the shadow root', () => {
   test('gives a focused sidebar button a 2px solid outline with a 2px offset, and the frame its shadow', async ({
     page,
