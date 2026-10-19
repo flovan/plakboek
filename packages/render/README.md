@@ -321,6 +321,11 @@ property rendering and structural patches.
 - **Input.** The page's whole live forest, the ids to render and the same
   component and block metadata maps; fragments come back in the order the ids
   were requested.
+- **Text environment.** `renderPageSnapshot`, `renderPageTree` and
+  `renderBlockFragments` all take an optional `text` input (a
+  `TextEnvironment`). Each block's markup renders inside it, so a fragment is
+  still byte-identical to that block's markup in the frame when both are given
+  the same environment. Left out, rich text uses the default theme.
 - **Unknown ids.** An id that is not in the tree is listed in `missing`, never
   thrown. A block that throws becomes the same inert `data-pk-unavailable`
   placeholder the frame shows and sets `degraded`.

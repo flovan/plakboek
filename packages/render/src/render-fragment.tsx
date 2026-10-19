@@ -12,6 +12,7 @@ import type { BlockNode } from '@plakboek/pages';
 import { renderBlocks } from './block-host.js';
 import type { ComponentMap } from './components.js';
 import type { RenderHooks } from './hooks.js';
+import type { TextEnvironment } from './rich-text/environment.js';
 import { liveEditFor, placeholderFor, type BlockMeta } from './render-tree.js';
 
 export type RenderBlockFragmentsInput = {
@@ -24,6 +25,8 @@ export type RenderBlockFragmentsInput = {
   readonly blockMeta: ReadonlyMap<string, BlockMeta>;
   readonly pageId: string;
   readonly hooks?: RenderHooks;
+  /** The text environment every block's rich text renders under. */
+  readonly text?: TextEnvironment;
 };
 
 export type RenderedFragment = {
@@ -73,6 +76,7 @@ export function renderBlockFragments(
       editFor,
       isDegraded: (candidate) => candidate.degraded,
       placeholderFor: placeholder,
+      ...(input.text === undefined ? {} : { text: input.text }),
     });
     degraded ||= rendered.degraded;
     fragments.push({ id, html: rendered.body });
