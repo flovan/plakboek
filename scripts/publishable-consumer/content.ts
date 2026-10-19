@@ -260,6 +260,11 @@ import {
   validateEntrySeo,
 } from '@plakboek/content';
 import * as content from '@plakboek/content';
+import {
+  isAllowedHref,
+  resolveTextTheme,
+  validateRichTextDocument,
+} from '@plakboek/content/rich-text';
 
 // Runtime kind checks. Nothing below opens a connection or applies a
 // migration: the only calls made are the pure ones listed further down.
@@ -474,6 +479,28 @@ for (const [name, value] of Object.entries(frozenObjects)) {
   if (typeof value !== 'object' || value === null || !Object.isFrozen(value)) {
     fail(`${name} is not a frozen object`);
   }
+}
+
+if (isAllowedHref('javascript:alert(1)') !== false) {
+  fail('the rich-text subpath accepts a javascript: href');
+}
+
+const defaultTextTheme = resolveTextTheme();
+if (defaultTextTheme.headingLevels.join(',') !== '2,3,4') {
+  fail('the rich-text subpath default theme does not offer heading levels 2-4');
+}
+
+const paragraphIssues = validateRichTextDocument(
+  {
+    type: 'doc',
+    content: [
+      { type: 'paragraph', content: [{ type: 'text', text: 'Hello' }] },
+    ],
+  },
+  defaultTextTheme,
+);
+if (paragraphIssues.length !== 0) {
+  fail('the rich-text subpath refuses a plain one-paragraph document');
 }
 
 const documentedValueCount =

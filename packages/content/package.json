@@ -22,6 +22,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./rich-text": {
+      "types": "./dist/rich-text.d.ts",
+      "default": "./dist/rich-text.js"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
