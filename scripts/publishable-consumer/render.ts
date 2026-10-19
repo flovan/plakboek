@@ -2,12 +2,15 @@ import {
   CMS_LOGIN_PATH,
   Columns,
   columnTracks,
+  CtaButton,
   defineBlockEdit,
+  defineTextTheme,
   EDIT_ATTRIBUTE,
   EDIT_PARAM,
   EDITOR_FLAG_KEY,
   NEXT_PARAM,
   NOOP_EDIT,
+  RichText,
   TOOLBAR_DISMISSED_KEY,
   type BlockComponent,
   type BlockComponentProps,
@@ -100,6 +103,13 @@ expectEqual(
   probeEdit,
 );
 expectEqual('NOOP_EDIT keys', Object.keys(NOOP_EDIT).length, 0);
+expectEqual(
+  'defineTextTheme headingLevels',
+  JSON.stringify(defineTextTheme().theme.headingLevels),
+  '[2,3,4]',
+);
+expectEqual('RichText', typeof RichText, 'function');
+expectEqual('CtaButton', typeof CtaButton, 'function');
 expectEqual(
   'NOOP_EDIT field keys',
   Object.keys(NOOP_EDIT.field('title')).length,

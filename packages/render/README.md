@@ -366,6 +366,65 @@ host section only draws the grid around them (D-06).
   is used only when it is digits joined by colons; anything else yields equal
   tracks, so a stored value can never inject CSS.
 
+## Rich text
+
+Stored rich text renders through one renderer map, so the visitor page, the
+editor frame and the editor's node views all look the same. `defineTextTheme`
+declares the theme data and overrides single renderers; `RichText` renders a
+stored document; `CtaButton` renders the standalone Button block exactly like a
+call to action inside text.
+
+```tsx
+import { RichText, defineTextTheme } from '@plakboek/render';
+
+export const textTheme = defineTextTheme({
+  colors: [{ label: 'Accent', token: 'accent' }],
+  renderers: {
+    heading: ({ level, children }) => {
+      const Tag = level === 3 ? 'h3' : level === 4 ? 'h4' : 'h2';
+      return <Tag className={`heading-${level}`}>{children}</Tag>;
+    },
+  },
+});
+
+// In a block: the host's own element carries the edit attributes, and
+// <RichText> is its only child.
+<div {...edit.field('body')}>
+  <RichText value={props.body} />
+</div>;
+```
+
+- **The field element is yours.** `RichText` adds no wrapper: the element that
+  carries `{...edit.field('prop')}` is the root the editor mounts on, and the
+  document's top-level nodes are its children.
+- **A renderer renders `children` inside one element.** The editor derives the
+  node's shell from that element, so add any wrapper around it, never beside
+  it. A heading renders as `h2`, `h3` or `h4`; a stored level outside 2 to 4
+  renders as `h2` and is reported, never as `h1`.
+- **Environment.** Provide `createTextEnvironment({ definition, mode,
+resolvePage, hooks })` with `TextEnvironmentProvider`, once per render.
+  `resolvePage` turns a page id into a public path (or `null`); a link whose
+  page is gone, or whose address the shared href policy refuses, renders as
+  plain text. Without a provider every field renders with the default theme in
+  visitor mode.
+- **Tokens render as variables.** A colour or size token renders as
+  `var(--color-<token>)` or `var(--text-<token>)`, so changing the theme
+  re-colours stored text. A Tailwind v4 host declares its tokens with
+  `@theme static` so the variables exist even when no utility class uses them.
+- **Custom values are inline styles.** Custom colour and size literals and
+  paragraph alignment render as inline `style` attributes. A host with a strict
+  `style-src` sets `allowCustomValues: false`, leaves `align` off, and
+  overrides the colour, size and paragraph renderers to render classes.
+- **New tabs.** The default `link` and `cta` renderers add
+  `rel="noopener noreferrer"` whenever the target is `_blank`; an overriding
+  renderer must keep it.
+- **Unfinished CTAs.** A call to action with no label or no usable target is not
+  shown to visitors and its data is kept. In edit mode it renders through the
+  `cta` renderer with `href: null`, so the editor can mark it.
+- **Keep data, flag, never crash.** An unknown node renders its text only and
+  an unknown mark is dropped. Each is reported once per environment, by type
+  name only, through `RenderHooks.onRichTextIssue`.
+
 ## Root versus server entry
 
 The package publishes two subpaths.
