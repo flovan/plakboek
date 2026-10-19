@@ -250,7 +250,10 @@ test.describe('the site’s own controls', () => {
     for (const control of inBlocks) {
       await control.click();
       await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
-      await page.keyboard.press('Escape');
+      // Escape climbs out of the block, its column and its section
+      for (let climbs = 0; climbs < 6; climbs += 1) {
+        await page.keyboard.press('Escape');
+      }
       await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
     }
 
@@ -266,7 +269,15 @@ test.describe('the site’s own controls', () => {
     }
     expect(await frame.evaluate(() => window.scrollY)).toBe(0);
 
-    expect(await siteState(frame)).toEqual(before);
+    // The editor reveals the entry and the tab it selected (the host's reveal
+    // hook), so those two now show; nothing else the site does on a click
+    // happened. A click that reached the site would toggle the entry shut.
+    await frame.locator(TRIGGER).first().click();
+    expect(await siteState(frame)).toEqual({
+      ...before,
+      expanded: 'true',
+      secondTab: 'true',
+    });
     expect(page.url()).toBe(shellUrl);
   });
 

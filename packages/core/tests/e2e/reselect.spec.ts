@@ -1,8 +1,8 @@
 /**
  * Reaching a block that renders at no size again, in a real browser: an
  * inserted Text with no text is a zero-height paragraph, and the pointer must
- * find it through the box the overlay draws it from, by drilling, by a click
- * at its column's scope, by hover and by its "Needs input" badge.
+ * find it through the box the overlay draws it from, by a click from nothing selected, by a click
+ * beside a selected block, by hover and by its "Needs input" badge.
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
@@ -77,18 +77,17 @@ async function open(page: Page): Promise<Frame> {
 }
 
 test.describe('an empty block can be selected again', () => {
-  test('by double-click drilling from nothing selected', async ({ page }) => {
+  test('by one click from nothing selected', async ({ page }) => {
     const frame = await open(page);
     const { x, y } = await ghostPoint(frame);
 
-    await page.mouse.dblclick(x, y);
-    await page.mouse.dblclick(x, y);
+    await page.mouse.click(x, y);
 
     await expect(page.locator(LIVE_REGION)).toHaveText(SELECTED_EMPTY);
     await expectGhostBox(page, frame, SELECTED);
   });
 
-  test('by a click when its column is the scope', async ({ page }) => {
+  test('by a click while a block beside it is selected', async ({ page }) => {
     const frame = await open(page);
     const { x, y } = await ghostPoint(frame);
 

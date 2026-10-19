@@ -15,6 +15,7 @@ import {
   openEditor,
   regionFocused,
   SELECTED,
+  selectContainer,
   selectItem,
   tabToRegion,
 } from './helpers/editing.ts';
@@ -105,7 +106,7 @@ test.describe('with a role that may delete', () => {
       const frame = await framedSite(page);
       const before = await blockIds(frame);
 
-      await selectItem(page, frame.locator('section.section').nth(0));
+      await selectContainer(page, frame.locator('section.section').nth(0));
       await deleteButton(page).click();
 
       const dialog = page.getByRole('dialog');
@@ -150,7 +151,7 @@ test.describe('with a role that may delete', () => {
       const created = await twoSections();
       await openEditor(page, created.path);
       const frame = await framedSite(page);
-      await selectItem(page, frame.locator('section.section').nth(0));
+      await selectContainer(page, frame.locator('section.section').nth(0));
       const dialog = page.getByRole('dialog');
 
       await deleteButton(page).click();
@@ -251,7 +252,7 @@ test.describe('with a role that may delete', () => {
       const created = await twoSections();
       await openEditor(page, created.path);
       const frame = await framedSite(page);
-      await selectItem(
+      await selectContainer(
         page,
         frame
           .locator('section.section')
@@ -279,7 +280,7 @@ test.describe('with a role that may delete', () => {
       });
       await openEditor(page, created.path);
       const frame = await framedSite(page);
-      await selectItem(
+      await selectContainer(
         page,
         frame.locator('section.section [data-pk-type="column"]').first(),
       );

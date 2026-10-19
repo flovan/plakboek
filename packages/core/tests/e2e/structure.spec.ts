@@ -12,6 +12,7 @@ import {
   HOST,
   openEditor,
   regionFocused,
+  selectContainer,
   selectItem,
   tabToRegion,
 } from './helpers/editing.ts';
@@ -243,7 +244,10 @@ test.describe('the toolbar buttons', () => {
     });
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await selectItem(page, frame.locator('[data-pk-kind="column"]').first());
+    await selectContainer(
+      page,
+      frame.locator('[data-pk-kind="column"]').first(),
+    );
 
     await expect(moveButton(page, 'right')).toBeVisible();
     await expect(moveButton(page, 'left')).toHaveAttribute(

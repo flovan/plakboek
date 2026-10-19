@@ -86,10 +86,9 @@ export async function selectedId(page: Page): Promise<string | null> {
 }
 
 /**
- * Selects the item the target belongs to. Phase 8 drills: a click selects the
- * section, each further double-click goes one level in (an accordion
- * entry's text is four levels down). Plan 09-14 makes it one click, and only
- * this function changes.
+ * Selects the item the target belongs to with one click on the target: a click
+ * selects the deepest item under the pointer, so the target should be the
+ * item's own content (its text), not a nested block inside it.
  */
 export async function selectItem(page: Page, target: Locator): Promise<void> {
   const id = await target.evaluate(
@@ -97,27 +96,31 @@ export async function selectItem(page: Page, target: Locator): Promise<void> {
       element.closest('[data-pk-block]')?.getAttribute('data-pk-block') ?? null,
   );
   if (id === null) throw new Error('The target is not inside a block');
-  let current = await selectedId(page);
   await target.click();
-  current = await settledSelection(page, current);
-  for (let drills = 0; drills < 4 && current !== id; drills += 1) {
-    const previous = current;
-    await target.dblclick();
-    current = await settledSelection(page, previous);
-  }
   await expect.poll(() => selectedId(page)).toBe(id);
 }
 
-/** Waits briefly for the selection to move off `previous`, then reads it. */
-async function settledSelection(
+/**
+ * Selects a section or a column. A click selects the deepest item under the
+ * pointer, so a container is reached the way an editor reaches it: click what
+ * is inside it, then Escape climbs one level at a time until it is selected.
+ * The target is the container's own element and the click lands on its centre.
+ */
+export async function selectContainer(
   page: Page,
-  previous: string | null,
-): Promise<string | null> {
-  await expect
-    .poll(() => selectedId(page), { timeout: 750 })
-    .not.toBe(previous)
-    .catch(() => undefined);
-  return await selectedId(page);
+  target: Locator,
+): Promise<void> {
+  const id = await target.getAttribute('data-pk-block');
+  if (id === null) throw new Error('The target is not a block');
+  await target.click();
+  for (let climbs = 0; climbs < 6; climbs += 1) {
+    await expect.poll(() => selectedId(page)).not.toBeNull();
+    const current = await selectedId(page);
+    if (current === id) return;
+    await page.keyboard.press('Escape');
+    await expect.poll(() => selectedId(page)).not.toBe(current);
+  }
+  await expect.poll(() => selectedId(page)).toBe(id);
 }
 
 /** Selects the item and opens its Properties sheet from the block toolbar. */

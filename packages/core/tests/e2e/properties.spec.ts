@@ -80,7 +80,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe('changing a heading in the panel', () => {
-  test('double-clicking a heading opens its text in the panel, typing shows live in the frame without losing the caret, and it is saved after the pause', async ({
+  test('opening a heading from the toolbar shows its text in the panel, typing shows live in the frame without losing the caret, and it is saved after the pause', async ({
     page,
   }) => {
     await openPageWithHeading(page);
@@ -91,11 +91,8 @@ test.describe('changing a heading in the panel', () => {
       .locator('h2')
       .first();
 
-    // down to the heading and once more on it: the ask for its Properties
-    const target = frame.locator('section.section >> h2 >> nth=0');
-    await target.dblclick();
-    await target.dblclick();
-    await target.dblclick();
+    // select the heading and ask for its Properties from the toolbar
+    await openProperties(page, first);
     await expect(sheet(page)).toHaveAttribute('data-open', '');
     const control = textControl(page);
     await expect(control).toHaveValue('Hello');
@@ -133,7 +130,7 @@ test.describe('the Properties sheet', () => {
     const frame = await framedSite(page);
     await expect(sheet(page)).not.toHaveAttribute('data-open', '');
 
-    // drill to a heading by clicks: it is selected, the sheet stays closed
+    // one click selects the heading: the sheet stays closed
     const target = frame
       .locator('section.section')
       .first()

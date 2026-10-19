@@ -2,9 +2,8 @@
  * The hover overlay on the real shell, over the adversarial theme.
  *
  * The overlay draws an outline, a dashed outline for the section around it
- * and a label chip over the block the pointer is on, restricted to what a click
- * would select at the current scope: at page scope that is a section, and
- * after drilling into a section's column it is the blocks inside it. It is
+ * and a label chip over the block the pointer is on: the deepest item a click
+ * there would select. It is
  * measured, not looked at: each outline's box is compared with the box the
  * site element has inside the frame, moved by where the frame's content box
  * sits in the shell.
@@ -234,20 +233,19 @@ test.describe('hovering a block in the framed site', () => {
   });
 });
 
-test.describe('hover follows the scope', () => {
-  test('at page scope a heading hover outlines its section, and after drilling into the section it outlines the heading', async ({
+test.describe('hover previews the click', () => {
+  test('a hover outlines the deepest item under the pointer and the click selects that same item', async ({
     page,
   }) => {
     await openShell(page, '/?_edit=1');
     const frame = await framedSite(page);
     await hover(page, '.variant-plain h2');
-    await expect(chrome(page).locator(CHIP)).toHaveText('Section');
+    await expect(chrome(page).locator(CHIP)).toHaveText('Heading');
     expectNear(
       await chromeBoxOf(page, OUTLINE),
-      await boxOf(frame, 'section.variant-plain'),
+      await boxOf(frame, '.variant-plain h2'),
     );
 
-    // selecting the heading makes it what the hover outlines
     await selectItem(page, frame.locator('.variant-plain h2'));
     await expectSelectedOver(page, frame, '.variant-plain h2');
     await expect(chrome(page).locator(CHIP)).toHaveText('Heading');

@@ -13,6 +13,7 @@ import {
   HOST,
   openEditor,
   SELECTED,
+  selectContainer,
   selectItem,
   type Rect,
 } from './helpers/editing.ts';
@@ -190,7 +191,7 @@ test.describe('where a line shows', () => {
     const frame = await framedSite(page);
     // The first section fills the window: its blank lower part is outside any column.
     await frame.evaluate(() => window.scrollTo(0, 0));
-    await selectItem(page, frame.locator('section.section').nth(2));
+    await selectContainer(page, frame.locator('section.section').nth(2));
     await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
 
     await pickUp(page);
