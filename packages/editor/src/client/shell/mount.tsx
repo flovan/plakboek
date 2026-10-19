@@ -96,7 +96,8 @@ import {
 import { createDragSession } from './drag-session.js';
 import { drawerFits, setDrawerColumn } from './drawer.js';
 import { watchFrame } from './frame-watch.js';
-import { keyAction, structureKeyAction } from './keys.js';
+import { keyAction, regionTabTarget, structureKeyAction } from './keys.js';
+import { stopAfterStage, tabStops } from './tab-stops.js';
 import { applyLayout, readLayout, writeLayout } from './layout.js';
 
 /**
@@ -1064,12 +1065,67 @@ function Shell(props: {
       }
     };
 
+    /**
+     * Tab between the page region and the in-frame chrome, which the frame's
+     * place outside the tab order would otherwise cut off. True when handled.
+     */
+    const tabKey = (event: KeyboardEvent): boolean => {
+      const chrome = chromeHostRef.current;
+      if (
+        event.key !== 'Tab' ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        chrome === null ||
+        store.getState().mode !== 'edit'
+      ) {
+        return false;
+      }
+      const focused = focusedChrome(event);
+      const first = event.composedPath()[0];
+      const inRegion =
+        focused === null && first instanceof Element && first.id === STAGE_ID;
+      const stops = tabStops(chrome.root);
+      const index =
+        focused === null ? -1 : stops.indexOf(focused as HTMLElement);
+      const target = regionTabTarget({
+        key: event.key,
+        shiftKey: event.shiftKey,
+        inRegion,
+        inToolbar: index !== -1,
+        hasToolbar: stops.length > 0,
+      });
+      if (target === null) return false;
+      event.preventDefault();
+      const shellRoot = host.shadowRoot;
+      if (target === 'toolbar') {
+        stops[0]?.focus({ preventScroll: true });
+      } else if (target === 'region') {
+        // Shift+Tab walks back through the chrome's own stops first.
+        const previous = stops[index - 1];
+        if (previous === undefined) focusRegion(host);
+        else previous.focus({ preventScroll: true });
+      } else {
+        const next = stops[index + 1];
+        const stage = shellRoot?.getElementById(STAGE_ID) ?? null;
+        const after =
+          next ??
+          (shellRoot === null || stage === null
+            ? null
+            : stopAfterStage(shellRoot, stage));
+        if (after === null) focusRegion(host);
+        else after.focus({ preventScroll: true });
+      }
+      return true;
+    };
+
     const onKey = (event: KeyboardEvent): void => {
       // A key something already used (the Properties sheet closing on Escape)
       // does nothing more here, so that Escape does not also climb the selection.
       if (event.defaultPrevented) return;
       // The delete confirmation owns the keyboard while it is open.
       if (store.getState().deleteRequest !== null) return;
+      if (tabKey(event)) return;
       const target =
         focusedChrome(event) ?? event.composedPath()[0] ?? event.target;
       const action = keyAction(event, target);

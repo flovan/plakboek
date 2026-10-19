@@ -293,6 +293,57 @@ test.describe('near the frame edge', () => {
   });
 });
 
+test.describe('after the frame scrolled during a drag', () => {
+  test('the line sits on its slot in the scrolled page and the drop lands there', async ({
+    page,
+  }) => {
+    const created = await createEditablePage({
+      blocks: [
+        section(heading('Top'), paragraph('One')),
+        section(heading('Below')),
+      ],
+    });
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await frame.evaluate(() => window.scrollTo(0, 0));
+    await selectHeading(page, frame, 0, 0);
+    await pickUp(page);
+
+    const view = await page.locator(`${HOST} iframe`).boundingBox();
+    if (view === null) throw new Error('The frame has no box');
+    await page.mouse.move(view.x + view.width / 2, view.y + view.height - 10, {
+      steps: 6,
+    });
+    await expect
+      .poll(() => frame.evaluate(() => window.scrollY))
+      .toBeGreaterThan(100);
+
+    const below = 'section.section >> nth=1 >> h2';
+    const target = await gapAfter(frame, below);
+    await page.mouse.move(target.x, target.y, { steps: 8 });
+    const line = chrome(page).locator(LINE);
+    await expect(line).toBeVisible();
+    const slot = await frameBoxOf(frame, below);
+    const drawn = await line.boundingBox();
+    if (drawn === null) throw new Error('The line has no box');
+    expect(Math.abs(drawn.y - (slot.y + slot.height))).toBeLessThan(24);
+    await page.mouse.up();
+
+    await expect
+      .poll(() =>
+        frame
+          .locator('section.section')
+          .evaluateAll((sections) =>
+            sections.map((element) =>
+              [...element.querySelectorAll('h2')].map((h) => h.textContent),
+            ),
+          ),
+      )
+      .toEqual([[], ['Below', 'Top']]);
+    await expect(page.getByText(SAVED)).toBeVisible();
+  });
+});
+
 test.describe('a drop that is not saved', () => {
   test('an aborted write shows the failed status and the frame keeps the order it had', async ({
     page,

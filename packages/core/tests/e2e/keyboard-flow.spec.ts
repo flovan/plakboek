@@ -114,6 +114,16 @@ test('the whole structure flow is done with the keyboard alone, and the page tha
   await page.keyboard.press('ArrowDown');
   await expect(page.locator(LIVE_REGION)).toContainText('Selected Text');
 
+  // Tab leaves the page region for the toolbar in the frame, Shift+Tab returns
+  expect(await regionFocused(page)).toBe(true);
+  await page.keyboard.press('Tab');
+  expect(await regionFocused(page)).toBe(false);
+  await expect(
+    chrome(page).locator('[data-toolbar] [tabindex="0"]'),
+  ).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  expect(await regionFocused(page)).toBe(true);
+
   // a copy, then its removal, undone and redone
   await page.keyboard.press('ControlOrMeta+D');
   await expect.poll(order).toHaveLength(3);
