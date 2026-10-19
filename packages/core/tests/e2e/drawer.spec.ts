@@ -7,6 +7,7 @@
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
   chrome,
+  exposeFrameChrome,
   FRAME,
   framedSite,
   HOST,
@@ -369,6 +370,7 @@ test.describe('a notice in the full-width layout', () => {
       await signIn(tabA, editor);
       await openEditor(tabA, created.path);
       const tabB = await context.newPage();
+      await exposeFrameChrome(tabB);
       await tabB.goto(`${created.path}?_edit=1`);
       await waitForShell(tabB);
       await expect(tabB.locator(HOST)).toHaveAttribute(

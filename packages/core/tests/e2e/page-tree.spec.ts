@@ -84,7 +84,16 @@ test.describe('Page structure', () => {
       '[data-pk-type="heading"]:has-text("Far")',
     );
 
-    // a fully visible item does not scroll the page
+    // a fully visible item does not scroll the page; first let the smooth
+    // scroll that brought Far into view come to rest, or its last frames land
+    // after the reset below
+    await expect
+      .poll(async () => {
+        const before = await frame.evaluate(() => window.scrollY);
+        await page.waitForTimeout(100);
+        return before === (await frame.evaluate(() => window.scrollY));
+      })
+      .toBe(true);
     await frame.evaluate(() =>
       window.scrollTo({ top: 0, behavior: 'instant' }),
     );

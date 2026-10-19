@@ -187,6 +187,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
           sheet: (
             <PropertiesSheet
               store={editor.store}
+              chromeHost={chromeHost}
               onPropertiesChange={editor.onPropertiesChange}
               onPropertiesBlur={editor.onPropertiesBlur}
               onLayoutChange={editor.onLayoutChange}

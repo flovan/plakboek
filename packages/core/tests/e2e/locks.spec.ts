@@ -15,6 +15,7 @@ import {
 } from '@playwright/test';
 import {
   chrome,
+  exposeFrameChrome,
   framedSite,
   FRAME,
   HOST,
@@ -104,6 +105,7 @@ async function personIn(
 }
 
 async function openShell(page: Page, path: string): Promise<void> {
+  await exposeFrameChrome(page);
   const response = await page.goto(`${path}?_edit=1`);
   expect(response?.status()).toBe(200);
   await waitForShell(page);
