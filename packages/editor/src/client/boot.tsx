@@ -11,6 +11,13 @@ export type BootEditorOptions = {
    * `plakboek()` Vite plugin supplies them; a host never passes this itself.
    */
   readonly blockEdit?: BlockEditLoaders;
+  /**
+   * The host's text theme module (the default export of its theme file), or
+   * `undefined` when the host has none. The `plakboek()` Vite plugin supplies
+   * it; the editor checks it with `isTextThemeDefinition` before use and a
+   * host never passes it itself.
+   */
+  readonly textTheme?: unknown;
 };
 
 /**

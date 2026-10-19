@@ -16,6 +16,8 @@ const EDITOR_CLIENT_ID = 'virtual:plakboek/editor-client';
 const RESOLVED_EDITOR_CLIENT_ID = `\0${EDITOR_CLIENT_ID}`;
 const BLOCK_EDIT_ID = 'virtual:plakboek/block-edit';
 const RESOLVED_BLOCK_EDIT_ID = `\0${BLOCK_EDIT_ID}`;
+const TEXT_THEME_ID = 'virtual:plakboek/text-theme';
+const RESOLVED_TEXT_THEME_ID = `\0${TEXT_THEME_ID}`;
 const ROOT = '/work/host';
 
 type Hook = (this: unknown, ...args: unknown[]) => unknown;
@@ -164,22 +166,62 @@ describe('plakboek() editor chunk', () => {
     ).toBe(RESOLVED_EDITOR_CLIENT_ID);
   });
 
-  it('loads a module that boots the editor with the host block edit loaders', () => {
+  it('loads a module that boots the editor with the host block edit loaders and text theme', () => {
     const source = callHook(
       instance().load,
       { environment: { name: 'client' } },
       RESOLVED_EDITOR_CLIENT_ID,
     ) as string;
     const lines = source.split('\n');
-    expect(lines).toHaveLength(3);
+    expect(lines).toHaveLength(4);
     expect(lines[0]).toMatch(
       /^import \{ bootEditor \} from ".*editor.*client\.js";$/,
     );
     expect(lines[1]).toBe(
       `import { blockEditModules } from "${BLOCK_EDIT_ID}";`,
     );
-    expect(lines[2]).toBe(
-      'bootEditor(document, { blockEdit: blockEditModules });',
+    expect(lines[2]).toBe(`import { textTheme } from "${TEXT_THEME_ID}";`);
+    expect(lines[3]).toBe(
+      'bootEditor(document, { blockEdit: blockEditModules, textTheme });',
+    );
+  });
+
+  it('resolves the text theme id, and its resolved form, to one module', () => {
+    const plugin = instance();
+    expect(callHook(plugin.resolveId, undefined, TEXT_THEME_ID)).toBe(
+      RESOLVED_TEXT_THEME_ID,
+    );
+    expect(callHook(plugin.resolveId, undefined, RESOLVED_TEXT_THEME_ID)).toBe(
+      RESOLVED_TEXT_THEME_ID,
+    );
+  });
+
+  it('loads the default eager glob for the host text theme module', () => {
+    const source = callHook(
+      instance().load,
+      { environment: { name: 'client' } },
+      RESOLVED_TEXT_THEME_ID,
+    ) as string;
+    expect(source).toBe(
+      [
+        `const modules = import.meta.glob(["/text-theme.{ts,tsx}"], { eager: true, import: 'default' });`,
+        'export const textTheme = Object.values(modules)[0];',
+      ].join('\n'),
+    );
+  });
+
+  it('loads the host patterns from the textTheme option, one or several', () => {
+    const load = (textTheme: PlakboekPluginOptions['textTheme']): string =>
+      callHook(
+        instance({ textTheme }).load,
+        { environment: { name: 'client' } },
+        RESOLVED_TEXT_THEME_ID,
+      ) as string;
+    expect(load('/app/theme.ts')).toContain(
+      'import.meta.glob(["/app/theme.ts"]',
+    );
+    expect(load(['/a/theme.ts', '/b/theme.ts'])).toContain(
+      'import.meta.glob(["/a/theme.ts","/b/theme.ts"]',
     );
   });
 
