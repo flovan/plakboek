@@ -19,12 +19,14 @@ import {
   isEmptyRichTextDocument,
   isRichTextDocumentInTheme,
 } from '@plakboek/content/rich-text';
+import { DEFAULT_TEXT_RENDERERS, type TextRenderers } from '@plakboek/render';
 import { formatString } from '../../chrome/strings.js';
 import type { EditorStore } from '../session/store.js';
 import { textOf } from '../session/selection-announcement.js';
 import { labelOf } from '../session/tree-model.js';
 import { beginInlineEdit, endInlineEdit } from '../frame/patch.js';
 import { buildTextExtensions } from './extensions.js';
+import { createRendererShells, type RendererShells } from './shells.js';
 import type { FieldTarget } from './field-target.js';
 import {
   cleanChildren,
@@ -57,6 +59,11 @@ export type TextControllerOptions = {
   /** Puts keyboard focus on the page region. */
   readonly focusRegion: () => void;
   readonly announce: (text: string) => void;
+  /**
+   * The host's renderer map; the field is edited in node views derived from it
+   * so it keeps the host's own markup. The default map when the host has none.
+   */
+  readonly renderers?: TextRenderers;
 };
 
 export type TextController = {
@@ -85,6 +92,7 @@ type Session = {
   readonly editor: Editor;
   readonly block: Element;
   readonly snapshot: FieldSnapshot;
+  readonly shells: RendererShells;
   /** The document as mounted, so an unchanged field gives back its exact markup. */
   readonly initial: string;
   /** Any change was made, so the value must be sent even when it ends as it began. */
@@ -115,6 +123,7 @@ export function createTextController(
   options: TextControllerOptions,
 ): TextController {
   const { store, changeProperties, ready, focusRegion, announce } = options;
+  const renderers = options.renderers ?? DEFAULT_TEXT_RENDERERS;
   let current: Session | null = null;
   let pressInside = false;
 
@@ -135,7 +144,7 @@ export function createTextController(
       return;
     }
     current = null;
-    const { target, editor, block, snapshot } = session;
+    const { target, editor, block, snapshot, shells } = session;
     const { blockId, key } = target;
     const value = savedValue(editor);
     const changed = JSON.stringify(editor.getJSON()) !== session.initial;
@@ -147,6 +156,7 @@ export function createTextController(
       // The document may already be gone (a reload); the restore below is
       // harmless on a detached element.
     }
+    shells.dispose();
     restoreField(target.element, snapshot, interim);
     endInlineEdit(block);
     store.setTextField(null);
@@ -186,6 +196,10 @@ export function createTextController(
 
     const snapshot = snapshotField(target.element);
     beginInlineEdit(block);
+    const shells = createRendererShells(
+      renderers,
+      target.element.ownerDocument,
+    );
     let editor: Editor;
     try {
       editor = new Editor({
@@ -197,10 +211,12 @@ export function createTextController(
           onEscape: () => {
             void exit('escape');
           },
+          shells,
         }),
         content: present ? (stored as object) : EMPTY_DOCUMENT,
       });
     } catch {
+      shells.dispose();
       restoreField(target.element, snapshot);
       endInlineEdit(block);
       return;
@@ -225,6 +241,7 @@ export function createTextController(
       editor,
       block,
       snapshot,
+      shells,
       initial: JSON.stringify(editor.getJSON()),
       touched: false,
     };

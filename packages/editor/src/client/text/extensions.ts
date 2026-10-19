@@ -22,11 +22,14 @@ import {
   wrappingInputRule,
   type Extensions,
 } from '@tiptap/core';
+import { Plugin } from '@tiptap/pm/state';
+import type { MarkViewConstructor, NodeViewConstructor } from '@tiptap/pm/view';
 import StarterKit, { type StarterKitOptions } from '@tiptap/starter-kit';
 import {
   DEFAULT_TEXT_THEME,
   type TextTheme,
 } from '@plakboek/content/rich-text';
+import type { RendererShells } from './shells.js';
 
 const OPTIONS: Partial<StarterKitOptions> = {
   // Marks: bold, italic, underline, strike.
@@ -46,8 +49,18 @@ const OPTIONS: Partial<StarterKitOptions> = {
   hardBreak: {},
   horizontalRule: {},
   // An empty paragraph after a trailing divider or button keeps a caret
-  // target; renderers drop a trailing empty paragraph.
-  trailingNode: {},
+  // target; renderers drop a trailing empty paragraph. Nothing is added after
+  // a node that already holds the caret (text, lists, quotes), so mounting the
+  // editor never adds a line the visitor page does not have.
+  trailingNode: {
+    notAfter: [
+      'paragraph',
+      'heading',
+      'bulletList',
+      'orderedList',
+      'blockquote',
+    ],
+  },
   // The field's own history while it is active; after exit the session stack
   // takes over.
   undoRedo: {},
@@ -132,7 +145,57 @@ const OrderedList = Node.create({
 export type TextExtensionHooks = {
   /** Escape was pressed inside the field. */
   readonly onEscape?: () => void;
+  /**
+   * Node and mark views derived from the host's renderers, so the field keeps
+   * the host's own markup while it is edited. Without them the editor uses its
+   * semantic defaults.
+   */
+  readonly shells?: RendererShells;
 };
+
+const SHELL_NODES = [
+  'paragraph',
+  'heading',
+  'bulletList',
+  'orderedList',
+  'listItem',
+  'blockquote',
+  'horizontalRule',
+] as const;
+
+const SHELL_MARKS = ['bold', 'italic', 'underline', 'strike'] as const;
+
+/**
+ * Hands the editor view the shells as plugin props. TipTap builds the view's
+ * own `nodeViews` and `markViews` from the extensions and would replace the
+ * editor props of the same name, whereas plugin props are merged beside them.
+ * A view constructor that finds no shell returns nothing, which makes
+ * ProseMirror use the node's own default.
+ */
+const RendererShellViews = Extension.create<TextExtensionHooks>({
+  name: 'rendererShellViews',
+
+  addOptions() {
+    return {};
+  },
+
+  addProseMirrorPlugins() {
+    const { shells } = this.options;
+    if (shells === undefined) return [];
+    // ProseMirror accepts a missing view and falls back; its types do not say so.
+    const nodeViews: Record<string, NodeViewConstructor> = {};
+    for (const name of SHELL_NODES) {
+      nodeViews[name] = ((node) =>
+        shells.nodeView(name, node.attrs)) as NodeViewConstructor;
+    }
+    const markViews: Record<string, MarkViewConstructor> = {};
+    for (const name of SHELL_MARKS) {
+      markViews[name] = ((mark) =>
+        shells.markView(name, mark.attrs)) as MarkViewConstructor;
+    }
+    return [new Plugin({ props: { nodeViews, markViews } })];
+  },
+});
 
 /**
  * Escape ends the field session. The key is consumed here so that the shell's
@@ -204,6 +267,9 @@ export function buildTextExtensions(
     StarterKit.configure(starterKitOptionsFor(theme)),
     ...(theme.nodes.includes('orderedList') ? [OrderedList] : []),
     TextFieldKeymap.configure(hooks),
+    ...(hooks.shells === undefined
+      ? []
+      : [RendererShellViews.configure({ shells: hooks.shells })]),
   ];
 }
 

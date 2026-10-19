@@ -126,3 +126,43 @@ html > *:not(head):not(body) {
 #site-dialog {
   padding: 16px;
 }
+
+/* The text theme's own spacing: margins and gaps that only hold when the
+   editor's field is made of the same elements as the visitor page. */
+.t-p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.t-h2,
+.t-h3,
+.t-h4 {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.t-h2:not(:first-child),
+.t-h3:not(:first-child),
+.t-h4:not(:first-child),
+.t-p:not(:first-child),
+.t-ul:not(:first-child),
+.t-ol:not(:first-child),
+.t-quote:not(:first-child) {
+  margin-top: 21px;
+}
+
+.t-ul,
+.t-ol {
+  margin: 0;
+  padding: 0 0 0 43px;
+}
+
+.t-li:not(:first-child) {
+  margin-top: 9px;
+}
+
+.t-quote {
+  margin: 0;
+  padding-left: 18px;
+  border-left: 4px solid #999;
+}

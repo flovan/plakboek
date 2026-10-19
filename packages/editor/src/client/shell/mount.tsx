@@ -19,7 +19,7 @@ import { ShellApp } from '../../chrome/shell.js';
 import { SHELL_ROOT_ID, type ShellIsland } from '../../chrome/island.js';
 import { STAGE_ID } from '../../chrome/stage.js';
 import { formatString, STRINGS } from '../../chrome/strings.js';
-import type { BlockEditHooks } from '@plakboek/render';
+import { isTextThemeDefinition, type BlockEditHooks } from '@plakboek/render';
 import type { BootEditorOptions } from '../boot.js';
 import { isFocusable } from '../chrome-host/shape.js';
 import { useChromeHost } from '../chrome-host/use-chrome-host.js';
@@ -529,6 +529,11 @@ function Shell(props: {
     runnerRef.current?.ready(blockId);
   }, []);
 
+  // The host's renderer map, when its theme module is valid: the field is
+  // edited in node views derived from it.
+  const textRenderers = isTextThemeDefinition(options.textTheme)
+    ? options.textTheme.renderers
+    : undefined;
   // Rich text fields are edited in place on the page. The controller owns one
   // session at a time and writes through the same preview and save path as the
   // Properties controls; the wiring here is only what it cannot reach itself.
@@ -544,8 +549,9 @@ function Shell(props: {
         announce: (text) => {
           store.announce(text);
         },
+        ...(textRenderers === undefined ? {} : { renderers: textRenderers }),
       }),
-    [store, changeProperties, blurProperties, host],
+    [store, changeProperties, blurProperties, host, textRenderers],
   );
   useEffect(() => () => controller.dispose(), [controller]);
   // The marker specs and tools wait on while a field session runs.
