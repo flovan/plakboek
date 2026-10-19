@@ -101,6 +101,11 @@ test.describe('the Properties sheet in the full-width layout', () => {
     await page.keyboard.press('Escape');
     await expect(page.locator(SHEET)).not.toHaveAttribute('data-open', '');
     await expect(drawer).toBeVisible();
+    // focus goes back to the toolbar's Properties button once the sheet is gone;
+    // the next step moves it, so it waits for that to land
+    await expect(
+      chrome(page).getByRole('button', { name: /^Properties of / }),
+    ).toBeFocused();
 
     // Escape inside the drawer closes it once the sheet is out of the way
     await drawer.getByRole('treeitem').first().focus();

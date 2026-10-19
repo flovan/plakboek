@@ -318,6 +318,20 @@ test.describe('after the frame scrolled during a drag', () => {
       .poll(() => frame.evaluate(() => window.scrollY))
       .toBeGreaterThan(100);
 
+    // out of the edge zone, so the scrolling stops, and wait for the page to rest
+    await page.mouse.move(view.x + view.width / 2, view.y + view.height / 2, {
+      steps: 4,
+    });
+    let seen = -1;
+    await expect
+      .poll(async () => {
+        const now = await frame.evaluate(() => window.scrollY);
+        const rested = now === seen;
+        seen = now;
+        return rested;
+      })
+      .toBe(true);
+
     const below = 'section.section >> nth=1 >> h2';
     const target = await gapAfter(frame, below);
     await page.mouse.move(target.x, target.y, { steps: 8 });
