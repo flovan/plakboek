@@ -46,12 +46,45 @@ export async function waitForShell(page: Page): Promise<void> {
 }
 
 /**
+ * Lets a spec reach the chrome the editor draws inside the framed document.
+ * That chrome sits in a closed shadow root, which Playwright locators cannot
+ * enter, so this init script makes `attachShadow` create open roots, but only
+ * in documents whose address carries `_edit=frame`. The gate is read when
+ * `attachShadow` is called, not when the script is installed: the frame's
+ * first window is an `about:blank` one that the real document reuses. Product
+ * code never sees this patch, and the isolation spec runs without it.
+ */
+export async function exposeFrameChrome(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const marker = Symbol.for('plakboek.e2e.openFrameChrome');
+    const proto = Element.prototype as unknown as Record<symbol, boolean>;
+    if (proto[marker] === true) return;
+    proto[marker] = true;
+    const original = Reflect.get(Element.prototype, 'attachShadow') as (
+      this: Element,
+      init: ShadowRootInit,
+    ) => ShadowRoot;
+    Element.prototype.attachShadow = function (init: ShadowRootInit) {
+      const forced = location.search.includes('_edit=frame');
+      return original.call(this, forced ? { ...init, mode: 'open' } : init);
+    };
+  });
+}
+
+/**
  * Opens `<path>?_edit=1` and waits until the editing session runs and the
  * frame's clicks are claimed (the frame leaves the tab order only then). Locks
- * an earlier spec left on a shared page are released first.
+ * an earlier spec left on a shared page are released first. The chrome inside
+ * the frame is reachable (see `exposeFrameChrome`) unless `exposeChrome` is
+ * false.
  */
-export async function openEditor(page: Page, path: string): Promise<void> {
+export async function openEditor(
+  page: Page,
+  path: string,
+  options: { readonly exposeChrome?: boolean } = {},
+): Promise<void> {
   await releaseAllPageLocks();
+  if (options.exposeChrome !== false) await exposeFrameChrome(page);
   const separator = path.includes('?') ? '&' : '?';
   const response = await page.goto(`${path}${separator}_edit=1`);
   expect(response?.status()).toBe(200);

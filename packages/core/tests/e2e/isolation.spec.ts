@@ -457,8 +457,8 @@ test.describe('the site with every editing layer mounted', () => {
   });
 });
 
-test.describe('the editor adds nothing to the site document', () => {
-  test('holds no chrome, popover, extra stylesheet or script, and the hostile rules aimed at injected elements match nothing', async ({
+test.describe('the editor adds one closed chrome host to the site document', () => {
+  test('adds exactly one closed chrome host outside body, and nothing else', async ({
     page,
   }) => {
     await openShell(page, '/?_edit=1');
@@ -476,7 +476,19 @@ test.describe('the editor adds nothing to the site document', () => {
       const bodyChildren = [...document.body.children].map(
         (element) => element.localName,
       );
+      const host = document.querySelector('plakboek-chrome');
+      const hostStyle = host === null ? null : getComputedStyle(host);
       return {
+        htmlChildren: [...document.documentElement.children].map(
+          (element) => element.localName,
+        ),
+        // read from the frame's realm: a closed root answers null
+        hostRoot: host === null ? 'missing' : host.shadowRoot,
+        hostStyleAttribute: host?.getAttribute('style') ?? null,
+        hostDisplay: hostStyle?.display,
+        hostPosition: hostStyle?.position,
+        hostPointerEvents: hostStyle?.pointerEvents,
+        hostVisibility: hostStyle?.visibility,
         chrome: document.querySelectorAll('plakboek-editor, plakboek-toolbar')
           .length,
         popovers: document.querySelectorAll('[popover]').length,
@@ -501,6 +513,14 @@ test.describe('the editor adds nothing to the site document', () => {
       };
     });
 
+    expect(facts.htmlChildren).toEqual(['head', 'body', 'plakboek-chrome']);
+    expect(facts.hostRoot).toBeNull();
+    expect(facts.hostStyleAttribute).toBeNull();
+    // the adversarial theme tries to hide, move and restyle anything injected
+    expect(facts.hostDisplay).toBe('block');
+    expect(facts.hostPosition).toBe('absolute');
+    expect(facts.hostPointerEvents).toBe('none');
+    expect(facts.hostVisibility).toBe('visible');
     expect(facts.chrome).toBe(0);
     expect(facts.popovers).toBe(0);
     expect(facts.iframes).toBe(0);
@@ -519,6 +539,19 @@ test.describe('the editor adds nothing to the site document', () => {
     expect(facts.outlined).toBe(0);
     // the one inline style on the page is the host's own spacer block
     expect(facts.inlineStyles).toBe(1);
+
+    // Interact hands the site back whole: the host is gone
+    await switchToInteract(page);
+    await expect
+      .poll(async () => await framed.locator('plakboek-chrome').count())
+      .toBe(0);
+    expect(
+      await framed.evaluate(() =>
+        [...document.documentElement.children].map(
+          (element) => element.localName,
+        ),
+      ),
+    ).toEqual(['head', 'body']);
   });
 });
 

@@ -21,6 +21,7 @@ import { STAGE_ID } from '../../chrome/stage.js';
 import { formatString, STRINGS } from '../../chrome/strings.js';
 import type { BlockEditHooks } from '@plakboek/render';
 import type { BootEditorOptions } from '../boot.js';
+import { useChromeHost } from '../chrome-host/use-chrome-host.js';
 import { attachClaim } from '../frame/claim.js';
 import { loadBlockEditModules } from '../frame/block-edit-loader.js';
 import { hitChain } from '../frame/hit-test.js';
@@ -192,6 +193,35 @@ function Shell(props: {
     setHydrated(true);
     host.dataset.hydrated = '';
   }, [host]);
+
+  // The in-frame chrome host exists only while an editing session is in Edit
+  // mode, once per frame document, and shows the shell's light or dark theme.
+  // The claim below lets a click on it through.
+  const mode = useEditorStore(store, (state) => state.mode);
+  const frameElement = useMemo(
+    () => (hydrated ? frameOf(host) : null),
+    [host, hydrated],
+  );
+  const [theme, setTheme] = useState<string | null>(null);
+  useEffect(() => {
+    const read = (): void => setTheme(host.getAttribute('data-theme'));
+    read();
+    const observer = new MutationObserver(read);
+    observer.observe(host, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return () => observer.disconnect();
+  }, [host]);
+  const chromeHost = useChromeHost(
+    frameElement,
+    editable && status === 'editing' && mode === 'edit',
+    theme,
+  );
+  const chromeHostRef = useRef(chromeHost);
+  useEffect(() => {
+    chromeHostRef.current = chromeHost;
+  }, [chromeHost]);
 
   // The host's block edit modules load once, after hydration and in edit mode
   // only. The frame runtime below calls their hooks.
@@ -1043,18 +1073,25 @@ function Shell(props: {
           if (model === null) return null;
           return { model, selection, chain: hitChain(frameDocument, x, y) };
         };
-        releaseClaim = attachClaim(claimed, {
-          onClick: (x, y) => {
-            store.closePicker();
-            const hit = read(x, y);
-            if (hit === null) return;
-            selectAndAnnounce(
-              store,
-              selectByClick(hit.model, hit.selection, hit.chain),
-            );
-            focusRegion(host);
+        releaseClaim = attachClaim(
+          claimed,
+          {
+            onClick: (x, y) => {
+              store.closePicker();
+              const hit = read(x, y);
+              if (hit === null) return;
+              selectAndAnnounce(
+                store,
+                selectByClick(hit.model, hit.selection, hit.chain),
+              );
+              focusRegion(host);
+            },
           },
-        });
+          {
+            isExempt: (event) =>
+              event.target === chromeHostRef.current?.element,
+          },
+        );
       } else if (!wanted && releaseClaim !== null) {
         releaseClaim();
         releaseClaim = null;

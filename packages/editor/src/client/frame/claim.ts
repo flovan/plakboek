@@ -54,14 +54,26 @@ function pointerPosition(event: Event): { x: number; y: number } {
   };
 }
 
+export type ClaimOptions = {
+  /**
+   * Events the claim leaves alone: no default cancelled, no propagation
+   * stopped, no handler called. Chrome drawn inside the frame document takes
+   * its own clicks and keys; its closed shadow root retargets an event to the
+   * host element at the window, so the check is `event.target === host`.
+   */
+  readonly isExempt?: (event: Event) => boolean;
+};
+
 /**
  * Claims the events on `frameWindow`. Returns the function that releases them.
  */
 export function attachClaim(
   frameWindow: Window,
   handlers: ClaimHandlers,
+  options: ClaimOptions = {},
 ): () => void {
   const listener = (event: Event): void => {
+    if (options.isExempt?.(event) === true) return;
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();

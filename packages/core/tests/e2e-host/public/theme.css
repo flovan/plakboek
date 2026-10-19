@@ -36,6 +36,15 @@ body > *:last-child:not(dialog) {
   outline: 5px solid red !important;
 }
 
+/* And rules aimed at whatever sits next to the body in the html element. */
+html > *:not(head):not(body) {
+  display: none !important;
+  visibility: hidden !important;
+  position: static !important;
+  pointer-events: auto !important;
+  outline: 5px solid red !important;
+}
+
 .site-header {
   position: sticky;
   top: 0;
