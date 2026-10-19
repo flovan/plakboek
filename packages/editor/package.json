@@ -50,6 +50,11 @@
     "@plakboek/permissions": "workspace:*",
     "@plakboek/render": "workspace:*",
     "@tanstack/react-query": "catalog:",
+    "@tiptap/core": "catalog:",
+    "@tiptap/extension-link": "catalog:",
+    "@tiptap/pm": "catalog:",
+    "@tiptap/starter-kit": "catalog:",
+    "@tiptap/suggestion": "catalog:",
     "better-auth": "catalog:",
     "zod": "catalog:"
   },
