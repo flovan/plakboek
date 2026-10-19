@@ -12,7 +12,7 @@ export const seed: SeedPage = {
       children: [
         {
           type: 'heading',
-          props: { text: 'Hello world', level: '1' },
+          props: { text: 'Hello world', level: '2' },
         },
       ],
     },

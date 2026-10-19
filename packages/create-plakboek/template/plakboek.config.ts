@@ -1,7 +1,10 @@
 import { defaultRoles, defineConfig } from '@plakboek/core/config';
+import { button } from './blocks/button.tsx';
 import { heading } from './blocks/heading.tsx';
 import { section } from './blocks/section.tsx';
+import { text } from './blocks/text.tsx';
 import { seed } from './seed.ts';
+import textTheme from './text-theme.tsx';
 
 // This file is loaded by Node (the plakboek CLI) as well as by Vite, so it
 // imports plain modules only: nothing that exists only in the Vite build, and
@@ -14,7 +17,10 @@ export default defineConfig({
 
   // Every block is listed here explicitly. A new block is one file in
   // blocks/ exporting one defineBlock(...) definition, plus one entry below.
-  blocks: [section, heading],
+  blocks: [section, heading, text, button],
+
+  // How rich text looks and what an editor may do in it (see text-theme.tsx).
+  textTheme,
 
   // The permission list belongs to the CMS; only the mapping from role to
   // permissions is yours. Spread the defaults and add or override roles.

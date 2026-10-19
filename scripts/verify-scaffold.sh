@@ -219,6 +219,16 @@ tr -d '\r' < "$CSS_HEADERS" | grep -qi '^content-type: text/css' \
 tr -d '\r' < "$CSS_HEADERS" | grep -qi '^cache-control: public, max-age=31536000, immutable$' \
   || fail "GET $CSS_HREF does not carry the immutable cache header"
 
+# The page uses no text-size or colour utility for these tokens, yet text
+# stores them by name: a static theme block keeps every variable in the build.
+curl --silent "$BASE_URL$CSS_HREF" > "$WORK_DIR/site.css"
+for TOKEN_VARIABLE in --color-accent --color-text-muted --text-xl --text-3xl; do
+  grep -q -- "$TOKEN_VARIABLE:" "$WORK_DIR/site.css" \
+    || fail "the built stylesheet does not declare $TOKEN_VARIABLE (the token block must stay static)"
+done
+H1_COUNT="$(grep -o '<h1[ >]' "$BODY" | wc -l | tr -d ' ')"
+[ "$H1_COUNT" = "1" ] || fail "GET / holds $H1_COUNT <h1 elements, expected exactly 1"
+
 ROBOTS="$(curl --silent "$BASE_URL/robots.txt")"
 case "$ROBOTS" in
   *"Disallow: /cms"*) ;;

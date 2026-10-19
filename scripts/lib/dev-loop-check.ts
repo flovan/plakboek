@@ -239,7 +239,7 @@ async function main(): Promise<void> {
   try {
     await proveEdit(socket, {
       file: 'blocks/heading.tsx',
-      anchor: '<h1',
+      anchor: '<h2',
       marker: 'block',
       label: 'block edit',
       sends: 'blocks-changed',

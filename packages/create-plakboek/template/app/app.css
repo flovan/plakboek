@@ -4,9 +4,12 @@
  * The theme of the starter. Change the values freely, but keep the token
  * names: the page editor reads them as the theme it works within. The
  * resets below remove Tailwind's default colours and text sizes, so only
- * what is declared here exists.
+ * what is declared here exists. The block is static so that every token
+ * exists as a CSS variable in the built stylesheet: text stores a colour or
+ * size as a token name, and a token no rule happens to use would otherwise
+ * be left out and resolve to nothing.
  */
-@theme {
+@theme static {
   --color-*: initial;
   --text-*: initial;
 
