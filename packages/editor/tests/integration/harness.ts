@@ -36,10 +36,12 @@ import {
   defineRoles,
   type PermissionResolver,
 } from '@plakboek/permissions';
-import type {
-  BlockComponentProps,
-  DocumentInput,
-  RenderDocument,
+import {
+  defineTextTheme,
+  RichText,
+  type BlockComponentProps,
+  type DocumentInput,
+  type RenderDocument,
 } from '@plakboek/render';
 import {
   createComponentMap,
@@ -62,6 +64,26 @@ function SectionBlock({ edit, children }: BlockComponentProps): ReactElement {
 function HeadingBlock({ edit, props }: BlockComponentProps): ReactElement {
   return createElement('h2', { ...edit }, String(props.text));
 }
+
+function ProseBlock({ edit, props }: BlockComponentProps): ReactElement {
+  return createElement(
+    'div',
+    { ...edit },
+    createElement(
+      'div',
+      { ...edit.field('body') },
+      createElement(RichText, { value: props.body }),
+    ),
+  );
+}
+
+/** A host theme whose heading renderer is recognisable in markup. */
+export const harnessTextTheme = defineTextTheme({
+  renderers: {
+    heading: ({ level, children }) =>
+      createElement(`h${level}`, { className: `h-${level}` }, children),
+  },
+});
 
 export const harnessConfig = definePagesConfig({
   content: defineContentConfig({
@@ -90,6 +112,15 @@ export const harnessConfig = definePagesConfig({
           required: true,
           options: { maxLength: 120 },
         },
+      },
+    },
+    {
+      key: 'prose',
+      editor: { label: 'Prose' },
+      schemaVersion: 1,
+      component: ProseBlock,
+      properties: {
+        body: { fieldType: 'rich_text', label: 'Body' },
       },
     },
   ]),
@@ -337,4 +368,68 @@ export async function callEntrypoint(
 ): Promise<Response | null> {
   const [request, context] = editRequest(pathAndQuery, headers);
   return await entrypoint(request, context);
+}
+
+/** A stored rich text document: one level-3 heading, then a paragraph whose
+ * words link to pages by id. */
+export function proseDoc(
+  links: readonly { readonly text: string; readonly pageId: string }[],
+): unknown {
+  return {
+    type: 'doc',
+    content: [
+      {
+        type: 'heading',
+        attrs: { level: 3, textAlign: null },
+        content: [{ type: 'text', text: 'Prose heading' }],
+      },
+      {
+        type: 'paragraph',
+        content: links.flatMap((link) => [
+          {
+            type: 'text',
+            text: link.text,
+            marks: [
+              {
+                type: 'link',
+                attrs: { href: null, pageId: link.pageId, target: null },
+              },
+            ],
+          },
+          { type: 'text', text: ' ' },
+        ]),
+      },
+    ],
+  };
+}
+
+/** Creates a page holding one section with one prose block. */
+export async function createProsePage(
+  harness: Harness,
+  input: { readonly title: string; readonly body: unknown },
+): Promise<SeededPage & { readonly proseId: string }> {
+  const { pagesDeps, actor } = harness;
+  const page = await createPage(pagesDeps, actor, {
+    locale: 'en',
+    title: input.title,
+  });
+  const owner = {
+    ownerType: 'page' as const,
+    ownerId: page.id,
+    locale: page.locale,
+  };
+  const section = await insertBlock(pagesDeps, actor, {
+    owner,
+    blockType: 'section',
+    parentBlockId: null,
+    basePageVersion: page.version,
+  });
+  const prose = await insertBlock(pagesDeps, actor, {
+    owner,
+    blockType: 'prose',
+    parentBlockId: section.id,
+    props: { body: input.body },
+    basePageVersion: page.version + 1,
+  });
+  return { pageId: page.id, sectionId: section.id, proseId: prose.id };
 }

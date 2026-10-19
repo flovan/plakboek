@@ -22,7 +22,11 @@ import {
 } from '@plakboek/auth';
 import type { PagesConfig, PagesDeps, PagesHooks } from '@plakboek/pages';
 import type { PermissionResolver } from '@plakboek/permissions';
-import { EDIT_PARAM, type RenderDocument } from '@plakboek/render';
+import {
+  EDIT_PARAM,
+  type RenderDocument,
+  type TextThemeDefinition,
+} from '@plakboek/render';
 import type {
   ComponentMap,
   EditEntrypoint,
@@ -51,6 +55,9 @@ export type EditEntrypointDeps = {
    * `'edit'`. */
   readonly renderDocument: RenderDocument;
   readonly hooks?: RenderHooks;
+  /** The host's text theme (`defineTextTheme`): the renderers the frame uses
+   * for rich text and calls to action. Defaults to the stock theme. */
+  readonly textTheme?: TextThemeDefinition;
   /** The host's not-found page, shown inside the frame with status 404. */
   readonly notFound?: (request: Request) => Response | Promise<Response>;
   readonly siteUrl?: string;

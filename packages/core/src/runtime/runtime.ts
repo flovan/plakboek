@@ -154,6 +154,7 @@ function composeEditor(
       db: db.db,
       pages: { config: config.pages, homeSlug: config.homeSlug },
       components: createComponentMap(config.pages.blocks),
+      textTheme: config.textTheme,
       renderDocument: siteHooks?.renderDocument ?? renderDefaultDocument,
       ...(siteHooks?.notFound === undefined
         ? {}
