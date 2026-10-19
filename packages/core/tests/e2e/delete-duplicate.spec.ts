@@ -8,11 +8,14 @@
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
+  chrome,
   expectSelectedOver,
   framedSite,
   HOST,
   openEditor,
   regionFocused,
+  SELECTED,
+  selectItem,
   tabToRegion,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -26,7 +29,7 @@ import { signIn } from './helpers/session.ts';
 import { createTestUser } from './helpers/users.ts';
 
 const TOAST = `${HOST} [data-toast]`;
-const TOOLBAR = `${HOST} [role="toolbar"]`;
+const TOOLBAR = '[role="toolbar"]';
 const SAVED = 'All changes saved';
 
 /** Section A holds H1 and H2, section B holds H3. */
@@ -54,22 +57,24 @@ function headingsIn(frame: Frame, sectionIndex: number): Promise<string[]> {
 }
 
 function deleteButton(page: Page) {
-  return page.getByRole('button', { name: /^Delete / });
+  return chrome(page).getByRole('button', { name: /^Delete / });
 }
 
 async function expectSaved(page: Page): Promise<void> {
   await expect(page.getByText(SAVED)).toBeVisible();
 }
 
-/** Double-click twice: section to column, column to the block under the pointer. */
-async function drillToHeading(frame: Frame, sectionIndex: number, at: number) {
-  const target = frame
-    .locator('section.section')
-    .nth(sectionIndex)
-    .locator('h2')
-    .nth(at);
-  await target.dblclick();
-  await target.dblclick();
+/** Selects the heading at the given position in the given section. */
+async function selectHeading(
+  page: Page,
+  frame: Frame,
+  sectionIndex: number,
+  at: number,
+) {
+  await selectItem(
+    page,
+    frame.locator('section.section').nth(sectionIndex).locator('h2').nth(at),
+  );
 }
 
 /** Selects the first heading with the keyboard alone: section, column, heading. */
@@ -81,7 +86,9 @@ async function selectFirstHeadingByKeyboard(page: Page): Promise<void> {
 }
 
 function tooltipOf(page: Page, text: string) {
-  return page.locator(`${TOOLBAR} [data-tooltip]`, { hasText: text });
+  return chrome(page).locator(`${TOOLBAR} [data-tooltip]`, {
+    hasText: text,
+  });
 }
 
 test.describe('with a role that may delete', () => {
@@ -98,13 +105,7 @@ test.describe('with a role that may delete', () => {
       const frame = await framedSite(page);
       const before = await blockIds(frame);
 
-      // a click at the page's scope selects the section
-      await frame
-        .locator('section.section')
-        .nth(0)
-        .locator('h2')
-        .first()
-        .click();
+      await selectItem(page, frame.locator('section.section').nth(0));
       await deleteButton(page).click();
 
       const dialog = page.getByRole('dialog');
@@ -149,12 +150,7 @@ test.describe('with a role that may delete', () => {
       const created = await twoSections();
       await openEditor(page, created.path);
       const frame = await framedSite(page);
-      await frame
-        .locator('section.section')
-        .nth(0)
-        .locator('h2')
-        .first()
-        .click();
+      await selectItem(page, frame.locator('section.section').nth(0));
       const dialog = page.getByRole('dialog');
 
       await deleteButton(page).click();
@@ -169,9 +165,7 @@ test.describe('with a role that may delete', () => {
       await expect(deleteButton(page)).toBeFocused();
 
       expect(await headingsIn(frame, 0)).toEqual(['H1', 'H2']);
-      await expect(page.locator(`${HOST} [data-overlay-selected]`)).toHaveCount(
-        1,
-      );
+      await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
       await expect(page.locator(TOAST)).toHaveCount(0);
     });
   });
@@ -183,7 +177,7 @@ test.describe('with a role that may delete', () => {
       const created = await twoSections();
       await openEditor(page, created.path);
       const frame = await framedSite(page);
-      await drillToHeading(frame, 0, 0);
+      await selectHeading(page, frame, 0, 0);
 
       await deleteButton(page).click();
 
@@ -211,7 +205,7 @@ test.describe('with a role that may delete', () => {
       const created = await twoSections();
       await openEditor(page, created.path);
       const frame = await framedSite(page);
-      await drillToHeading(frame, 0, 0);
+      await selectHeading(page, frame, 0, 0);
       await deleteButton(page).click();
       await expect(page.locator(TOAST)).toBeVisible();
 
@@ -223,7 +217,7 @@ test.describe('with a role that may delete', () => {
       const created = await twoSections();
       await openEditor(page, created.path);
       const frame = await framedSite(page);
-      await drillToHeading(frame, 0, 0);
+      await selectHeading(page, frame, 0, 0);
       await deleteButton(page).click();
       await page.locator(TOAST).hover();
 
@@ -238,7 +232,7 @@ test.describe('with a role that may delete', () => {
       const created = await twoSections();
       await openEditor(page, created.path);
       const frame = await framedSite(page);
-      await drillToHeading(frame, 0, 0);
+      await selectHeading(page, frame, 0, 0);
       await deleteButton(page).click();
       await expect.poll(() => headingsIn(frame, 0)).toEqual(['H2']);
       await expectSaved(page);
@@ -257,13 +251,13 @@ test.describe('with a role that may delete', () => {
       const created = await twoSections();
       await openEditor(page, created.path);
       const frame = await framedSite(page);
-      // double-click a heading: the section's only column
-      await frame
-        .locator('section.section')
-        .nth(0)
-        .locator('h2')
-        .first()
-        .dblclick();
+      await selectItem(
+        page,
+        frame
+          .locator('section.section')
+          .nth(0)
+          .locator('[data-pk-type="column"]'),
+      );
 
       const button = deleteButton(page);
       await expect(button).toHaveAttribute('aria-disabled', 'true');
@@ -285,10 +279,15 @@ test.describe('with a role that may delete', () => {
       });
       await openEditor(page, created.path);
       const frame = await framedSite(page);
-      await frame.locator('section.section h2').first().dblclick();
+      await selectItem(
+        page,
+        frame.locator('section.section [data-pk-type="column"]').first(),
+      );
       const original = await blockIds(frame);
 
-      await page.getByRole('button', { name: /^Duplicate / }).click();
+      await chrome(page)
+        .getByRole('button', { name: /^Duplicate / })
+        .click();
 
       const columns = frame.locator('[data-pk-type="column"]');
       await expect(columns).toHaveCount(2);
@@ -365,9 +364,7 @@ test.describe('with a role that may delete', () => {
       await expect(page.getByRole('dialog')).toHaveCount(0);
       expect(await headingsIn(frame, 0)).toEqual(['H1', 'H2']);
       // Escape closed the dialog and did not climb the selection
-      await expect(page.locator(`${HOST} [data-overlay-selected]`)).toHaveCount(
-        1,
-      );
+      await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
       await expect.poll(() => regionFocused(page)).toBe(true);
     });
   });
@@ -381,7 +378,7 @@ test.describe('with a role that may edit but not delete', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillToHeading(frame, 0, 0);
+    await selectHeading(page, frame, 0, 0);
 
     const reason = "Your role can't delete content on this page.";
     await expect(deleteButton(page)).toHaveAttribute('aria-disabled', 'true');
@@ -389,7 +386,9 @@ test.describe('with a role that may edit but not delete', () => {
     await deleteButton(page).click({ force: true });
     expect(await headingsIn(frame, 0)).toEqual(['H1', 'H2']);
 
-    await page.getByRole('button', { name: /^Duplicate / }).click();
+    await chrome(page)
+      .getByRole('button', { name: /^Duplicate / })
+      .click();
     await expect.poll(() => headingsIn(frame, 0)).toEqual(['H1', 'H1', 'H2']);
     await expectSaved(page);
 

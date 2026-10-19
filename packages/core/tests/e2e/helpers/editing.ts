@@ -96,12 +96,27 @@ export async function selectItem(page: Page, target: Locator): Promise<void> {
       element.closest('[data-pk-block]')?.getAttribute('data-pk-block') ?? null,
   );
   if (id === null) throw new Error('The target is not inside a block');
+  let current = await selectedId(page);
   await target.click();
-  for (let drills = 0; drills < 3; drills += 1) {
-    if ((await selectedId(page)) === id) break;
+  current = await settledSelection(page, current);
+  for (let drills = 0; drills < 3 && current !== id; drills += 1) {
+    const previous = current;
     await target.dblclick();
+    current = await settledSelection(page, previous);
   }
   await expect.poll(() => selectedId(page)).toBe(id);
+}
+
+/** Waits briefly for the selection to move off `previous`, then reads it. */
+async function settledSelection(
+  page: Page,
+  previous: string | null,
+): Promise<string | null> {
+  await expect
+    .poll(() => selectedId(page), { timeout: 750 })
+    .not.toBe(previous)
+    .catch(() => undefined);
+  return await selectedId(page);
 }
 
 /** Selects the item and opens its Properties sheet from the block toolbar. */
