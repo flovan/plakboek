@@ -24,7 +24,7 @@ import { NoticeSlot } from './editing/notices.js';
 import { PropertiesSheet, SidePanel } from './editing/panel.js';
 import { RailTools } from './editing/rail-tools.js';
 import type { PropertiesPanelProps } from './editing/properties/properties-panel.js';
-import { UndoToast } from './editing/toast.js';
+import { MessageToast, UndoToast } from './editing/toast.js';
 import { SaveStatusRow, ToolGroup } from './editing/tool-group.js';
 import type { ShellIsland } from './island.js';
 import { Sidebar, type SidebarLayout, type SidebarSlots } from './sidebar.js';
@@ -268,10 +268,13 @@ export function ShellApp(props: ShellAppProps): ReactElement {
         onReload={onReload}
         toast={
           hydrated && editor !== undefined ? (
-            <UndoToast
-              store={editor.store}
-              onUndo={editor.onToastUndo ?? editor.onUndo ?? noop}
-            />
+            <>
+              <UndoToast
+                store={editor.store}
+                onUndo={editor.onToastUndo ?? editor.onUndo ?? noop}
+              />
+              <MessageToast store={editor.store} />
+            </>
           ) : null
         }
       />

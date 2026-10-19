@@ -14,7 +14,11 @@ import {
   typeInField,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
-import { createEditablePage, section } from './helpers/pages.ts';
+import {
+  createEditablePage,
+  readBlockProps,
+  section,
+} from './helpers/pages.ts';
 import { signIn } from './helpers/session.ts';
 
 type Doc = Readonly<Record<string, unknown>>;
@@ -49,13 +53,17 @@ const RICH_BODY = {
 async function openProse(
   page: Parameters<typeof openEditor>[0],
   body: unknown = RICH_BODY,
-): Promise<{ frame: Frame; field: Locator }> {
+): Promise<{ frame: Frame; field: Locator; pageId: string }> {
   const created = await createEditablePage({
     blocks: [section({ type: 'prose', props: { body } })],
   });
   await openEditor(page, created.path);
   const frame = await framedSite(page);
-  return { frame, field: frame.locator('.prose-flow').first() };
+  return {
+    frame,
+    field: frame.locator('.prose-flow').first(),
+    pageId: created.pageId,
+  };
 }
 
 /**
@@ -180,4 +188,145 @@ test('the host classes are still on the elements being edited', async ({
   await expect(field.locator('ul')).toHaveClass('t-ul');
   await expect(field.locator('li').first()).toHaveClass('t-li');
   await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+});
+
+const WORD_HTML = [
+  '<html><head><meta charset="utf-8"><style>p.MsoNormal { color: red }</style></head><body>',
+  '<!--StartFragment-->',
+  '<h1 class="MsoTitle" style="font-size:28pt">Big title</h1>',
+  '<p class="MsoNormal" style="color:red;font-size:30px"><span style="font-family:Arial;color:red">Red </span><b>bold words</b><font face="Arial" color="red"> font</font><o:p></o:p></p>',
+  '<table><tr><td>cell one</td><td>cell two</td></tr></table>',
+  '<!--EndFragment--></body></html>',
+].join('');
+
+/** Pastes `html` (and the plain text of it) into the field as the browser would. */
+async function paste(
+  frame: Frame,
+  html: string | null,
+  plain: string,
+): Promise<void> {
+  await frame.evaluate(
+    ({ html: markup, plain: words }) => {
+      const field = document.querySelector('.prose-flow');
+      if (field === null) throw new Error('no field');
+      const data = new DataTransfer();
+      if (markup !== null) data.setData('text/html', markup);
+      data.setData('text/plain', words);
+      field.dispatchEvent(
+        new ClipboardEvent('paste', {
+          clipboardData: data,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    },
+    { html, plain },
+  );
+}
+
+/** Every node and mark type that appears in a document, and its attributes. */
+function inventory(doc: unknown): {
+  types: Set<string>;
+  headingLevels: number[];
+  attributeKeys: Set<string>;
+} {
+  const found = {
+    types: new Set<string>(),
+    headingLevels: [] as number[],
+    attributeKeys: new Set<string>(),
+  };
+  function visit(node: unknown): void {
+    if (typeof node !== 'object' || node === null) return;
+    const record = node as Record<string, unknown>;
+    if (typeof record['type'] === 'string') found.types.add(record['type']);
+    const attrs = record['attrs'];
+    if (typeof attrs === 'object' && attrs !== null) {
+      for (const [key, value] of Object.entries(attrs)) {
+        if (value !== null) found.attributeKeys.add(key);
+        if (key === 'level' && typeof value === 'number') {
+          found.headingLevels.push(value);
+        }
+      }
+    }
+    for (const child of [
+      ...((record['content'] as unknown[] | undefined) ?? []),
+      ...((record['marks'] as unknown[] | undefined) ?? []),
+    ]) {
+      visit(child);
+    }
+  }
+  visit(doc);
+  return found;
+}
+
+test.describe('pasting keeps only what the theme allows', () => {
+  test('Word styling, headings and tables never reach the stored document, and the author is told', async ({
+    page,
+  }) => {
+    const { frame, field, pageId } = await openProse(page, {
+      type: 'doc',
+      content: [paragraph('Start')],
+    });
+    await typeInField(page, field.locator('p'), '');
+    await paste(
+      frame,
+      WORD_HTML,
+      'Big title Red bold words font cell one cell two',
+    );
+
+    const notice = page.getByText(
+      'Some formatting was removed to match the theme.',
+    );
+    await expect(notice).toBeVisible();
+    await expect(page.locator(`${HOST} [data-toast-message]`)).toHaveAttribute(
+      'role',
+      'status',
+    );
+    // leaving the field sends what is pending at once
+    await page.keyboard.press('Escape');
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+    await expect
+      .poll(async () =>
+        JSON.stringify((await readBlockProps(pageId, 'prose'))['body']),
+      )
+      .toContain('cell two');
+
+    const stored = (await readBlockProps(pageId, 'prose'))['body'];
+    const seen = inventory(stored);
+    expect([...seen.types].sort()).toEqual(
+      ['bold', 'doc', 'paragraph', 'text'].sort(),
+    );
+    // the h1 became a paragraph; no colour, size, font or level survived
+    expect(seen.headingLevels).toEqual([]);
+    expect(seen.attributeKeys.size).toBe(0);
+    const plain = JSON.stringify(stored);
+    for (const word of ['textColor', 'textSize', 'Arial', 'MsoNormal']) {
+      expect(plain).not.toContain(word);
+    }
+    for (const word of [
+      'Big title',
+      'Red',
+      'bold words',
+      'cell one',
+      'cell two',
+    ]) {
+      expect(plain).toContain(word);
+    }
+    // the cells did not run together
+    expect(plain).toContain('cell one cell two');
+
+    // the message leaves by itself
+    await expect(notice).toBeHidden({ timeout: 8000 });
+  });
+
+  test('a plain text paste shows no message', async ({ page }) => {
+    const { frame, field } = await openProse(page, {
+      type: 'doc',
+      content: [paragraph('Start')],
+    });
+    await typeInField(page, field.locator('p'), '');
+    await paste(frame, null, 'just some words');
+    await expect(field.locator('p')).toContainText('just some words');
+    await expect(page.locator(`${HOST} [data-toast-message]`)).toHaveCount(0);
+  });
 });

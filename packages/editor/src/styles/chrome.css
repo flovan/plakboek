@@ -963,6 +963,12 @@
     max-width: min(400px, calc(100% - 32px));
   }
 
+  /* A status message has no button, so its padding is even; it covers the undo toast. */
+  .pk-toast-message {
+    z-index: 5;
+    padding: 8px 16px;
+  }
+
   /* Shown only while it animates; with reduced motion it has no fill at all. */
   .pk-overlay-flash {
     position: absolute;

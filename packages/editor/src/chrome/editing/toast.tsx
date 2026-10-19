@@ -103,3 +103,41 @@ export function UndoToast(props: UndoToastProps): ReactElement | null {
     />
   );
 }
+
+/** How long a status message stays. */
+const MESSAGE_MS = 4000;
+
+export type MessageToastProps = { readonly store: EditorStore };
+
+/**
+ * A transient status message in the toast's place, such as the note that a
+ * paste lost formatting: four seconds, no button, announced politely. It sits
+ * above the undo toast if both show.
+ */
+export function MessageToast(props: MessageToastProps): ReactElement | null {
+  const { store } = props;
+  const message = useEditorStore(store, (state) => state.message);
+  const token = message?.token;
+  useEffect(() => {
+    if (token === undefined) return undefined;
+    const timer = setTimeout(() => {
+      store.clearMessage();
+    }, MESSAGE_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [store, token]);
+  if (message === null) return null;
+  return (
+    <div
+      key={message.token}
+      role="status"
+      className="pk-toast pk-toast-message"
+      data-toast-message=""
+    >
+      <span className="min-w-0 flex-1 text-body text-text">
+        {STRINGS[message.key]}
+      </span>
+    </div>
+  );
+}

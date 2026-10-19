@@ -26,6 +26,7 @@ import { textOf } from '../session/selection-announcement.js';
 import { labelOf } from '../session/tree-model.js';
 import { beginInlineEdit, endInlineEdit } from '../frame/patch.js';
 import { buildTextExtensions } from './extensions.js';
+import { cleanPastedHtml, pasteLostFormatting } from './paste.js';
 import { createRendererShells, type RendererShells } from './shells.js';
 import type { FieldTarget } from './field-target.js';
 import {
@@ -207,6 +208,20 @@ export function createTextController(
         // types the option as an element.
         element: { mount: target.element } as unknown as Element,
         injectCSS: false,
+        editorProps: {
+          // Defence in depth beside the locked schema: pasted styling never
+          // reaches the editor, and the author is told when formatting was
+          // dropped. The paste transaction follows this call synchronously, so
+          // the message is raised once it has run.
+          transformPastedHTML: (html) => {
+            if (pasteLostFormatting(html)) {
+              queueMicrotask(() => {
+                store.showMessage('text.paste.stripped');
+              });
+            }
+            return cleanPastedHtml(html);
+          },
+        },
         extensions: buildTextExtensions(theme, {
           onEscape: () => {
             void exit('escape');

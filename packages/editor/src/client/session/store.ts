@@ -10,6 +10,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import type { EditorSession, LockView, ModelNode } from '../../api-types.js';
+import type { StringKey } from '../../chrome/strings.js';
 import { createDragFeed, type DragFeed } from '../drag/feed.js';
 import type { DragSubject } from '../drag/slots.js';
 import { createUndoStack, type UndoEntry, type UndoStack } from './inverse.js';
@@ -130,6 +131,15 @@ export type EditorState = {
     readonly label: string;
     readonly token: number;
   } | null;
+  /**
+   * A transient status message (no button): what the toast shows for a few
+   * seconds, such as "Some formatting was removed to match the theme." A new
+   * message replaces the one showing and restarts its time.
+   */
+  readonly message: {
+    readonly key: StringKey;
+    readonly token: number;
+  } | null;
   /** The open picker: the gap it adds to and what opened it, so focus can go back. */
   readonly picker: {
     readonly slot: InsertSlot;
@@ -205,6 +215,9 @@ export type EditorStore = {
   /** Shows the undo toast for a delete, replacing any earlier one. */
   showToast(entry: UndoEntry, label: string): void;
   clearToast(): void;
+  /** Shows a transient status message, replacing any earlier one. */
+  showMessage(key: StringKey): void;
+  clearMessage(): void;
   /** Opens the delete confirmation for `id`. */
   askDelete(id: string, opener: DeleteOpener): void;
   cancelDelete(): void;
@@ -238,6 +251,7 @@ export function initialEditorState(): EditorState {
     noticeSeen: null,
     propertiesRequest: null,
     toast: null,
+    message: null,
     picker: null,
     drag: null,
     deleteRequest: null,
@@ -279,6 +293,7 @@ export function openedState(
     queue: createQueue(),
     undo: createUndoStack(),
     toast: null,
+    message: null,
     picker: null,
     drag: null,
     deleteRequest: null,
@@ -319,6 +334,7 @@ export function createEditorStore(
       highlight: null,
       propertiesOpen: false,
       toast: null,
+      message: null,
       picker: null,
       drag: null,
       deleteRequest: null,
@@ -485,6 +501,14 @@ export function createEditorStore(
     clearToast() {
       if (state.toast === null) return;
       set({ ...state, toast: null });
+    },
+    showMessage(key) {
+      token += 1;
+      set({ ...state, message: { key, token } });
+    },
+    clearMessage() {
+      if (state.message === null) return;
+      set({ ...state, message: null });
     },
     askDelete(id, opener) {
       if (state.mode !== 'edit') return;

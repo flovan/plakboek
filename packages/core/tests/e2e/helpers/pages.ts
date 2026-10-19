@@ -134,3 +134,29 @@ export async function releaseAllPageLocks(): Promise<void> {
     await closeAllDbs();
   }
 }
+
+/**
+ * The saved props of the first block of `blockType` on a page, read straight
+ * from the database: what a reload would show, without going through a page.
+ */
+export async function readBlockProps(
+  pageId: string,
+  blockType: string,
+): Promise<Record<string, unknown>> {
+  const { default: config } = await import('../../e2e-host/plakboek.config.ts');
+  const runtime = createRuntime({ config }, readRuntimeEnv(process.env));
+  try {
+    const rows = await runtime.db.db.execute<{
+      props: Record<string, unknown>;
+    }>(
+      sql`SELECT props FROM page_blocks WHERE owner_id = ${pageId} AND block_type = ${blockType} ORDER BY depth, sort_order LIMIT 1`,
+    );
+    const row = rows[0];
+    if (row === undefined) {
+      throw new Error(`The page ${pageId} has no ${blockType} block`);
+    }
+    return row.props;
+  } finally {
+    await closeAllDbs();
+  }
+}
