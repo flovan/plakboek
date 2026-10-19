@@ -42,6 +42,10 @@ import {
   definePagesConfig,
 } from '@plakboek/pages';
 import {
+  findWideningNarrowing,
+  type TextThemeNarrowing,
+} from '@plakboek/content/rich-text';
+import {
   defineTextTheme,
   isTextThemeDefinition,
   type TextThemeDefinition,
@@ -360,6 +364,81 @@ function checkTextTheme(
   });
 }
 
+/**
+ * The parts of a `narrow` option that have the right primitive shape. Entries
+ * the engine's options schema would refuse (an unknown level, say) are kept
+ * so the widening check can name them; a part of the wrong shape is dropped
+ * and left to the engine's own options validation.
+ */
+function readNarrowing(narrow: Record<string, unknown>): TextThemeNarrowing {
+  const list = (value: unknown): unknown[] | undefined =>
+    Array.isArray(value) ? value : undefined;
+  const flag = (value: unknown): true | undefined =>
+    value === true ? true : undefined;
+  return {
+    marks: list(narrow.marks),
+    nodes: list(narrow.nodes),
+    headingLevels: list(narrow.headingLevels),
+    ctaVariants: list(narrow.ctaVariants),
+    colors: flag(narrow.colors),
+    sizes: flag(narrow.sizes),
+    align: flag(narrow.align),
+    allowCustomValues: flag(narrow.allowCustomValues),
+  } as TextThemeNarrowing;
+}
+
+/**
+ * One `rich_text` property can narrow the global theme through its `narrow`
+ * option but never widen it (D-06).
+ */
+function checkNarrowing(
+  where: string,
+  options: unknown,
+  theme: TextThemeDefinition['theme'],
+  issues: PlakboekConfigIssue[],
+): void {
+  if (!isRecord(options) || !isRecord(options.narrow)) return;
+  const widening = findWideningNarrowing(theme, readNarrowing(options.narrow));
+  if (widening.length === 0) return;
+  issues.push({
+    code: 'TEXT_THEME_NARROWING_WIDENS',
+    message: `${where}: narrow names ${widening.join(', ')}, which the global text theme does not allow; a property can narrow the theme but never widen it`,
+  });
+}
+
+function checkNarrowings(
+  blocks: readonly HostBlockDefinition[],
+  theme: TextThemeDefinition['theme'],
+  issues: PlakboekConfigIssue[],
+): void {
+  for (const block of blocks) {
+    const properties: unknown = block.properties;
+    if (!isRecord(properties)) continue;
+    for (const [name, property] of Object.entries(properties)) {
+      if (!isRecord(property)) continue;
+      const where = `blocks.${echo(block.key)}.properties.${echo(name)}`;
+      if (property.fieldType === 'rich_text') {
+        checkNarrowing(where, property.options, theme, issues);
+      } else if (
+        property.fieldType === 'repeater' &&
+        isRecord(property.options) &&
+        Array.isArray(property.options.fields)
+      ) {
+        for (const field of property.options.fields as unknown[]) {
+          if (!isRecord(field) || field.fieldType !== 'rich_text') continue;
+          const key = typeof field.key === 'string' ? echo(field.key) : '?';
+          checkNarrowing(
+            `${where}.fields.${key}`,
+            field.options,
+            theme,
+            issues,
+          );
+        }
+      }
+    }
+  }
+}
+
 export function defineConfig(input: PlakboekConfigInput): PlakboekConfig {
   const issues: PlakboekConfigIssue[] = [];
   checkSiteName(input.siteName, issues);
@@ -386,11 +465,20 @@ export function defineConfig(input: PlakboekConfigInput): PlakboekConfig {
   if (issues.length > 0) throw new PlakboekConfigError(issues);
 
   const textTheme: TextThemeDefinition = input.textTheme ?? defineTextTheme();
+
   const modules = input.modules ?? [];
   const blocks: HostBlockDefinition[] = [
     ...fromModules(modules, (m) => m.blocks),
     ...input.blocks,
   ];
+
+  // Still before any engine call: a property may narrow the theme, never
+  // widen it.
+  const narrowingIssues: PlakboekConfigIssue[] = [];
+  checkNarrowings(blocks, textTheme.theme, narrowingIssues);
+  if (narrowingIssues.length > 0)
+    throw new PlakboekConfigError(narrowingIssues);
+
   const fieldTypes = [
     ...fromModules(modules, (m) => m.fieldTypes),
     ...(input.fieldTypes ?? []),
