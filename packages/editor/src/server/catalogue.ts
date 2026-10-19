@@ -5,7 +5,13 @@
  * A property an installation hides is absent here, not flagged: it never
  * leaves the server. A fixed or narrowed property carries its constraint so
  * the client can show the value as locked or offer only the allowed choices.
+ *
+ * A `rich_text` property carries its effective theme, the installation's text
+ * theme narrowed by the property: the same function the server validates a
+ * write with, so the client builds its schema and toolbar from exactly what
+ * the server will accept.
  */
+import { effectiveTextTheme } from '@plakboek/content';
 import {
   resolveBlockProperties,
   type BlockDefinition,
@@ -33,6 +39,9 @@ function toProperty(
       ? { defaultValue: property.defaultValue }
       : {}),
     options: property.options ?? {},
+    ...(property.fieldType === 'rich_text'
+      ? { textTheme: effectiveTextTheme(property.options) }
+      : {}),
     constraint: property.constraint,
     ...(property.constraint === 'fixed'
       ? { fixedValue: property.fixedValue }

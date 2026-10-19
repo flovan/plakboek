@@ -24,9 +24,12 @@ import type {
 import { createEditorApi } from '../../src/server/api/handler.js';
 import {
   apiRequest,
+  apiTextTheme,
   components,
   createApiHarness,
   createColumnPage,
+  createProsePage,
+  headingDoc,
   SITE_ORIGIN,
   type ApiHarness,
   type SeededPage,
@@ -54,6 +57,7 @@ function api(): ReturnType<typeof createEditorApi> {
     pages: harness.pagesDeps,
     homeSlug: 'home',
     components,
+    textTheme: apiTextTheme,
     siteOrigin: SITE_ORIGIN,
   });
 }
@@ -398,6 +402,32 @@ describe('a write whose read-back fails', () => {
     } finally {
       quiet.mockRestore();
     }
+  });
+});
+
+describe('rich text in rendered fragments', () => {
+  it('renders a saved prose body through the host theme', async () => {
+    const seeded = await createProsePage(harness, { title: 'Prose save' });
+    const tree = await readTree(harness.editor, seeded.pageId);
+    const prose = tree.tree.find((node) => node.id === seeded.proseId);
+    const done = await readEdit(
+      await edit(harness.editor, seeded.pageId, {
+        basePageVersion: tree.pageVersion,
+        ops: [
+          {
+            op: 'update',
+            blockId: seeded.proseId,
+            baseVersion: prose?.version ?? 1,
+            props: { body: headingDoc('Saved heading') },
+          },
+        ],
+      }),
+    );
+    const html = done.patch?.fragments
+      .map((fragment) => fragment.html)
+      .join('');
+    expect(html).toContain('class="h-3"');
+    expect(html).toContain('Saved heading');
   });
 });
 

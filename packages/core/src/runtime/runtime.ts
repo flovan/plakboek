@@ -206,6 +206,7 @@ function composeEditorApi(
       pages,
       homeSlug: config.homeSlug,
       components: createComponentMap(config.pages.blocks),
+      textTheme: config.textTheme,
       siteOrigin: new URL(env.siteUrl).origin,
     });
   });

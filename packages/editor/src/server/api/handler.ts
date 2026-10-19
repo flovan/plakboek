@@ -14,6 +14,7 @@
 import { needsTwoFactorEnrolment, type Auth } from '@plakboek/auth';
 import { PageLockedError, type PagesDeps } from '@plakboek/pages';
 import type { PermissionResolver } from '@plakboek/permissions';
+import type { TextThemeDefinition } from '@plakboek/render';
 import type { ComponentMap, RenderHooks } from '@plakboek/render/server';
 import { EDITOR_API_BASE, type LockView } from '../../api-types.js';
 import { buildCatalogue } from '../catalogue.js';
@@ -61,6 +62,9 @@ export type EditorApiDeps = {
    * site. */
   readonly components: ComponentMap;
   readonly hooks?: RenderHooks;
+  /** The host's text theme (`defineTextTheme`): the renderers rich text and
+   * calls to action use in rendered fragments. Defaults to the stock theme. */
+  readonly textTheme?: TextThemeDefinition;
   /** This site's origin; a state-changing request must come from it or from
    * the request's own origin. */
   readonly siteOrigin: string;

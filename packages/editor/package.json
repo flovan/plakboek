@@ -46,6 +46,7 @@
   },
   "dependencies": {
     "@plakboek/auth": "workspace:*",
+    "@plakboek/content": "workspace:*",
     "@plakboek/pages": "workspace:*",
     "@plakboek/permissions": "workspace:*",
     "@plakboek/render": "workspace:*",
@@ -60,7 +61,6 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "catalog:",
-    "@plakboek/content": "workspace:*",
     "@plakboek/db": "workspace:*",
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",

@@ -1,9 +1,11 @@
 /**
  * The editor API contract, shared by the editor server (which writes these
  * shapes) and the editor client (which reads them). Types and one constant
- * only: no imports and no runtime logic, so the client can import it without
- * pulling anything server-side into its module graph.
+ * only: no runtime logic and no runtime imports, so the client can import it
+ * without pulling anything server-side into its module graph. The one import
+ * is type-only, from the client-safe `@plakboek/content/rich-text` subpath.
  */
+import type { TextTheme } from '@plakboek/content/rich-text';
 
 /** Where every editor API route lives. */
 export const EDITOR_API_BASE = '/cms/api';
@@ -56,6 +58,9 @@ export type CatalogueProperty = {
   readonly required: boolean;
   readonly defaultValue?: unknown;
   readonly options: unknown;
+  /** The theme a `rich_text` property is held to: the installation's theme
+   * narrowed by the property. Absent for every other field type. */
+  readonly textTheme?: TextTheme;
   readonly constraint: 'none' | 'fixed' | 'narrowed';
   readonly fixedValue?: unknown;
   readonly allowedValues?: readonly string[];

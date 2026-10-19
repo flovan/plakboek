@@ -19,6 +19,7 @@ import {
 import { renderBlockFragments } from '@plakboek/render/server';
 import type { EditResponse, FragmentPatch } from '../../api-types.js';
 import { toModelNodes } from '../model.js';
+import { textEnvironmentFor } from '../text-environment.js';
 import { planFragmentTargets } from './fragments.js';
 import type { EditBody, EditBodyOp, EditNodeInput } from './schemas.js';
 import { readPageForest, type ApiContext } from './session.js';
@@ -128,12 +129,23 @@ export async function editPage(
       });
       // A target the renderer cannot find is left out; the client reloads for
       // a fragment it expected and did not get.
+      const text = await textEnvironmentFor({
+        db: deps.pages.db,
+        config,
+        homeSlug: deps.homeSlug,
+        textTheme: deps.textTheme,
+        blocks: after.blocks,
+        mode: 'edit',
+        liveOnly: false,
+        hooks: deps.hooks,
+      });
       const rendered = renderBlockFragments({
         blocks: after.blocks,
         targets: plan.targets,
         components: deps.components,
         blockMeta: context.blockMeta,
         pageId,
+        text,
         ...(deps.hooks === undefined ? {} : { hooks: deps.hooks }),
       });
       patch = {
