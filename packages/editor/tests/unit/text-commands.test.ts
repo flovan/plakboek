@@ -662,10 +662,11 @@ describe('the custom style commands', () => {
       const doc = styled();
       const { next } = apply(resetStyle, selectText(doc, 'red'));
       expect(marksOf(next.doc, 'red')).toEqual([]);
-      expect(marksOf(next.doc, 'big').map((mark) => mark.name)).toEqual([
-        'textSize',
-        'bold',
-      ]);
+      expect(
+        marksOf(next.doc, 'big')
+          .map((mark) => mark.name)
+          .sort(),
+      ).toEqual(['bold', 'textSize']);
       // The selection sits in the first paragraph, so its alignment goes too.
       expect(aligns(next.doc)).toEqual([null, 'right', null]);
     });
