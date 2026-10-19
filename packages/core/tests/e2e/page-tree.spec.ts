@@ -5,6 +5,8 @@
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
+  chrome,
+  chromeBoxOf,
   expectSelectedOver,
   framedSite,
   frameBoxOf,
@@ -12,6 +14,7 @@ import {
   LIVE_REGION,
   openEditor,
   SELECTED,
+  selectItem,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
 import { createEditablePage, heading, section } from './helpers/pages.ts';
@@ -107,15 +110,16 @@ test.describe('Page structure', () => {
     await openLongPage(page);
     const frame = await framedSite(page);
     const top = await headingId(frame, 'Top');
-    const highlight = `${HOST} [data-overlay-highlight="${top}"]`;
+    const highlight = `[data-overlay-highlight="${top}"]`;
 
     await row(page, top).hover();
-    await expect(page.locator(highlight)).toHaveCount(1);
+    await expect(chrome(page).locator(highlight)).toHaveCount(1);
     await expect
       .poll(async () => {
-        const outline = await page
-          .locator(`${highlight} .pk-overlay-outline`)
-          .boundingBox();
+        const outline = await chromeBoxOf(
+          page,
+          `${highlight} .pk-overlay-outline`,
+        ).catch(() => null);
         const heading = await frameBoxOf(frame, `[data-pk-block="${top}"]`);
         if (outline === null) return Number.POSITIVE_INFINITY;
         return Math.max(
@@ -128,7 +132,7 @@ test.describe('Page structure', () => {
       .toBeLessThanOrEqual(1);
 
     await page.getByRole('heading', { name: 'Page structure' }).hover();
-    await expect(page.locator(highlight)).toHaveCount(0);
+    await expect(chrome(page).locator(highlight)).toHaveCount(0);
   });
 
   test('leaving a hovered row gives the outline back to the row that has focus', async ({
@@ -142,7 +146,7 @@ test.describe('Page structure', () => {
     const first = await headingId(frame, 'One');
     const second = await headingId(frame, 'Two');
     const highlight = (id: string) =>
-      page.locator(`${HOST} [data-overlay-highlight="${id}"]`);
+      chrome(page).locator(`[data-overlay-highlight="${id}"]`);
 
     await row(page, first).focus();
     await row(page, second).hover();
@@ -192,7 +196,7 @@ test.describe('Page structure', () => {
 
     await page.keyboard.press('ArrowDown');
     await expect(focusedRow).toHaveAttribute('aria-level', '2');
-    await expect(page.locator(SELECTED)).toHaveCount(0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
 
     await page.keyboard.press('ArrowUp');
     await expect(focusedRow).toHaveAttribute('aria-level', '1');
@@ -224,9 +228,7 @@ test.describe('Page structure', () => {
     const id = await headingId(frame, 'H1');
     const target = frame.getByRole('heading', { name: 'H1' });
 
-    // a section with one column selects the column, and the next level the heading
-    await target.dblclick();
-    await target.dblclick();
+    await selectItem(page, target);
     await expect(row(page, id)).toHaveAttribute('aria-selected', 'true');
   });
 });
