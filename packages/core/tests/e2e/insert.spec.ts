@@ -6,12 +6,13 @@
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
+  chrome,
   frameBoxOf,
   framedSite,
-  HOST,
   LIVE_REGION,
   openEditor,
   SELECTED,
+  selectItem,
   tabToRegion,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -25,8 +26,8 @@ import {
 import { signIn } from './helpers/session.ts';
 
 const SAVED = 'All changes saved';
-const MARKER = `${HOST} [data-marker]`;
-const TOOLBAR = `${HOST} [role="toolbar"]`;
+const MARKER = '[data-marker]';
+const TOOLBAR = '[role="toolbar"]';
 
 /** Section A holds H1 and H2. */
 async function pageWithTwoHeadings(): Promise<EditablePage> {
@@ -50,11 +51,16 @@ async function expectSaved(page: Page): Promise<void> {
   await expect(page.getByText(SAVED)).toBeVisible();
 }
 
-/** Double-click twice: section to column, column to the block under the pointer. */
-async function drillToHeading(frame: Frame, at: number): Promise<void> {
-  const target = frame.locator('section.section').first().locator('h2').nth(at);
-  await target.dblclick();
-  await target.dblclick();
+/** Selects the heading at the given position in the first section. */
+async function selectHeading(
+  page: Page,
+  frame: Frame,
+  at: number,
+): Promise<void> {
+  await selectItem(
+    page,
+    frame.locator('section.section').first().locator('h2').nth(at),
+  );
 }
 
 /** Moves the pointer into the gap between the first two headings. */
@@ -72,13 +78,11 @@ async function hoverGapBetweenHeadings(
 
 /** The attribute of the shell element that has focus, or null. */
 function focusedAttribute(page: Page, name: string): Promise<string | null> {
-  return page
-    .locator(HOST)
-    .evaluate(
-      (host, attribute) =>
-        host.shadowRoot?.activeElement?.getAttribute(attribute) ?? null,
-      name,
-    );
+  return chrome(page).evaluate(
+    (host, attribute) =>
+      host.shadowRoot?.activeElement?.getAttribute(attribute) ?? null,
+    name,
+  );
 }
 
 test.beforeEach(async ({ page }) => {
@@ -92,15 +96,15 @@ test.describe('the insert points and the picker', () => {
     const created = await pageWithTwoHeadings();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillToHeading(frame, 0);
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await selectHeading(page, frame, 0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
 
     await hoverGapBetweenHeadings(page, frame);
-    await page
+    await chrome(page)
       .getByRole('button', { name: 'Add block after Heading' })
       .first()
       .click();
-    const picker = page.getByRole('dialog', { name: 'Add a block' });
+    const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
     await expect(picker).toBeVisible();
     await page.keyboard.type('tex');
     await expect(picker.getByRole('option')).toHaveCount(1);
@@ -112,7 +116,7 @@ test.describe('the insert points and the picker', () => {
       .toEqual(['h2', 'p', 'h2']);
     await expectSaved(page);
     await expect(page.locator(LIVE_REGION)).toContainText('Added Text.');
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
 
     await page.reload();
     const reloaded = await framedSite(page);
@@ -129,14 +133,14 @@ test.describe('the picker', () => {
     const created = await pageWithTwoHeadings();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillToHeading(frame, 0);
+    await selectHeading(page, frame, 0);
     await hoverGapBetweenHeadings(page, frame);
-    const button = page
+    const button = chrome(page)
       .getByRole('button', { name: 'Add block after Heading' })
       .first();
     const slot = await button.getAttribute('data-slot');
     await button.click();
-    const picker = page.getByRole('dialog', { name: 'Add a block' });
+    const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
     await expect(picker.getByRole('combobox')).toBeFocused();
 
     await page.keyboard.press('Escape');
@@ -158,7 +162,7 @@ test.describe('the picker', () => {
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('+');
 
-    const picker = page.getByRole('dialog', { name: 'Add a block' });
+    const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
     await expect(picker).toBeVisible();
     // the column is never offered, and only types that can go in a column are
     const options = await picker.getByRole('option').allTextContents();
@@ -191,26 +195,26 @@ test.describe('empty places and the blocks that need a value', () => {
     const frame = await framedSite(page);
     const live = page.locator(LIVE_REGION);
 
-    const card = page.locator(`${HOST} [data-empty-page]`);
+    const card = chrome(page).locator('[data-empty-page]');
     await expect(card).toContainText('This page has no sections yet');
     await expect(card).toContainText(
       'Add a section to start building the page.',
     );
     // a core section is the only legal section type, so there is nothing to pick
-    await page.getByRole('button', { name: 'Add a section' }).click();
+    await chrome(page).getByRole('button', { name: 'Add a section' }).click();
 
     await expect(live).toContainText('Added Section.');
     await expect(card).toHaveCount(0);
     await expect(frame.locator('section.section')).toHaveCount(1);
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
     await expectSaved(page);
 
     // the new section starts with one column, which is empty and says how to fill it
-    const prompt = page.locator(`${HOST} [data-empty-add]`);
+    const prompt = chrome(page).locator('[data-empty-add]');
     await expect(prompt).toHaveCount(1);
     await expect(prompt).toHaveText('Add block');
     await prompt.click();
-    const picker = page.getByRole('dialog', { name: 'Add a block' });
+    const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
     await page.keyboard.type('head');
     await page.keyboard.press('Enter');
 
@@ -218,8 +222,8 @@ test.describe('empty places and the blocks that need a value', () => {
     await expect(frame.locator('section.section h2')).toHaveCount(1);
     await expect(prompt).toHaveCount(0);
     // its text is required and still empty
-    await expect(page.locator(MARKER)).toHaveCount(1);
-    await expect(page.locator(MARKER)).toHaveText('Needs input');
+    await expect(chrome(page).locator(MARKER)).toHaveCount(1);
+    await expect(chrome(page).locator(MARKER)).toHaveText('Needs input');
     await expect(live).toHaveText(/Added Heading\. Needs input\.$/);
   });
 
@@ -230,8 +234,8 @@ test.describe('empty places and the blocks that need a value', () => {
       blocks: [section(heading('H1'), paragraph('Some text'))],
     });
     await openEditor(page, created.path);
-    await expect(page.locator(`${HOST} [data-empty-box]`)).toHaveCount(0);
-    await expect(page.locator(MARKER)).toHaveCount(0);
+    await expect(chrome(page).locator('[data-empty-box]')).toHaveCount(0);
+    await expect(chrome(page).locator(MARKER)).toHaveCount(0);
   });
 
   test('Add after opens the picker for the gap after the selected block, and the + key from the page region does the same', async ({
@@ -240,13 +244,13 @@ test.describe('empty places and the blocks that need a value', () => {
     const created = await pageWithTwoHeadings();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillToHeading(frame, 0);
+    await selectHeading(page, frame, 0);
 
-    await page
+    await chrome(page)
       .locator(TOOLBAR)
       .getByRole('button', { name: 'Add after Heading' })
       .click();
-    const picker = page.getByRole('dialog', { name: 'Add a block' });
+    const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
     await expect(picker).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(picker).toHaveCount(0);
@@ -270,7 +274,7 @@ test.describe('empty places and the blocks that need a value', () => {
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('+');
-    const picker = page.getByRole('dialog', { name: 'Add a block' });
+    const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
     await page.keyboard.type('zzzz');
     await expect(picker).toContainText('No blocks match "zzzz".');
     await expect(picker.getByRole('option')).toHaveCount(0);
@@ -294,7 +298,7 @@ test.describe('empty places and the blocks that need a value', () => {
     await narrowed.keyboard.press('ArrowRight');
     await narrowed.keyboard.press('ArrowRight');
     await narrowed.keyboard.press('+');
-    const empty = narrowed.getByRole('dialog', { name: 'Add a block' });
+    const empty = chrome(narrowed).getByRole('dialog', { name: 'Add a block' });
     await expect(empty).toContainText('Nothing can be added here');
     await expect(empty).toContainText(
       'The page structure does not allow another block in this spot.',
