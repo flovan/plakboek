@@ -42,6 +42,14 @@ const ROOT_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   ColumnBlock: 'function',
   // edit-hooks
   defineBlockEdit: 'function',
+  // rich-text
+  DEFAULT_TEXT_RENDERERS: 'constant',
+  defineTextTheme: 'function',
+  isTextThemeDefinition: 'function',
+  createTextEnvironment: 'function',
+  TextEnvironmentProvider: 'function',
+  useTextEnvironment: 'function',
+  RichText: 'function',
 });
 
 const ROOT_TYPES: readonly string[] = Object.freeze([
@@ -68,6 +76,35 @@ const ROOT_TYPES: readonly string[] = Object.freeze([
   // edit-proxy
   'EditAttributes',
   'EditProxy',
+  // rich-text
+  'BlockquoteRendererProps',
+  'BoldRendererProps',
+  'BulletListRendererProps',
+  'CtaRendererProps',
+  'CtaRowRendererProps',
+  'HardBreakRendererProps',
+  'HeadingRendererProps',
+  'HorizontalRuleRendererProps',
+  'ItalicRendererProps',
+  'LinkRendererProps',
+  'ListItemRendererProps',
+  'OrderedListRendererProps',
+  'ParagraphRendererProps',
+  'StrikeRendererProps',
+  'TextColorRendererProps',
+  'TextRenderers',
+  'TextSizeRendererProps',
+  'UnderlineRendererProps',
+  'LinkTarget',
+  'TextTheme',
+  'TextThemeDefinition',
+  'TextThemeDefinitionInput',
+  'TextThemeInput',
+  'TextThemeNarrowing',
+  'TextEnvironment',
+  'TextEnvironmentInput',
+  'TextEnvironmentMode',
+  'RichTextProps',
 ]);
 
 const SERVER_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
@@ -287,7 +324,10 @@ describe('block catalogue prohibition', () => {
       ...Object.keys(await import('../../src/server.js')),
     ];
     for (const name of names) {
-      expect(name).not.toMatch(/^(Hero|Section|Heading|Paragraph|Text|Image)/);
+      // `Text` alone would be a catalogue block; the rich-text environment's
+      // names (`TextEnvironmentProvider`) are not.
+      expect(name).not.toMatch(/^(Hero|Section|Heading|Paragraph|Image)/);
+      expect(name).not.toBe('Text');
     }
     expect(readFileSync(pathOf('../../src/index.ts'), 'utf8')).not.toMatch(
       /defineBlocks|BlockDefinition/,

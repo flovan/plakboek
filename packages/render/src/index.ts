@@ -57,3 +57,50 @@ export type { EditAttributes, EditProxy } from './edit-proxy.js';
 
 // live-edit
 export { EDIT_ATTRIBUTE, isLiveEdit } from './live-edit.js';
+
+// rich-text
+export { DEFAULT_TEXT_RENDERERS } from './rich-text/renderers.js';
+export type {
+  BlockquoteRendererProps,
+  BoldRendererProps,
+  BulletListRendererProps,
+  CtaRendererProps,
+  CtaRowRendererProps,
+  HardBreakRendererProps,
+  HeadingRendererProps,
+  HorizontalRuleRendererProps,
+  ItalicRendererProps,
+  LinkRendererProps,
+  ListItemRendererProps,
+  OrderedListRendererProps,
+  ParagraphRendererProps,
+  StrikeRendererProps,
+  TextColorRendererProps,
+  TextRenderers,
+  TextSizeRendererProps,
+  UnderlineRendererProps,
+} from './rich-text/renderers.js';
+export {
+  defineTextTheme,
+  isTextThemeDefinition,
+} from './rich-text/define-text-theme.js';
+export type {
+  LinkTarget,
+  TextTheme,
+  TextThemeDefinition,
+  TextThemeDefinitionInput,
+  TextThemeInput,
+  TextThemeNarrowing,
+} from './rich-text/define-text-theme.js';
+export {
+  createTextEnvironment,
+  TextEnvironmentProvider,
+  useTextEnvironment,
+} from './rich-text/environment.js';
+export type {
+  TextEnvironment,
+  TextEnvironmentInput,
+  TextEnvironmentMode,
+} from './rich-text/environment.js';
+export { RichText } from './rich-text/rich-text.js';
+export type { RichTextProps } from './rich-text/rich-text.js';

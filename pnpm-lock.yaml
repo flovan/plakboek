@@ -802,6 +802,9 @@ importers:
       '@plakboek/cache':
         specifier: workspace:*
         version: link:../cache
+      '@plakboek/content':
+        specifier: workspace:*
+        version: link:../content
       '@plakboek/pages':
         specifier: workspace:*
         version: link:../pages
@@ -812,9 +815,6 @@ importers:
       '@plakboek/auth':
         specifier: workspace:*
         version: link:../auth
-      '@plakboek/content':
-        specifier: workspace:*
-        version: link:../content
       '@plakboek/db':
         specifier: workspace:*
         version: link:../db

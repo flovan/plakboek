@@ -40,12 +40,24 @@ export type CacheErrorEvent = {
   readonly error: unknown;
 };
 
+/**
+ * Stored rich text the renderer could not render as written: a node it does
+ * not know (`kind: 'node'`, including a heading level outside 2-4) or a mark
+ * it does not know (`kind: 'mark'`). It carries the type name only, never
+ * any of the text. Reported once per name per render environment.
+ */
+export type RichTextIssueEvent = {
+  readonly kind: 'node' | 'mark';
+  readonly name: string;
+};
+
 export type RenderHooks = {
   readonly onUnknownBlock?: (event: UnknownBlockEvent) => void;
   readonly onMissingComponent?: (event: MissingComponentEvent) => void;
   readonly onBlockRenderError?: (event: BlockRenderErrorEvent) => void;
   readonly onRenderError?: (event: RenderErrorEvent) => void;
   readonly onCacheError?: (event: CacheErrorEvent) => void;
+  readonly onRichTextIssue?: (event: RichTextIssueEvent) => void;
 };
 
 function errorName(error: unknown): string {
