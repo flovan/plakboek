@@ -200,10 +200,10 @@ export function OverlayLayer(props: {
         ? {}
         : {
             resolve: (chain) => {
-              const { model, selection: scope } = store.getState();
+              const { model } = store.getState();
               return model === null
                 ? (chain[0] ?? null)
-                : hoverTarget(model, scope, chain);
+                : hoverTarget(model, chain);
             },
             selection: {
               read: () => store.getState().selection,

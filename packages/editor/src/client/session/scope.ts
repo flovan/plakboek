@@ -2,13 +2,14 @@ import type { ModelNode } from '../../api-types.js';
 import type { TreeModel } from './tree-model.js';
 
 /**
- * Scoped selection over the page model. The scope is the container whose
- * children one click can select (`null` is the page); the selected item is
- * always a child of the scope, so the pair is `{ parent of selected,
- * selected }` or `{ null, null }`. Everything here reads the model, never the
- * DOM: the caller turns the pointer into a hit chain (the ids of the items
- * under it, innermost first, skipping any element it could not measure) and
- * gets the next selection back.
+ * Selection over the page model. A click selects the deepest item under the
+ * pointer; the scope is the selected item's parent (`null` at the top), kept
+ * so the overlay can outline it and the keyboard can walk the siblings, so
+ * the pair is `{ parent of selected, selected }` or `{ null, null }`.
+ * Everything here reads the model, never the DOM: the caller turns the
+ * pointer into a hit chain (the ids of the items under it, innermost first,
+ * skipping any element it could not measure) and gets the next selection
+ * back. Ancestors are reached by Escape, the breadcrumb and Page structure.
  */
 export type Selection = {
   readonly scopeId: string | null;
@@ -33,119 +34,48 @@ function select(model: TreeModel, node: ModelNode): Selection {
   return { scopeId: model.parentOf(node.id)?.id ?? null, selectedId: node.id };
 }
 
-function ancestorCount(model: TreeModel, id: string): number {
-  return model.ancestorsOf(id).length;
-}
-
 /**
- * The outermost item of the chain strictly inside `containerId` (anywhere
- * for the page). Outermost is the child of the container unless a level was
- * skipped, in which case the first item below the gap stands in for it.
+ * The deepest item of the chain the model holds: the item a click selects and
+ * the hover previews. Ids the model does not know (a site element carrying a
+ * stale id) are skipped.
  */
-function outermostInside(
+function deepestHit(
   model: TreeModel,
   hitChain: readonly string[],
-  containerId: string | null,
 ): ModelNode | null {
-  let best: ModelNode | null = null;
-  let bestDepth = Number.POSITIVE_INFINITY;
   for (const id of hitChain) {
     const node = model.get(id);
-    if (node === undefined) continue;
-    if (
-      containerId !== null &&
-      !model.ancestorsOf(id).some((ancestor) => ancestor.id === containerId)
-    ) {
-      continue;
-    }
-    const depth = ancestorCount(model, id);
-    if (depth < bestDepth) {
-      best = node;
-      bestDepth = depth;
-    }
-  }
-  return best;
-}
-
-/** What a click would select now: the scope's child under the pointer, climbing as far as the pointer needs. */
-function resolveClick(
-  model: TreeModel,
-  scopeId: string | null,
-  hitChain: readonly string[],
-): ModelNode | null {
-  let container = scopeId;
-  for (let steps = 0; steps <= model.size; steps += 1) {
-    const hit = outermostInside(model, hitChain, container);
-    if (hit !== null) return hit;
-    if (container === null) return null;
-    container = model.parentOf(container)?.id ?? null;
+    if (node !== undefined) return node;
   }
   return null;
 }
 
-/** First click: selects the child of the current scope under the pointer, climbing when the pointer is outside the scope; empty page clears. */
+/**
+ * Click: selects the deepest item under the pointer, whatever is selected
+ * now. A click on the item that is already selected keeps it (same object, no
+ * toggle); empty page area clears.
+ */
 export function selectByClick(
   model: TreeModel,
   selection: Selection,
   hitChain: readonly string[],
 ): Selection {
-  const hit = resolveClick(model, selection.scopeId, hitChain);
-  return hit === null ? NO_SELECTION : select(model, hit);
+  const hit = deepestHit(model, hitChain);
+  if (hit === null) return NO_SELECTION;
+  return hit.id === selection.selectedId ? selection : select(model, hit);
 }
 
 /** What a click would select now, for the hover preview. */
 export function hoverTarget(
   model: TreeModel,
-  selection: Selection,
   hitChain: readonly string[],
 ): string | null {
-  return resolveClick(model, selection.scopeId, hitChain)?.id ?? null;
+  return deepestHit(model, hitChain)?.id ?? null;
 }
 
 /** A leaf block has Properties to show; a column has none. */
 function leafOpensProperties(node: ModelNode): boolean {
   return node.kind !== 'column';
-}
-
-function drillInto(
-  model: TreeModel,
-  node: ModelNode,
-  hitChain: readonly string[],
-): ScopeResult {
-  const children = model.childrenOf(node.id);
-  if (children.length === 0) {
-    return {
-      selection: select(model, node),
-      openProperties: leafOpensProperties(node),
-    };
-  }
-  const underPointer = outermostInside(model, hitChain, node.id);
-  const only = children[0];
-  // A section's single column is selected even with the pointer on the
-  // section's own padding.
-  const child =
-    underPointer ??
-    (node.kind === 'section' && children.length === 1 ? only : undefined);
-  if (child === undefined) {
-    return { selection: select(model, node), openProperties: false };
-  }
-  return { selection: select(model, child), openProperties: false };
-}
-
-/** Double-click: drills one level into the selected item, or asks for Properties on a leaf. */
-export function drillByDoubleClick(
-  model: TreeModel,
-  selection: Selection,
-  hitChain: readonly string[],
-): ScopeResult {
-  const selected =
-    selection.selectedId !== null && hitChain.includes(selection.selectedId)
-      ? model.get(selection.selectedId)
-      : undefined;
-  const target =
-    selected ?? resolveClick(model, selection.scopeId, hitChain) ?? undefined;
-  if (target === undefined) return { selection, openProperties: false };
-  return drillInto(model, target, hitChain);
 }
 
 /** Escape: selects the parent, and clears at a top-level item. */

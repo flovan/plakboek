@@ -104,8 +104,8 @@ export type EditorState = {
   /** The notice that was showing when the drawer was last open or closed, so a newer one is unread. */
   readonly noticeSeen: Notice | null;
   /**
-   * An explicit ask for an item's Properties (a double-click or Enter on a
-   * leaf, the toolbar button, an insert that needs input). It switches the
+   * An explicit ask for an item's Properties (the toolbar button, Enter or a
+   * double-click in the Page structure, the needs-input marker). It switches the
    * panel to Properties; the panel answers it by moving focus to a control.
    */
   readonly propertiesRequest: {

@@ -25,8 +25,8 @@ export type SidePanelProps = {
 /**
  * Moves focus to the first control of the open Properties panel that still
  * needs input, else to its first control. Only an explicit ask does this
- * (a double-click or Enter on a leaf, the toolbar's Properties button, an
- * insert that needs input); selecting never does.
+ * (the toolbar's Properties button, Enter or a double-click in the Page
+ * structure, the needs-input marker); selecting never does.
  */
 function focusFirstControl(root: HTMLElement | null): void {
   const panel = root?.querySelector('[data-properties-panel]') ?? null;

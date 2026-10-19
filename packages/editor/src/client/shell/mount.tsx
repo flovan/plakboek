@@ -67,7 +67,6 @@ import { hasPending, type Intent } from '../session/save-queue.js';
 import { createSaveRunner, type SaveRunner } from '../session/save-runner.js';
 import {
   climb,
-  drillByDoubleClick,
   drillFirst,
   firstSibling,
   lastSibling,
@@ -1055,25 +1054,6 @@ function Shell(props: {
             );
             focusRegion(host);
           },
-          onDoubleClick: (x, y) => {
-            store.closePicker();
-            const hit = read(x, y);
-            if (hit === null) return;
-            const drilled = drillByDoubleClick(
-              hit.model,
-              hit.selection,
-              hit.chain,
-            );
-            selectAndAnnounce(store, drilled.selection);
-            focusRegion(host);
-            // A double-click on a leaf is the explicit ask for its Properties.
-            if (
-              drilled.openProperties &&
-              drilled.selection.selectedId !== null
-            ) {
-              store.requestProperties(drilled.selection.selectedId);
-            }
-          },
         });
       } else if (!wanted && releaseClaim !== null) {
         releaseClaim();
@@ -1339,8 +1319,8 @@ function Shell(props: {
     [host, store, showLayout],
   );
 
-  // An explicit ask for an item's Properties (a double-click, the toolbar
-  // button) shows them: in the full layout that opens the drawer, in the same
+  // An explicit ask for an item's Properties (the toolbar button, the Page
+  // structure) shows them: in the full layout that opens the drawer, in the same
   // store update's wake so the panel's own focus move is the one that lands.
   useEffect(() => {
     let seen = store.getState().propertiesRequest?.token ?? 0;
