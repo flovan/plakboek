@@ -1,11 +1,14 @@
 export {
   DEFAULT_TEXT_THEME,
+  findWideningNarrowing,
   HEADING_LEVELS,
+  narrowTextTheme,
   resolveTextTheme,
   TEXT_ALIGNS,
   TEXT_MARK_NAMES,
   TEXT_NODE_NAMES,
   TextThemeError,
+  textThemeNarrowingSchema,
 } from './theme.js';
 export type {
   CtaVariant,
@@ -19,6 +22,7 @@ export type {
   TextThemeInput,
   TextThemeIssue,
   TextThemeIssueCode,
+  TextThemeNarrowing,
 } from './theme.js';
 export { HREF_MAX_LENGTH, isAllowedHref } from './href.js';
 export {

@@ -4,6 +4,7 @@
  * behaviour, so the server validator, the editor's schema builder and the
  * renderer can all be driven from the same value.
  */
+import { z } from 'zod';
 import { TOKEN_PATTERN } from './values.js';
 
 export const TEXT_MARK_NAMES = [
@@ -76,6 +77,21 @@ export type TextTheme = {
   readonly align: boolean;
   readonly allowCustomValues: boolean;
   readonly ctaVariants: readonly CtaVariant[];
+};
+
+/**
+ * What a property or block may take away from the theme. Every boolean can
+ * only switch a feature off, every list can only name entries to keep.
+ */
+export type TextThemeNarrowing = {
+  readonly marks?: readonly TextMarkName[];
+  readonly nodes?: readonly TextNodeName[];
+  readonly headingLevels?: readonly HeadingLevel[];
+  readonly colors?: boolean;
+  readonly sizes?: boolean;
+  readonly align?: boolean;
+  readonly allowCustomValues?: boolean;
+  readonly ctaVariants?: readonly string[];
 };
 
 export type TextThemeIssueCode =
@@ -419,7 +435,12 @@ export function resolveTextTheme(input?: TextThemeInput): TextTheme {
 
   const effectiveNodes = nodes ?? DEFAULT_TEXT_THEME.nodes;
   const effectiveVariants = ctaVariants ?? DEFAULT_TEXT_THEME.ctaVariants;
-  if (effectiveNodes.includes('cta') && effectiveVariants.length === 0) {
+  // Only an explicitly empty list is this problem; a list whose entries were
+  // all refused has already been reported entry by entry.
+  const noVariantsListed = Array.isArray(source.ctaVariants)
+    ? source.ctaVariants.length === 0
+    : effectiveVariants.length === 0;
+  if (effectiveNodes.includes('cta') && noVariantsListed) {
     issues.push({
       code: 'CTA_WITHOUT_VARIANTS',
       message:
@@ -443,3 +464,103 @@ export function resolveTextTheme(input?: TextThemeInput): TextTheme {
     ctaVariants: freezeEntries(effectiveVariants),
   });
 }
+
+function keep<T>(
+  current: readonly T[],
+  wanted: readonly T[] | undefined,
+): readonly T[] {
+  return Object.freeze(
+    wanted === undefined
+      ? [...current]
+      : current.filter((entry) => wanted.includes(entry)),
+  );
+}
+
+/**
+ * The theme a property or block ends up with: the theme intersected with the
+ * narrowing. A narrowing can drop marks, nodes, heading levels, palettes,
+ * alignment, custom values and CTA variants, never add one; whatever it names
+ * that the theme lacks is ignored (see `findWideningNarrowing`). Dropping the
+ * last CTA variant also drops the cta node.
+ */
+export function narrowTextTheme(
+  theme: TextTheme,
+  narrowing: TextThemeNarrowing = {},
+): TextTheme {
+  const ctaVariants =
+    narrowing.ctaVariants === undefined
+      ? theme.ctaVariants
+      : theme.ctaVariants.filter((entry) =>
+          narrowing.ctaVariants?.includes(entry.value),
+        );
+  const nodes = keep(theme.nodes, narrowing.nodes).filter(
+    (node) => node !== 'cta' || ctaVariants.length > 0,
+  );
+  return Object.freeze({
+    marks: keep(theme.marks, narrowing.marks),
+    nodes: Object.freeze(nodes),
+    headingLevels: keep(theme.headingLevels, narrowing.headingLevels),
+    colors: narrowing.colors === false ? Object.freeze([]) : theme.colors,
+    sizes: narrowing.sizes === false ? Object.freeze([]) : theme.sizes,
+    align: narrowing.align === false ? false : theme.align,
+    allowCustomValues:
+      narrowing.allowCustomValues === false ? false : theme.allowCustomValues,
+    ctaVariants: Object.freeze([...ctaVariants]),
+  });
+}
+
+/**
+ * Every part of `narrowing` that lies outside `theme`, as short readable
+ * entries (`marks: code`, `headingLevels: 1`, `colors`, `ctaVariants:
+ * tertiary`). Empty for a pure subset. `narrowTextTheme` ignores these; a
+ * caller that wants to refuse them reports this list.
+ */
+export function findWideningNarrowing(
+  theme: TextTheme,
+  narrowing: TextThemeNarrowing = {},
+): readonly string[] {
+  const widening: string[] = [];
+  const outside = (
+    key: string,
+    wanted: readonly unknown[] | undefined,
+    available: readonly unknown[],
+  ): void => {
+    for (const entry of wanted ?? []) {
+      if (!available.includes(entry)) {
+        widening.push(`${key}: ${shown(entry)}`);
+      }
+    }
+  };
+  outside('marks', narrowing.marks, theme.marks);
+  outside('nodes', narrowing.nodes, theme.nodes);
+  outside('headingLevels', narrowing.headingLevels, theme.headingLevels);
+  if (narrowing.colors === true && theme.colors.length === 0) {
+    widening.push('colors');
+  }
+  if (narrowing.sizes === true && theme.sizes.length === 0) {
+    widening.push('sizes');
+  }
+  if (narrowing.align === true && !theme.align) widening.push('align');
+  if (narrowing.allowCustomValues === true && !theme.allowCustomValues) {
+    widening.push('allowCustomValues');
+  }
+  outside(
+    'ctaVariants',
+    narrowing.ctaVariants,
+    theme.ctaVariants.map((entry) => entry.value),
+  );
+  return widening;
+}
+
+export const textThemeNarrowingSchema = z.strictObject({
+  marks: z.array(z.enum(TEXT_MARK_NAMES)).optional(),
+  nodes: z.array(z.enum(TEXT_NODE_NAMES)).optional(),
+  headingLevels: z
+    .array(z.union([z.literal(2), z.literal(3), z.literal(4)]))
+    .optional(),
+  colors: z.boolean().optional(),
+  sizes: z.boolean().optional(),
+  align: z.boolean().optional(),
+  allowCustomValues: z.boolean().optional(),
+  ctaVariants: z.array(z.string()).optional(),
+});

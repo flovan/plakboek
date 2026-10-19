@@ -482,3 +482,56 @@ audited, permission-gated door for actually deleting them, requiring
 `entries:delete-permanent`. `@plakboek/pages`'s cross-package `purgeLocale`
 calls `purgeLocaleEntriesInTransaction` directly, inside its own transaction,
 so a page-engine purge and this entry purge commit or roll back together.
+
+### Rich text entry: `@plakboek/content/rich-text`
+
+A second, client-safe entry point (`import { ... } from '@plakboek/content/rich-text'`). It imports only `zod` and its own modules (no database, no Drizzle, no Node builtin), so the server validator, the renderer and the editor share one set of acceptance rules for stored rich text. A test fails if any module in it imports anything else.
+
+| Export                      | Kind     | Purpose                                                                                                        |
+| --------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
+| `TEXT_MARK_NAMES`           | constant | The marks a theme can allow: bold, italic, underline, strike, link                                             |
+| `TEXT_NODE_NAMES`           | constant | The optional nodes a theme can allow: lists, blockquote, divider, hard break, CTA                              |
+| `HEADING_LEVELS`            | constant | The heading levels that exist: 2, 3 and 4 (level 1 belongs to the page title)                                  |
+| `TEXT_ALIGNS`               | constant | The alignments a paragraph or heading can carry: left, center, right                                           |
+| `DEFAULT_TEXT_THEME`        | constant | The lean default theme: every mark and node, headings 2 to 4, no palettes, no alignment, custom values allowed |
+| `resolveTextTheme`          | function | Fills a theme from the default, checks it and freezes it; throws `TextThemeError` listing every problem        |
+| `narrowTextTheme`           | function | Intersects a theme with a narrowing; it can only take things away                                              |
+| `findWideningNarrowing`     | function | Names every part of a narrowing that lies outside the theme                                                    |
+| `textThemeNarrowingSchema`  | constant | Zod schema of a narrowing                                                                                      |
+| `TextThemeError`            | class    | Thrown by `resolveTextTheme`; carries `issues`                                                                 |
+| `HREF_MAX_LENGTH`           | constant | Longest accepted href, 2048 characters                                                                         |
+| `isAllowedHref`             | function | The one href policy: https, http, mailto, tel, root-relative paths and fragments only                          |
+| `validateRichTextDocument`  | function | Checks a stored document against a theme; returns `{ path, code }` issues, never the submitted value           |
+| `isRichTextDocumentInTheme` | function | True when a document has no issues for a theme                                                                 |
+| `stripOutOfTheme`           | function | Rewrites a document so it fits a theme and keeps every word                                                    |
+| `isEmptyRichTextDocument`   | function | True for null, an empty doc or a doc of empty paragraphs; false once it holds text, a CTA or a divider         |
+| `collectRichTextPageIds`    | function | Each distinct page id a link or CTA points at, in document order                                               |
+| `isCompleteCta`             | function | True when a CTA has a non-blank label and one usable target                                                    |
+| `PAGE_ID_PATTERN`           | constant | Lowercase uuid pattern of a page id                                                                            |
+| `linkTargetSchema`          | constant | Zod schema of a link target: exactly one of `href` and `pageId`, plus an optional `_blank` target              |
+| `isCompleteLinkTarget`      | function | True when exactly one of href and page id is set and usable                                                    |
+| `TOKEN_PATTERN`             | constant | Shape of a palette, size or CTA variant token name                                                             |
+| `CUSTOM_SIZE_MIN`           | constant | Smallest custom size, 8 px                                                                                     |
+| `CUSTOM_SIZE_MAX`           | constant | Largest custom size, 200 px                                                                                    |
+| `parseCustomColor`          | function | A typed hex colour (3, 4, 6 or 8 digits) as typed, or null                                                     |
+| `parseCustomSize`           | function | A typed whole number of px between the bounds as `18px`, or null                                               |
+| `isCustomColorValue`        | function | True for a stored custom colour value                                                                          |
+| `isCustomSizeValue`         | function | True for a stored custom size value                                                                            |
+| `TextMarkName`              | type     | One of `TEXT_MARK_NAMES`                                                                                       |
+| `TextNodeName`              | type     | One of `TEXT_NODE_NAMES`                                                                                       |
+| `HeadingLevel`              | type     | 2, 3 or 4                                                                                                      |
+| `TextAlign`                 | type     | One of `TEXT_ALIGNS`                                                                                           |
+| `TextPaletteEntry`          | type     | A colour of the palette: `{ label, token }`                                                                    |
+| `TextSizeEntry`             | type     | A size of the palette: `{ label, token, value? }`                                                              |
+| `CtaVariant`                | type     | A CTA look: `{ label, value }`                                                                                 |
+| `TextThemeInput`            | type     | What a host writes: every key optional                                                                         |
+| `TextTheme`                 | type     | A resolved, frozen theme with every key present                                                                |
+| `TextThemeNarrowing`        | type     | What a property or block may take away from a theme                                                            |
+| `TextThemeIssueCode`        | type     | Codes of a theme problem                                                                                       |
+| `TextThemeIssue`            | type     | One theme problem: `{ code, message }`                                                                         |
+| `RichTextDocument`          | type     | A stored document: `{ type: 'doc', content? }`                                                                 |
+| `RichTextNodeJson`          | type     | A stored node                                                                                                  |
+| `RichTextMarkJson`          | type     | A stored mark                                                                                                  |
+| `RichTextIssueCode`         | type     | Codes of a document problem                                                                                    |
+| `RichTextIssue`             | type     | One document problem: `{ path, code }`                                                                         |
+| `LinkTarget`                | type     | A link target: `{ href, pageId, target }`                                                                      |
