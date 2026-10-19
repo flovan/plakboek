@@ -51,6 +51,13 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   // field-types/rich-text
   RICH_TEXT_MAX_BYTES: 'constant',
   RICH_TEXT_MAX_DEPTH: 'constant',
+  // field-types/text-theme-registry
+  registerTextTheme: 'function',
+  getTextTheme: 'function',
+  effectiveTextTheme: 'function',
+  // field-types/link
+  LINK_FIELD_TYPE: 'constant',
+  LINK_FIELD_TYPE_KEY: 'constant',
   // field-types/url
   URL_MAX_LENGTH: 'constant',
   // field-types/json

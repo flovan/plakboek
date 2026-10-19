@@ -131,6 +131,21 @@ stays scoped to the sixteen built-ins only -- host types are validated in
 the application layer, not by the `content_type_fields_field_type_check`
 CHECK constraint.
 
+### Text theme and the link field type
+
+| Export                | Kind     | Purpose                                                                                                                            |
+| --------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `registerTextTheme`   | function | Sets the installation's text theme (a resolved one from `resolveTextTheme`); the last call wins                                    |
+| `getTextTheme`        | function | The registered theme, or the lean default                                                                                          |
+| `effectiveTextTheme`  | function | The theme one `rich_text` property is held to: the registered theme narrowed by the property's `narrow` option                     |
+| `LINK_FIELD_TYPE`     | constant | The CMS `link` field type: `{ href, pageId, target }` with exactly one of href and page id; options name sibling label and variant |
+| `LINK_FIELD_TYPE_KEY` | constant | `'link'`, the key the link field type is stored under in block properties                                                          |
+
+Every `rich_text` write is validated against the effective theme: an `h1`, a
+mark or node the theme does not allow, an off-palette token or a refused href
+is refused as invalid, naming the path and a code, never the text. A property
+may declare `options: { narrow: { ... } }` to take things away; it cannot add.
+
 ### Field-type validation constants
 
 | Export                  | Kind     | Purpose                                                          |

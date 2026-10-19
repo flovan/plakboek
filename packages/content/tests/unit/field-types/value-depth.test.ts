@@ -65,7 +65,9 @@ describe('deeply nested values are rejected, never thrown (D-CR-02, D-CR-03)', (
   });
 
   it('still accepts documents at the rich_text content-depth cap', () => {
-    const schema = richTextFieldType.buildValueSchema({} as never);
+    // Paragraphs nested in paragraphs fit the shape and the caps but not a
+    // theme, so this is the shape-only schema.
+    const schema = richTextFieldType.buildStoredValueSchema({} as never);
     expect(schema.safeParse(nestedDoc(30)).success).toBe(true);
   });
 });

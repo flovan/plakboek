@@ -65,6 +65,7 @@ import {
   EDIT_LOCK_TTL_SECONDS,
   type EditLockGrant,
   EditLockingDisabledError,
+  effectiveTextTheme,
   EMPTY_ENTRY_SEO,
   ENTRY_SEO_PROPERTIES,
   ENTRY_STATUSES,
@@ -113,6 +114,7 @@ import {
   getOrCreateSingleton,
   type GetOrCreateSingletonInput,
   getRevisionCap,
+  getTextTheme,
   type HostFieldTypeDefinition,
   HostRegistrationError,
   type HostRegistrationIssue,
@@ -126,6 +128,8 @@ import {
   isSafePattern,
   JSON_FIELD_MAX_BYTES,
   LABEL_MAX_LENGTH,
+  LINK_FIELD_TYPE,
+  LINK_FIELD_TYPE_KEY,
   listEntries,
   type ListEntriesInput,
   listFieldKeyHistory,
@@ -168,6 +172,7 @@ import {
   REPEATER_MAX_ITEMS,
   registerHostFieldType,
   registerHostWidget,
+  registerTextTheme,
   reportContentWarning,
   resolveUrlPath,
   restoreEntryFromTrash,
@@ -301,12 +306,14 @@ const functions: Record<string, unknown> = {
   findEntry,
   findSingleton,
   findTranslations,
+  effectiveTextTheme,
   fieldKeyFromLabel,
   getContentTypeByKey,
   getFieldTypeDefinition,
   getFieldTypeWidgets,
   getOrCreateSingleton,
   getRevisionCap,
+  getTextTheme,
   isFieldType,
   isLockLive,
   isNormalizedSlug,
@@ -325,6 +332,7 @@ const functions: Record<string, unknown> = {
   purgeLocaleEntriesInTransaction,
   registerHostFieldType,
   registerHostWidget,
+  registerTextTheme,
   releaseEditLock,
   renameContentTypeKey,
   renameField,
@@ -436,6 +444,10 @@ const frozenObjects: Record<string, unknown> = {
   EMPTY_ENTRY_SEO,
 };
 
+const fieldTypeDefinitions: Record<string, unknown> = {
+  LINK_FIELD_TYPE,
+};
+
 function fail(reason: string): never {
   console.error(`content.ts: ${reason}`);
   process.exit(1);
@@ -475,6 +487,16 @@ for (const [name, value] of Object.entries(frozenArrays)) {
   }
 }
 
+for (const [name, value] of Object.entries(fieldTypeDefinitions)) {
+  if (typeof value !== 'object' || value === null) {
+    fail(`${name} is not a field type definition`);
+  }
+}
+
+if (LINK_FIELD_TYPE_KEY !== 'link' || LINK_FIELD_TYPE.fieldType !== 'link') {
+  fail("the link field type is not filed under the key 'link'");
+}
+
 for (const [name, value] of Object.entries(frozenObjects)) {
   if (typeof value !== 'object' || value === null || !Object.isFrozen(value)) {
     fail(`${name} is not a frozen object`);
@@ -509,7 +531,9 @@ const documentedValueCount =
   Object.keys(numbers).length +
   Object.keys(regexPatterns).length +
   Object.keys(frozenArrays).length +
-  Object.keys(frozenObjects).length;
+  Object.keys(frozenObjects).length +
+  Object.keys(fieldTypeDefinitions).length +
+  1; // LINK_FIELD_TYPE_KEY
 
 const exportedNames = Object.keys(content);
 if (exportedNames.length !== documentedValueCount) {
