@@ -6,13 +6,14 @@
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
-  boxOf,
+  chrome,
+  chromeBoxOf,
   frameBoxOf,
   framedSite,
-  HOST,
   LIVE_REGION,
   openEditor,
   SELECTED,
+  selectItem,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
 import {
@@ -51,16 +52,18 @@ async function expectGhostBox(
   const paragraph = await frameBoxOf(frame, EMPTY);
   await expect
     .poll(async () => {
-      const outline = await boxOf(page, selector);
+      const outline = await chromeBoxOf(page, selector);
       return [Math.round(outline.y - paragraph.y), Math.round(outline.height)];
     })
     .toEqual([0, 24]);
 }
 
-async function drillTwice(frame: Frame, name: string): Promise<void> {
-  const target = frame.getByRole('heading', { name });
-  await target.dblclick();
-  await target.dblclick();
+async function selectHeading(
+  page: Page,
+  frame: Frame,
+  name: string,
+): Promise<void> {
+  await selectItem(page, frame.getByRole('heading', { name }));
 }
 
 test.beforeEach(async ({ page }) => {
@@ -89,7 +92,7 @@ test.describe('an empty block can be selected again', () => {
     const frame = await open(page);
     const { x, y } = await ghostPoint(frame);
 
-    await drillTwice(frame, 'H1');
+    await selectHeading(page, frame, 'H1');
     await page.mouse.click(x, y);
 
     await expect(page.locator(LIVE_REGION)).toHaveText(SELECTED_EMPTY);
@@ -100,13 +103,13 @@ test.describe('an empty block can be selected again', () => {
     const { x, y } = await ghostPoint(frame);
     const id = await frame.locator(EMPTY).getAttribute('data-pk-block');
 
-    await drillTwice(frame, 'H1');
+    await selectHeading(page, frame, 'H1');
     await page.mouse.move(x, y);
 
     await expectGhostBox(
       page,
       frame,
-      `${HOST} [data-overlay-target="${id}"] [data-overlay-outline]`,
+      `[data-overlay-target="${id}"] [data-overlay-outline]`,
     );
   });
 
@@ -114,9 +117,9 @@ test.describe('an empty block can be selected again', () => {
     page,
   }) => {
     const frame = await open(page);
-    const marker = page.locator(`${HOST} [data-marker]`);
+    const marker = chrome(page).locator('[data-marker]');
 
-    await drillTwice(frame, 'H2');
+    await selectHeading(page, frame, 'H2');
     await marker.click();
 
     await expect(page.locator(LIVE_REGION)).toHaveText(SELECTED_EMPTY);

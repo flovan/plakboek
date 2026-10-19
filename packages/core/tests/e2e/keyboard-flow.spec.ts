@@ -8,8 +8,8 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import {
+  chrome,
   framedSite,
-  HOST,
   LIVE_REGION,
   openEditor,
   SELECTED,
@@ -21,12 +21,12 @@ import { createEditablePage } from './helpers/pages.ts';
 import { signIn } from './helpers/session.ts';
 
 const SAVED = 'All changes saved';
-const HANDLE = `${HOST} [data-drag-handle]`;
+const HANDLE = '[data-drag-handle]';
 
-/** Presses Tab until `selector` (in the shell) holds focus. */
+/** Presses Tab until `selector` (in the chrome) holds focus. */
 async function tabUntilFocused(page: Page, selector: string): Promise<void> {
   const focused = () =>
-    page
+    chrome(page)
       .locator(selector)
       .first()
       .evaluate(
@@ -57,15 +57,15 @@ test('the whole structure flow is done with the keyboard alone, and the page tha
             `${element.tagName.toLowerCase()}:${element.textContent}`,
         ),
       );
-  const picker = page.getByRole('dialog', { name: 'Add a block' });
+  const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
 
   // a section, from the empty page's own prompt
-  await tabUntilFocused(page, `${HOST} [data-empty-page] button`);
+  await tabUntilFocused(page, '[data-empty-page] button');
   await page.keyboard.press('Enter');
   await expect(frame.locator('section.section')).toHaveCount(1);
 
   // its column is empty and offers a prompt, which opens the picker
-  await tabUntilFocused(page, `${HOST} [data-empty-add]`);
+  await tabUntilFocused(page, '[data-empty-add]');
   await page.keyboard.press('Enter');
   await expect(picker).toBeVisible();
   await page.keyboard.type('head');
@@ -109,7 +109,7 @@ test('the whole structure flow is done with the keyboard alone, and the page tha
   // climb to the column, drill back in to the heading, step on to the text
   await tabToRegion(page);
   await page.keyboard.press('ArrowLeft');
-  await expect(page.locator(SELECTED)).toHaveCount(1);
+  await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowDown');
   await expect(page.locator(LIVE_REGION)).toContainText('Selected Text');
