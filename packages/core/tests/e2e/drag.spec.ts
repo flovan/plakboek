@@ -92,7 +92,7 @@ async function pickUp(page: Page): Promise<void> {
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + 10, y + 10, { steps: 3 });
-  await expect(chrome(page).locator(SURFACE)).toBeVisible();
+  await expect(page.locator(HOST).locator(SURFACE)).toBeVisible();
 }
 
 /** The centre of a frame element, a few pixels below its bottom edge: the gap after it. */
@@ -137,7 +137,7 @@ test.describe('dragging by the handle', () => {
     expect(await headingsIn(frame, 1)).toEqual(['H1', 'H2']);
     await page.mouse.up();
 
-    await expect(chrome(page).locator(SURFACE)).toHaveCount(0);
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveCount(0);
     await expect.poll(() => headingsIn(frame, 2)).toEqual(['H3', 'H1', 'H4']);
     expect(await headingsIn(frame, 1)).toEqual(['H2']);
     await expect(page.getByText(SAVED)).toBeVisible();
@@ -166,7 +166,7 @@ test.describe('where a line shows', () => {
     await page.mouse.move(header.x + 200, header.y + header.height / 2, {
       steps: 8,
     });
-    await expect(chrome(page).locator(SURFACE)).toHaveAttribute(
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveAttribute(
       'data-legal',
       'false',
     );
@@ -175,7 +175,7 @@ test.describe('where a line shows', () => {
     // Back over a column the same drag shows a line again.
     const target = await gapAfter(frame, H3);
     await page.mouse.move(target.x, target.y, { steps: 8 });
-    await expect(chrome(page).locator(SURFACE)).toHaveAttribute(
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveAttribute(
       'data-legal',
       'true',
     );
@@ -238,7 +238,7 @@ test.describe('ending a drag without a change', () => {
     await expect(chrome(page).locator(LINE)).toBeVisible();
 
     await page.keyboard.press('Escape');
-    await expect(chrome(page).locator(SURFACE)).toHaveCount(0);
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveCount(0);
     await expect(chrome(page).locator(LINE)).toHaveCount(0);
     await page.mouse.up();
     expect(await headingsIn(frame, 1)).toEqual(['H1', 'H2']);
@@ -258,7 +258,7 @@ test.describe('ending a drag without a change', () => {
 
     await page.mouse.move(60, 400, { steps: 8 });
     await page.mouse.up();
-    await expect(chrome(page).locator(SURFACE)).toHaveCount(0);
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveCount(0);
     expect(await headingsIn(frame, 1)).toEqual(['H1', 'H2']);
     await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
   });
@@ -366,7 +366,7 @@ test.describe('dragging by the keyboard', () => {
     await expect.poll(() => headingsIn(frame, 2)).toEqual(['H1', 'H3', 'H4']);
     expect(await headingsIn(frame, 1)).toEqual(['H2']);
     await expect(page.getByText(SAVED)).toBeVisible();
-    await expect(chrome(page).locator(SURFACE)).toHaveCount(0);
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveCount(0);
     await expect(chrome(page).locator(LINE)).toHaveCount(0);
     expect(await announced()).toEqual(
       expect.arrayContaining([

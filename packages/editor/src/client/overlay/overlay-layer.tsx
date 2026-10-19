@@ -539,7 +539,6 @@ export function OverlayLayer(props: {
                   store={store}
                   empty={measured.empty}
                   boxes={placed}
-                  visible={measured.visible}
                   onOpen={onOpenPicker}
                 />
               </>

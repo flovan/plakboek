@@ -29,8 +29,6 @@ export type EmptyPromptsProps = {
   readonly empty: readonly string[];
   /** The boxes of those columns, in the framed document's coordinates. */
   readonly boxes: ReadonlyMap<string, Box>;
-  /** The part of the document the frame shows: an empty page's card is centred in it. */
-  readonly visible: Box;
   /** Called with the gap whose prompt was pressed. */
   readonly onOpen: (
     slot: InsertSlot,
@@ -42,11 +40,12 @@ export type EmptyPromptsProps = {
  * What an empty place on the page offers: a dashed box with "Add block" over
  * every column that holds nothing, and, on a page with no sections, a card
  * with "Add a section". A prompt goes as soon as its container has a child.
- * The cell itself stays clickable through the box, so a click still selects
+ * The page's card is centred in the frame's viewport (it is fixed there, since
+ * an empty page can be shorter than the frame). The cell itself stays clickable through the box, so a click still selects
  * the column.
  */
 export function EmptyPrompts(props: EmptyPromptsProps): ReactElement | null {
-  const { store, empty, boxes, visible, onOpen } = props;
+  const { store, empty, boxes, onOpen } = props;
   const model = useEditorStore(store, (state) => state.model);
   if (model === null) return null;
 
@@ -94,7 +93,7 @@ export function EmptyPrompts(props: EmptyPromptsProps): ReactElement | null {
         );
       })}
       {pageEmpty ? (
-        <div className="pk-empty-page" style={boxStyle(visible)}>
+        <div className="pk-empty-page">
           <div className="pk-empty-card" data-empty-page="">
             <h2 className="m-0 text-heading font-semibold text-text">
               {STRINGS['empty.page.heading']}

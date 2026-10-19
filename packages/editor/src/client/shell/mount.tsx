@@ -1099,6 +1099,8 @@ function Shell(props: {
           claimed,
           {
             onClick: (x, y) => {
+              // The click that follows a drag's release is not a selection.
+              if (dragSession.justEnded()) return;
               store.closePicker();
               const hit = read(x, y);
               if (hit === null) return;
@@ -1111,7 +1113,11 @@ function Shell(props: {
           },
           {
             isExempt: (event) =>
-              event.target === chromeHostRef.current?.element,
+              event.target === chromeHostRef.current?.element ||
+              // The release of a pointer drag is the drag's: the frame keeps
+              // the mouse from the press on the in-frame handle until then.
+              (event.type === 'pointerup' &&
+                store.getState().drag?.via === 'pointer'),
           },
         );
       } else if (!wanted && releaseClaim !== null) {
@@ -1166,6 +1172,7 @@ function Shell(props: {
     store,
     changeMode,
     climbSelection,
+    dragSession,
     deleteItem,
     duplicateItem,
     openPicker,
