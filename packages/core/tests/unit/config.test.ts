@@ -574,3 +574,100 @@ describe('defineConfig: text theme', () => {
     expect(getFieldTypeDefinition('link').fieldType).toBe('link');
   });
 });
+
+describe('defineConfig: a property can narrow the text theme, never widen it', () => {
+  const withBody = (options: unknown, key = 'article') =>
+    defineBlock({
+      key,
+      editor: { label: 'Article' },
+      schemaVersion: 1,
+      properties: {
+        body: { fieldType: 'rich_text', label: 'Body', options },
+      },
+      component: Render,
+    });
+
+  it('accepts a narrowing that only takes away', () => {
+    const block = withBody({ narrow: { marks: ['bold', 'italic', 'link'] } });
+
+    expect(() =>
+      defineConfig({ ...base, blocks: [section, block] }),
+    ).not.toThrow();
+  });
+
+  it('refuses colours when the theme has none, naming block, property and entry', () => {
+    const block = withBody({ narrow: { colors: true } });
+    const error = catchError(() =>
+      defineConfig({ ...base, blocks: [section, block] }),
+    );
+
+    expect(issueCodes(error)).toEqual(['TEXT_THEME_NARROWING_WIDENS']);
+    const message = (error as PlakboekConfigError).issues[0]?.message ?? '';
+    expect(message).toContain('blocks.article.properties.body');
+    expect(message).toContain('colors');
+  });
+
+  it('refuses a heading level the theme does not allow', () => {
+    const block = withBody({ narrow: { headingLevels: [1] } });
+    const error = catchError(() =>
+      defineConfig({ ...base, blocks: [section, block] }),
+    );
+
+    expect(issueCodes(error)).toEqual(['TEXT_THEME_NARROWING_WIDENS']);
+    expect((error as PlakboekConfigError).issues[0]?.message).toContain(
+      'headingLevels: 1',
+    );
+  });
+
+  it('checks a rich_text sub-field of a repeater property', () => {
+    const block = defineBlock({
+      key: 'faq',
+      editor: { label: 'FAQ' },
+      schemaVersion: 1,
+      properties: {
+        items: {
+          fieldType: 'repeater',
+          label: 'Items',
+          options: {
+            fields: [
+              { key: 'question', label: 'Question', fieldType: 'short_text' },
+              {
+                key: 'answer',
+                label: 'Answer',
+                fieldType: 'rich_text',
+                options: { narrow: { sizes: true } },
+              },
+            ],
+          },
+        },
+      },
+      component: Render,
+    });
+    const error = catchError(() =>
+      defineConfig({ ...base, blocks: [section, block] }),
+    );
+
+    expect(issueCodes(error)).toEqual(['TEXT_THEME_NARROWING_WIDENS']);
+    const message = (error as PlakboekConfigError).issues[0]?.message ?? '';
+    expect(message).toContain('blocks.faq.properties.items.fields.answer');
+    expect(message).toContain('sizes');
+  });
+
+  it('reports every widening property in one error', () => {
+    const error = catchError(() =>
+      defineConfig({
+        ...base,
+        blocks: [
+          section,
+          withBody({ narrow: { colors: true } }, 'first'),
+          withBody({ narrow: { align: true } }, 'second'),
+        ],
+      }),
+    );
+
+    expect(issueCodes(error)).toEqual([
+      'TEXT_THEME_NARROWING_WIDENS',
+      'TEXT_THEME_NARROWING_WIDENS',
+    ]);
+  });
+});
