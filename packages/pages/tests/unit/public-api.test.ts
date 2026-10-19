@@ -103,6 +103,11 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   getPageUrlPattern: 'function',
   PageEngineSettingsMissingError: 'class',
   setPageEditLocking: 'function',
+  // page-links
+  PAGE_SEARCH_LIMIT: 'constant',
+  PAGE_SEARCH_QUERY_MAX_LENGTH: 'constant',
+  resolvePageLinkPaths: 'function',
+  searchPages: 'function',
   // page-routing
   computePageResolvedPath: 'function',
   computeUrlPatternChangeImpact: 'function',
@@ -292,6 +297,10 @@ const PUBLIC_TYPES: readonly string[] = Object.freeze([
   'PageEngineSettings',
   'SetPageEditLockingInput',
   'SetPageEditLockingResult',
+  // page-links
+  'PageSearchResult',
+  'ResolvePageLinkPathsInput',
+  'SearchPagesInput',
   // page-routing
   'ComputePageResolvedPathInput',
   'ComputeUrlPatternChangeImpactInput',
