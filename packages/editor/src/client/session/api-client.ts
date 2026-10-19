@@ -18,6 +18,7 @@ import {
   type EditorSession,
   type LockResponse,
   type LockView,
+  type PageSearchResponse,
   type PreviewRequest,
   type PreviewResponse,
   type TreeResponse,
@@ -62,6 +63,12 @@ export type ApiClient = {
     request: PreviewRequest,
     signal?: AbortSignal,
   ): Promise<PreviewResponse>;
+  /** Finds the pages of one locale by title or path, for the page picker. */
+  searchPages(
+    locale: string,
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<PageSearchResponse>;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -144,6 +151,13 @@ export function createApiClient(
     edit: (pageId, request) => send(pagePath(pageId, 'edit'), 'POST', request),
     preview: (pageId, request, signal) =>
       send(pagePath(pageId, 'preview'), 'POST', request, signal),
+    searchPages: (locale, query, signal) =>
+      send(
+        `/pages/search?locale=${encodeURIComponent(locale)}&q=${encodeURIComponent(query)}`,
+        'GET',
+        undefined,
+        signal,
+      ),
   };
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiHttpError } from '../../src/server/api/http.js';
 import {
   editBody,
+  pageSearchQuery,
   parseWith,
   previewBody,
 } from '../../src/server/api/schemas.js';
@@ -158,6 +159,32 @@ describe('previewBody', () => {
     expect(previewBody.safeParse({ blockId: A, extra: 1 }).success).toBe(false);
     expect(
       previewBody.safeParse({ blockId: A, layout: { size: 1 } }).success,
+    ).toBe(false);
+  });
+});
+
+describe('pageSearchQuery', () => {
+  it('takes a locale and defaults the text to empty', () => {
+    expect(pageSearchQuery.parse({ locale: 'en' })).toEqual({
+      locale: 'en',
+      q: '',
+    });
+    expect(pageSearchQuery.parse({ locale: 'nl', q: 'about' })).toEqual({
+      locale: 'nl',
+      q: 'about',
+    });
+  });
+
+  it('refuses a missing locale, a query over 200 characters and an unknown key', () => {
+    expect(pageSearchQuery.safeParse({ q: 'x' }).success).toBe(false);
+    expect(
+      pageSearchQuery.safeParse({ locale: 'en', q: 'x'.repeat(200) }).success,
+    ).toBe(true);
+    expect(
+      pageSearchQuery.safeParse({ locale: 'en', q: 'x'.repeat(201) }).success,
+    ).toBe(false);
+    expect(
+      pageSearchQuery.safeParse({ locale: 'en', extra: '1' }).success,
     ).toBe(false);
   });
 });

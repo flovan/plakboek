@@ -255,3 +255,18 @@ export type TreeResponse = {
 };
 
 export type LockResponse = { readonly ok: true; readonly lock: LockView };
+
+/** One page found by the page picker. */
+export type PageSearchResult = {
+  readonly id: string;
+  readonly title: string;
+  readonly path: string;
+  readonly publicPath: string;
+  /** True when the page has a published version visitors can reach. */
+  readonly live: boolean;
+};
+
+export type PageSearchResponse = {
+  readonly ok: true;
+  readonly results: readonly PageSearchResult[];
+};

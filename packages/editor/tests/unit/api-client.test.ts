@@ -54,6 +54,24 @@ describe('createApiClient', () => {
     expect(calls[0]?.init.body).toBe('{"path":"/about"}');
   });
 
+  it('searches pages with the locale and the text encoded into the address', async () => {
+    const answer = { ok: true, results: [] };
+    const { calls, fetchImpl } = fakeFetch(200, answer);
+    const controller = new AbortController();
+    const result = await createApiClient(fetchImpl).searchPages(
+      'nl',
+      '100% a&b',
+      controller.signal,
+    );
+    expect(result).toEqual(answer);
+    expect(calls[0]?.url).toBe(
+      '/cms/api/pages/search?locale=nl&q=100%25%20a%26b',
+    );
+    expect(calls[0]?.init.method).toBe('GET');
+    expect(calls[0]?.init.body).toBeUndefined();
+    expect(calls[0]?.init.signal).toBe(controller.signal);
+  });
+
   it('reads with a GET and no body', async () => {
     const { calls, fetchImpl } = fakeFetch(200, { ok: true });
     await createApiClient(fetchImpl).tree('p1');
