@@ -532,7 +532,7 @@ function Shell(props: {
   // Rich text fields are edited in place on the page. The controller owns one
   // session at a time and writes through the same preview and save path as the
   // Properties controls; the wiring here is only what it cannot reach itself.
-  const textController = useMemo(
+  const controller = useMemo(
     () =>
       createTextController({
         store,
@@ -547,7 +547,7 @@ function Shell(props: {
       }),
     [store, changeProperties, blurProperties, host],
   );
-  useEffect(() => () => textController.dispose(), [textController]);
+  useEffect(() => () => controller.dispose(), [controller]);
   // The marker specs and tools wait on while a field session runs.
   useEffect(() => {
     const sync = (): void => {
@@ -564,13 +564,13 @@ function Shell(props: {
    */
   const afterTextSession = useCallback(
     (reason: 'structure' | 'undo', action: () => void) => {
-      if (textController.active() === null) {
+      if (controller.active() === null) {
         action();
         return;
       }
-      void textController.exit(reason).then(action);
+      void controller.exit(reason).then(action);
     },
-    [textController],
+    [controller],
   );
 
   /**
@@ -1216,9 +1216,9 @@ function Shell(props: {
               // The click that follows a drag's release is not a selection.
               if (dragSession.justEnded()) return;
               // Nor is the click that ends a text selection dragged out of the field.
-              if (textController.pressEndedOutside()) return;
+              if (controller.pressEndedOutside()) return;
               store.closePicker();
-              void textController.exit('click');
+              void controller.exit('click');
               const hit = read(x, y);
               if (hit === null) return;
               selectAndAnnounce(
@@ -1240,7 +1240,7 @@ function Shell(props: {
                 field !== null &&
                 field.blockId === latest.selection.selectedId
               ) {
-                textController.enter(field, { x, y });
+                controller.enter(field, { x, y });
               } else {
                 focusRegion(host);
               }
@@ -1251,7 +1251,7 @@ function Shell(props: {
               event.target === chromeHostRef.current?.element ||
               // The active text field keeps its own clicks, selections and
               // double-clicks; the claim still owns every other site event.
-              textController.ownsEvent(event) ||
+              controller.ownsEvent(event) ||
               // The release of a pointer drag is the drag's: the frame keeps
               // the mouse from the press on the in-frame handle until then.
               (event.type === 'pointerup' &&
@@ -1278,7 +1278,7 @@ function Shell(props: {
         return;
       }
       // A new document: the field of the old one is gone.
-      void textController.exit('reload');
+      void controller.exit('reload');
       releaseClaim?.();
       releaseClaim = null;
       releaseKeys?.();
@@ -1316,7 +1316,7 @@ function Shell(props: {
     deleteItem,
     duplicateItem,
     openPicker,
-    textController,
+    controller,
   ]);
 
   // The lock is held while editing: renewed on a heartbeat, again when the tab

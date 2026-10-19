@@ -3,7 +3,7 @@
  * own field element), update (every change is previewed and queued through the
  * one write path as a coalesced edit), exit (flush, restore, hand back).
  *
- * The editor is mounted on the field element itself with `injectCSS: false`,
+ * The editor is mounted on the field element itself without TipTap's stylesheet,
  * so the site's markup, classes and attributes stay and no stylesheet reaches
  * either document. While a session runs the block carries the inline-edit
  * mark, so the server's render of the block waits until the session ends and
