@@ -4,16 +4,16 @@
  * until the editing session is running: the page opened, the lock taken and
  * the frame's clicks claimed.
  */
-import { expect, type Frame, type Page } from '@playwright/test';
+import { expect, type Frame, type Locator, type Page } from '@playwright/test';
 import { releaseAllPageLocks } from './pages.ts';
 
 export const HOST = 'plakboek-editor';
 export const FRAME = `${HOST} iframe`;
-export const SELECTED = `${HOST} [data-overlay-selected]`;
-export const SCOPE = `${HOST} [data-overlay-scope]`;
-export const OUTLINE = `${HOST} [data-overlay-outline]`;
-export const SECTION_OUTLINE = `${HOST} [data-overlay-section]`;
-export const CHIP = `${HOST} [data-overlay-chip]`;
+export const SELECTED = '[data-overlay-selected]';
+export const SCOPE = '[data-overlay-scope]';
+export const OUTLINE = '[data-overlay-outline]';
+export const SECTION_OUTLINE = '[data-overlay-section]';
+export const CHIP = '[data-overlay-chip]';
 export const MODE_GROUP = `${HOST} [role="radiogroup"]`;
 export const LIVE_REGION = `${HOST} [role="status"].sr-only`;
 
@@ -60,6 +60,64 @@ export async function openEditor(page: Page, path: string): Promise<void> {
   await expect(page.locator(FRAME)).toHaveAttribute('tabindex', '-1');
 }
 
+/**
+ * The scope of frame-anchored chrome: the outlines, chips, block toolbar,
+ * insert points, picker, needs-input markers and empty prompts. Specs reach
+ * all of it through here so that moving it (plan 09-16 points it into the
+ * frame) changes this one function.
+ */
+export function chrome(page: Page): Locator {
+  return page.locator(HOST);
+}
+
+/** A chrome element's box in the page's coordinates. */
+export async function chromeBoxOf(page: Page, selector: string): Promise<Rect> {
+  const box = await chrome(page).locator(selector).first().boundingBox();
+  if (box === null) throw new Error(`${selector} has no box in the chrome`);
+  return box;
+}
+
+/** The id of the selected item: the selected outline's value, null when none. */
+export async function selectedId(page: Page): Promise<string | null> {
+  const outline = chrome(page).locator(SELECTED);
+  if ((await outline.count()) === 0) return null;
+  const value = await outline.first().getAttribute('data-overlay-selected');
+  return value === null || value === '' ? null : value;
+}
+
+/**
+ * Selects the item the target belongs to. Phase 8 drills: a click selects the
+ * section, each further double-click goes one level in. Plan 09-14 makes it
+ * one click, and only this function changes.
+ */
+export async function selectItem(page: Page, target: Locator): Promise<void> {
+  const id = await target.evaluate(
+    (element) =>
+      element.closest('[data-pk-block]')?.getAttribute('data-pk-block') ?? null,
+  );
+  if (id === null) throw new Error('The target is not inside a block');
+  await target.click();
+  for (let drills = 0; drills < 3; drills += 1) {
+    if ((await selectedId(page)) === id) break;
+    await target.dblclick();
+  }
+  await expect.poll(() => selectedId(page)).toBe(id);
+}
+
+/** Selects the item and opens its Properties sheet from the block toolbar. */
+export async function openProperties(
+  page: Page,
+  target: Locator,
+): Promise<void> {
+  await selectItem(page, target);
+  await chrome(page)
+    .getByRole('button', { name: /^Properties of / })
+    .click();
+  await expect(
+    page.locator(`${HOST} [data-properties-sheet][data-open]`),
+  ).toHaveCount(1);
+}
+
 export async function boxOf(page: Page, selector: string): Promise<Rect> {
   const box = await page.locator(selector).first().boundingBox();
   if (box === null) throw new Error(`${selector} has no box in the shell`);
@@ -93,10 +151,13 @@ export async function expectSelectedOver(
   frame: Frame,
   selector: string,
 ): Promise<void> {
-  await expect(page.locator(SELECTED)).toHaveCount(1);
+  await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
   await expect
     .poll(async () => {
-      const outline = await page.locator(SELECTED).first().boundingBox();
+      const outline = await chrome(page)
+        .locator(SELECTED)
+        .first()
+        .boundingBox();
       const element = await frame.locator(selector).first().boundingBox();
       if (outline === null || element === null) return Number.POSITIVE_INFINITY;
       return Math.max(

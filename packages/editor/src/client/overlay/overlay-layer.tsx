@@ -171,6 +171,10 @@ export function OverlayLayer(props: {
     store ?? NO_STORE,
     (current) => current.selection.selectedId,
   );
+  const scopeId = useEditorStore(
+    store ?? NO_STORE,
+    (current) => current.selection.scopeId,
+  );
   const active = useEditorStore(
     store ?? NO_STORE,
     (current) =>
@@ -395,14 +399,14 @@ export function OverlayLayer(props: {
             {selection === null || selection.scope === null ? null : (
               <div
                 className="pk-overlay-scope"
-                data-overlay-scope=""
+                data-overlay-scope={scopeId ?? ''}
                 style={boxStyle(outlineRect(selection.scope, origin))}
               />
             )}
             {selection === null || selection.selected === null ? null : (
               <div
                 className="pk-overlay-selected"
-                data-overlay-selected=""
+                data-overlay-selected={selectedId ?? ''}
                 style={boxStyle(outlineRect(selection.selected, origin))}
               />
             )}

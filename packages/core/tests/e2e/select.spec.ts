@@ -3,8 +3,9 @@
  * editing, clicks claim the framed site's events and select by the scope
  * rules, and the Edit and Interact toggle hands the site back.
  */
-import { expect, test, type Frame, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
+  chrome,
   expectSelectedOver,
   framedSite,
   FRAME,
@@ -14,6 +15,7 @@ import {
   openEditor,
   SCOPE,
   SELECTED,
+  selectItem,
   waitForShell,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -50,13 +52,6 @@ async function twoSections(): Promise<EditablePage> {
       ),
     ],
   });
-}
-
-/** A double-click on the element, twice: section to column, column to block. */
-async function drillTwice(frame: Frame, selector: string): Promise<void> {
-  const target = frame.locator(selector).first();
-  await target.dblclick();
-  await target.dblclick();
 }
 
 function mode(page: Page) {
@@ -97,8 +92,8 @@ test.describe('scoped selection', () => {
     // it becomes the scope, drawn dashed
     await headingA.dblclick();
     await expectSelectedOver(page, frame, COLUMN_A);
-    await expect(page.locator(SCOPE)).toHaveCount(1);
-    const scope = await page.locator(SCOPE).boundingBox();
+    await expect(chrome(page).locator(SCOPE)).toHaveCount(1);
+    const scope = await chrome(page).locator(SCOPE).boundingBox();
     const sectionBox = await frame.locator(SECTION_A).boundingBox();
     expect(Math.abs((scope?.x ?? 0) - (sectionBox?.x ?? 0))).toBeLessThan(2);
     expect(
@@ -111,13 +106,13 @@ test.describe('scoped selection', () => {
     // a click outside the scope climbs and selects in the other section
     await frame.getByRole('heading', { name: 'Beta heading' }).click();
     await expectSelectedOver(page, frame, SECTION_B);
-    await expect(page.locator(SCOPE)).toHaveCount(0);
+    await expect(chrome(page).locator(SCOPE)).toHaveCount(0);
 
     // empty page area (the site's header holds no block) clears the selection
     await frame
       .locator('header.site-header')
       .click({ position: { x: 2, y: 2 } });
-    await expect(page.locator(SELECTED)).toHaveCount(0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
   });
 
   test('Escape climbs one level at a time and clears at a top-level section', async ({
@@ -126,7 +121,7 @@ test.describe('scoped selection', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTwice(frame, HEADING_A);
+    await selectItem(page, frame.locator(HEADING_A).first());
     await expectSelectedOver(page, frame, HEADING_A);
 
     await page.keyboard.press('Escape');
@@ -134,7 +129,7 @@ test.describe('scoped selection', () => {
     await page.keyboard.press('Escape');
     await expectSelectedOver(page, frame, SECTION_A);
     await page.keyboard.press('Escape');
-    await expect(page.locator(SELECTED)).toHaveCount(0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
   });
 });
 
@@ -167,7 +162,7 @@ test.describe('Edit mode claims the site', () => {
       await expectSelectedOver(page, frame, SECTION_B);
       const scrolled = await frame.evaluate(() => window.scrollY);
       await frame.locator(control).click();
-      await expect(page.locator(SELECTED)).toHaveCount(0);
+      await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
       // the hash link would have scrolled the long page to the footer
       expect(await frame.evaluate(() => window.scrollY)).toBe(scrolled);
     }
@@ -197,13 +192,13 @@ test.describe('Edit and Interact', () => {
     const frame = await framedSite(page);
     await expect(mode(page)).toHaveText('Edit');
     await frame.getByRole('heading', { name: 'Beta heading' }).click();
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
 
     // I switches to Interact: nothing is selected, the iframe is in the tab
     // order again and the site behaves as it does for a visitor
     await page.keyboard.press('i');
     await expect(mode(page)).toHaveText('Interact');
-    await expect(page.locator(SELECTED)).toHaveCount(0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
     await expect(page.locator(FRAME)).not.toHaveAttribute('tabindex');
     await expect(page.locator(LIVE_REGION)).toHaveText('Interact mode.');
     await expect(page.locator(`${HOST} [data-tools] p`)).toContainText(
@@ -226,8 +221,7 @@ test.describe('Edit and Interact', () => {
     );
     const panel = frame.getByText('The hidden panel text.');
     await expect(panel).toBeVisible();
-    await panel.dblclick();
-    await panel.dblclick();
+    await selectItem(page, panel);
     await expectSelectedOver(page, frame, ACCORDION);
   });
 
@@ -286,7 +280,7 @@ test.describe('a user who cannot edit', () => {
       'aria-expanded',
       'true',
     );
-    await expect(page.locator(SELECTED)).toHaveCount(0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
   });
 });
 
