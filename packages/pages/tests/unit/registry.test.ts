@@ -446,3 +446,104 @@ describe('lenient required validation and findMissingRequiredProps (D-21, D-20)'
     expect(findMissingRequiredProps(constrained, {})).toEqual(['title']);
   });
 });
+
+describe('stored values on write: keep data, flag, never crash (TEXT-04)', () => {
+  const [definition] = defineBlocks([
+    {
+      key: 'storedValueProbe',
+      editor: { label: 'Stored value probe' },
+      schemaVersion: 1,
+      properties: {
+        body: {
+          fieldType: 'rich_text',
+          label: 'Body',
+          options: { narrow: { marks: ['bold'] } },
+        },
+        note: {
+          fieldType: 'short_text',
+          label: 'Note',
+          options: { maxLength: 5 },
+        },
+      },
+    },
+  ]);
+  if (definition === undefined) throw new Error('fixture block missing');
+
+  const italic = {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'Hi', marks: [{ type: 'italic' }] }],
+      },
+    ],
+  };
+  // The same document with every object's keys in the opposite order.
+  const italicReordered = {
+    content: [
+      {
+        content: [{ marks: [{ type: 'italic' }], text: 'Hi', type: 'text' }],
+        type: 'paragraph',
+      },
+    ],
+    type: 'doc',
+  };
+
+  function codesOf(run: () => unknown): string[] {
+    try {
+      run();
+    } catch (error) {
+      if (error instanceof BlockPropsValidationError) {
+        return error.issues.map(
+          (issue) => `${issue.propertyKey}:${issue.code}`,
+        );
+      }
+      throw error;
+    }
+    return [];
+  }
+
+  it('refuses a rich text value outside the narrowed theme', () => {
+    expect(
+      codesOf(() => validateBlockProps(definition, { body: italic })),
+    ).toEqual(['body:INVALID']);
+  });
+
+  it('accepts an unchanged out-of-theme value, whatever the key order', () => {
+    expect(
+      codesOf(() =>
+        validateBlockProps(
+          definition,
+          { body: italicReordered },
+          { storedProps: { body: italic } },
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it('refuses a changed value even when another one is stored', () => {
+    const changed = structuredClone(italic);
+    changed.content[0]!.content[0]!.text = 'Changed';
+    expect(
+      codesOf(() =>
+        validateBlockProps(
+          definition,
+          { body: changed },
+          { storedProps: { body: italic } },
+        ),
+      ),
+    ).toEqual(['body:INVALID']);
+  });
+
+  it('validates a field type with no stored-value schema normally, even unchanged', () => {
+    expect(
+      codesOf(() =>
+        validateBlockProps(
+          definition,
+          { note: 'far too long' },
+          { storedProps: { note: 'far too long' } },
+        ),
+      ),
+    ).toEqual(['note:INVALID']);
+  });
+});
