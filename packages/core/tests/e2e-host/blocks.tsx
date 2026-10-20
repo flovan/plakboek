@@ -183,6 +183,19 @@ const Prose: BlockComponent<{ body?: unknown }> = ({ props, edit }) => (
 );
 
 /**
+ * A prose-like block whose body keeps the theme's palettes but refuses free
+ * values, so a spec can prove no custom input is offered and the server holds
+ * the line (the brand-strict case).
+ */
+const BrandProse: BlockComponent<{ body?: unknown }> = ({ props, edit }) => (
+  <div {...edit} className="prose-block">
+    <div {...edit.field('body')} className="prose-flow">
+      <RichText value={props.body} />
+    </div>
+  </div>
+);
+
+/**
  * A block with a short title and a rich text caption the host narrows to bold,
  * italic and link, so a spec can prove the toolbar offers exactly that.
  */
@@ -345,6 +358,20 @@ export const prose = defineBlock({
     body: { fieldType: 'rich_text', label: 'Body', options: {} },
   },
   component: Prose,
+});
+
+export const brandProse = defineBlock({
+  key: 'brandProse',
+  editor: { label: 'Brand locked' },
+  schemaVersion: 1,
+  properties: {
+    body: {
+      fieldType: 'rich_text',
+      label: 'Body',
+      options: { narrow: { allowCustomValues: false } },
+    },
+  },
+  component: BrandProse,
 });
 
 export const card = defineBlock({

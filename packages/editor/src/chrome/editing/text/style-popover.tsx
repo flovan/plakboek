@@ -105,18 +105,37 @@ export function StylePopover(props: StylePopoverProps): ReactElement {
     onReturn();
   };
 
-  const onPopoverKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
-    if (event.key === 'Escape') {
+  // Escape closes the popover and nothing else, wherever the focus is: a
+  // popover opened with the pointer leaves it in the field, where a second
+  // Escape would otherwise end the field session. The listener runs in the
+  // capture phase so the field's own Escape never sees the key.
+  useEffect(() => {
+    if (!open) return undefined;
+    const element = wrapper.current;
+    if (element === null) return undefined;
+    const owner = element.ownerDocument;
+    const onEscape = (event: globalThis.KeyboardEvent): void => {
+      if (
+        event.key !== 'Escape' ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey
+      ) {
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
-      closeToField();
-      return;
-    }
-    if (event.key === 'Tab') {
-      // Tab moves on through the popover; leaving it closes it.
-      return;
-    }
+      setOpen(false);
+      onReturn();
+    };
+    owner.addEventListener('keydown', onEscape, true);
+    return () => {
+      owner.removeEventListener('keydown', onEscape, true);
+    };
+  }, [open, onReturn]);
+
+  const onPopoverKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     if (
       ![
         'ArrowDown',
