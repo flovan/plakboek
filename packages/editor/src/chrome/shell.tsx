@@ -104,6 +104,8 @@ export type ShellAppProps = {
     /** Called by the unsupported-formatting notice's buttons. */
     readonly onKeepUnsupported?: () => void;
     readonly onRemoveUnsupported?: () => Promise<unknown>;
+    /** Called by Done on a short text field's bar. */
+    readonly onFieldDone?: () => void;
     /** Called when a Properties control changes a value: render it and queue the save. */
     readonly onPropertiesChange?: PropertiesPanelProps['onPropertiesChange'];
     /** Called when a Properties control loses focus: save the block's edit now. */
@@ -296,6 +298,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               onLiftDrag={editor?.onLiftDrag}
               onKeepUnsupported={editor?.onKeepUnsupported}
               onRemoveUnsupported={editor?.onRemoveUnsupported}
+              onFieldDone={editor?.onFieldDone}
             />,
             chromeHost.root,
           )

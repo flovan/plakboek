@@ -170,6 +170,68 @@ export function toolbarPlacement(input: {
   };
 }
 
+/** Where a text field's bar goes, in the same coordinate space as its inputs. */
+export type FieldBarPlacement = {
+  readonly mode: 'above' | 'below' | 'pinned';
+  readonly left: number;
+  readonly top: number;
+};
+
+/**
+ * Places the bar of the field being edited (the compact bar of a short text,
+ * the text toolbar of a rich one). It follows the field, never the caret.
+ *
+ * - `above`: 8px above the field's top edge, when the visible part holds the
+ *   bar's height plus 8px above the field.
+ * - `below`: otherwise 8px below the field's bottom edge, when it holds that
+ *   much below the field.
+ * - `pinned`: when neither fits (a field taller than the frame), inside the
+ *   field's visible top-left corner, 8px in. It is drawn with
+ *   `position: sticky` inside a wrapper over the field.
+ *
+ * The bar's left edge follows the field's and is kept 8px inside the visible
+ * part. A field fully scrolled out of the visible part has no bar: the caller
+ * checks that with `isVisibleIn` first.
+ */
+export function fieldBarPlacement(input: {
+  readonly field: Box;
+  readonly visible: Box;
+  readonly height: number;
+  readonly width: number;
+}): FieldBarPlacement {
+  const { field, visible, height, width } = input;
+  const room = height + TOOLBAR_GAP;
+  const visibleRight = visible.left + visible.width;
+  const visibleBottom = visible.top + visible.height;
+  const fieldBottom = field.top + field.height;
+
+  const clampLeft = (left: number): number =>
+    Math.max(
+      visible.left + TOOLBAR_GAP,
+      Math.min(left, visibleRight - TOOLBAR_GAP - width),
+    );
+
+  if (field.top - visible.top >= room) {
+    return {
+      mode: 'above',
+      left: clampLeft(field.left),
+      top: field.top - TOOLBAR_GAP - height,
+    };
+  }
+  if (visibleBottom - fieldBottom >= room) {
+    return {
+      mode: 'below',
+      left: clampLeft(field.left),
+      top: fieldBottom + TOOLBAR_GAP,
+    };
+  }
+  return {
+    mode: 'pinned',
+    left: clampLeft(Math.max(field.left, visible.left) + TOOLBAR_GAP),
+    top: Math.max(field.top, visible.top) + TOOLBAR_GAP,
+  };
+}
+
 /**
  * Whether the siblings sit side by side or stacked, from where their boxes
  * are: when their left edges differ more than their top edges they are

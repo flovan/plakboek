@@ -61,7 +61,13 @@ export function FieldDecor(props: FieldDecorProps): ReactElement | null {
                 top: field.box.top + CHIP_INSET,
               }}
             >
-              {STRINGS['text.field.placeholder.rich']}
+              {
+                STRINGS[
+                  field.kind === 'plain'
+                    ? 'text.field.placeholder.plain'
+                    : 'text.field.placeholder.rich'
+                ]
+              }
             </div>
           ) : null}
         </div>

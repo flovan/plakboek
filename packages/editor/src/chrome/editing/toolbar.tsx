@@ -10,24 +10,18 @@ import {
 import {
   frameElementOf,
   frameOriginOf,
-  isNodeLike,
 } from '../../client/chrome-host/shape.js';
 import {
   toolbarPlacement,
   type Box,
   type Point,
 } from '../../client/overlay/geometry.js';
-import {
-  legalityContextOf,
-  catalogueByKey,
-} from '../../client/session/move-action.js';
+import { legalityContextOf } from '../../client/session/move-action.js';
 import {
   moveTargetReason,
   type MoveDirection,
 } from '../../client/session/move-targets.js';
 import { slotAfter, type InsertSlot } from '../../client/session/insertion.js';
-import { breadcrumb, selectCrumb } from '../../client/session/scope.js';
-import { selectAndAnnounce } from '../../client/session/selection-announcement.js';
 import {
   canDuplicate,
   deleteBlockedReason,
@@ -36,7 +30,6 @@ import {
   useEditorStore,
   type EditorStore,
 } from '../../client/session/store.js';
-import { labelOf, type ItemLabel } from '../../client/session/tree-model.js';
 import {
   ArrowDownIcon,
   ArrowLeftIcon,
@@ -50,6 +43,7 @@ import {
 } from '../icons.js';
 import { formatString, STRINGS } from '../strings.js';
 import { Tooltip } from '../tooltip.js';
+import { Crumbs, crumbKeys, crumbLayout, useRoving } from './text/crumbs.js';
 
 function boxStyle(box: Box): CSSProperties {
   return {
@@ -60,25 +54,11 @@ function boxStyle(box: Box): CSSProperties {
   };
 }
 
-/** The most crumbs shown; a longer path shows the first, "…", and the last two. */
-const MAX_CRUMBS = 4;
-
 const BUTTON =
   'flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent';
 
 /** Delete turns destructive on hover and focus only, and never while it cannot act. */
 const DELETE_BUTTON = `${BUTTON} hover:text-destructive focus-visible:text-destructive`;
-
-const CRUMB =
-  'h-6 max-w-[96px] cursor-pointer truncate rounded-sm border-0 bg-transparent px-1 text-caption font-semibold text-text-muted hover:bg-surface-muted hover:text-text focus-visible:outline-2 focus-visible:outline-focus-ring';
-
-function textOf(label: ItemLabel): string {
-  return label.kind === 'column'
-    ? formatString('label.column', { n: String(label.n) })
-    : label.text;
-}
-
-type Crumb = { readonly id: string; readonly text: string };
 
 const MOVE_ICON = {
   vertical: { earlier: ArrowUpIcon, later: ArrowDownIcon },
@@ -147,13 +127,6 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
   const state = useEditorStore(store, (current) => current);
   const root = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 40 });
-  const [active, setActive] = useState('');
-  /** The item whose hidden path levels are listed, and where the list hangs below the toolbar. */
-  const [menu, setMenu] = useState<{
-    readonly itemId: string;
-    readonly left: number;
-  } | null>(null);
-  const moreButton = useRef<HTMLButtonElement>(null);
 
   useLayoutEffect(() => {
     const element = root.current;
@@ -169,28 +142,39 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
 
   const { model, selection, session } = state;
   const selectedId = selection.selectedId;
-  // The list belongs to the item it was opened for: a new selection closes it.
-  const open = menu !== null && menu.itemId === selectedId ? menu : null;
-  const menuOpen = open !== null;
-  if (model === null || session === null || selectedId === null) return null;
-  const selected = model.get(selectedId);
-  if (selected === undefined) return null;
-
-  const byKey = catalogueByKey(session.catalogue);
-  const path: Crumb[] = breadcrumb(model, selectedId).map((node) => ({
-    id: node.id,
-    text: textOf(labelOf(model, byKey, node.id)),
-  }));
-  const itemLabel = path[path.length - 1]?.text ?? '';
-  const collapsed = path.length > MAX_CRUMBS;
-  const hidden = collapsed ? path.slice(1, path.length - 2) : [];
-  const shown: readonly (Crumb | 'more')[] = collapsed
-    ? [path[0], 'more', ...path.slice(-2)].filter(
-        (entry): entry is Crumb | 'more' => entry !== undefined,
-      )
-    : path;
-
+  const selected =
+    model === null || selectedId === null ? undefined : model.get(selectedId);
+  const layout =
+    model === null || session === null || selectedId === null
+      ? null
+      : crumbLayout(model, session, selectedId);
   const ctx = legalityContextOf(state);
+  const addSlot =
+    ctx === null || selectedId === null ? null : slotAfter(ctx, selectedId);
+  const keys = [
+    'drag',
+    ...(layout === null || selectedId === null
+      ? []
+      : crumbKeys(layout, selectedId)),
+    'earlier',
+    'later',
+    ...(addSlot === null ? [] : ['add']),
+    'duplicate',
+    ...(selected?.kind === 'column' ? [] : ['properties']),
+    'delete',
+  ];
+  const { rove, onKeyDown } = useRoving(keys);
+  if (
+    model === null ||
+    session === null ||
+    selectedId === null ||
+    selected === undefined ||
+    layout === null
+  ) {
+    return null;
+  }
+  const itemLabel = layout.itemLabel;
+
   const reasonFor = (direction: MoveDirection): string | null => {
     if (ctx === null) return STRINGS['toolbar.reason.atStart'];
     const reason = moveTargetReason(ctx, selectedId, direction);
@@ -201,64 +185,6 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
   };
 
   const placement = toolbarPlacement({ item, visible, toolbar: size });
-  // After a column the same button adds a column there, with no picker.
-  const addSlot = ctx === null ? null : slotAfter(ctx, selectedId);
-  const keys = [
-    'drag',
-    ...shown.flatMap((entry) =>
-      entry === 'more'
-        ? ['more']
-        : entry.id === selectedId
-          ? []
-          : [`crumb:${entry.id}`],
-    ),
-    'earlier',
-    'later',
-    ...(addSlot === null ? [] : ['add']),
-    'duplicate',
-    ...(selected.kind === 'column' ? [] : ['properties']),
-    'delete',
-  ];
-  const current = keys.includes(active) ? active : (keys[0] ?? '');
-
-  const selectCrumbById = (id: string): void => {
-    setMenu(null);
-    selectAndAnnounce(store, selectCrumb(model, id));
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
-    if (event.key === 'Escape' && menuOpen) {
-      event.stopPropagation();
-      setMenu(null);
-      moreButton.current?.focus();
-      return;
-    }
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    const items = [
-      ...event.currentTarget.querySelectorAll<HTMLElement>('[data-roving]'),
-    ];
-    const at = items.findIndex((candidate) => candidate === event.target);
-    if (at === -1) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const next =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? items.length - 1
-          : (at + (event.key === 'ArrowRight' ? 1 : -1) + items.length) %
-            items.length;
-    items[next]?.focus();
-  };
-
-  const rove = (key: string) => ({
-    'data-roving': key,
-    tabIndex: current === key ? 0 : -1,
-    onFocus: () => {
-      setActive(key);
-    },
-  });
 
   const moveButton = (direction: MoveDirection): ReactElement => {
     const reason = reasonFor(direction);
@@ -333,16 +259,6 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
         aria-label={formatString('toolbar.label', { label: itemLabel })}
         aria-orientation="horizontal"
         onKeyDown={onKeyDown}
-        onBlur={(event) => {
-          // Focus leaving the toolbar closes the list of hidden levels.
-          const next = event.relatedTarget;
-          if (
-            menuOpen &&
-            !(isNodeLike(next) && event.currentTarget.contains(next))
-          ) {
-            setMenu(null);
-          }
-        }}
         style={
           pinned
             ? { maxWidth }
@@ -367,102 +283,13 @@ export function Toolbar(props: ToolbarProps): ReactElement | null {
             <GripIcon />
           </button>
         </Tooltip>
-        <nav
-          className="flex min-w-0 items-center gap-1 overflow-hidden px-1"
-          aria-label={STRINGS['toolbar.breadcrumb']}
-        >
-          {shown.map((entry, index) => {
-            const separator =
-              index === 0 ? null : (
-                <span
-                  aria-hidden="true"
-                  className="text-caption text-text-muted"
-                >
-                  ›
-                </span>
-              );
-            if (entry === 'more') {
-              return (
-                <span key="more" className="flex items-center gap-1">
-                  {separator}
-                  <button
-                    ref={moreButton}
-                    type="button"
-                    className={CRUMB}
-                    aria-label={STRINGS['toolbar.more.label']}
-                    aria-expanded={menuOpen}
-                    onClick={(event) => {
-                      // The list hangs below the toolbar, under this button.
-                      setMenu(
-                        menuOpen
-                          ? null
-                          : {
-                              itemId: selectedId,
-                              left: event.currentTarget.offsetLeft,
-                            },
-                      );
-                    }}
-                    {...rove('more')}
-                  >
-                    {STRINGS['toolbar.more']}
-                  </button>
-                </span>
-              );
-            }
-            const last = entry.id === selectedId;
-            return (
-              <span key={entry.id} className="flex items-center gap-1">
-                {separator}
-                {last ? (
-                  <span
-                    aria-current="true"
-                    title={entry.text}
-                    className="inline-block h-6 max-w-[96px] truncate px-1 text-caption leading-6 font-semibold text-text"
-                  >
-                    {entry.text}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    className={CRUMB}
-                    title={entry.text}
-                    aria-label={entry.text}
-                    onClick={() => {
-                      selectCrumbById(entry.id);
-                    }}
-                    {...rove(`crumb:${entry.id}`)}
-                  >
-                    {entry.text}
-                  </button>
-                )}
-              </span>
-            );
-          })}
-        </nav>
-        {open !== null && hidden.length > 0 ? (
-          // Outside the breadcrumb, which clips what overflows it: the toolbar does not.
-          <div
-            role="group"
-            data-toolbar-hidden-levels=""
-            className="pk-toolbar-menu"
-            aria-label={STRINGS['toolbar.more.label']}
-            style={{ left: open.left }}
-          >
-            {hidden.map((crumb) => (
-              <button
-                key={crumb.id}
-                type="button"
-                className={CRUMB}
-                title={crumb.text}
-                onClick={() => {
-                  selectCrumbById(crumb.id);
-                }}
-              >
-                {crumb.text}
-              </button>
-            ))}
-          </div>
-        ) : null}
+        <Crumbs
+          store={store}
+          model={model}
+          selectedId={selectedId}
+          layout={layout}
+          rove={rove}
+        />
         <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
         {moveButton('earlier')}
         {moveButton('later')}

@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { CatalogueEntry } from '../../api-types.js';
 import { EmptyPrompts } from '../../chrome/editing/empty-prompts.js';
+import { FieldBar } from '../../chrome/editing/text/field-bar.js';
 import { FieldDecor } from '../../chrome/editing/text/field-decor.js';
 import { UnsupportedNotice } from '../../chrome/editing/text/unsupported-notice.js';
 import { InsertPoints } from '../../chrome/editing/insert-points.js';
@@ -101,8 +102,9 @@ function wantedIds(state: EditorState): readonly string[] {
 }
 
 /**
- * The rich text fields of the selected block, so their chip, boundary and
- * notice can be drawn; null when no block with such a field is selected.
+ * The text fields (rich and short) of the selected block, so their chip,
+ * boundary, bar and notice can be drawn; null when no block with such a field
+ * is selected.
  */
 function wantedFields(state: EditorState): FieldsWanted | null {
   const { model, session, selection } = state;
@@ -111,15 +113,84 @@ function wantedFields(state: EditorState): FieldsWanted | null {
   }
   const node = model.get(selection.selectedId);
   if (node === undefined) return null;
-  const keys =
+  const fields =
     session.catalogue
       .find((entry) => entry.key === node.type)
       ?.properties.filter(
         (property) =>
-          property.fieldType === 'rich_text' && property.constraint === 'none',
-      )
-      .map((property) => property.key) ?? [];
-  return keys.length === 0 ? null : { blockId: node.id, keys };
+          (property.fieldType === 'rich_text' ||
+            property.fieldType === 'short_text') &&
+          property.constraint === 'none',
+      ) ?? [];
+  if (fields.length === 0) return null;
+  return {
+    blockId: node.id,
+    keys: fields.map((property) => property.key),
+    plain: fields
+      .filter((property) => property.fieldType === 'short_text')
+      .map((property) => property.key),
+  };
+}
+
+/** The label and `maxLength` of the property a short text session is in. */
+function plainPropertyOf(
+  state: EditorState,
+  blockId: string,
+  key: string,
+): { readonly label: string; readonly maxLength?: number } | null {
+  const node = state.model?.get(blockId);
+  const property = state.session?.catalogue
+    .find((entry) => entry.key === node?.type)
+    ?.properties.find((item) => item.key === key);
+  if (property === undefined) return null;
+  const options: unknown = property.options;
+  const max: unknown =
+    typeof options === 'object' && options !== null
+      ? Reflect.get(options, 'maxLength')
+      : undefined;
+  return {
+    label: property.label,
+    ...(typeof max === 'number' && Number.isInteger(max) && max >= 1
+      ? { maxLength: max }
+      : {}),
+  };
+}
+
+/**
+ * The compact bar of the short text field being edited, hidden while the
+ * field is fully scrolled out of the frame (the session goes on).
+ */
+function PlainFieldBar(props: {
+  readonly store: EditorStore;
+  readonly textField: NonNullable<EditorState['textField']>;
+  readonly fields: readonly FieldBox[];
+  readonly visible: Box;
+  readonly onDone: () => void;
+}): ReactElement | null {
+  const { store, textField, fields, visible, onDone } = props;
+  const box = fields.find((item) => item.key === textField.key)?.box ?? null;
+  const property = plainPropertyOf(
+    store.getState(),
+    textField.blockId,
+    textField.key,
+  );
+  if (box === null || property === null || !isVisibleIn(box, visible)) {
+    return null;
+  }
+  return (
+    <FieldBar
+      store={store}
+      blockId={textField.blockId}
+      propertyKey={textField.key}
+      label={property.label}
+      {...(property.maxLength === undefined
+        ? {}
+        : { maxLength: property.maxLength })}
+      field={box}
+      visible={visible}
+      onDone={onDone}
+    />
+  );
 }
 
 /** The frame the layer sits in: the one passed, else the one its document is shown in. */
@@ -216,6 +287,8 @@ export function OverlayLayer(props: {
   readonly onKeepUnsupported?: () => void;
   /** Called by the notice's "Remove unsupported formatting". */
   readonly onRemoveUnsupported?: () => Promise<unknown>;
+  /** Called by Done on a short text field's bar. */
+  readonly onFieldDone?: () => void;
 }): ReactElement {
   const {
     frame,
@@ -231,6 +304,7 @@ export function OverlayLayer(props: {
     onLiftDrag,
     onKeepUnsupported,
     onRemoveUnsupported,
+    onFieldDone,
   } = props;
   const layer = useRef<HTMLDivElement>(null);
   const [frameElement, setFrameElement] = useState<HTMLIFrameElement | null>(
@@ -394,6 +468,7 @@ export function OverlayLayer(props: {
     };
   }, [frame, store, active]);
   const fieldActive = textField !== null && !textField.unsupported;
+  const plainActive = fieldActive && textField.kind === 'plain';
   const unsupportedBox =
     textField !== null && textField.unsupported
       ? (fields.find((item) => item.key === textField.key)?.box ?? null)
@@ -478,6 +553,8 @@ export function OverlayLayer(props: {
   const toolbarItem =
     store === undefined ||
     confirming ||
+    // The compact field bar takes the toolbar's place while short text is typed.
+    plainActive ||
     pointerDragging ||
     selection === null ||
     selection.selected === null ||
@@ -635,6 +712,15 @@ export function OverlayLayer(props: {
                 onRemove={onRemoveUnsupported}
               />
             )}
+            {plainActive && onFieldDone !== undefined ? (
+              <PlainFieldBar
+                store={store}
+                textField={textField}
+                fields={fields}
+                visible={selection?.visible ?? visible}
+                onDone={onFieldDone}
+              />
+            ) : null}
             {toolbarItem === null ? null : (
               <Toolbar
                 store={store}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   chipPlacement,
+  fieldBarPlacement,
   isMeasurable,
   sameBox,
   siblingAxis,
@@ -200,5 +201,70 @@ describe('siblingAxis', () => {
     expect(siblingAxis([{ left: 0, top: 0, width: 1, height: 1 }])).toBe(
       'vertical',
     );
+  });
+});
+
+describe('fieldBarPlacement', () => {
+  const bar = { height: 40, width: 300 };
+
+  it('sits 8px above the field with its left edge on the field', () => {
+    const field = { left: 120, top: 900, width: 400, height: 40 };
+    expect(fieldBarPlacement({ field, visible: VISIBLE, ...bar })).toEqual({
+      mode: 'above',
+      left: 120,
+      top: 852,
+    });
+  });
+
+  it('flips below when the visible part holds less than its height plus 8px above the field', () => {
+    const field = { left: 120, top: 640, width: 400, height: 40 };
+    expect(fieldBarPlacement({ field, visible: VISIBLE, ...bar })).toEqual({
+      mode: 'below',
+      left: 120,
+      top: 688,
+    });
+    // 47px above is one short of 48, 48px is enough
+    expect(
+      fieldBarPlacement({
+        field: { ...field, top: 647 },
+        visible: VISIBLE,
+        ...bar,
+      }).mode,
+    ).toBe('below');
+    expect(
+      fieldBarPlacement({
+        field: { ...field, top: 648 },
+        visible: VISIBLE,
+        ...bar,
+      }).mode,
+    ).toBe('above');
+  });
+
+  it('pins inside the field top-left, 8px in, when neither side fits', () => {
+    // a field taller than the frame, its top scrolled above the visible part
+    const field = { left: 120, top: 400, width: 400, height: 2000 };
+    expect(fieldBarPlacement({ field, visible: VISIBLE, ...bar })).toEqual({
+      mode: 'pinned',
+      left: 128,
+      top: 608,
+    });
+  });
+
+  it('is clamped 8px inside the frame on both sides', () => {
+    const wide = { ...bar, width: 500 };
+    expect(
+      fieldBarPlacement({
+        field: { left: 900, top: 900, width: 100, height: 40 },
+        visible: VISIBLE,
+        ...wide,
+      }).left,
+    ).toBe(1070 - 8 - 500);
+    expect(
+      fieldBarPlacement({
+        field: { left: -20, top: 900, width: 100, height: 40 },
+        visible: VISIBLE,
+        ...wide,
+      }).left,
+    ).toBe(8);
   });
 });

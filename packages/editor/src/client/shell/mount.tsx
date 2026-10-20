@@ -1589,6 +1589,9 @@ function Shell(props: {
                 controller.keepUnsupported();
               },
               onRemoveUnsupported: () => controller.removeUnsupported(),
+              onFieldDone: () => {
+                void controller.exit('done');
+              },
               onPropertiesChange: changeProperties,
               onPropertiesBlur: blurProperties,
               onLayoutChange: changeLayout,

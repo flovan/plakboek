@@ -13,14 +13,19 @@ import { documentBox } from '../chrome-host/coordinates.js';
 import { sameBox, type Box } from './geometry.js';
 import { GHOST_SIZE } from './boxes.js';
 
-/** What to follow: the selected block and which of its fields are rich text. */
+/** What to follow: the selected block and which of its fields are text, rich or plain. */
 export type FieldsWanted = {
   readonly blockId: string;
+  /** Every text field's key. */
   readonly keys: readonly string[];
+  /** The keys among them that are short text (plain). */
+  readonly plain?: readonly string[];
 };
 
 export type FieldBox = {
   readonly key: string;
+  /** Rich text, or one plain line of short text. */
+  readonly kind: 'rich' | 'plain';
   /** The field's box; a ghost box when the field takes up no room. */
   readonly box: Box;
   /** The box of the block that holds the field. */
@@ -57,6 +62,7 @@ function sameFields(a: readonly FieldBox[], b: readonly FieldBox[]): boolean {
       return (
         other !== undefined &&
         item.key === other.key &&
+        item.kind === other.kind &&
         item.empty === other.empty &&
         sameBox(item.box, other.box) &&
         sameBox(item.block, other.block)
@@ -112,7 +118,12 @@ export function createFieldTracker(
       const blockBox = block === undefined ? null : measure(block, view);
       const found: FieldBox[] = [];
       if (block !== undefined && blockBox !== null) {
-        for (const field of block.querySelectorAll(FIELD_SELECTOR)) {
+        // The block's own element can be the field (a heading's root is its text).
+        const candidates = [
+          ...(block.matches(FIELD_SELECTOR) ? [block] : []),
+          ...block.querySelectorAll(FIELD_SELECTOR),
+        ];
+        for (const field of candidates) {
           const key = field.getAttribute(EDIT_ATTRIBUTE.field);
           // A field of a nested block is that block's, not this one's.
           if (
@@ -127,6 +138,7 @@ export function createFieldTracker(
           if (box === null) continue;
           found.push({
             key,
+            kind: wanted.plain?.includes(key) === true ? 'plain' : 'rich',
             box,
             block: blockBox,
             empty: isEmptyFieldElement(field),
