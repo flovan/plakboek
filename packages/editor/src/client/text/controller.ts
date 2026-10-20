@@ -29,6 +29,11 @@ import { labelOf } from '../session/tree-model.js';
 import { hasPending } from '../session/save-queue.js';
 import { beginInlineEdit, endInlineEdit } from '../frame/patch.js';
 import { buildTextExtensions } from './extensions.js';
+import {
+  buildPlainExtensions,
+  plainDocument,
+  plainTextOf,
+} from './plain-field.js';
 import { cleanPastedHtml, pasteLostFormatting } from './paste.js';
 import { createRendererShells, type RendererShells } from './shells.js';
 import { findEditableField, type FieldTarget } from './field-target.js';
@@ -47,7 +52,8 @@ export type TextExitReason =
   | 'structure'
   | 'undo'
   | 'reload'
-  | 'lock';
+  | 'lock'
+  | 'panel';
 
 export type TextControllerOptions = {
   readonly store: EditorStore;
@@ -109,7 +115,10 @@ type Session = {
   readonly editor: Editor;
   readonly block: Element;
   readonly snapshot: FieldSnapshot;
-  readonly shells: RendererShells;
+  /** The node views of a rich text field; a plain field has none. */
+  readonly shells: RendererShells | null;
+  /** The latest value not yet shown to the Properties panel, and its timer. */
+  live: { timer: ReturnType<typeof setTimeout> | null; value: unknown };
   /** The document as mounted, so an unchanged field gives back its exact markup. */
   readonly initial: string;
   /** Any change was made, so the value must be sent even when it ends as it began. */
@@ -122,10 +131,17 @@ const EMPTY_DOCUMENT = {
 } as const;
 
 /** The value a document saves as: an emptied field is an absent value. */
-function savedValue(editor: Editor): unknown {
+function savedValue(editor: Editor, kind: FieldTarget['kind']): unknown {
   const json = editor.getJSON();
+  if (kind === 'plain') {
+    const text = plainTextOf(json);
+    return text === '' ? undefined : text;
+  }
   return isEmptyRichTextDocument(json) ? undefined : json;
 }
+
+/** How long typing waits before the Properties panel is shown the new value. */
+const LIVE_VALUE_DELAY_MS = 150;
 
 function containsNode(root: Element, node: unknown): boolean {
   return (
@@ -165,7 +181,12 @@ export function createTextController(
     current = null;
     const { target, editor, block, snapshot, shells } = session;
     const { blockId, key } = target;
-    const value = savedValue(editor);
+    const value = savedValue(editor, target.kind);
+    if (session.live.timer !== null) clearTimeout(session.live.timer);
+    // The panel shows what was typed from now until the write has landed.
+    if (session.touched && target.kind === 'plain') {
+      store.setLiveValue(blockId, key, plainTextOf(editor.getJSON()));
+    }
     const changed = JSON.stringify(editor.getJSON()) !== session.initial;
     // What the field shows until the server's render replaces the block.
     const interim = changed ? cleanChildren(target.element) : undefined;
@@ -175,7 +196,7 @@ export function createTextController(
       // The document may already be gone (a reload); the restore below is
       // harmless on a detached element.
     }
-    shells.dispose();
+    shells?.dispose();
     restoreField(target.element, snapshot, interim);
     endInlineEdit(block);
     store.setTextField(null);
@@ -189,17 +210,37 @@ export function createTextController(
       await changeProperties(blockId, { [key]: value }, key, true);
     }
     if (reason !== 'reload') ready(blockId);
+    if (target.kind === 'plain') {
+      // Once everything queued is sent the model holds the value, so the
+      // panel reads the model again; until then it keeps showing the typing.
+      if (reason === 'reload') store.clearLiveValues(blockId);
+      else {
+        void settled().then((outcome) => {
+          // A failed or paused queue keeps the typing on show, like a draft
+          // the engine refused.
+          if (outcome === 'saved' && current?.target.blockId !== blockId) {
+            store.clearLiveValues(blockId);
+          }
+        });
+      }
+    }
   }
 
   function enter(target: FieldTarget, point?: { x: number; y: number }): void {
     if (current !== null) void exit('click');
     const state = store.getState();
     if (state.status !== 'editing' || state.mode !== 'edit') return;
+    const rich = target.kind === 'rich';
     const theme = target.property.textTheme;
-    if (theme === undefined) return;
+    if (rich && theme === undefined) return;
     const stored = state.model?.get(target.blockId)?.props[target.key];
     const present = stored !== undefined && stored !== null;
-    if (present && !isRichTextDocumentInTheme(stored, theme)) {
+    if (
+      rich &&
+      theme !== undefined &&
+      present &&
+      !isRichTextDocumentInTheme(stored, theme)
+    ) {
       // Formatting the theme no longer allows: the field stays read-only and
       // its words are kept as they are until the editor chooses otherwise.
       refused = target;
@@ -216,10 +257,9 @@ export function createTextController(
 
     const snapshot = snapshotField(target.element);
     beginInlineEdit(block);
-    const shells = createRendererShells(
-      renderers,
-      target.element.ownerDocument,
-    );
+    const shells = rich
+      ? createRendererShells(renderers, target.element.ownerDocument)
+      : null;
     let editor: Editor;
     try {
       editor = new Editor({
@@ -227,30 +267,50 @@ export function createTextController(
         // types the option as an element.
         element: { mount: target.element } as unknown as Element,
         injectCSS: false,
-        editorProps: {
-          // Defence in depth beside the locked schema: pasted styling never
-          // reaches the editor, and the author is told when formatting was
-          // dropped. The paste transaction follows this call synchronously, so
-          // the message is raised once it has run.
-          transformPastedHTML: (html) => {
-            if (pasteLostFormatting(html)) {
-              queueMicrotask(() => {
-                store.showMessage('text.paste.stripped');
-              });
+        // A plain field's paste rule lives in its own plugin.
+        editorProps: rich
+          ? {
+              // Defence in depth beside the locked schema: pasted styling
+              // never reaches the editor, and the author is told when
+              // formatting was dropped. The paste transaction follows this
+              // call synchronously, so the message is raised once it has run.
+              transformPastedHTML: (html) => {
+                if (pasteLostFormatting(html)) {
+                  queueMicrotask(() => {
+                    store.showMessage('text.paste.stripped');
+                  });
+                }
+                return cleanPastedHtml(html);
+              },
             }
-            return cleanPastedHtml(html);
-          },
-        },
-        extensions: buildTextExtensions(theme, {
-          onEscape: () => {
-            void exit('escape');
-          },
-          shells,
-        }),
-        content: present ? (stored as object) : EMPTY_DOCUMENT,
+          : {},
+        extensions:
+          rich && theme !== undefined && shells !== null
+            ? buildTextExtensions(theme, {
+                onEscape: () => {
+                  void exit('escape');
+                },
+                shells,
+              })
+            : buildPlainExtensions({
+                ...(target.maxLength === undefined
+                  ? {}
+                  : { maxLength: target.maxLength }),
+                onEnter: () => {
+                  void exit('done');
+                },
+                onEscape: () => {
+                  void exit('escape');
+                },
+              }),
+        content: rich
+          ? present
+            ? (stored as object)
+            : EMPTY_DOCUMENT
+          : plainDocument(typeof stored === 'string' ? stored : ''),
       });
     } catch {
-      shells.dispose();
+      shells?.dispose();
       restoreField(target.element, snapshot);
       endInlineEdit(block);
       return;
@@ -276,6 +336,7 @@ export function createTextController(
       block,
       snapshot,
       shells,
+      live: { timer: null, value: undefined },
       initial: JSON.stringify(editor.getJSON()),
       touched: false,
     };
@@ -286,10 +347,18 @@ export function createTextController(
       session.touched = true;
       void changeProperties(
         target.blockId,
-        { [target.key]: savedValue(editor) },
+        { [target.key]: savedValue(editor, target.kind) },
         target.key,
         false,
       );
+      if (target.kind === 'plain') {
+        // The panel follows the typing, at most once per delay.
+        session.live.value = plainTextOf(editor.getJSON());
+        session.live.timer ??= setTimeout(() => {
+          session.live.timer = null;
+          store.setLiveValue(target.blockId, target.key, session.live.value);
+        }, LIVE_VALUE_DELAY_MS);
+      }
     });
     store.setTextField({
       blockId: target.blockId,
@@ -298,9 +367,10 @@ export function createTextController(
       unsupported: false,
     });
     announce(
-      formatString('text.announce.editingRich', {
-        label: target.property.label,
-      }),
+      formatString(
+        rich ? 'text.announce.editingRich' : 'text.announce.editingPlain',
+        { label: target.property.label },
+      ),
     );
   }
 

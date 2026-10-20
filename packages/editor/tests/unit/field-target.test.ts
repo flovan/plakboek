@@ -72,6 +72,9 @@ const catalogue = [
     property('body', 'rich_text'),
     property('locked', 'rich_text', 'fixed'),
     property('caption', 'short_text'),
+    { ...property('title', 'short_text'), options: { maxLength: 200 } },
+    property('lockedTitle', 'short_text', 'fixed'),
+    property('count', 'integer'),
   ]),
 ];
 const model = createTreeModel(
@@ -111,13 +114,33 @@ describe('findEditableField', () => {
     expect(findEditableField(text, model, catalogue)).toBeNull();
   });
 
-  it('answers null for a fixed property and for a short text property', () => {
-    expect(
-      findEditableField(fieldIn('DIV', 'locked').text, model, catalogue),
-    ).toBeNull();
-    expect(
-      findEditableField(fieldIn('DIV', 'caption').text, model, catalogue),
-    ).toBeNull();
+  it('answers a short text field as a plain one, with the property maxLength', () => {
+    const { field } = fieldIn('H2', 'title');
+    expect(findEditableField(field, model, catalogue)).toMatchObject({
+      blockId: 'b',
+      key: 'title',
+      kind: 'plain',
+      element: field,
+      maxLength: 200,
+    });
+  });
+
+  it('answers a short text field without a maxLength option with none', () => {
+    const target = findEditableField(
+      fieldIn('SPAN', 'caption').field,
+      model,
+      catalogue,
+    );
+    expect(target?.kind).toBe('plain');
+    expect(target).not.toHaveProperty('maxLength');
+  });
+
+  it('answers null for a fixed property and for a type that is not text', () => {
+    for (const key of ['locked', 'lockedTitle', 'count']) {
+      expect(
+        findEditableField(fieldIn('DIV', key).text, model, catalogue),
+      ).toBeNull();
+    }
   });
 
   it('answers null outside any block, for an unknown block and for an unknown key', () => {

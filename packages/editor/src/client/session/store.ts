@@ -157,6 +157,14 @@ export type EditorState = {
   readonly leaveRequest: { readonly token: number } | null;
   /** The text field in a session, or null. */
   readonly textField: TextFieldState | null;
+  /**
+   * What the editor has typed on the page into short text fields and the model
+   * does not hold yet, by block and property key. The Properties panel shows
+   * it so the two never disagree; the text controller sets and clears it.
+   */
+  readonly liveValues: Readonly<
+    Record<string, Readonly<Record<string, unknown>>>
+  >;
 };
 
 /** What a successful write changes in one step, so no one reads a half-applied state. */
@@ -228,6 +236,10 @@ export type EditorStore = {
   setDrag(drag: DragState | null): void;
   /** A text field session starts or ends. */
   setTextField(field: TextFieldState | null): void;
+  /** Records what is typed on the page into a property, for the Properties panel. */
+  setLiveValue(blockId: string, key: string, value: unknown): void;
+  /** Forgets everything typed on the page into a block's properties. */
+  clearLiveValues(blockId: string): void;
 };
 
 export function initialEditorState(): EditorState {
@@ -257,6 +269,7 @@ export function initialEditorState(): EditorState {
     deleteRequest: null,
     leaveRequest: null,
     textField: null,
+    liveValues: {},
   };
 }
 
@@ -299,6 +312,7 @@ export function openedState(
     deleteRequest: null,
     leaveRequest: null,
     textField: null,
+    liveValues: {},
   };
 }
 
@@ -340,6 +354,7 @@ export function createEditorStore(
       deleteRequest: null,
       leaveRequest: null,
       textField: null,
+      liveValues: {},
     });
   }
 
@@ -534,6 +549,26 @@ export function createEditorStore(
     setTextField(textField) {
       if (textField === null && state.textField === null) return;
       set({ ...state, textField });
+    },
+    setLiveValue(blockId, key, value) {
+      const held = state.liveValues[blockId];
+      if (held !== undefined && key in held && held[key] === value) return;
+      set({
+        ...state,
+        liveValues: {
+          ...state.liveValues,
+          [blockId]: { ...held, [key]: value },
+        },
+      });
+    },
+    clearLiveValues(blockId) {
+      if (!(blockId in state.liveValues)) return;
+      set({
+        ...state,
+        liveValues: Object.fromEntries(
+          Object.entries(state.liveValues).filter(([id]) => id !== blockId),
+        ),
+      });
     },
   };
 }

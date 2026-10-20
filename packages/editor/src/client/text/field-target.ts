@@ -11,10 +11,12 @@ export type FieldTarget = {
   readonly blockId: string;
   /** The property key the field is marked with. */
   readonly key: string;
-  /** Plain text fields join in a later plan. */
+  /** A `rich_text` property is typed as formatted text, a `short_text` one as one plain line. */
   readonly kind: 'rich' | 'plain';
   readonly element: Element;
   readonly property: CatalogueProperty;
+  /** The `maxLength` of a plain field's property, when it has one. */
+  readonly maxLength?: number;
 };
 
 const FIELD_SELECTOR = `[${EDIT_ATTRIBUTE.field}]`;
@@ -57,8 +59,8 @@ function elementOf(start: unknown): ElementLike | null {
 /**
  * The editable field under `start` (the element a click landed on), or null.
  * It is a field only when its owning block is in the model, the property is a
- * `rich_text` one with no placement constraint, and the element is not a
- * control.
+ * `rich_text` or `short_text` one with no placement constraint, and the
+ * element is not a control.
  */
 export function findEditableField(
   start: unknown,
@@ -80,18 +82,33 @@ export function findEditableField(
   const property = catalogue
     .find((entry) => entry.key === node.type)
     ?.properties.find((item) => item.key === key);
-  if (
-    property === undefined ||
-    property.fieldType !== 'rich_text' ||
-    property.constraint !== 'none'
-  ) {
-    return null;
+  if (property === undefined || property.constraint !== 'none') return null;
+  if (property.fieldType === 'rich_text') {
+    return {
+      blockId,
+      key,
+      kind: 'rich',
+      element: field as unknown as Element,
+      property,
+    };
   }
+  if (property.fieldType !== 'short_text') return null;
+  const maxLength = maxLengthOf(property.options);
   return {
     blockId,
     key,
-    kind: 'rich',
+    kind: 'plain',
     element: field as unknown as Element,
     property,
+    ...(maxLength === undefined ? {} : { maxLength }),
   };
+}
+
+/** The `maxLength` option of a short text property, when it is a usable one. */
+function maxLengthOf(options: unknown): number | undefined {
+  if (typeof options !== 'object' || options === null) return undefined;
+  const value: unknown = Reflect.get(options, 'maxLength');
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1
+    ? value
+    : undefined;
 }
