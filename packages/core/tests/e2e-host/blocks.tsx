@@ -443,6 +443,7 @@ export const card = defineBlock({
     caption: {
       fieldType: 'rich_text',
       label: 'Caption',
+      required: true,
       options: {
         narrow: {
           marks: ['bold', 'italic', 'link'],

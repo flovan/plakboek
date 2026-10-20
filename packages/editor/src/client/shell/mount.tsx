@@ -1005,6 +1005,27 @@ function Shell(props: {
     [host, store],
   );
 
+  /**
+   * Puts the caret at the end of the block's first text field (in the order
+   * its properties are declared). A button field is not text: it answers false,
+   * as does a block with no field.
+   */
+  const enterFirstTextField = useCallback(
+    (blockId: string): boolean => {
+      const { model, session } = store.getState();
+      const type = model?.get(blockId)?.type;
+      const entry = session?.catalogue.find((item) => item.key === type);
+      if (entry === undefined) return false;
+      for (const property of entry.properties) {
+        const target = controller.fieldFor(blockId, property.key);
+        if (target === null || target.kind === 'button') continue;
+        return controller.enterField(blockId, property.key);
+      }
+      return false;
+    },
+    [controller, store],
+  );
+
   const climbSelection = useCallback(() => {
     const { model, selection } = store.getState();
     if (model !== null) selectAndAnnounce(store, climb(model, selection));
@@ -1084,6 +1105,16 @@ function Shell(props: {
           break;
         case 'drill': {
           const result = drillFirst(model, selection);
+          // Enter on a block with text to type in goes to the text; the
+          // Properties open for a block with none, and for Arrow Right.
+          if (
+            event.key === 'Enter' &&
+            result.openProperties &&
+            selected !== undefined &&
+            enterFirstTextField(selected.id)
+          ) {
+            break;
+          }
           selectAndAnnounce(store, result.selection);
           if (result.openProperties && result.selection.selectedId !== null) {
             store.requestProperties(result.selection.selectedId);

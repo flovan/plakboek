@@ -6,13 +6,21 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import {
+  chrome,
   framedSite,
   HOST,
   openEditor,
   openProperties,
+  selectItem,
+  selectedId,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
-import { createEditablePage, section } from './helpers/pages.ts';
+import {
+  createEditablePage,
+  heading,
+  readBlockProps,
+  section,
+} from './helpers/pages.ts';
 import { signIn } from './helpers/session.ts';
 
 function paragraphDoc(text: string) {
@@ -107,5 +115,90 @@ test.describe('formatted text in the Properties panel', () => {
     );
     await expect(row).toContainText('This text is not editable on the page.');
     await expect(row.getByRole('button')).toHaveCount(0);
+  });
+});
+
+test.describe('the routes into the text on the page', () => {
+  test('a short text with a limit counts its characters in the panel, live', async ({
+    page,
+  }) => {
+    const created = await createEditablePage({
+      blocks: [section(heading('Hello'))],
+    });
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await openProperties(page, frame.locator('h2.reset-target').first());
+
+    const counter = sheet(page).locator('[data-text-counter]');
+    await expect(counter).toHaveText('5 of 200 characters');
+    await page.getByRole('textbox', { name: 'Text' }).fill('Hello there');
+    await expect(counter).toHaveText('11 of 200 characters');
+  });
+
+  test('a needs-input marker on a missing text starts typing in it on the page, and Properties stay closed', async ({
+    page,
+  }) => {
+    const created = await createEditablePage({
+      blocks: [
+        section({
+          type: 'card',
+          props: { title: 'A card' },
+        }),
+      ],
+    });
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await chrome(page).locator('[data-marker]').click();
+    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+    await expect(sheet(page)).not.toHaveAttribute('data-open', '');
+    await page.keyboard.type('Typed here');
+    await expect(frame.locator('.card-caption')).toHaveText('Typed here');
+    await page.keyboard.press('Escape');
+    await expect
+      .poll(async () =>
+        JSON.stringify(
+          (await readBlockProps(created.pageId, 'card'))['caption'],
+        ),
+      )
+      .toContain('Typed here');
+    // nothing is missing any more
+    await expect(chrome(page).locator('[data-marker]')).toHaveCount(0);
+  });
+
+  test('Enter on a selected block with text puts the caret at the end of the field; on a block without text it opens Properties', async ({
+    page,
+  }) => {
+    const created = await createEditablePage({
+      blocks: [
+        section(
+          { type: 'prose', props: { body: paragraphDoc('Hello world') } },
+          { type: 'propsDemo', props: { title: 'Demo' } },
+        ),
+      ],
+    });
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    const field = frame.locator('.prose-flow').first();
+
+    await selectItem(page, field);
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+    const id = await selectedId(page);
+    await page.keyboard.press('Enter');
+    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+    await expect(sheet(page)).not.toHaveAttribute('data-open', '');
+    await page.keyboard.type('!');
+    await expect(field).toHaveText('Hello world!');
+    await page.keyboard.press('Escape');
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+    expect(await selectedId(page)).toBe(id);
+
+    // a block with no text to type in keeps the Phase 8 route
+    await selectItem(
+      page,
+      frame.locator('section.section >> .props-demo >> p >> nth=0'),
+    );
+    await page.keyboard.press('Enter');
+    await expect(sheet(page)).toHaveAttribute('data-open', '');
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
   });
 });

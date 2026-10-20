@@ -806,7 +806,11 @@ export function OverlayLayer(props: {
         <div className="pk-overlay-interaction" data-overlay-interaction="">
           <div className="pk-overlay-plane">
             {measured === null ? null : (
-              <NeedsInputMarkers store={store} boxes={placed} />
+              <NeedsInputMarkers
+                store={store}
+                boxes={placed}
+                textController={textController}
+              />
             )}
             {confirming || measured === null || drag !== null ? null : (
               <>

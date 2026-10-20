@@ -15,6 +15,7 @@ import {
   type EditorStore,
 } from '../../client/session/store.js';
 import { labelOf } from '../../client/session/tree-model.js';
+import type { TextController } from '../../client/text/controller.js';
 import { AlertIcon } from '../icons.js';
 import { formatString, STRINGS } from '../strings.js';
 
@@ -35,6 +36,8 @@ export type NeedsInputMarkersProps = {
   readonly store: EditorStore;
   /** The boxes of the blocks, in the framed document's coordinates. */
   readonly boxes: ReadonlyMap<string, Box>;
+  /** Starts typing on the page in a block's text field; without it a marker only opens the Properties. */
+  readonly textController?: TextController;
 };
 
 /** The ids of the blocks that still lack a required value. */
@@ -56,7 +59,8 @@ type Placement = {
  * A marker inside the top-right corner of every block with a required value
  * missing. It is a pointer control in the interaction plane, below the
  * toolbar: pressing it selects its block and opens its Properties with focus
- * on the first empty required control. It takes no focus of its own (the
+ * on the first empty required control, unless that one is a text the block
+ * marks on the page, which it starts typing in instead. It takes no focus of its own (the
  * keyboard reaches the same place through the block's toolbar), and while a
  * drag runs or the delete confirmation is open it is drawn but takes no
  * pointer. It moves to the left corner where it would sit under the floating
@@ -68,7 +72,7 @@ type Placement = {
 export function NeedsInputMarkers(
   props: NeedsInputMarkersProps,
 ): ReactElement | null {
-  const { store, boxes } = props;
+  const { store, boxes, textController } = props;
   const model = useEditorStore(store, (state) => state.model);
   const session = useEditorStore(store, (state) => state.session);
   const busy = useEditorStore(
@@ -157,6 +161,20 @@ export function NeedsInputMarkers(
               })}
               onClick={() => {
                 if (model === null) return;
+                // A missing text is typed where it belongs: on the page.
+                const missing = model.get(id)?.needsInput[0];
+                const field =
+                  missing === undefined
+                    ? null
+                    : (textController?.fieldFor(id, missing) ?? null);
+                if (
+                  missing !== undefined &&
+                  field !== null &&
+                  field.kind !== 'button' &&
+                  textController?.enterField(id, missing) === true
+                ) {
+                  return;
+                }
                 selectAndAnnounce(store, selectCrumb(model, id));
                 store.requestProperties(id);
               }}
