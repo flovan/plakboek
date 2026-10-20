@@ -1,5 +1,11 @@
 import { defineBlock } from '@plakboek/core';
-import { Columns, RichText, type BlockComponent } from '@plakboek/render';
+import {
+  Columns,
+  CtaButton,
+  RichText,
+  type BlockComponent,
+} from '@plakboek/render';
+import textTheme from './text-theme.tsx';
 
 const VARIANTS = ['plain', 'transform', 'filter', 'contain', 'isolation'];
 
@@ -213,6 +219,21 @@ const Card: BlockComponent<{ title: string; caption?: unknown }> = ({
   </div>
 );
 
+/**
+ * A standalone button: the same label, link and variant a button typed into a
+ * text has, drawn by the same renderer. The wrapper is the link field, so a
+ * click on it opens the Button popover.
+ */
+const ButtonBlock: BlockComponent<{
+  label?: string;
+  link?: unknown;
+  variant?: string;
+}> = ({ props, edit }) => (
+  <div {...edit} {...edit.field('link')} className="button-block">
+    <CtaButton label={props.label} link={props.link} variant={props.variant} />
+  </div>
+);
+
 /** Renders the same whatever its required note says, so a spec can leave it empty. */
 const Note: BlockComponent<{ note: string }> = ({ edit }) => (
   <div {...edit} className="note" aria-hidden="true" style={{ height: 24 }} />
@@ -348,6 +369,39 @@ export const quote = defineBlock({
     },
   },
   component: Quote,
+});
+
+export const button = defineBlock({
+  key: 'button',
+  editor: { label: 'Button' },
+  schemaVersion: 1,
+  properties: {
+    label: {
+      fieldType: 'short_text',
+      label: 'Label',
+      required: true,
+      options: { maxLength: 80 },
+    },
+    link: {
+      fieldType: 'link',
+      label: 'Link',
+      required: true,
+      options: { labelProperty: 'label', variantProperty: 'variant' },
+    },
+    variant: {
+      fieldType: 'select',
+      label: 'Style',
+      defaultValue: 'primary',
+      options: {
+        // The styles the text theme lists, so the two stay in step.
+        choices: textTheme.theme.ctaVariants.map((entry) => ({
+          value: entry.value,
+          labels: { en: entry.label },
+        })),
+      },
+    },
+  },
+  component: ButtonBlock,
 });
 
 export const prose = defineBlock({

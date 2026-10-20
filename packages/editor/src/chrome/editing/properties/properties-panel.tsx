@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactElement,
@@ -36,7 +37,9 @@ import { formatString, STRINGS } from '../../strings.js';
 import { ColumnsGroup } from './columns-group.js';
 import { PropertyField } from './controls.js';
 import { LayoutGroup, type LayoutChangeHandler } from './layout-group.js';
+import { LinkSearchContext } from './link-control.js';
 import { PlacementGroup } from './placement-group.js';
+import type { PageSearch } from '../text/page-picker.js';
 
 /** What the panel asks of the shell when a property changes. */
 export type PropertiesPanelProps = {
@@ -75,6 +78,8 @@ export type PropertiesPanelProps = {
   readonly onAddColumn?: (sectionId: string) => void;
   readonly onMoveColumn?: (id: string, direction: MoveDirection) => void;
   readonly onRemoveColumn?: (id: string) => void;
+  /** Finds pages for a link property's picker; without it only web addresses can be entered. */
+  readonly onSearchPages?: PageSearch;
 };
 
 function textOf(label: ItemLabel): string {
@@ -331,9 +336,14 @@ export function PropertiesPanel(props: PropertiesPanelProps): ReactElement {
     onAddColumn,
     onMoveColumn,
     onRemoveColumn,
+    onSearchPages,
   } = props;
   const state = useEditorStore(store, (current) => current);
   const { model, session, selection } = state;
+  const linkSearch = useMemo(
+    () => ({ search: onSearchPages, locale: session?.locale ?? '' }),
+    [onSearchPages, session?.locale],
+  );
   const node =
     state.status === 'editing' &&
     state.mode === 'edit' &&
@@ -444,9 +454,11 @@ export function PropertiesPanel(props: PropertiesPanelProps): ReactElement {
   }
 
   return (
-    <div data-properties-panel="" data-properties-for={node.id}>
-      <PanelHeader store={store} node={node} />
-      {body}
-    </div>
+    <LinkSearchContext.Provider value={linkSearch}>
+      <div data-properties-panel="" data-properties-for={node.id}>
+        <PanelHeader store={store} node={node} />
+        {body}
+      </div>
+    </LinkSearchContext.Provider>
   );
 }

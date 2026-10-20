@@ -26,6 +26,7 @@ export type ControlKind =
   | 'date'
   | 'json'
   | 'repeater'
+  | 'link-target'
   | 'note-rich-text'
   | 'note-media'
   | 'note-entry';
@@ -71,6 +72,7 @@ const KIND_BY_WIDGET: Readonly<Record<string, ControlKind>> = {
   'date-picker': 'date',
   'json-editor': 'json',
   'repeater-list': 'repeater',
+  'link-picker': 'link-target',
   'rich-text-editor': 'note-rich-text',
   'image-picker': 'note-media',
   'file-picker': 'note-media',
@@ -95,6 +97,7 @@ const DEFAULT_WIDGET: Readonly<Record<string, string>> = {
   slug: 'slug-input',
   url: 'url-input',
   repeater: 'repeater-list',
+  link: 'link-picker',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

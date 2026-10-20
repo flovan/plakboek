@@ -209,6 +209,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               onAddColumn={editor.onAddColumn}
               onMoveColumn={editor.onMoveColumn}
               onRemoveColumn={editor.onRemoveColumn}
+              onSearchPages={editor.onSearchPages}
               top={
                 sheetOpen ? (
                   <>

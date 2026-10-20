@@ -21,6 +21,7 @@ import {
 } from '../../../client/session/control-map.js';
 import { formatString, STRINGS } from '../../strings.js';
 import { Field, type FieldLayout } from './field.js';
+import { LinkControl } from './link-control.js';
 import { RepeaterControl } from './repeater-control.js';
 
 /** Called with the new value (undefined clears it) and whether it applies at once or after a pause. */
@@ -608,7 +609,10 @@ export function PropertyField(props: PropertyFieldProps): ReactElement {
     onBlur: props.onBlur,
   };
   const group =
-    kind === 'radio' || kind === 'checkbox-group' || kind === 'repeater';
+    kind === 'radio' ||
+    kind === 'checkbox-group' ||
+    kind === 'repeater' ||
+    kind === 'link-target';
 
   let control: ReactElement;
   switch (kind) {
@@ -676,6 +680,23 @@ export function PropertyField(props: PropertyFieldProps): ReactElement {
               onBlur={props.onBlur}
             />
           )}
+        />
+      );
+      break;
+    case 'link-target':
+      control = (
+        <LinkControl
+          id={ids.control}
+          labelId={ids.label}
+          fieldKey={fieldKey}
+          value={value}
+          disabled={disabled}
+          invalid={error !== null}
+          required={required}
+          attention={needsInput}
+          describedBy={describedBy}
+          onChange={props.onChange}
+          onBlur={props.onBlur}
         />
       );
       break;

@@ -35,6 +35,7 @@ describe('controlFor', () => {
     ['date-picker', 'date_time', 'date'],
     ['json-editor', 'json', 'json'],
     ['repeater-list', 'repeater', 'repeater'],
+    ['link-picker', 'link', 'link-target'],
     ['rich-text-editor', 'rich_text', 'note-rich-text'],
     ['image-picker', 'image', 'note-media'],
     ['file-picker', 'file', 'note-media'],
@@ -66,6 +67,12 @@ describe('controlFor', () => {
       expect(control.customWidget).toBe(true);
     },
   );
+
+  it('draws a host widget on a link property with the shared link control', () => {
+    const control = controlFor(source('host-link-box', 'link'));
+    expect(control.kind).toBe('link-target');
+    expect(control.customWidget).toBe(true);
+  });
 
   it("keeps the standard control's hints and choices under a widget it does not know", () => {
     expect(
