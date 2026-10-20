@@ -112,7 +112,7 @@ test.describe('an empty block can be selected again', () => {
     );
   });
 
-  test('by its Needs input badge, which opens its Properties on the empty control', async ({
+  test('by its Needs input badge, which starts typing in its empty text', async ({
     page,
   }) => {
     const frame = await open(page);
@@ -121,10 +121,10 @@ test.describe('an empty block can be selected again', () => {
     await selectHeading(page, frame, 'H2');
     await marker.click();
 
-    await expect(page.locator(LIVE_REGION)).toHaveText(SELECTED_EMPTY);
-    const field = page.getByRole('textbox', { name: 'Text' });
-    await expect(field).toBeFocused();
-    await field.fill('Filled');
+    await expect(page.locator(LIVE_REGION)).toHaveText(
+      'Editing Text. Press Escape to stop editing.',
+    );
+    await page.keyboard.type('Filled');
     await expect(frame.locator(EMPTY)).toHaveText('Filled');
     await expect(marker).toHaveCount(0);
   });
