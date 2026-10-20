@@ -12,7 +12,7 @@
  * Without a cache nothing is stored (D-17).
  */
 import { createHash } from 'node:crypto';
-import type { CacheBackend, CacheEntry } from '@plakboek/cache';
+import { pageTag, type CacheBackend, type CacheEntry } from '@plakboek/cache';
 import {
   DEFAULT_HOME_SLUG,
   resolvePageLinkPaths,
@@ -398,11 +398,16 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
    * The text environment of one visitor render. Every page id a block holds
    * is resolved in one batch before the synchronous render, and only when
    * there is one; a page that is not live resolves to nothing, so its link
-   * renders as plain text instead of exposing an unpublished address.
+   * renders as plain text instead of exposing an unpublished address. The
+   * page ids come back too: the cached page depends on each of them, so a
+   * change to a linked page has to purge it.
    */
   async function visitorTextEnvironment(
     blocks: Parameters<typeof collectPageLinkIds>[0],
-  ): Promise<TextEnvironment> {
+  ): Promise<{
+    readonly environment: TextEnvironment;
+    readonly pageIds: readonly string[];
+  }> {
     const pageIds = collectPageLinkIds(blocks, blockDefinitions);
     const paths =
       pageIds.length === 0
@@ -413,12 +418,13 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
             homeSlug,
             liveOnly: true,
           });
-    return createTextEnvironment({
+    const environment = createTextEnvironment({
       ...(deps.textTheme === undefined ? {} : { definition: deps.textTheme }),
       mode: 'visitor',
       resolvePage: (id) => paths.get(id) ?? null,
       hooks,
     });
+    return { environment, pageIds };
   }
 
   /** Resolves, renders and (with a cache) stores one canonical path. */
@@ -459,9 +465,8 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
 
       const { view } = resolution;
       seen.pageId = view.page.id;
-      const text = await visitorTextEnvironment(
-        view.publication.snapshot.blocks,
-      );
+      const { environment: text, pageIds: linkedPageIds } =
+        await visitorTextEnvironment(view.publication.snapshot.blocks);
       const rendered = renderPageSnapshot({
         view,
         publicPath: key,
@@ -492,7 +497,10 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
       // fill that raced a purge refuse itself.
       if (cache !== undefined && ticket !== undefined && !rendered.degraded) {
         await guarded('set', key, () =>
-          cache.set(key, entry, { tags: rendered.tags, ticket }),
+          cache.set(key, entry, {
+            tags: [...rendered.tags, ...linkedPageIds.map(pageTag)],
+            ticket,
+          }),
         );
       }
       return pageOutcome(

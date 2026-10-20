@@ -4,7 +4,13 @@
  * live renders unlinked text, and a page that holds no page links issues no
  * extra statement.
  */
-import { createPage } from '@plakboek/pages';
+import { createMemoryCache } from '@plakboek/cache';
+import {
+  createPage,
+  getPage,
+  publishPage,
+  unpublishPage,
+} from '@plakboek/pages';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createVisitorHandler } from '../../src/server.js';
 import { createCountingDb, type CountingDb } from './counting-db.js';
@@ -139,5 +145,55 @@ describe('visitor page links', () => {
     const html = await (await visit(handler, '/counted-link')).text();
     expect(html).toContain('href="/counted-target"');
     expect(counting.statements).toHaveLength(baseline + 2);
+  });
+});
+
+describe('a cached page that links to another page', () => {
+  it('is refreshed when the linked page is unpublished and published again', async () => {
+    const lru = createMemoryCache();
+    const deps = pagesDepsFor(fixture, lru);
+    const target = await publishHeadingPage(deps, fixture.superadmin, {
+      locale: 'en',
+      title: 'Cached target',
+      text: 'Target',
+    });
+    await publishPageWithBlock(deps, fixture.superadmin, {
+      locale: 'en',
+      title: 'Cached linker',
+      blockType: 'prose',
+      props: {
+        body: linkingDoc([{ text: 'Cached link', pageId: target.pageId }]),
+      },
+    });
+    const handler = createVisitorHandler({
+      db: fixture.handle.db,
+      config: fixtureConfig,
+      cache: lru,
+    });
+    const linked = /<a [^>]*href="\/cached-target"[^>]*>Cached link<\/a>/;
+
+    expect(await (await visit(handler, '/cached-linker')).text()).toMatch(
+      linked,
+    );
+
+    const live = await getPage(fixture.handle.db, target.pageId);
+    await unpublishPage(deps, fixture.superadmin, {
+      pageId: target.pageId,
+      baseVersion: live?.version ?? -1,
+    });
+    const afterUnpublish = await (
+      await visit(handler, '/cached-linker')
+    ).text();
+    expect(afterUnpublish).toContain('Cached link');
+    expect(afterUnpublish).not.toMatch(linked);
+
+    const draft = await getPage(fixture.handle.db, target.pageId);
+    await publishPage(deps, fixture.superadmin, {
+      pageId: target.pageId,
+      baseVersion: draft?.version ?? -1,
+    });
+    expect(await (await visit(handler, '/cached-linker')).text()).toMatch(
+      linked,
+    );
   });
 });
