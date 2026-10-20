@@ -1321,9 +1321,11 @@ function Shell(props: {
               // double-clicks; the claim still owns every other site event.
               controller.ownsEvent(event) ||
               // The release of a pointer drag is the drag's: the frame keeps
-              // the mouse from the press on the in-frame handle until then.
+              // the mouse from the press on the in-frame handle until then,
+              // also when the pointer never moved far enough to start it.
               (event.type === 'pointerup' &&
-                store.getState().drag?.via === 'pointer'),
+                (store.getState().drag?.via === 'pointer' ||
+                  dragSession.pointerArmed())),
           },
         );
       } else if (!wanted && releaseClaim !== null) {

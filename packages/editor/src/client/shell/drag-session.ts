@@ -45,6 +45,12 @@ export type DragSession = {
    * by a click on the frame that is not a selection.
    */
   justEnded(): boolean;
+  /**
+   * Whether a pointer drag is waiting for its release: pressed on a source,
+   * whether or not it has moved far enough to start. The release has to reach
+   * the drag, or it never ends and no later drag can start.
+   */
+  pointerArmed(): boolean;
 };
 
 /** How long after a pointer drag ends its trailing click is still the drag's. */
@@ -79,6 +85,7 @@ export function createDragSession(options: DragSessionOptions): DragSession {
   const { store } = options;
   let stop: (() => void) | null = null;
   let pointerDragEndedAt = Number.NEGATIVE_INFINITY;
+  let pointerArmed = false;
 
   function labelOf(subject: DragSubject): string | null {
     const ctx = legalityContextOf(store.getState());
@@ -141,12 +148,14 @@ export function createDragSession(options: DragSessionOptions): DragSession {
         onCancel: () => undefined,
         onEnd: () => {
           stop = null;
+          pointerArmed = false;
           if (store.getState().drag !== null) {
             pointerDragEndedAt = performance.now();
           }
           closeDrag(reader);
         },
       });
+      pointerArmed = true;
     },
 
     liftKeyboard(id) {
@@ -253,6 +262,10 @@ export function createDragSession(options: DragSessionOptions): DragSession {
 
     justEnded() {
       return performance.now() - pointerDragEndedAt < TRAILING_CLICK_MS;
+    },
+
+    pointerArmed() {
+      return pointerArmed;
     },
   };
 }
