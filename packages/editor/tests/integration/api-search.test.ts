@@ -119,6 +119,72 @@ describe('GET /cms/api/pages/search', () => {
     ]);
   });
 
+  describe('with the id of one page', () => {
+    async function lookup(
+      user: SignedIn | undefined,
+      key: string,
+      locale = 'en',
+    ): Promise<PageSearchResponse> {
+      const response = await search(
+        user,
+        `?locale=${locale}&id=${ids[key] ?? ''}`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      return (await response.json()) as PageSearchResponse;
+    }
+
+    it('answers that page alone, with its address', async () => {
+      expect((await lookup(harness.editor, 'team')).results).toEqual([
+        {
+          id: ids.team,
+          title: 'Search team',
+          path: 'search-team',
+          publicPath: '/search-team',
+          live: false,
+        },
+      ]);
+    });
+
+    it('answers nothing for a trashed page', async () => {
+      expect((await lookup(harness.editor, 'gone')).results).toEqual([]);
+    });
+
+    it('answers nothing for a page of another locale, and prefixes none for its own', async () => {
+      expect((await lookup(harness.editor, 'dutch', 'en')).results).toEqual([]);
+      expect(
+        (await lookup(harness.editor, 'dutch', 'nl')).results.map(
+          (result) => result.publicPath,
+        ),
+      ).toEqual(['/nl/search-nederlands']);
+    });
+
+    it('answers nothing for a page that never existed', async () => {
+      const response = await search(
+        harness.editor,
+        '?locale=en&id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      );
+      expect(((await response.json()) as PageSearchResponse).results).toEqual(
+        [],
+      );
+    });
+
+    it('is behind the same gate, and refuses an id that is not a uuid', async () => {
+      const anonymous = await search(
+        undefined,
+        `?locale=en&id=${ids.team ?? ''}`,
+      );
+      expect(anonymous.status).toBe(401);
+      const viewer = await search(
+        harness.viewer,
+        `?locale=en&id=${ids.team ?? ''}`,
+      );
+      expect(viewer.status).toBe(403);
+      const bad = await search(harness.editor, '?locale=en&id=team');
+      expect(bad.status).toBe(400);
+    });
+  });
+
   it('prefixes the public path of a non-default locale', async () => {
     const response = await search(harness.editor, '?locale=nl');
     const body = (await response.json()) as PageSearchResponse;

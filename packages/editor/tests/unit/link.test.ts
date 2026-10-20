@@ -64,7 +64,7 @@ describe('the link mark of the schema', () => {
     const element = {
       getAttribute: (name: string): string | null => attributes[name] ?? null,
     };
-    return rule?.getAttrs?.(element as unknown as HTMLElement);
+    return rule?.getAttrs?.(element as never);
   }
 
   it('reads a web address, a page id and a new tab from an anchor', () => {

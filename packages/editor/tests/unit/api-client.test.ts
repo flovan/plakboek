@@ -72,6 +72,19 @@ describe('createApiClient', () => {
     expect(calls[0]?.init.signal).toBe(controller.signal);
   });
 
+  it('adds the page id of a lookup to the search route', async () => {
+    const { calls, fetchImpl } = fakeFetch(200, { ok: true, results: [] });
+    await createApiClient(fetchImpl).searchPages(
+      'en',
+      '',
+      undefined,
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    );
+    expect(calls[0]?.url).toBe(
+      '/cms/api/pages/search?locale=en&q=&id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    );
+  });
+
   it('reads with a GET and no body', async () => {
     const { calls, fetchImpl } = fakeFetch(200, { ok: true });
     await createApiClient(fetchImpl).tree('p1');

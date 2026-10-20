@@ -63,11 +63,16 @@ export type ApiClient = {
     request: PreviewRequest,
     signal?: AbortSignal,
   ): Promise<PreviewResponse>;
-  /** Finds the pages of one locale by title or path, for the page picker. */
+  /**
+   * Finds the pages of one locale by title or path, for the page picker. With
+   * `id` it looks up that one page instead (an empty answer means the page is
+   * gone, is in the trash or belongs to another locale).
+   */
   searchPages(
     locale: string,
     query: string,
     signal?: AbortSignal,
+    id?: string,
   ): Promise<PageSearchResponse>;
 };
 
@@ -151,9 +156,11 @@ export function createApiClient(
     edit: (pageId, request) => send(pagePath(pageId, 'edit'), 'POST', request),
     preview: (pageId, request, signal) =>
       send(pagePath(pageId, 'preview'), 'POST', request, signal),
-    searchPages: (locale, query, signal) =>
+    searchPages: (locale, query, signal, id) =>
       send(
-        `/pages/search?locale=${encodeURIComponent(locale)}&q=${encodeURIComponent(query)}`,
+        `/pages/search?locale=${encodeURIComponent(locale)}&q=${encodeURIComponent(query)}${
+          id === undefined ? '' : `&id=${encodeURIComponent(id)}`
+        }`,
         'GET',
         undefined,
         signal,

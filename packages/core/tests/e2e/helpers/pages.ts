@@ -11,7 +11,14 @@ import {
   resolveTextTheme,
   type TextThemeInput,
 } from '@plakboek/content/rich-text';
-import { createPage, getPage, insertBlock, publishPage } from '@plakboek/pages';
+import {
+  createPage,
+  getPage,
+  insertBlock,
+  publishPage,
+  renamePage,
+  trashPage,
+} from '@plakboek/pages';
 import { sql } from 'drizzle-orm';
 import { closeAllDbs } from '../../../src/runtime/db.ts';
 import { readRuntimeEnv } from '../../../src/runtime/env.ts';
@@ -176,4 +183,56 @@ export async function readBlockProps(
   } finally {
     await closeAllDbs();
   }
+}
+
+/**
+ * Runs `action` as the superadmin against the same throwaway database, with
+ * the page as it is now, so a spec can change a page behind the editor's back
+ * the way another editor would.
+ */
+async function asSuperadmin(
+  pageId: string,
+  action: (
+    deps: ReturnType<typeof createRuntime>['pages'],
+    actor: { readonly userId: string; readonly roleKey: string },
+    version: number,
+  ) => Promise<unknown>,
+): Promise<void> {
+  const { default: config } = await import('../../e2e-host/plakboek.config.ts');
+  const runtime = createRuntime({ config }, readRuntimeEnv(process.env));
+  try {
+    const rows = await runtime.db.db.execute<{ id: string; role: string }>(
+      sql`SELECT id, role_key AS role FROM "user" WHERE email = ${e2eUsers().superadmin.email}`,
+    );
+    const owner = rows[0];
+    if (owner === undefined) {
+      throw new Error('The e2e superadmin account does not exist');
+    }
+    const page = await getPage(runtime.pages.db, pageId);
+    if (page === null) throw new Error(`The page ${pageId} does not exist`);
+    await action(
+      runtime.pages,
+      { userId: owner.id, roleKey: owner.role },
+      page.version,
+    );
+  } finally {
+    await closeAllDbs();
+  }
+}
+
+/** Gives a page a new slug (and so a new public path), as another editor would. */
+export async function renamePageSlug(
+  pageId: string,
+  slug: string,
+): Promise<void> {
+  await asSuperadmin(pageId, async (deps, actor, baseVersion) => {
+    await renamePage(deps, actor, { pageId, baseVersion, slug });
+  });
+}
+
+/** Moves a page to the trash, so a link to it no longer has a page to point at. */
+export async function trashPageById(pageId: string): Promise<void> {
+  await asSuperadmin(pageId, async (deps, actor, baseVersion) => {
+    await trashPage(deps, actor, { pageId, baseVersion });
+  });
 }

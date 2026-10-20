@@ -15,6 +15,7 @@ import {
 } from 'react';
 import { hydrateRoot as hydrate, type Root } from 'react-dom/client';
 import type { SidebarLayout } from '../../chrome/controls.js';
+import type { PageSearch } from '../../chrome/editing/text/page-picker.js';
 import { ShellApp } from '../../chrome/shell.js';
 import { SHELL_ROOT_ID, type ShellIsland } from '../../chrome/island.js';
 import { STAGE_ID } from '../../chrome/stage.js';
@@ -523,6 +524,12 @@ function Shell(props: {
         return response;
       }),
     [store, trackPropertyWork],
+  );
+
+  // The link popover's page picker asks the same API as the rest of the shell.
+  const searchPages = useCallback<PageSearch>(
+    (locale, query, signal, id) => api.searchPages(locale, query, signal, id),
+    [api],
   );
 
   const blurProperties = useCallback((blockId: string) => {
@@ -1594,6 +1601,7 @@ function Shell(props: {
               },
               textSession: controller,
               textController: controller,
+              onSearchPages: searchPages,
               onPropertiesChange: changeProperties,
               onPropertiesBlur: blurProperties,
               onLayoutChange: changeLayout,

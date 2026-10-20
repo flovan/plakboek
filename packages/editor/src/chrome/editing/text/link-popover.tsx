@@ -12,12 +12,17 @@ import {
 } from '../../../client/text/link.js';
 import { STRINGS } from '../../strings.js';
 import { LinkTargetEditor } from './link-target-editor.js';
+import type { PageSearch } from './page-picker.js';
 
 export type LinkPopoverProps = {
   readonly controller: TextController;
   readonly store: EditorStore;
   /** The part of the document the frame shows, in the framed document's coordinates. */
   readonly visible: Box;
+  /** The locale of the page being edited: the pages a link may point at. */
+  readonly locale: string;
+  /** Finds pages for the picker; without it only web addresses can be linked. */
+  readonly search?: PageSearch;
 };
 
 /** The tallest the popover grows: the page list scrolls inside it past this. */
@@ -67,7 +72,7 @@ function selectionBox(editor: Editor, from: number, to: number): Box | null {
  * without a change.
  */
 export function LinkPopover(props: LinkPopoverProps): ReactElement | null {
-  const { controller, store, visible } = props;
+  const { controller, store, visible, locale, search } = props;
   const root = useRef<HTMLDivElement>(null);
   const [context] = useState(() => {
     const editor = controller.editor();
@@ -76,6 +81,11 @@ export function LinkPopover(props: LinkPopoverProps): ReactElement | null {
   const [target, setTarget] = useState<LinkTarget | null>(
     context?.kind === 'edit' ? context.target : null,
   );
+  // The title of the page last picked, which a link at a bare caret takes as its text.
+  const [picked, setPicked] = useState<{
+    readonly pageId: string;
+    readonly title: string;
+  } | null>(null);
 
   // Escape closes the popover and nothing else, wherever the focus is; a press
   // anywhere but here or on the Link button closes it as well.
@@ -126,7 +136,11 @@ export function LinkPopover(props: LinkPopoverProps): ReactElement | null {
 
   const apply = (): void => {
     if (target === null) return;
-    const tr = linkTransaction(editor.state, context, target, null);
+    const title =
+      target.pageId !== null && picked?.pageId === target.pageId
+        ? picked.title
+        : null;
+    const tr = linkTransaction(editor.state, context, target, title);
     if (tr === null) return;
     editor.view.dispatch(tr);
     finish(
@@ -160,7 +174,18 @@ export function LinkPopover(props: LinkPopoverProps): ReactElement | null {
         transform: placement.side === 'above' ? 'translateY(-100%)' : undefined,
       }}
     >
-      <LinkTargetEditor value={target} onChange={setTarget} onSubmit={apply} />
+      <LinkTargetEditor
+        value={target}
+        locale={locale}
+        {...(search === undefined ? {} : { search })}
+        onChange={(next, title) => {
+          setTarget(next);
+          if (title !== null && next.pageId !== null) {
+            setPicked({ pageId: next.pageId, title });
+          }
+        }}
+        onSubmit={apply}
+      />
       <div className="flex gap-2 pt-2">
         {context.kind === 'edit' ? (
           <button

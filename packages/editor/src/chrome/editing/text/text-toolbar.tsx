@@ -48,6 +48,7 @@ import {
 import { InsertMenu } from './insert-menu.js';
 import { LinkPopover } from './link-popover.js';
 import { MoreMenu, type MoreEntry } from './more-menu.js';
+import type { PageSearch } from './page-picker.js';
 import { StyleMenu } from './style-menu.js';
 import {
   collapseToolbar,
@@ -78,6 +79,8 @@ export type TextToolbarProps = {
   readonly field: Box;
   /** The part of the document the frame shows, in the same coordinates. */
   readonly visible: Box;
+  /** Finds pages for the link popover's picker; without it links go to web addresses only. */
+  readonly search?: PageSearch;
 };
 
 /** A 32px toggle; pressed it takes the inverted fill, never colour alone (aria-pressed). */
@@ -197,7 +200,7 @@ function Divider(): ReactElement {
  * What it offers is the property's effective theme, nothing else.
  */
 export function TextToolbar(props: TextToolbarProps): ReactElement | null {
-  const { controller, store, label, theme, field, visible } = props;
+  const { controller, store, label, theme, field, visible, search } = props;
   const root = useRef<HTMLDivElement>(null);
   const doneText = useRef<HTMLSpanElement>(null);
   const [size, setSize] = useState({ width: 0, height: 40 });
@@ -689,6 +692,8 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
           controller={controller}
           store={store}
           visible={visible}
+          locale={store.getState().session?.locale ?? ''}
+          {...(search === undefined ? {} : { search })}
         />
       ) : null}
     </>

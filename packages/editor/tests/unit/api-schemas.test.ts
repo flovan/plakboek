@@ -175,6 +175,17 @@ describe('pageSearchQuery', () => {
     });
   });
 
+  it('takes the id of one page to look up, and only a uuid', () => {
+    expect(pageSearchQuery.parse({ locale: 'en', id: A })).toEqual({
+      locale: 'en',
+      q: '',
+      id: A,
+    });
+    expect(
+      pageSearchQuery.safeParse({ locale: 'en', id: 'not-a-uuid' }).success,
+    ).toBe(false);
+  });
+
   it('refuses a missing locale, a query over 200 characters and an unknown key', () => {
     expect(pageSearchQuery.safeParse({ q: 'x' }).success).toBe(false);
     expect(

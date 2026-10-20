@@ -13,6 +13,7 @@ import { FieldBar } from '../../chrome/editing/text/field-bar.js';
 import { CustomStyleMarker } from '../../chrome/editing/text/custom-style-marker.js';
 import { FieldDecor } from '../../chrome/editing/text/field-decor.js';
 import { SlashMenu } from '../../chrome/editing/text/slash-menu.js';
+import type { PageSearch } from '../../chrome/editing/text/page-picker.js';
 import { TextToolbar } from '../../chrome/editing/text/text-toolbar.js';
 import { UnsupportedNotice } from '../../chrome/editing/text/unsupported-notice.js';
 import { InsertPoints } from '../../chrome/editing/insert-points.js';
@@ -207,8 +208,9 @@ function RichFieldToolbar(props: {
   readonly textField: NonNullable<EditorState['textField']>;
   readonly fields: readonly FieldBox[];
   readonly visible: Box;
+  readonly search: PageSearch | undefined;
 }): ReactElement | null {
-  const { store, controller, textField, fields, visible } = props;
+  const { store, controller, textField, fields, visible, search } = props;
   const box = fields.find((item) => item.key === textField.key)?.box ?? null;
   const state = store.getState();
   const node = state.model?.get(textField.blockId);
@@ -234,6 +236,7 @@ function RichFieldToolbar(props: {
       theme={theme}
       field={box}
       visible={visible}
+      {...(search === undefined ? {} : { search })}
     />
   );
 }
@@ -336,6 +339,8 @@ export function OverlayLayer(props: {
   readonly onFieldDone?: () => void;
   /** The text session, for the rich text toolbar's commands. */
   readonly textController?: TextController;
+  /** Finds pages for the link popover's picker. */
+  readonly onSearchPages?: PageSearch;
 }): ReactElement {
   const {
     frame,
@@ -353,6 +358,7 @@ export function OverlayLayer(props: {
     onRemoveUnsupported,
     onFieldDone,
     textController,
+    onSearchPages,
   } = props;
   const layer = useRef<HTMLDivElement>(null);
   const [frameElement, setFrameElement] = useState<HTMLIFrameElement | null>(
@@ -786,6 +792,7 @@ export function OverlayLayer(props: {
                 textField={textField}
                 fields={fields}
                 visible={selection?.visible ?? visible}
+                search={onSearchPages}
               />
             ) : null}
             {richActive && textController !== undefined ? (

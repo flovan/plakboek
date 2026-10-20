@@ -29,11 +29,14 @@ export const openBody = z.object({
     ),
 });
 
-/** `/cms/api/pages/search`: the locale to search and the text to find. The
- * locale is checked against the installation's own list by the route. */
+/** `/cms/api/pages/search`: the locale to search and the text to find, or the
+ * one page `id` to look up (a link's stored page, to tell whether it still
+ * exists). The locale is checked against the installation's own list by the
+ * route. */
 export const pageSearchQuery = z.strictObject({
   locale: z.string().min(1).max(35),
   q: z.string().max(PAGE_SEARCH_QUERY_MAX_LENGTH).default(''),
+  id: z.uuid().optional(),
 });
 
 /** The lock endpoints take no input but are still JSON. */

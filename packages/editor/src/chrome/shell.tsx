@@ -25,6 +25,7 @@ import { NoticeSlot } from './editing/notices.js';
 import { PropertiesSheet, SidePanel } from './editing/panel.js';
 import { RailTools } from './editing/rail-tools.js';
 import type { PropertiesPanelProps } from './editing/properties/properties-panel.js';
+import type { PageSearch } from './editing/text/page-picker.js';
 import { MessageToast, UndoToast } from './editing/toast.js';
 import { SaveStatusRow, ToolGroup } from './editing/tool-group.js';
 import type { ShellIsland } from './island.js';
@@ -109,6 +110,8 @@ export type ShellAppProps = {
     readonly onFieldDone?: () => void;
     /** The text session: the rich text toolbar runs its commands through it. */
     readonly textController?: TextController;
+    /** Finds pages for the link popover's picker. */
+    readonly onSearchPages?: PageSearch;
     /** The text session the Properties panel hands over to when a control of the property typed on the page takes focus. */
     readonly textSession?: PropertiesPanelProps['textSession'];
     /** Called when a Properties control changes a value: render it and queue the save. */
@@ -306,6 +309,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               onRemoveUnsupported={editor?.onRemoveUnsupported}
               onFieldDone={editor?.onFieldDone}
               textController={editor?.textController}
+              onSearchPages={editor?.onSearchPages}
             />,
             chromeHost.root,
           )
