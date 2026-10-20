@@ -71,12 +71,16 @@ export type TextExitReason =
 
 export type TextControllerOptions = {
   readonly store: EditorStore;
-  /** Writes the property's candidate value: previews it, then queues the save. */
+  /**
+   * Writes the property's candidate value: previews it, then queues the save.
+   * With `persist` the save is queued at once, whatever the preview answers.
+   */
   readonly changeProperties: (
     blockId: string,
     values: Readonly<Record<string, unknown>>,
     changedKey: string,
     immediate: boolean,
+    persist?: boolean,
   ) => Promise<unknown>;
   /** Sends what is queued for the block now (the blur flush). */
   readonly ready: (blockId: string) => void;
@@ -334,7 +338,10 @@ export function createTextController(
       );
     }
     if (session.touched) {
-      await changeProperties(blockId, { [key]: value }, key, true);
+      // Queued before it returns, whatever the preview answers: the typed text
+      // exists nowhere else once the editor is gone. Not awaited, so a slow
+      // preview never holds back the action that follows the session.
+      void changeProperties(blockId, { [key]: value }, key, true, true);
     }
     if (reason !== 'reload') ready(blockId);
     // Once everything queued is sent the model holds the value, so the

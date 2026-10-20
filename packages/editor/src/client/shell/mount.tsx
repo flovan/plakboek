@@ -467,6 +467,11 @@ function Shell(props: {
    * and, when the engine accepts them, queue the save as one edit that the
    * keystrokes of this field share (one undo step, sent after a pause or on
    * blur). A refusal queues nothing and leaves the frame on its last render.
+   *
+   * `persist` is for text that has nowhere else to live, the last write of an
+   * in-place text session: it is queued at once, whatever the preview says, so
+   * a failed, superseded or refused preview never drops the typed words (a
+   * refusal then shows as a failed save). The preview is only the render.
    */
   const changeProperties = useCallback(
     async (
@@ -474,6 +479,7 @@ function Shell(props: {
       values: Readonly<Record<string, unknown>>,
       changedKey: string,
       immediate: boolean,
+      persist = false,
     ): Promise<PreviewResponse | null> =>
       await trackPropertyWork(async () => {
         const state = store.getState();
@@ -486,41 +492,44 @@ function Shell(props: {
         ) {
           return null;
         }
+        const queueWrite = (): void => {
+          const latest = store.getState();
+          const { model, session } = latest;
+          const runner = runnerRef.current;
+          if (
+            latest.status !== 'editing' ||
+            model === null ||
+            model.get(blockId) === undefined ||
+            runner === null
+          ) {
+            return;
+          }
+          const type = model.get(blockId)?.type;
+          const property = session?.catalogue
+            .find((entry) => entry.key === type)
+            ?.properties.find((item) => item.key === changedKey);
+          const intent: Intent = { kind: 'update', blockId, props: values };
+          runner.perform(
+            intent,
+            buildUndoEntry(
+              intent,
+              model,
+              {
+                kind: 'changed',
+                itemId: blockId,
+                property: property?.label ?? changedKey,
+              },
+              { coalesceKey: `${blockId}:${changedKey}`, open: true },
+            ),
+          );
+        };
+        if (persist) queueWrite();
         const response = await preview.change(
           blockId,
           { props: withValues(node.props, values) },
           immediate,
         );
-        if (response?.ok !== true) return response;
-        const latest = store.getState();
-        const { model, session } = latest;
-        const runner = runnerRef.current;
-        if (
-          latest.status !== 'editing' ||
-          model === null ||
-          model.get(blockId) === undefined ||
-          runner === null
-        ) {
-          return response;
-        }
-        const type = model.get(blockId)?.type;
-        const property = session?.catalogue
-          .find((entry) => entry.key === type)
-          ?.properties.find((item) => item.key === changedKey);
-        const intent: Intent = { kind: 'update', blockId, props: values };
-        runner.perform(
-          intent,
-          buildUndoEntry(
-            intent,
-            model,
-            {
-              kind: 'changed',
-              itemId: blockId,
-              property: property?.label ?? changedKey,
-            },
-            { coalesceKey: `${blockId}:${changedKey}`, open: true },
-          ),
-        );
+        if (!persist && response?.ok === true) queueWrite();
         return response;
       }),
     [store, trackPropertyWork],
