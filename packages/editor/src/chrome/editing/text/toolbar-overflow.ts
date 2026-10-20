@@ -17,7 +17,11 @@ export type ControlId =
   | 'bulletList'
   | 'orderedList'
   | 'insert'
+  | 'customStyle'
   | 'done';
+
+/** The controls that sit in a group of the bar (Custom style and Done sit after the last divider). */
+export type GroupedControlId = Exclude<ControlId, 'customStyle' | 'done'>;
 
 /** The bar's own chrome: 1px border and 4px padding on both sides. */
 export const BAR_FRAME = 10;
@@ -28,10 +32,7 @@ export const DIVIDER_WIDTH = 1;
 export const MORE_WIDTH = 32;
 
 /** The controls in the order they are drawn, grouped as the bar groups them. */
-export const CONTROL_GROUPS: readonly (readonly Exclude<
-  ControlId,
-  'done'
->[])[] = [
+export const CONTROL_GROUPS: readonly (readonly GroupedControlId[])[] = [
   ['style'],
   ['bold', 'italic', 'underline', 'strike'],
   ['bulletList', 'orderedList'],
@@ -57,9 +58,9 @@ export type CollapseInput = {
 
 export type Collapse = {
   /** The controls left on the bar, in drawing order (Done is always shown). */
-  readonly visible: readonly Exclude<ControlId, 'done'>[];
+  readonly visible: readonly GroupedControlId[];
   /** The controls in the More menu, in drawing order; empty means no More button. */
-  readonly inMore: readonly Exclude<ControlId, 'done'>[];
+  readonly inMore: readonly GroupedControlId[];
   readonly doneIconOnly: boolean;
 };
 
@@ -80,8 +81,10 @@ function barWidth(
     first = false;
     for (const id of present) children.push(widths[id] ?? 0);
   }
-  // A divider before Done, then More when something moved, then Done.
+  // A divider before Done, then Custom style (its label never collapses and
+  // never moves), More when something moved, then Done.
   if (!first) children.push(DIVIDER_WIDTH);
+  if (widths.customStyle !== undefined) children.push(widths.customStyle);
   if (inMore.size > 0) children.push(MORE_WIDTH);
   const done = widths.done ?? 0;
   children.push(doneIconOnly ? Math.max(0, done - doneTextWidth) : done);

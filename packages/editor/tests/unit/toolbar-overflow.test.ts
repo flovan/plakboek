@@ -93,4 +93,15 @@ describe('collapseToolbar', () => {
       'insert',
     ]);
   });
+
+  it('counts the Custom style label in the bar and never moves it', () => {
+    const withCustom = { ...WIDTHS, customStyle: 118 };
+    // 478 whole + 4px gap + 118
+    expect(at(600, withCustom).doneIconOnly).toBe(false);
+    expect(at(599, withCustom).doneIconOnly).toBe(true);
+    const squeezed = at(0, withCustom);
+    expect(squeezed.visible).not.toContain('customStyle');
+    expect(squeezed.inMore).not.toContain('customStyle');
+    expect(squeezed.doneIconOnly).toBe(true);
+  });
 });

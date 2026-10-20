@@ -1,6 +1,7 @@
 import {
   Fragment,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -27,13 +28,16 @@ import {
   ItalicIcon,
   ListBulletIcon,
   ListNumberedIcon,
+  PaletteIcon,
   StrikethroughIcon,
   UnderlineIcon,
 } from '../../icons.js';
 import { formatString, STRINGS, type StringKey } from '../../strings.js';
 import { Tooltip } from '../../tooltip.js';
 import { useRoving } from './crumbs.js';
+import { CustomStyleRow } from './custom-style-row.js';
 import { boxStyle, DONE_BUTTON } from './field-bar.js';
+import { hasCustomStyle } from '../../../client/text/commands.js';
 import {
   ariaShortcut,
   currentPlatform,
@@ -48,6 +52,7 @@ import {
   CONTROL_GROUPS,
   type Collapse,
   type ControlId,
+  type GroupedControlId,
 } from './toolbar-overflow.js';
 import {
   STYLE_LEVEL,
@@ -55,6 +60,7 @@ import {
   toolbarModel,
   type StyleId,
   type ToggleControl,
+  type CustomStyleControl,
   type ToolbarModel,
   type ToggleId,
 } from './toolbar-state.js';
@@ -133,19 +139,47 @@ const DEFAULT_WIDTH: Readonly<Record<ControlId, number>> = {
   bulletList: 32,
   orderedList: 32,
   insert: 32,
+  customStyle: 118,
   done: 0,
 };
 
 const CONTROL_IDS: ReadonlySet<string> = new Set<string>([
   ...CONTROL_GROUPS.flat(),
+  'customStyle',
   'done',
 ]);
+
+/** The controls of the Custom style row, in the order the keyboard visits them. */
+const CUSTOM_ROW_KEYS = [
+  'size',
+  'color',
+  'align-left',
+  'align-center',
+  'align-right',
+  'reset',
+] as const;
+
+/** A 32px toggle with its text: Custom style. Pressed it takes the inverted fill. */
+const CUSTOM_TOGGLE =
+  'relative flex h-8 cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-2 text-body font-semibold text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-pressed:bg-text aria-pressed:text-surface aria-pressed:hover:bg-text';
 
 type Measured = {
   readonly widths: Readonly<Partial<Record<ControlId, number>>>;
   /** How wide Done's text is, once it has been on show. */
   readonly doneText: number;
 };
+
+/** Whether a control of the Custom style row is drawn for what the theme declares. */
+function customRowKeyShown(
+  key: (typeof CUSTOM_ROW_KEYS)[number],
+  control: CustomStyleControl | null,
+): boolean {
+  if (control === null) return false;
+  if (key === 'size') return control.sizes.length > 0;
+  if (key === 'color') return control.colors.length > 0;
+  if (key === 'reset') return true;
+  return control.align;
+}
 
 function Divider(): ReactElement {
   return <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />;
@@ -164,6 +198,11 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
   const root = useRef<HTMLDivElement>(null);
   const doneText = useRef<HTMLSpanElement>(null);
   const [size, setSize] = useState({ width: 0, height: 40 });
+  // The Custom style row: closed by default, open for the rest of the field
+  // session once the toggle is pressed.
+  const [customOpen, setCustomOpen] = useState(false);
+  const customRowId = useId();
+  const customActiveId = useId();
   const [measured, setMeasured] = useState<Measured>({
     widths: {},
     doneText: 0,
@@ -185,7 +224,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
   // What the frame leaves the bar: its width minus 16px. Controls that do not
   // fit collapse in a fixed order (Done to its icon, then toggles into More).
   const available = Math.max(0, visible.width - 16);
-  const present: Exclude<ControlId, 'done'>[] = [
+  const present: GroupedControlId[] = [
     ...(model.style === null ? [] : (['style'] as const)),
     ...model.marks.map((toggle) => toggle.id),
     ...model.lists.map((toggle) => toggle.id),
@@ -198,10 +237,11 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
       ? { visible: present, inMore: [], doneIconOnly: false }
       : collapseToolbar({
           widths: Object.fromEntries(
-            [...present, 'done' as const].map((id) => [
-              id,
-              measured.widths[id] ?? DEFAULT_WIDTH[id],
-            ]),
+            [
+              ...present,
+              ...(model.customStyle === null ? [] : ['customStyle' as const]),
+              'done' as const,
+            ].map((id) => [id, measured.widths[id] ?? DEFAULT_WIDTH[id]]),
           ),
           available,
           doneTextWidth: measured.doneText,
@@ -253,8 +293,14 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
       .filter((toggle) => !moved.has(toggle.id))
       .map((toggle) => toggle.id),
     ...(plusItems.length === 0 ? [] : ['insert']),
+    ...(model.customStyle === null ? [] : ['customStyle']),
     ...(collapse.inMore.length === 0 ? [] : ['more']),
     'done',
+    ...(customOpen && model.customStyle !== null
+      ? CUSTOM_ROW_KEYS.filter((key) =>
+          customRowKeyShown(key, model.customStyle),
+        )
+      : []),
   ];
   const { rove, onKeyDown: roveKeys } = useRoving(keys);
 
@@ -300,6 +346,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
   });
 
   if (state === null) return null;
+  const customized = model.customStyle !== null && hasCustomStyle(state);
 
   const toggle = (id: ToggleId): void => {
     const editor = controller.editor();
@@ -461,6 +508,64 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
           },
         ]),
   ];
+  const customToggle =
+    model.customStyle === null ? null : (
+      <>
+        <Tooltip
+          label={STRINGS['text.customStyle.tooltip']}
+          placement={tooltipSide}
+        >
+          <button
+            type="button"
+            className={CUSTOM_TOGGLE}
+            aria-pressed={customOpen}
+            aria-expanded={customOpen}
+            aria-controls={customRowId}
+            aria-describedby={customized ? customActiveId : undefined}
+            data-custom-toggle=""
+            onMouseDown={(event) => {
+              event.preventDefault();
+            }}
+            onClick={() => {
+              setCustomOpen(!customOpen);
+            }}
+            {...rove('customStyle')}
+          >
+            <PaletteIcon />
+            {STRINGS['text.customStyle']}
+            {customized ? (
+              <span
+                aria-hidden="true"
+                data-custom-dot=""
+                className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-text ring-2 ring-surface"
+              />
+            ) : null}
+          </button>
+        </Tooltip>
+        {customized ? (
+          <span id={customActiveId} className="sr-only">
+            {STRINGS['text.customStyle.active']}
+          </span>
+        ) : null}
+      </>
+    );
+
+  // The second row opens on the side of the bar away from the field, so the
+  // main row never moves relative to the field.
+  const customRow =
+    customOpen && model.customStyle !== null ? (
+      <CustomStyleRow
+        id={customRowId}
+        controller={controller}
+        store={store}
+        control={model.customStyle}
+        state={state}
+        rove={rove}
+        tooltipSide={tooltipSide}
+      />
+    ) : null;
+  const rowFirst = placement.mode === 'above';
+
   return (
     // The wrapper is always there so the bar keeps its place in the tree when
     // it changes side. Pinned, it spans the field and the bar sticks inside it.
@@ -475,6 +580,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
         data-toolbar=""
         data-text-toolbar=""
         data-placement={placement.mode}
+        data-rows={customRow === null ? '1' : '2'}
         role="toolbar"
         aria-label={formatString('text.toolbar.label', { label })}
         aria-orientation="horizontal"
@@ -489,40 +595,45 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
             : { left: placement.left, top: placement.top, maxWidth }
         }
       >
-        {groups.map((group, at) => (
-          <Fragment key={group.key}>
-            {at === 0 ? null : <Divider />}
-            {group.node}
-          </Fragment>
-        ))}
-        {groups.length === 0 ? null : <Divider />}
-        <MoreMenu
-          entries={moreEntries}
-          onReturn={() => {
-            controller.focusField();
-          }}
-          rove={rove}
-          tooltipSide={tooltipSide}
-        />
-        <Tooltip label={STRINGS['text.done.tooltip']} placement={tooltipSide}>
-          <button
-            type="button"
-            className={DONE_BUTTON}
-            aria-label={STRINGS['text.done.label']}
-            onMouseDown={(event) => {
-              event.preventDefault();
+        {rowFirst ? customRow : null}
+        <div className="pk-toolbar-row" data-main-row="">
+          {groups.map((group, at) => (
+            <Fragment key={group.key}>
+              {at === 0 ? null : <Divider />}
+              {group.node}
+            </Fragment>
+          ))}
+          {groups.length === 0 ? null : <Divider />}
+          {customToggle}
+          <MoreMenu
+            entries={moreEntries}
+            onReturn={() => {
+              controller.focusField();
             }}
-            onClick={() => {
-              void controller.exit('done');
-            }}
-            {...rove('done')}
-          >
-            <CheckIcon />
-            {collapse.doneIconOnly ? null : (
-              <span ref={doneText}>{STRINGS['text.done']}</span>
-            )}
-          </button>
-        </Tooltip>
+            rove={rove}
+            tooltipSide={tooltipSide}
+          />
+          <Tooltip label={STRINGS['text.done.tooltip']} placement={tooltipSide}>
+            <button
+              type="button"
+              className={DONE_BUTTON}
+              aria-label={STRINGS['text.done.label']}
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
+              onClick={() => {
+                void controller.exit('done');
+              }}
+              {...rove('done')}
+            >
+              <CheckIcon />
+              {collapse.doneIconOnly ? null : (
+                <span ref={doneText}>{STRINGS['text.done']}</span>
+              )}
+            </button>
+          </Tooltip>
+        </div>
+        {rowFirst ? null : customRow}
       </div>
     </div>
   );

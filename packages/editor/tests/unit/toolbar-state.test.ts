@@ -1,9 +1,11 @@
 import {
   DEFAULT_TEXT_THEME,
   narrowTextTheme,
+  resolveTextTheme,
 } from '@plakboek/content/rich-text';
 import { describe, expect, it } from 'vitest';
 import {
+  choiceLabel,
   toolbarChanges,
   toolbarModel,
 } from '../../src/chrome/editing/text/toolbar-state.js';
@@ -104,6 +106,75 @@ describe('toolbarModel', () => {
     expect(
       toolbarModel({ theme, isActive: none }).lists.map((toggle) => toggle.id),
     ).toEqual(['orderedList']);
+  });
+});
+
+describe('the Custom style control', () => {
+  const themed = resolveTextTheme({
+    colors: [{ label: 'Accent', token: 'accent' }],
+    sizes: [{ label: 'Large', token: 'xl', value: '28px' }],
+    align: true,
+  });
+
+  it('is absent when the theme declares no colour, size or alignment', () => {
+    expect(
+      toolbarModel({ theme: DEFAULT_TEXT_THEME, isActive: none }).customStyle,
+    ).toBeNull();
+  });
+
+  it('carries the palettes, alignment and the custom-value rule the theme declares', () => {
+    expect(toolbarModel({ theme: themed, isActive: none }).customStyle).toEqual(
+      {
+        colors: [{ label: 'Accent', token: 'accent' }],
+        sizes: [{ label: 'Large', token: 'xl', value: '28px' }],
+        align: true,
+        allowCustomValues: true,
+      },
+    );
+  });
+
+  it('is present for alignment alone', () => {
+    const theme = resolveTextTheme({ align: true });
+    expect(toolbarModel({ theme, isActive: none }).customStyle?.colors).toEqual(
+      [],
+    );
+  });
+
+  it('follows a narrowing that switches the palettes and alignment off', () => {
+    const theme = narrowTextTheme(themed, {
+      colors: false,
+      sizes: false,
+      align: false,
+    });
+    expect(toolbarModel({ theme, isActive: none }).customStyle).toBeNull();
+  });
+
+  it('keeps allowCustomValues false when the property narrows it', () => {
+    const theme = narrowTextTheme(themed, { allowCustomValues: false });
+    expect(
+      toolbarModel({ theme, isActive: none }).customStyle?.allowCustomValues,
+    ).toBe(false);
+  });
+});
+
+describe('choiceLabel', () => {
+  const entries = [{ label: 'Accent', token: 'accent' }];
+  const same = (value: string) => value;
+
+  it('names a palette token by its label', () => {
+    expect(choiceLabel(entries, 'accent', same)).toBe('Accent');
+  });
+
+  it('writes a literal through the formatter', () => {
+    expect(choiceLabel(entries, '#12ab34', same)).toBe('#12ab34');
+    expect(choiceLabel(entries, '20px', (value) => `[${value}]`)).toBe(
+      '[20px]',
+    );
+  });
+
+  it('reads a token the palette no longer lists as itself, and nothing as null', () => {
+    expect(choiceLabel(entries, 'gone', same)).toBe('gone');
+    expect(choiceLabel(entries, null, same)).toBeNull();
   });
 });
 

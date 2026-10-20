@@ -225,6 +225,8 @@ function RichFieldToolbar(props: {
   }
   return (
     <TextToolbar
+      // The Custom style toggle lasts for one field session.
+      key={`${textField.blockId}:${textField.key}`}
       controller={controller}
       store={store}
       label={property.label}

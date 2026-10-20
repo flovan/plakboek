@@ -325,6 +325,9 @@ export function createTextController(
                 onFocusToolbar: () => {
                   toolbarFocus?.();
                 },
+                onStyleReset: () => {
+                  announce(formatString('text.announce.styleReset'));
+                },
                 onSlash: (next) => {
                   slashState = next;
                   notify();
