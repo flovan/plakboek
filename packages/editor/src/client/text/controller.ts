@@ -29,6 +29,7 @@ import { labelOf } from '../session/tree-model.js';
 import { hasPending } from '../session/save-queue.js';
 import { beginInlineEdit, endInlineEdit } from '../frame/patch.js';
 import { buildTextExtensions } from './extensions.js';
+import type { SlashState } from './slash.js';
 import {
   buildPlainExtensions,
   plainDocument,
@@ -95,6 +96,11 @@ export type TextController = {
    * function that stops it. The toolbar reads its state through this.
    */
   readonly subscribe: (listener: () => void) => () => void;
+  /**
+   * The '/' menu of the running session: what it lists and where, or null
+   * while it is closed. Changes are announced through `subscribe`.
+   */
+  slash(): SlashState | null;
   /** Puts keyboard focus back in the field with its selection as it was. */
   focusField(): void;
   /**
@@ -180,6 +186,7 @@ export function createTextController(
   let refused: FieldTarget | null = null;
   const listeners = new Set<() => void>();
   let toolbarFocus: (() => void) | null = null;
+  let slashState: SlashState | null = null;
 
   function notify(): void {
     for (const listener of listeners) listener();
@@ -202,6 +209,7 @@ export function createTextController(
       return;
     }
     current = null;
+    slashState = null;
     const { target, editor, block, snapshot, shells } = session;
     const { blockId, key } = target;
     const value = savedValue(editor, target.kind);
@@ -316,6 +324,17 @@ export function createTextController(
                 },
                 onFocusToolbar: () => {
                   toolbarFocus?.();
+                },
+                onSlash: (next) => {
+                  slashState = next;
+                  notify();
+                },
+                onInserted: (inserted) => {
+                  announce(
+                    formatString('text.announce.inserted', {
+                      item: inserted.label,
+                    }),
+                  );
                 },
                 shells,
               })
@@ -518,6 +537,7 @@ export function createTextController(
         listeners.delete(listener);
       };
     },
+    slash: () => slashState,
     focusField() {
       current?.editor.view.focus();
     },

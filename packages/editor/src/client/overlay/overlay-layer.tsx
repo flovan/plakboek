@@ -11,6 +11,7 @@ import type { CatalogueEntry } from '../../api-types.js';
 import { EmptyPrompts } from '../../chrome/editing/empty-prompts.js';
 import { FieldBar } from '../../chrome/editing/text/field-bar.js';
 import { FieldDecor } from '../../chrome/editing/text/field-decor.js';
+import { SlashMenu } from '../../chrome/editing/text/slash-menu.js';
 import { TextToolbar } from '../../chrome/editing/text/text-toolbar.js';
 import { UnsupportedNotice } from '../../chrome/editing/text/unsupported-notice.js';
 import { InsertPoints } from '../../chrome/editing/insert-points.js';
@@ -773,6 +774,12 @@ export function OverlayLayer(props: {
                 controller={textController}
                 textField={textField}
                 fields={fields}
+                visible={selection?.visible ?? visible}
+              />
+            ) : null}
+            {richActive && textController !== undefined ? (
+              <SlashMenu
+                controller={textController}
                 visible={selection?.visible ?? visible}
               />
             ) : null}

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Box } from '../../src/client/overlay/geometry.js';
 import {
   pickerPlacement,
+  slashPlacement,
   slotGeometry,
 } from '../../src/client/overlay/slot-geometry.js';
 import type { InsertSlot } from '../../src/client/session/insertion.js';
@@ -58,5 +59,39 @@ describe('the picker placement', () => {
     );
     expect(placed.side).toBe('above');
     expect(placed.maxHeight).toBe(324);
+  });
+});
+
+describe("the '/' menu placement", () => {
+  const visible: Box = { left: 0, top: 1200, width: 800, height: 600 };
+
+  it('hangs from the left edge of the typed text, below it', () => {
+    const placed = slashPlacement(
+      { left: 300, top: 1300, width: 24, height: 22 },
+      visible,
+    );
+    expect(placed.left).toBe(300);
+    expect(placed.side).toBe('below');
+    expect(placed.top).toBe(1330);
+  });
+
+  it('stays 8px inside the visible part on either side', () => {
+    expect(
+      slashPlacement({ left: 2, top: 1300, width: 24, height: 22 }, visible)
+        .left,
+    ).toBe(8);
+    expect(
+      slashPlacement({ left: 790, top: 1300, width: 24, height: 22 }, visible)
+        .left,
+    ).toBe(472);
+  });
+
+  it('flips above near the bottom and never outgrows the room', () => {
+    const placed = slashPlacement(
+      { left: 300, top: 1540, width: 24, height: 22 },
+      { ...visible, height: 400 },
+    );
+    expect(placed.side).toBe('above');
+    expect(placed.maxHeight).toBeLessThanOrEqual(360);
   });
 });

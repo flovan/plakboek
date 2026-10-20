@@ -29,7 +29,9 @@ import {
   DEFAULT_TEXT_THEME,
   type TextTheme,
 } from '@plakboek/content/rich-text';
+import { insertItems, type InsertItem } from './insert-items.js';
 import type { RendererShells } from './shells.js';
+import { slashExtension, type SlashState } from './slash.js';
 
 const OPTIONS: Partial<StarterKitOptions> = {
   // Marks: bold, italic, underline, strike.
@@ -148,6 +150,13 @@ export type TextExtensionHooks = {
   /** Alt+F10 was pressed inside the field: focus goes to the toolbar. */
   readonly onFocusToolbar?: () => void;
   /**
+   * The '/' menu changed (opened, filtered, moved, closed with null). Without
+   * it the field has no '/' menu at all.
+   */
+  readonly onSlash?: (state: SlashState | null) => void;
+  /** An item was inserted from the '/' menu. */
+  readonly onInserted?: (item: InsertItem) => void;
+  /**
    * Node and mark views derived from the host's renderers, so the field keeps
    * the host's own markup while it is edited. Without them the editor uses its
    * semantic defaults.
@@ -262,6 +271,23 @@ export function starterKitOptionsFor(
   };
 }
 
+/** The '/' menu of a field: present when something is insertable and the session listens. */
+function slashExtensions(
+  theme: TextTheme,
+  hooks: TextExtensionHooks,
+): Extensions {
+  const { onSlash, onInserted } = hooks;
+  const items = insertItems(theme, 'slash');
+  if (onSlash === undefined || items.length === 0) return [];
+  return [
+    slashExtension({
+      items,
+      publish: onSlash,
+      ...(onInserted === undefined ? {} : { onInserted }),
+    }),
+  ];
+}
+
 /**
  * The extension set of one rich_text property: the locked base narrowed by the
  * property's effective theme. The link, button and style extensions join it in
@@ -276,6 +302,7 @@ export function buildTextExtensions(
     StarterKit.configure(starterKitOptionsFor(theme)),
     ...(theme.nodes.includes('orderedList') ? [OrderedList] : []),
     TextFieldKeymap.configure(hooks),
+    ...slashExtensions(theme, hooks),
     ...(hooks.shells === undefined
       ? []
       : [RendererShellViews.configure({ shells: hooks.shells })]),

@@ -180,3 +180,20 @@ export function pickerPlacement(anchor: Box, visible: Box): PickerPlacement {
       : Math.max(anchor.top - PICKER_GAP, visible.top + PICKER_GAP + maxHeight);
   return { left, top, maxHeight, side };
 }
+
+/**
+ * Where the '/' menu goes: the picker's width and room rules, but its left edge
+ * follows the typed `/query` (kept 8px inside the visible part) instead of
+ * centring on the anchor, so the menu hangs from the caret.
+ */
+export function slashPlacement(anchor: Box, visible: Box): PickerPlacement {
+  const placed = pickerPlacement(anchor, visible);
+  const left = Math.max(
+    visible.left + PICKER_GAP,
+    Math.min(
+      anchor.left,
+      visible.left + visible.width - PICKER_GAP - PICKER_WIDTH,
+    ),
+  );
+  return { ...placed, left };
+}
