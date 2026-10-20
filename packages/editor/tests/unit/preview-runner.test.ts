@@ -90,6 +90,21 @@ describe('the preview runner', () => {
     expect(calls.map((call) => call.signal?.aborted)).toEqual([false, false]);
   });
 
+  it('keeps properties of one block apart: a change to one does not abort the flush of another', async () => {
+    const { runner, calls } = setup();
+    const title = runner.change('b1', { props: { title: 'a' } }, true, 'title');
+    void runner.change('b1', { props: { body: 'b' } }, true, 'body');
+    expect(calls.map((call) => call.signal?.aborted)).toEqual([false, false]);
+    calls[0]?.resolve(OK);
+    expect(await title).toEqual(OK);
+
+    // the same property still supersedes itself, and cancel reaches every property of the block
+    void runner.change('b1', { props: { body: 'c' } }, true, 'body');
+    expect(calls[1]?.signal?.aborted).toBe(true);
+    runner.cancel('b1');
+    expect(calls[2]?.signal?.aborted).toBe(true);
+  });
+
   it('hands the engine refusal back as it came, issues and all', async () => {
     const { runner, calls } = setup();
     const answer = runner.change('b1', { props: { n: 9 } }, true);

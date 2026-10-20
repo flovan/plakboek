@@ -528,6 +528,7 @@ function Shell(props: {
           blockId,
           { props: withValues(node.props, values) },
           immediate,
+          changedKey,
         );
         if (!persist && response?.ok === true) queueWrite();
         return response;

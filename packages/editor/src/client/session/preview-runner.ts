@@ -5,7 +5,9 @@
  * changes wait for 150ms of quiet; pickers, switches, selects and sliders go
  * at once. Each block has one request in flight: a newer change aborts the
  * older one, and an answer that is no longer the latest is ignored, so the
- * last change always wins.
+ * last change always wins. A change that names the property it carries
+ * (`key`) only supersedes an earlier change of that same property, so a flush
+ * of one property is never aborted by an edit of another on the same block.
  *
  * Only the edited block's markup is replaced, through the same patch planner
  * and applier a saved write uses, so other blocks, the frame's scroll and the
@@ -39,18 +41,20 @@ export type PreviewRunner = {
   /**
    * Renders the block with `values` in the frame. Resolves with the engine's
    * answer, or `null` when a newer change superseded this one, it was
-   * cancelled or the request failed.
+   * cancelled or the request failed. `key` is the property the change carries.
    */
   readonly change: (
     blockId: string,
     values: PreviewValues,
     immediate: boolean,
+    key?: string,
   ) => Promise<PreviewResponse | null>;
   /** Drops everything pending and in flight for a block, or for every block. */
   readonly cancel: (blockId?: string) => void;
 };
 
 type Pending = {
+  readonly blockId: string;
   timer: ReturnType<typeof setTimeout> | null;
   controller: AbortController | null;
   /** Settles the promise of a change that will not run. */
@@ -63,13 +67,21 @@ export function createPreviewRunner(
 ): PreviewRunner {
   const { api, pageId, frame, hooks } = options;
   const debounceMs = options.debounceMs ?? PREVIEW_DEBOUNCE_MS;
-  const blocks = new Map<string, Pending>();
+  /** One entry per block and property: a change without a property has its own. */
+  const changes = new Map<string, Pending>();
 
-  function pendingFor(blockId: string): Pending {
-    let pending = blocks.get(blockId);
+  function pendingFor(blockId: string, key: string | undefined): Pending {
+    const id = key === undefined ? blockId : `${blockId}\u0000${key}`;
+    let pending = changes.get(id);
     if (pending === undefined) {
-      pending = { timer: null, controller: null, drop: null, latest: 0 };
-      blocks.set(blockId, pending);
+      pending = {
+        blockId,
+        timer: null,
+        controller: null,
+        drop: null,
+        latest: 0,
+      };
+      changes.set(id, pending);
     }
     return pending;
   }
@@ -123,8 +135,8 @@ export function createPreviewRunner(
   }
 
   return {
-    change: (blockId, values, immediate) => {
-      const pending = pendingFor(blockId);
+    change: (blockId, values, immediate, key) => {
+      const pending = pendingFor(blockId, key);
       supersede(pending);
       pending.latest += 1;
       const ticket = pending.latest;
@@ -141,12 +153,11 @@ export function createPreviewRunner(
       });
     },
     cancel: (blockId) => {
-      if (blockId !== undefined) {
-        const pending = blocks.get(blockId);
-        if (pending !== undefined) supersede(pending);
-        return;
+      for (const pending of changes.values()) {
+        if (blockId === undefined || pending.blockId === blockId) {
+          supersede(pending);
+        }
       }
-      for (const pending of blocks.values()) supersede(pending);
     },
   };
 }
