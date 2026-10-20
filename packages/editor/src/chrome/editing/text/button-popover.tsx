@@ -370,10 +370,11 @@ function TextButtonPopover(props: TextButtonPopoverProps): ReactElement | null {
 
   const attrs: Readonly<Record<string, unknown>> = selected.node.attrs;
   const variants = theme.ctaVariants;
-  const variant =
-    typeof attrs['variant'] === 'string'
-      ? attrs['variant']
-      : (variants[0]?.value ?? '');
+  // A variant the theme no longer lists shows as the first one, so a radio is always checked.
+  const stored = attrs['variant'];
+  const variant = variants.some((entry) => entry.value === stored)
+    ? (stored as string)
+    : (variants[0]?.value ?? '');
   const labelValue: unknown = attrs['label'];
 
   const close = (): void => {
