@@ -36,7 +36,7 @@ import { EDIT_ATTRIBUTE } from '@plakboek/render';
 import { documentBox, visibleDocumentBox } from '../chrome-host/coordinates.js';
 import { CHROME_HOST_TAG } from '../chrome-host/host.js';
 import { blocksAt } from '../frame/hit-test.js';
-import { measureLooseInDocument } from './boxes.js';
+import { followsViewport, measureLooseInDocument } from './boxes.js';
 import { isMeasurable, sameBox, type Box, type Point } from './geometry.js';
 
 /** What the overlay draws. Every box is in the framed document's own
@@ -234,6 +234,8 @@ function track(
   let scopeElement: Element | null = null;
   let animationFrame = 0;
   let settleTimer: number | null = null;
+  /** Whether a followed item sits in a fixed or sticky box and moves with the scroll. */
+  let followsScroll = false;
 
   /** Where the frame's content box starts in the shell. */
   function contentBox(): Box {
@@ -343,6 +345,14 @@ function track(
     const visible = visibleDocumentBox(current.view);
     emit(hoverState(current, visible));
     emitSelection(selectionState(current, visible));
+    // A fixed or sticky item keeps its place on the screen, so its document box
+    // moves with every scroll.
+    followsScroll = [target, selectedElement, scopeElement].some(
+      (element) =>
+        element !== null &&
+        element.isConnected &&
+        followsViewport(element, current.view),
+    );
   }
 
   /** Asks for a measurement in the next animation frame; any number of asks
@@ -457,8 +467,13 @@ function track(
     root.addEventListener('pointermove', onPointer, { passive: true });
     root.addEventListener('pointerleave', onLeave, { passive: true });
     // A scroll moves no box (they are in document coordinates): it only asks
-    // for the settle, once the page has been quiet.
-    view.addEventListener('scroll', scheduleSettle, { passive: true });
+    // for the settle, once the page has been quiet. A fixed or sticky item is
+    // the exception and is measured again in the next frame.
+    const onScroll = (): void => {
+      if (followsScroll) schedule();
+      scheduleSettle();
+    };
+    view.addEventListener('scroll', onScroll, { passive: true });
     view.addEventListener('resize', changed, { passive: true });
 
     attached = {
@@ -471,7 +486,7 @@ function track(
         root.removeEventListener('pointerover', onPointer);
         root.removeEventListener('pointermove', onPointer);
         root.removeEventListener('pointerleave', onLeave);
-        view.removeEventListener('scroll', scheduleSettle);
+        view.removeEventListener('scroll', onScroll);
         view.removeEventListener('resize', changed);
       },
     };

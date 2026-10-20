@@ -9,7 +9,10 @@
  * moved by the scroll offset), because the overlay is drawn inside that
  * document and scrolls with it. A scroll therefore changes no box: it does not
  * measure again until the page has been quiet for 100ms, and only then to
- * refresh the visible part of the document the placement rules read.
+ * refresh the visible part of the document the placement rules read. The one
+ * exception is an item in a fixed or sticky box: it keeps its place on the
+ * screen while the page scrolls, so its document box moves with the scroll and
+ * is measured again in the next animation frame.
  *
  * It reads the identity attributes the live render puts on every block
  * (`EDIT_ATTRIBUTE`) and never changes the framed site: its listeners are
@@ -70,6 +73,22 @@ export function measureLoose(element: Element, view: Window): Box | null {
   };
 }
 
+/**
+ * Whether the element, or an ancestor, is fixed to the viewport or sticky: its
+ * place in the document changes as the page scrolls.
+ */
+export function followsViewport(element: Element, view: Window): boolean {
+  for (
+    let node: Element | null = element;
+    node !== null;
+    node = node.parentElement
+  ) {
+    const { position } = view.getComputedStyle(node);
+    if (position === 'fixed' || position === 'sticky') return true;
+  }
+  return false;
+}
+
 /** `measureLoose`, in the framed document's own coordinates. */
 export function measureLooseInDocument(
   element: Element,
@@ -111,6 +130,8 @@ export function createBoxTracker(
   let animationFrame = 0;
   let quietTimer: number | null = null;
   let last: BoxesState | null = null;
+  /** Whether a measured item moves with the scroll (fixed or sticky). */
+  let followsScroll = false;
 
   function contentBox(): Box {
     const rect = frame.getBoundingClientRect();
@@ -150,6 +171,7 @@ export function createBoxTracker(
     }
     const boxes = new Map<string, Box>();
     const fixed: string[] = [];
+    let moving = false;
     for (const id of options.ids()) {
       const element = byId.get(id);
       if (element === undefined) continue;
@@ -157,7 +179,9 @@ export function createBoxTracker(
       if (box === null) continue;
       boxes.set(id, box);
       if (view.getComputedStyle(element).position === 'fixed') fixed.push(id);
+      if (followsViewport(element, view)) moving = true;
     }
+    followsScroll = moving;
     const empty: string[] = [];
     for (const element of doc.querySelectorAll(EMPTY_SELECTOR)) {
       const id = element.getAttribute(EDIT_ATTRIBUTE.block);
@@ -175,8 +199,12 @@ export function createBoxTracker(
     animationFrame = shellWindow.requestAnimationFrame(measureAll);
   }
 
-  /** A scroll moves no box: measure again once the page has been quiet. */
+  /**
+   * A scroll moves no box: measure again once the page has been quiet. An item
+   * that follows the viewport does move, and is measured again at once.
+   */
   function scheduleQuiet(): void {
+    if (followsScroll) schedule();
     if (quietTimer !== null) shellWindow.clearTimeout(quietTimer);
     quietTimer = shellWindow.setTimeout(() => {
       quietTimer = null;
