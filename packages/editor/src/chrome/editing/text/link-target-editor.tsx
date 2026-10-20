@@ -134,20 +134,24 @@ function WebAddress(props: WebAddressProps): ReactElement {
 
 /**
  * Whether the page a stored link points at is gone: asks the search route for
- * that one id. A lookup that fails says nothing, so it is not "gone".
+ * that one id. A lookup that fails says nothing, so it is not "gone". The
+ * answer is for the page the section opened on, so it stops showing once the
+ * value points at another page.
  */
 function usePageGone(
   search: PageSearch | undefined,
   locale: string,
   pageId: string | null,
 ): boolean {
-  const [gone, setGone] = useState(false);
+  const [goneId, setGoneId] = useState<string | null>(null);
   useEffect(() => {
     if (search === undefined || pageId === null) return undefined;
     const controller = new AbortController();
     search(locale, '', controller.signal, pageId).then(
       (response) => {
-        if (!controller.signal.aborted) setGone(response.results.length === 0);
+        if (!controller.signal.aborted) {
+          setGoneId(response.results.length === 0 ? pageId : null);
+        }
       },
       () => undefined,
     );
@@ -156,7 +160,7 @@ function usePageGone(
     };
     // The page the popover opened on; later picks are of pages that exist.
   }, []);
-  return gone;
+  return goneId !== null && goneId === pageId;
 }
 
 /**
