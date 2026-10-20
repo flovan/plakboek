@@ -28,7 +28,8 @@ export type LinkPopoverProps = {
 /** The tallest the popover grows: the page list scrolls inside it past this. */
 const POPOVER_MAX_HEIGHT = 480;
 
-const BUTTON =
+/** A 40px button of a popover's action row; the caller adds its colours. */
+export const POPOVER_BUTTON =
   'h-10 flex-1 cursor-pointer rounded-lg border px-3 text-body font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
 /** Whether a node on an event's path is the toolbar's Link button, whichever window made it. */
@@ -190,7 +191,7 @@ export function LinkPopover(props: LinkPopoverProps): ReactElement | null {
         {context.kind === 'edit' ? (
           <button
             type="button"
-            className={`${BUTTON} border-control-border bg-surface text-text hover:bg-surface-muted`}
+            className={`${POPOVER_BUTTON} border-control-border bg-surface text-text hover:bg-surface-muted`}
             onClick={remove}
           >
             {STRINGS['text.link.remove']}
@@ -199,7 +200,7 @@ export function LinkPopover(props: LinkPopoverProps): ReactElement | null {
         <button
           type="button"
           aria-disabled={target === null}
-          className={`${BUTTON} border-transparent bg-accent text-accent-contrast aria-disabled:cursor-default aria-disabled:opacity-60`}
+          className={`${POPOVER_BUTTON} border-transparent bg-accent text-accent-contrast aria-disabled:cursor-default aria-disabled:opacity-60`}
           onClick={apply}
         >
           {STRINGS['text.link.apply']}

@@ -28,6 +28,7 @@ import { textOf } from '../session/selection-announcement.js';
 import { labelOf } from '../session/tree-model.js';
 import { hasPending } from '../session/save-queue.js';
 import { beginInlineEdit, endInlineEdit } from '../frame/patch.js';
+import { CTA_INSERTED, selectedCta } from './cta.js';
 import { buildTextExtensions } from './extensions.js';
 import type { SlashState } from './slash.js';
 import {
@@ -111,6 +112,17 @@ export type TextController = {
   openLink(): void;
   /** Closes the link popover without touching the field. */
   closeLink(): void;
+  /**
+   * The Button popover of the running session: a number that changes each time
+   * it is asked for (a CTA inserted or clicked, Mod-K on a selected CTA), 0
+   * while it is closed. It closes by itself once no CTA is selected. Changes
+   * are announced through `subscribe`.
+   */
+  buttonRequest(): number;
+  /** Asks for the Button popover; does nothing between sessions. */
+  openButton(): void;
+  /** Closes the Button popover without touching the field. */
+  closeButton(): void;
   /** Puts keyboard focus back in the field with its selection as it was. */
   focusField(): void;
   /**
@@ -199,6 +211,8 @@ export function createTextController(
   let slashState: SlashState | null = null;
   let linkToken = 0;
   let linkCounter = 0;
+  let buttonToken = 0;
+  let buttonCounter = 0;
 
   function notify(): void {
     for (const listener of listeners) listener();
@@ -223,6 +237,7 @@ export function createTextController(
     current = null;
     slashState = null;
     linkToken = 0;
+    buttonToken = 0;
     const { target, editor, block, snapshot, shells } = session;
     const { blockId, key } = target;
     const value = savedValue(editor, target.kind);
@@ -342,15 +357,17 @@ export function createTextController(
                   announce(formatString('text.announce.styleReset'));
                 },
                 onLink: openLink,
+                onButton: openButton,
                 onSlash: (next) => {
                   slashState = next;
                   notify();
                 },
                 onInserted: (inserted) => {
                   announce(
-                    formatString('text.announce.inserted', {
-                      item: inserted.label,
-                    }),
+                    inserted.announcement ??
+                      formatString('text.announce.inserted', {
+                        item: inserted.label,
+                      }),
                   );
                 },
                 shells,
@@ -404,8 +421,18 @@ export function createTextController(
       touched: false,
     };
     current = session;
-    // The toolbar follows every transaction, selection moves included.
-    editor.on('transaction', notify);
+    // The toolbar follows every transaction, selection moves included. A CTA
+    // just inserted asks for its popover; one that is no longer selected
+    // takes the popover away.
+    editor.on('transaction', ({ transaction }) => {
+      if (transaction.getMeta(CTA_INSERTED) !== undefined) {
+        buttonCounter += 1;
+        buttonToken = buttonCounter;
+      } else if (buttonToken !== 0 && selectedCta(editor.state) === null) {
+        buttonToken = 0;
+      }
+      notify();
+    });
     // Registered after the first transaction, so a node the editor adds by
     // itself on mount is not a change.
     editor.on('update', () => {
@@ -450,6 +477,19 @@ export function createTextController(
   function closeLink(): void {
     if (linkToken === 0) return;
     linkToken = 0;
+    notify();
+  }
+
+  function openButton(): void {
+    if (current === null) return;
+    buttonCounter += 1;
+    buttonToken = buttonCounter;
+    notify();
+  }
+
+  function closeButton(): void {
+    if (buttonToken === 0) return;
+    buttonToken = 0;
     notify();
   }
 
@@ -571,6 +611,9 @@ export function createTextController(
     linkRequest: () => linkToken,
     openLink,
     closeLink,
+    buttonRequest: () => buttonToken,
+    openButton,
+    closeButton,
     focusField() {
       current?.editor.view.focus();
     },

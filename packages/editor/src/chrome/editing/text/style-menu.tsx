@@ -22,10 +22,12 @@ export type StyleMenuProps = {
   readonly rove: Rove;
   readonly platform: Platform;
   readonly tooltipSide: 'top' | 'bottom';
+  /** A Button is selected: the button is shown but opens nothing. */
+  readonly disabled?: boolean;
 };
 
 const BUTTON =
-  'flex h-8 w-[112px] cursor-pointer items-center justify-between gap-1 rounded-md border-0 bg-transparent pr-1 pl-2 text-body font-semibold text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring';
+  'flex h-8 w-[112px] cursor-pointer items-center justify-between gap-1 rounded-md border-0 bg-transparent pr-1 pl-2 text-body font-semibold text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent';
 
 const ROW =
   'flex h-10 w-full cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-2 text-left text-body text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring';
@@ -47,6 +49,7 @@ const NAME = {
 export function StyleMenu(props: StyleMenuProps): ReactElement {
   const { current, options, onChoose, onReturn, rove, platform, tooltipSide } =
     props;
+  const disabled = props.disabled === true;
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -120,7 +123,11 @@ export function StyleMenu(props: StyleMenuProps): ReactElement {
   return (
     <span ref={wrapper} className="relative inline-flex">
       <Tooltip
-        label={STRINGS['text.style.tooltip']}
+        label={
+          disabled
+            ? STRINGS['text.disabled.button']
+            : STRINGS['text.style.tooltip']
+        }
         placement={tooltipSide}
         enabled={!open}
       >
@@ -128,19 +135,28 @@ export function StyleMenu(props: StyleMenuProps): ReactElement {
           ref={button}
           type="button"
           className={BUTTON}
-          aria-label={formatString('text.style.label', { style: name })}
+          aria-label={
+            disabled
+              ? formatString('text.disabled.buttonLabel', {
+                  name: STRINGS['text.style.tooltip'],
+                })
+              : formatString('text.style.label', { style: name })
+          }
+          aria-disabled={disabled ? true : undefined}
           aria-haspopup="menu"
-          aria-expanded={open}
+          aria-expanded={open && !disabled}
           data-style-button=""
           onMouseDown={(event) => {
             event.preventDefault();
           }}
           onClick={(event) => {
             // A click made by Enter or Space has no pointer detail.
+            if (disabled) return;
             withKeyboard.current = event.detail === 0;
             setOpen(!open);
           }}
           onKeyDown={(event) => {
+            if (disabled) return;
             if (event.altKey || event.ctrlKey || event.metaKey) return;
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault();
@@ -154,7 +170,7 @@ export function StyleMenu(props: StyleMenuProps): ReactElement {
           <ChevronDownIcon />
         </button>
       </Tooltip>
-      {open ? (
+      {open && !disabled ? (
         <div
           ref={menu}
           role="menu"

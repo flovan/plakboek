@@ -30,6 +30,7 @@ import {
   type TextTheme,
 } from '@plakboek/content/rich-text';
 import { resetStyle } from './commands.js';
+import { createCtaNode } from './cta.js';
 import { insertItems, type InsertItem } from './insert-items.js';
 import { ThemedLink } from './link.js';
 import type { RendererShells } from './shells.js';
@@ -160,6 +161,11 @@ export type TextExtensionHooks = {
    */
   readonly onLink?: () => void;
   /**
+   * A click on a CTA, or Mod-K with one selected: the Button popover was asked
+   * for. Without it a click on a CTA only selects it.
+   */
+  readonly onButton?: () => void;
+  /**
    * The '/' menu changed (opened, filtered, moved, closed with null). Without
    * it the field has no '/' menu at all.
    */
@@ -182,6 +188,7 @@ const SHELL_NODES = [
   'listItem',
   'blockquote',
   'horizontalRule',
+  'cta',
 ] as const;
 
 const SHELL_MARKS = ['bold', 'italic', 'underline', 'strike'] as const;
@@ -324,9 +331,7 @@ function slashExtensions(
 
 /**
  * The extension set of one rich_text property: the locked base narrowed by the
- * property's effective theme. The button extension joins it in a later plan;
- * until then a theme that names it simply has no such extension yet, and the
- * server still validates every write.
+ * property's effective theme.
  */
 export function buildTextExtensions(
   theme: TextTheme,
@@ -340,6 +345,10 @@ export function buildTextExtensions(
     // Links, only when the theme names the mark.
     ...(theme.marks.includes('link')
       ? [ThemedLink.configure({ onOpen: hooks.onLink ?? null })]
+      : []),
+    // Buttons, only when the theme names the node.
+    ...(theme.nodes.includes('cta')
+      ? [createCtaNode(theme, { onOpen: hooks.onButton })]
       : []),
     TextFieldKeymap.configure(hooks),
     ...slashExtensions(theme, hooks),

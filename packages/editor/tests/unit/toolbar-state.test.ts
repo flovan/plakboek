@@ -36,6 +36,24 @@ describe('toolbarModel', () => {
     expect(model.link).toEqual({ pressed: false });
   });
 
+  it('knows a Button is selected, but only for a theme that has the node', () => {
+    const selected = (name: string) => name === 'cta';
+    expect(
+      toolbarModel({ theme: DEFAULT_TEXT_THEME, isActive: none })
+        .buttonSelected,
+    ).toBe(false);
+    expect(
+      toolbarModel({ theme: DEFAULT_TEXT_THEME, isActive: selected })
+        .buttonSelected,
+    ).toBe(true);
+    const noButton = narrowTextTheme(DEFAULT_TEXT_THEME, {
+      nodes: ['bulletList'],
+    });
+    expect(
+      toolbarModel({ theme: noButton, isActive: selected }).buttonSelected,
+    ).toBe(false);
+  });
+
   it('presses Link while the caret is in a link, and has none without the mark', () => {
     expect(
       toolbarModel({

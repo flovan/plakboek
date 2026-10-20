@@ -167,6 +167,39 @@ html > *:not(head):not(body) {
   border-left: 4px solid #999;
 }
 
+/*
+ * Buttons: one look for the page and for the field. The page puts adjacent
+ * buttons in a wrapping row; the field flows them side by side, with the row
+ * gap as a margin, and spaces the first of a row like any other block.
+ */
+.t-cta {
+  display: inline-block;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 10px 20px;
+  border: 2px solid #222;
+  color: #222;
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.t-cta[data-variant='primary'] {
+  background: #222;
+  color: #fff;
+}
+
+.t-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.t-cta-row:not(:first-child),
+.prose-flow > :not([data-pk-cta-wrap]) + [data-pk-cta-wrap] {
+  margin-top: 21px;
+}
+
 /* A prose field with no text still has a box to click and to draw a hint in. */
 .prose-flow {
   min-height: 40px;

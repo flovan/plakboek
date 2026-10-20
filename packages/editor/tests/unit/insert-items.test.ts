@@ -22,11 +22,13 @@ describe('insertItems', () => {
       'orderedList',
       'quote',
       'divider',
+      'button',
     ]);
   });
 
-  it("lists only the blocks that are not text styles in the '+' menu", () => {
+  it("lists only the blocks that are not text styles in the '+' menu, Button first", () => {
     expect(ids(insertItems(DEFAULT_TEXT_THEME, 'plus'))).toEqual([
+      'button',
       'quote',
       'divider',
     ]);
@@ -71,13 +73,21 @@ describe('insertItems', () => {
     expect(insertItems(theme, 'plus')).toEqual([]);
   });
 
-  it('never lists Button before the button node exists', () => {
-    expect(ids(insertItems(DEFAULT_TEXT_THEME, 'slash'))).not.toContain(
-      'button',
+  it('lists Button in both menus only when the theme has the button node', () => {
+    const without = narrowTextTheme(DEFAULT_TEXT_THEME, {
+      nodes: ['bulletList', 'blockquote', 'horizontalRule'],
+    });
+    for (const place of ['slash', 'plus'] as const) {
+      expect(ids(insertItems(DEFAULT_TEXT_THEME, place))).toContain('button');
+      expect(ids(insertItems(without, place))).not.toContain('button');
+    }
+  });
+
+  it('announces a Button as added', () => {
+    const button = insertItems(DEFAULT_TEXT_THEME, 'plus').find(
+      (entry) => entry.id === 'button',
     );
-    expect(ids(insertItems(DEFAULT_TEXT_THEME, 'plus'))).not.toContain(
-      'button',
-    );
+    expect(button?.announcement).toBe('Button added.');
   });
 });
 

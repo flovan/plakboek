@@ -10,6 +10,7 @@
 import type { ChainedCommands } from '@tiptap/core';
 import type { TextTheme } from '@plakboek/content/rich-text';
 import { STRINGS, type StringKey } from '../../chrome/strings.js';
+import './cta.js';
 import { STYLE_LEVEL } from './heading-styles.js';
 
 export type InsertItemId =
@@ -26,6 +27,8 @@ export type InsertItemId =
 export type InsertItem = {
   readonly id: InsertItemId;
   readonly label: string;
+  /** What a screen reader hears once it is inserted, when not just its name. */
+  readonly announcement?: string;
   /** Applies the item at the selection and returns the chain. */
   readonly run: (chain: ChainedCommands) => ChainedCommands;
 };
@@ -45,20 +48,32 @@ const LABEL = {
   button: 'text.insert.button',
 } as const satisfies Record<InsertItemId, StringKey>;
 
-const item = (id: InsertItemId, run: InsertItem['run']): InsertItem => ({
+const item = (
+  id: InsertItemId,
+  run: InsertItem['run'],
+  announcement?: string,
+): InsertItem => ({
   id,
   label: STRINGS[LABEL[id]],
+  ...(announcement === undefined ? {} : { announcement }),
   run,
 });
+
+const buttonItem = (): InsertItem =>
+  item(
+    'button',
+    (chain) => chain.insertCta(),
+    STRINGS['text.announce.buttonAdded'],
+  );
 
 const headingItem = (id: 'title' | 'heading' | 'subheading'): InsertItem =>
   item(id, (chain) => chain.setHeading({ level: STYLE_LEVEL[id] }));
 
 /**
  * The items a theme allows for one place, in the menu's order: Paragraph,
- * Title, Heading, Subheading, Bulleted list, Numbered list, Quote, Divider
- * (and Button once the button node exists). Paragraph alone is not worth a
- * menu: the '/' list is empty when the theme allows nothing else.
+ * Title, Heading, Subheading, Bulleted list, Numbered list, Quote, Divider and
+ * Button; the '+' menu leads with Button. Paragraph alone is not worth a menu:
+ * the '/' list is empty when the theme allows nothing else.
  */
 export function insertItems(
   theme: TextTheme,
@@ -66,6 +81,7 @@ export function insertItems(
 ): readonly InsertItem[] {
   const nodes = theme.nodes;
   const items: InsertItem[] = [
+    ...(place === 'plus' && nodes.includes('cta') ? [buttonItem()] : []),
     ...(place === 'slash'
       ? [
           item('paragraph', (chain) => chain.setParagraph()),
@@ -86,6 +102,7 @@ export function insertItems(
     ...(nodes.includes('horizontalRule')
       ? [item('divider', (chain) => chain.setHorizontalRule())]
       : []),
+    ...(place === 'slash' && nodes.includes('cta') ? [buttonItem()] : []),
   ];
   return items.length === 1 && items[0]?.id === 'paragraph' ? [] : items;
 }

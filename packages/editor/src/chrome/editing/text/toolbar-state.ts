@@ -74,6 +74,11 @@ export type ToolbarModel = {
   readonly insert: boolean;
   /** Absent when the theme declares no colour, size or alignment. */
   readonly customStyle: CustomStyleControl | null;
+  /**
+   * A Button is selected as a block: text formatting does not apply to it, so
+   * every control but Insert and Done is shown as not available.
+   */
+  readonly buttonSelected: boolean;
 };
 
 export type ToolbarInput = {
@@ -121,6 +126,7 @@ export function toolbarModel(input: ToolbarInput): ToolbarModel {
             align: theme.align,
             allowCustomValues: theme.allowCustomValues,
           },
+    buttonSelected: theme.nodes.includes('cta') && isActive('cta'),
   };
 }
 

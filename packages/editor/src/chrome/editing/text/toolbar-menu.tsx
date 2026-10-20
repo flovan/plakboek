@@ -8,12 +8,13 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
+import { formatString, STRINGS } from '../../strings.js';
 import { Tooltip } from '../../tooltip.js';
 import type { Rove } from './crumbs.js';
 
 /** A 32px icon button of the toolbar that opens a menu. */
 const MENU_BUTTON =
-  'flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-expanded:bg-surface-muted';
+  'flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-expanded:bg-surface-muted aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent';
 
 /** A 40px row of a toolbar menu. */
 export const MENU_ROW =
@@ -29,6 +30,8 @@ export type ToolbarMenuProps = {
   readonly tooltipSide: 'top' | 'bottom';
   /** After a choice made with the keyboard, focus goes back to the field. */
   readonly onReturn: () => void;
+  /** A Button is selected: the button is shown but opens nothing. */
+  readonly disabled?: boolean;
   /** The rows: `choose(action)` makes the click handler of one. */
   readonly children: (
     choose: (action: () => void) => (event: MouseEvent) => void,
@@ -44,6 +47,7 @@ export type ToolbarMenuProps = {
  */
 export function ToolbarMenu(props: ToolbarMenuProps): ReactElement {
   const { id, label, icon, rove, tooltipSide, onReturn, children } = props;
+  const disabled = props.disabled === true;
   const [open, setOpen] = useState(false);
   const [alignEnd, setAlignEnd] = useState(false);
   const wrapper = useRef<HTMLSpanElement>(null);
@@ -131,24 +135,35 @@ export function ToolbarMenu(props: ToolbarMenuProps): ReactElement {
 
   return (
     <span ref={wrapper} className="relative inline-flex">
-      <Tooltip label={label} placement={tooltipSide} enabled={!open}>
+      <Tooltip
+        label={disabled ? STRINGS['text.disabled.button'] : label}
+        placement={tooltipSide}
+        enabled={!open}
+      >
         <button
           ref={button}
           type="button"
           className={MENU_BUTTON}
-          aria-label={label}
+          aria-label={
+            disabled
+              ? formatString('text.disabled.buttonLabel', { name: label })
+              : label
+          }
+          aria-disabled={disabled ? true : undefined}
           aria-haspopup="menu"
-          aria-expanded={open}
+          aria-expanded={open && !disabled}
           data-menu-button={id}
           onMouseDown={(event) => {
             event.preventDefault();
           }}
           onClick={(event) => {
             // A click made by Enter or Space has no pointer detail.
+            if (disabled) return;
             withKeyboard.current = event.detail === 0;
             setOpen(!open);
           }}
           onKeyDown={(event) => {
+            if (disabled) return;
             if (event.altKey || event.ctrlKey || event.metaKey) return;
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
               event.preventDefault();
@@ -162,7 +177,7 @@ export function ToolbarMenu(props: ToolbarMenuProps): ReactElement {
           {icon}
         </button>
       </Tooltip>
-      {open ? (
+      {open && !disabled ? (
         <div
           ref={menu}
           role="menu"

@@ -126,6 +126,7 @@ test('a lone slash opens the full list in order; Escape closes it and keeps the 
     /^Numbered list/,
     /^Quote/,
     /^Divider/,
+    /^Button/,
   ]);
   await expect(menu.getByRole('option').first()).toHaveAttribute(
     'aria-selected',
@@ -174,7 +175,11 @@ test('Insert, Quote wraps the current paragraph in a blockquote that is stored a
   await expect(insert).toHaveAttribute('aria-haspopup', 'menu');
   await insert.click();
   const menu = toolbar.getByRole('menu', { name: 'Insert' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['Quote', 'Divider']);
+  await expect(menu.getByRole('menuitem')).toHaveText([
+    'Button',
+    'Quote',
+    'Divider',
+  ]);
   expect((await menu.boundingBox())?.width).toBe(200);
   await menu.getByRole('menuitem', { name: 'Quote' }).click();
   await expect(menu).toHaveCount(0);

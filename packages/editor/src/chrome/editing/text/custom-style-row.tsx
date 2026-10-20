@@ -37,6 +37,8 @@ export type CustomStyleRowProps = {
   readonly state: EditorState;
   readonly rove: Rove;
   readonly tooltipSide: 'top' | 'bottom';
+  /** A Button is selected: the row is shown, but none of it can be used. */
+  readonly blocked?: boolean;
 };
 
 const ALIGNS = [
@@ -75,6 +77,7 @@ function literalSize(value: string): string {
  */
 export function CustomStyleRow(props: CustomStyleRowProps): ReactElement {
   const { id, controller, store, control, state, rove, tooltipSide } = props;
+  const blocked = props.blocked === true;
   const current = currentCustomStyle(state);
   const customized = hasCustomStyle(state);
 
@@ -106,6 +109,11 @@ export function CustomStyleRow(props: CustomStyleRowProps): ReactElement {
       data-custom-row=""
       role="group"
       aria-label={STRINGS['text.customStyle']}
+      aria-disabled={blocked ? true : undefined}
+      // `inert` takes every control of the row out of reach while it is not available.
+      inert={blocked ? true : undefined}
+      title={blocked ? STRINGS['text.disabled.button'] : undefined}
+      style={blocked ? { opacity: 0.5 } : undefined}
     >
       {control.sizes.length === 0 ? null : (
         <SizePopover

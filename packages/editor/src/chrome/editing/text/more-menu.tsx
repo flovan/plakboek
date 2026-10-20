@@ -18,6 +18,8 @@ export type MoreMenuProps = {
   readonly onReturn: () => void;
   readonly rove: Rove;
   readonly tooltipSide: 'top' | 'bottom';
+  /** A Button is selected: the menu is not available. */
+  readonly disabled?: boolean;
 };
 
 /**
@@ -25,7 +27,7 @@ export type MoreMenuProps = {
  * menu items that keep their pressed state (`menuitemcheckbox`).
  */
 export function MoreMenu(props: MoreMenuProps): ReactElement | null {
-  const { entries, onReturn, rove, tooltipSide } = props;
+  const { entries, onReturn, rove, tooltipSide, disabled } = props;
   if (entries.length === 0) return null;
   return (
     <ToolbarMenu
@@ -35,6 +37,7 @@ export function MoreMenu(props: MoreMenuProps): ReactElement | null {
       rove={rove}
       tooltipSide={tooltipSide}
       onReturn={onReturn}
+      {...(disabled === true ? { disabled: true } : {})}
     >
       {(choose) =>
         entries.map((entry) => (

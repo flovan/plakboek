@@ -20,6 +20,7 @@ describe('the locked base text schema', () => {
     expect(Object.keys(schema.nodes).sort()).toEqual([
       'blockquote',
       'bulletList',
+      'cta',
       'doc',
       'hardBreak',
       'heading',

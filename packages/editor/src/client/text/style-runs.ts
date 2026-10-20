@@ -17,7 +17,7 @@
  */
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { EditorView } from '@tiptap/pm/view';
-import { TEXT_ALIGNS } from '@plakboek/content/rich-text';
+import { isCompleteCta, TEXT_ALIGNS } from '@plakboek/content/rich-text';
 
 /** The structural shape of a stored document node. */
 export type JsonNode = {
@@ -72,6 +72,41 @@ export function flattenedText(doc: JsonNode): string {
   const own = ownText(doc);
   if (own !== null) return own;
   return (doc.content ?? []).map(flattenedText).join('');
+}
+
+/** A button of a stored document that lacks a label or a link, as its label's span in the flattened text. */
+export type IncompleteCta = {
+  readonly start: number;
+  readonly end: number;
+  /** Which of the two the button lacks; a missing label is named first. */
+  readonly lacks: 'label' | 'link';
+};
+
+/**
+ * The incomplete buttons of a stored document, in document order, each as the
+ * span its label takes in the flattened text. A button with no label takes no
+ * text, so its span is empty and cannot be found in rendered text.
+ */
+export function incompleteCtas(doc: JsonNode): readonly IncompleteCta[] {
+  const found: IncompleteCta[] = [];
+  let offset = 0;
+  const walk = (node: JsonNode): void => {
+    const own = ownText(node);
+    if (own !== null) {
+      if (node.type === 'cta' && !isCompleteCta(node.attrs)) {
+        found.push({
+          start: offset,
+          end: offset + own.length,
+          lacks: own.trim().length === 0 ? 'label' : 'link',
+        });
+      }
+      offset += own.length;
+      return;
+    }
+    for (const child of node.content ?? []) walk(child);
+  };
+  walk(doc);
+  return found;
 }
 
 /**

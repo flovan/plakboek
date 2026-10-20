@@ -28,6 +28,12 @@ export type LinkTargetEditorProps = {
   readonly onChange: (target: LinkTarget, title: string | null) => void;
   /** Enter in the address input with a valid address: the owner applies. */
   readonly onSubmit?: () => void;
+  /**
+   * Whether the first field takes the focus when the section appears. A
+   * popover whose own first field is elsewhere (the Button popover's label)
+   * turns it off; pressing a segment still moves the focus into the field.
+   */
+  readonly focusOnOpen?: boolean;
 };
 
 type Segment = 'page' | 'web';
@@ -37,7 +43,7 @@ const SWITCH =
   'relative h-6 w-10 shrink-0 cursor-pointer appearance-none rounded-full border border-control-border bg-surface-muted before:absolute before:top-0.5 before:left-0.5 before:size-[18px] before:rounded-full before:bg-text checked:bg-text checked:before:translate-x-4 checked:before:bg-surface focus-visible:outline-2 focus-visible:outline-focus-ring';
 
 /** A segment of the "Link to" control: the selected one takes the inverted fill. */
-const SEGMENT =
+export const SEGMENT =
   'h-10 flex-1 cursor-pointer rounded-md border-0 bg-transparent px-3 text-body font-semibold text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-checked:bg-text aria-checked:text-surface aria-checked:hover:bg-text';
 
 const SEGMENTS: readonly { readonly id: Segment; readonly label: string }[] = [
@@ -167,6 +173,7 @@ function usePageGone(
  */
 export function LinkTargetEditor(props: LinkTargetEditorProps): ReactElement {
   const { value, locale, search, onChange, onSubmit } = props;
+  const focusOnOpen = props.focusOnOpen !== false;
   const [segment, setSegment] = useState<Segment>(
     search === undefined || (value?.pageId === null && value.href !== null)
       ? 'web'
@@ -174,7 +181,7 @@ export function LinkTargetEditor(props: LinkTargetEditorProps): ReactElement {
   );
   // The first field takes the focus when the section appears and when a
   // segment is pressed; the arrow keys of the segments keep it on them.
-  const [focusField, setFocusField] = useState(true);
+  const [focusField, setFocusField] = useState(focusOnOpen);
   const [newTab, setNewTab] = useState(value?.target === '_blank');
   // What the address input showed last, so a round trip through Page keeps it.
   const [webText, setWebText] = useState(value?.href ?? '');

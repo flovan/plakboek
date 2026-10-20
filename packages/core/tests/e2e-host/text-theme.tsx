@@ -56,5 +56,24 @@ export default defineTextTheme({
     blockquote: ({ children }) => (
       <blockquote className="t-quote">{children}</blockquote>
     ),
+    // One element for a button with and without an address, so the field's
+    // button (drawn with no address) looks like the visitor's.
+    cta: ({ label, href, target, variant }) =>
+      href === null ? (
+        <span className="t-cta" data-variant={variant}>
+          {label}
+        </span>
+      ) : (
+        <a
+          className="t-cta"
+          href={href}
+          target={target ?? undefined}
+          rel={target === '_blank' ? 'noopener noreferrer' : undefined}
+          data-variant={variant}
+        >
+          {label}
+        </a>
+      ),
+    ctaRow: ({ children }) => <div className="t-cta-row">{children}</div>,
   },
 });

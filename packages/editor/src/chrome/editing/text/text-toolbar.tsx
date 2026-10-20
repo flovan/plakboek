@@ -45,6 +45,7 @@ import {
   shortcutLabel,
   type ShortcutId,
 } from './shortcuts.js';
+import { ButtonPopover } from './button-popover.js';
 import { InsertMenu } from './insert-menu.js';
 import { LinkPopover } from './link-popover.js';
 import { MoreMenu, type MoreEntry } from './more-menu.js';
@@ -85,7 +86,7 @@ export type TextToolbarProps = {
 
 /** A 32px toggle; pressed it takes the inverted fill, never colour alone (aria-pressed). */
 const TOGGLE =
-  'flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-pressed:bg-text aria-pressed:text-surface aria-pressed:hover:bg-text';
+  'flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-pressed:bg-text aria-pressed:text-surface aria-pressed:hover:bg-text aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent';
 
 const TOGGLES = {
   bold: {
@@ -167,7 +168,7 @@ const CUSTOM_ROW_KEYS = [
 
 /** A 32px toggle with its text: Custom style. Pressed it takes the inverted fill. */
 const CUSTOM_TOGGLE =
-  'relative flex h-8 cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-2 text-body font-semibold text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-pressed:bg-text aria-pressed:text-surface aria-pressed:hover:bg-text';
+  'relative flex h-8 cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-2 text-body font-semibold text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring aria-pressed:bg-text aria-pressed:text-surface aria-pressed:hover:bg-text aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent';
 
 type Measured = {
   readonly widths: Readonly<Partial<Record<ControlId, number>>>;
@@ -226,12 +227,20 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     controller.linkRequest(),
   );
 
+  // The Button popover follows the selected CTA; the number changes each time
+  // it is asked for.
+  const buttonRequest = useSyncExternalStore(controller.subscribe, () =>
+    controller.buttonRequest(),
+  );
+
   const model = toolbarModel({
     theme,
     isActive: (name, attributes) =>
       controller.editor()?.isActive(name, attributes) ?? false,
   });
   const plusItems = model.insert ? insertItems(theme, 'plus') : [];
+  // A selected Button takes none of the text controls but Insert and Done.
+  const blocked = model.buttonSelected;
 
   // What the frame leaves the bar: its width minus 16px. Controls that do not
   // fit collapse in a fixed order (Done to its icon, then toggles into More).
@@ -310,7 +319,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     ...(model.customStyle === null ? [] : ['customStyle']),
     ...(collapse.inMore.length === 0 ? [] : ['more']),
     'done',
-    ...(customOpen && model.customStyle !== null
+    ...(customOpen && model.customStyle !== null && !blocked
       ? CUSTOM_ROW_KEYS.filter((key) =>
           customRowKeyShown(key, model.customStyle),
         )
@@ -383,9 +392,13 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
   const insert = (item: InsertItem): void => {
     const editor = controller.editor();
     if (editor === null) return;
-    item.run(editor.chain().focus()).run();
+    // A Button hands the focus to its popover, so the chain must not ask for
+    // the field's focus a frame later.
+    const chain = editor.chain();
+    item.run(item.id === 'button' ? chain : chain.focus()).run();
     store.announce(
-      formatString('text.announce.inserted', { item: item.label }),
+      item.announcement ??
+        formatString('text.announce.inserted', { item: item.label }),
     );
   };
 
@@ -422,23 +435,34 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     return (
       <Tooltip
         key={control.id}
-        label={formatString('text.withShortcut', {
-          name: STRINGS[name],
-          shortcut: shortcutLabel(shortcut, platform),
-        })}
+        label={
+          blocked
+            ? STRINGS['text.disabled.button']
+            : formatString('text.withShortcut', {
+                name: STRINGS[name],
+                shortcut: shortcutLabel(shortcut, platform),
+              })
+        }
         placement={tooltipSide}
       >
         <button
           type="button"
           className={TOGGLE}
-          aria-label={STRINGS[name]}
+          aria-label={
+            blocked
+              ? formatString('text.disabled.buttonLabel', {
+                  name: STRINGS[name],
+                })
+              : STRINGS[name]
+          }
           aria-pressed={control.pressed}
+          aria-disabled={blocked ? true : undefined}
           aria-keyshortcuts={ariaShortcut(shortcut, platform)}
           onMouseDown={(event) => {
             event.preventDefault();
           }}
           onClick={() => {
-            toggle(control.id);
+            if (!blocked) toggle(control.id);
           }}
           {...rove(control.id)}
         >
@@ -451,17 +475,28 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
   const linkButton =
     model.link === null ? null : (
       <Tooltip
-        label={formatString('text.withShortcut', {
-          name: STRINGS['text.link'],
-          shortcut: shortcutLabel('link', platform),
-        })}
+        label={
+          blocked
+            ? STRINGS['text.disabled.button']
+            : formatString('text.withShortcut', {
+                name: STRINGS['text.link'],
+                shortcut: shortcutLabel('link', platform),
+              })
+        }
         placement={tooltipSide}
       >
         <button
           type="button"
           className={TOGGLE}
-          aria-label={STRINGS['text.link']}
+          aria-label={
+            blocked
+              ? formatString('text.disabled.buttonLabel', {
+                  name: STRINGS['text.link'],
+                })
+              : STRINGS['text.link']
+          }
           aria-pressed={model.link.pressed}
+          aria-disabled={blocked ? true : undefined}
           aria-haspopup="dialog"
           aria-expanded={linkRequest !== 0}
           aria-keyshortcuts={ariaShortcut('link', platform)}
@@ -470,7 +505,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
             event.preventDefault();
           }}
           onClick={() => {
-            controller.openLink();
+            if (!blocked) controller.openLink();
           }}
           {...rove('link')}
         >
@@ -514,6 +549,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
                 rove={rove}
                 platform={platform}
                 tooltipSide={tooltipSide}
+                disabled={blocked}
               />
             ),
           },
@@ -558,12 +594,24 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     model.customStyle === null ? null : (
       <>
         <Tooltip
-          label={STRINGS['text.customStyle.tooltip']}
+          label={
+            blocked
+              ? STRINGS['text.disabled.button']
+              : STRINGS['text.customStyle.tooltip']
+          }
           placement={tooltipSide}
         >
           <button
             type="button"
             className={CUSTOM_TOGGLE}
+            aria-label={
+              blocked
+                ? formatString('text.disabled.buttonLabel', {
+                    name: STRINGS['text.customStyle'],
+                  })
+                : undefined
+            }
+            aria-disabled={blocked ? true : undefined}
             aria-pressed={customOpen}
             aria-expanded={customOpen}
             aria-controls={customRowId}
@@ -573,7 +621,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
               event.preventDefault();
             }}
             onClick={() => {
-              setCustomOpen(!customOpen);
+              if (!blocked) setCustomOpen(!customOpen);
             }}
             {...rove('customStyle')}
           >
@@ -601,6 +649,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
   const customRow =
     customOpen && model.customStyle !== null ? (
       <CustomStyleRow
+        blocked={blocked}
         id={customRowId}
         controller={controller}
         store={store}
@@ -653,6 +702,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
             {groups.length === 0 ? null : <Divider />}
             {customToggle}
             <MoreMenu
+              disabled={blocked}
               entries={moreEntries}
               onReturn={() => {
                 controller.focusField();
@@ -686,6 +736,17 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
           {rowFirst ? null : customRow}
         </div>
       </div>
+      {buttonRequest !== 0 && model.buttonSelected ? (
+        <ButtonPopover
+          key={buttonRequest}
+          controller={controller}
+          store={store}
+          theme={theme}
+          visible={visible}
+          locale={store.getState().session?.locale ?? ''}
+          {...(search === undefined ? {} : { search })}
+        />
+      ) : null}
       {linkRequest !== 0 && model.link !== null ? (
         <LinkPopover
           key={linkRequest}

@@ -139,6 +139,23 @@ function instantiate(template: Template, withContent: boolean): RendererShell {
     : { dom };
 }
 
+/**
+ * What a CTA is drawn in: an inline-flex wrapper around the renderer's element,
+ * with the row gap as its right margin, so adjacent CTAs sit side by side and
+ * wrap like the visitor page's row. The vertical gap and the space above the
+ * first one are the host field's own sibling spacing rule.
+ */
+function ctaWrapper(frameDocument: Document, template: Template): HTMLElement {
+  const wrapper = frameDocument.createElement('span');
+  wrapper.setAttribute('data-pk-cta-wrap', '');
+  wrapper.style.display = 'inline-flex';
+  wrapper.style.verticalAlign = 'top';
+  wrapper.style.marginRight = '16px';
+  wrapper.style.maxWidth = '100%';
+  wrapper.append(instantiate(template, false).dom);
+  return wrapper;
+}
+
 function numberOf(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
@@ -228,6 +245,22 @@ export function createRendererShells(
           );
         case 'hardBreak':
           return shellFor('hardBreak', () => renderers.hardBreak({}), false);
+        case 'cta': {
+          // One render per node: the label and variant differ, and a label is
+          // free text, so a cache keyed by it would only grow.
+          const label =
+            typeof attrs['label'] === 'string' ? attrs['label'] : '';
+          const variant =
+            typeof attrs['variant'] === 'string' ? attrs['variant'] : '';
+          const template = buildTemplate(
+            frameDocument,
+            () => renderers.cta({ label, href: null, target: null, variant }),
+            false,
+          );
+          return template === null
+            ? null
+            : { dom: ctaWrapper(frameDocument, template) };
+        }
         default:
           return null;
       }

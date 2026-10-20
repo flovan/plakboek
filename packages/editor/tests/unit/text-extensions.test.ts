@@ -59,6 +59,7 @@ describe('the editor schema of the default theme', () => {
     expect(Object.keys(schema.nodes).sort()).toEqual([
       'blockquote',
       'bulletList',
+      'cta',
       'doc',
       'hardBreak',
       'heading',
