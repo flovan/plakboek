@@ -2,7 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"],
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // The tests import the starter template, whose own files import each
+    // other with their real extensions.
+    "allowImportingTsExtensions": true
   },
   "include": ["src", "tests", "tsdown.config.ts", "vitest.config.ts"],
   "exclude": ["tests/fixtures"]
