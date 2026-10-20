@@ -120,7 +120,13 @@ export function ButtonPopover(props: ButtonPopoverProps): ReactElement | null {
     };
     const onPress = (event: Event): void => {
       if (event.composedPath().includes(element)) return;
+      // A press on a control that keeps the field's focus must not leave the
+      // focus on the label that is about to disappear.
+      // (inside a shadow root the focused element is that root's, not the document's)
+      const root = element.getRootNode() as Document | ShadowRoot;
+      const hadFocus = element.contains(root.activeElement);
       controller.closeButton();
+      if (hadFocus) controller.focusField();
     };
     owner.addEventListener('keydown', onKey, true);
     owner.addEventListener('pointerdown', onPress, true);

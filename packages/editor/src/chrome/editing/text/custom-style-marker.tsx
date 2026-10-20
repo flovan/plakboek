@@ -27,7 +27,7 @@ const BLOCK_SELECTOR = `[${EDIT_ATTRIBUTE.block}]`;
 const FIELD_SELECTOR = `[${EDIT_ATTRIBUTE.field}]`;
 const ALIGNED_BLOCK = 'p, h1, h2, h3, h4, h5, h6';
 
-function fieldElement(
+export function fieldElement(
   frameDocument: Document,
   blockId: string,
   key: string,

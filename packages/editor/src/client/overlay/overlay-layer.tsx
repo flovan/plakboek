@@ -10,6 +10,7 @@ import {
 import type { CatalogueEntry } from '../../api-types.js';
 import { EmptyPrompts } from '../../chrome/editing/empty-prompts.js';
 import { FieldBar } from '../../chrome/editing/text/field-bar.js';
+import { CtaMarkers } from '../../chrome/editing/text/cta-markers.js';
 import { CustomStyleMarker } from '../../chrome/editing/text/custom-style-marker.js';
 import { FieldDecor } from '../../chrome/editing/text/field-decor.js';
 import { SlashMenu } from '../../chrome/editing/text/slash-menu.js';
@@ -656,12 +657,20 @@ export function OverlayLayer(props: {
               activeKey={fieldActive ? (textField?.key ?? null) : null}
             />
             {store === undefined ? null : (
-              <CustomStyleMarker
-                store={store}
-                controller={textController}
-                frame={frameElement}
-                fields={fields}
-              />
+              <>
+                <CustomStyleMarker
+                  store={store}
+                  controller={textController}
+                  frame={frameElement}
+                  fields={fields}
+                />
+                <CtaMarkers
+                  store={store}
+                  controller={textController}
+                  frame={frameElement}
+                  fields={fields}
+                />
+              </>
             )}
             {selection === null ||
             selection.selected === null ||

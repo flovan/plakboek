@@ -1089,6 +1089,35 @@
     outline-offset: 2px;
   }
 
+  /*
+   * The incomplete-button marker: the needs-input look at the top-right of a
+   * button that lacks a label or a link, and the selection box of the
+   * selected one. Decoration only; it takes no pointer.
+   */
+  .pk-cta-decor {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .pk-cta-marker {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 4px;
+    background: var(--pk-attention-marker);
+    color: var(--pk-overlay-chip-text);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    pointer-events: none;
+    forced-color-adjust: none;
+  }
+
   /* While a drag runs or the delete confirmation is open the markers stay drawn and take no pointer. */
   [data-markers][data-inert] .pk-marker {
     pointer-events: none;

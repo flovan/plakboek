@@ -11,6 +11,7 @@
  * `EditorState`, with no DOM, so they are proven in Node.
  */
 import { Node } from '@tiptap/core';
+import { closeHistory } from '@tiptap/pm/history';
 import type { Node as PMNode, NodeType } from '@tiptap/pm/model';
 import {
   NodeSelection,
@@ -400,9 +401,15 @@ export function caretAfterCta(state: EditorState): Transaction | null {
   return state.tr.setSelection(Selection.near(state.doc.resolve(at), 1));
 }
 
-/** A transaction that removes the selected CTA. */
+/**
+ * A transaction that removes the selected CTA. It is its own undo step, so
+ * Control+Z brings the button back whatever was done just before it.
+ */
 export function removeCta(state: EditorState): Transaction | null {
   const selected = selectedCta(state);
   if (selected === null) return null;
-  return state.tr.delete(selected.pos, selected.pos + selected.node.nodeSize);
+  return closeHistory(state.tr).delete(
+    selected.pos,
+    selected.pos + selected.node.nodeSize,
+  );
 }

@@ -170,7 +170,9 @@ html > *:not(head):not(body) {
 /*
  * Buttons: one look for the page and for the field. The page puts adjacent
  * buttons in a wrapping row; the field flows them side by side, with the row
- * gap as a margin, and spaces the first of a row like any other block.
+ * gap as a margin, and spaces them like any other block. Every button after
+ * the first child takes the block gap above it, so buttons of one line stay
+ * level (and the second line of a wrapped row is spaced by it too).
  */
 .t-cta {
   display: inline-block;
@@ -196,7 +198,7 @@ html > *:not(head):not(body) {
 }
 
 .t-cta-row:not(:first-child),
-.prose-flow > :not([data-pk-cta-wrap]) + [data-pk-cta-wrap] {
+.prose-flow > [data-pk-cta-wrap]:not(:first-child) {
   margin-top: 21px;
 }
 
