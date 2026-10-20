@@ -366,6 +366,42 @@ describe('stripOutOfTheme', () => {
     }
   });
 
+  it('drops a custom colour or size mark when the theme allows no palette, as the validator does', () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: 'x',
+              marks: [
+                { type: 'textColor', attrs: { token: null, value: '#ffffff' } },
+                { type: 'textSize', attrs: { token: null, value: '18px' } },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const themes = [
+      resolveTextTheme(),
+      resolveTextTheme({ colors: [], sizes: [] }),
+      resolveTextTheme({
+        colors: [{ token: 'brand', label: 'Brand' }],
+      }),
+    ];
+    for (const theme of themes) {
+      const stripped = stripOutOfTheme(doc, theme);
+      expect(validateRichTextDocument(stripped, theme)).toEqual([]);
+      expect(collectText(stripped)).toBe('x');
+    }
+    expect(JSON.stringify(stripOutOfTheme(doc, themes[0]!))).not.toContain(
+      'textColor',
+    );
+  });
+
   it('leaves a document that already fits the theme unchanged', () => {
     const theme = themeNamed('full');
     for (const fixture of shapes.valid) {

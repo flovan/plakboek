@@ -743,23 +743,31 @@ function stripMarks(
         if (target !== null) stripped = { type, attrs: { ...target } };
         break;
       }
+      // A property that allows no colours (or sizes) allows no such mark at all,
+      // custom values included: the validator refuses it, so it is not kept.
       case 'textColor':
-        stripped = stripPaletteMark(
-          type,
-          attrs,
-          theme.colors.map((entry) => entry.token),
-          isCustomColorValue,
-          theme.allowCustomValues,
-        );
+        stripped =
+          theme.colors.length === 0
+            ? null
+            : stripPaletteMark(
+                type,
+                attrs,
+                theme.colors.map((entry) => entry.token),
+                isCustomColorValue,
+                theme.allowCustomValues,
+              );
         break;
       case 'textSize':
-        stripped = stripPaletteMark(
-          type,
-          attrs,
-          theme.sizes.map((entry) => entry.token),
-          isCustomSizeValue,
-          theme.allowCustomValues,
-        );
+        stripped =
+          theme.sizes.length === 0
+            ? null
+            : stripPaletteMark(
+                type,
+                attrs,
+                theme.sizes.map((entry) => entry.token),
+                isCustomSizeValue,
+                theme.allowCustomValues,
+              );
         break;
       default:
     }
