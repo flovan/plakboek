@@ -5,6 +5,10 @@ import {
   registerTextTheme,
 } from '../../../src/field-types/text-theme-registry.js';
 import { LINK_FIELD_TYPE } from '../../../src/field-types/link.js';
+import {
+  getFieldTypeDefinition,
+  parseFieldOptions,
+} from '../../../src/field-types/registry.js';
 import { richTextFieldType } from '../../../src/field-types/rich-text.js';
 import {
   DEFAULT_TEXT_THEME,
@@ -128,6 +132,32 @@ describe('rich_text stored values', () => {
     expect(
       richTextFieldType.buildStoredValueSchema(narrow).safeParse('<p>x</p>')
         .success,
+    ).toBe(false);
+  });
+
+  it('holds a rich text inside a repeater item to shape and size only when the repeater is unchanged', () => {
+    const repeater = getFieldTypeDefinition('repeater');
+    const options = parseFieldOptions('repeater', {
+      fields: [
+        {
+          key: 'body',
+          label: 'Body',
+          fieldType: 'rich_text',
+          options: { narrow: { marks: ['bold'] } },
+        },
+      ],
+    });
+    const value = [{ body: paragraph(text('x', [{ type: 'italic' }])) }];
+    expect(repeater.buildValueSchema(options).safeParse(value).success).toBe(
+      false,
+    );
+    expect(
+      repeater.buildStoredValueSchema?.(options).safeParse(value).success,
+    ).toBe(true);
+    expect(
+      repeater
+        .buildStoredValueSchema?.(options)
+        .safeParse([{ body: '<p>x</p>' }]).success,
     ).toBe(false);
   });
 
