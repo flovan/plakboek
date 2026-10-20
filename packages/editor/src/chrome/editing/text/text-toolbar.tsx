@@ -18,6 +18,10 @@ import {
 import type { EditorStore } from '../../../client/session/store.js';
 import type { TextController } from '../../../client/text/controller.js';
 import {
+  insertItems,
+  type InsertItem,
+} from '../../../client/text/insert-items.js';
+import {
   BoldIcon,
   CheckIcon,
   ItalicIcon,
@@ -36,7 +40,15 @@ import {
   shortcutLabel,
   type ShortcutId,
 } from './shortcuts.js';
+import { InsertMenu } from './insert-menu.js';
+import { MoreMenu, type MoreEntry } from './more-menu.js';
 import { StyleMenu } from './style-menu.js';
+import {
+  collapseToolbar,
+  CONTROL_GROUPS,
+  type Collapse,
+  type ControlId,
+} from './toolbar-overflow.js';
 import {
   STYLE_LEVEL,
   toolbarChanges,
@@ -111,6 +123,30 @@ const STYLE_NAME = {
   subheading: 'text.style.subheading',
 } as const satisfies Record<StyleId, StringKey>;
 
+/** The width of each control before it has been measured: the CSS gives them fixed sizes. */
+const DEFAULT_WIDTH: Readonly<Record<ControlId, number>> = {
+  style: 112,
+  bold: 32,
+  italic: 32,
+  underline: 32,
+  strike: 32,
+  bulletList: 32,
+  orderedList: 32,
+  insert: 32,
+  done: 0,
+};
+
+const CONTROL_IDS: ReadonlySet<string> = new Set<string>([
+  ...CONTROL_GROUPS.flat(),
+  'done',
+]);
+
+type Measured = {
+  readonly widths: Readonly<Partial<Record<ControlId, number>>>;
+  /** How wide Done's text is, once it has been on show. */
+  readonly doneText: number;
+};
+
 function Divider(): ReactElement {
   return <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />;
 }
@@ -126,13 +162,51 @@ function Divider(): ReactElement {
 export function TextToolbar(props: TextToolbarProps): ReactElement | null {
   const { controller, store, label, theme, field, visible } = props;
   const root = useRef<HTMLDivElement>(null);
+  const doneText = useRef<HTMLSpanElement>(null);
   const [size, setSize] = useState({ width: 0, height: 40 });
+  const [measured, setMeasured] = useState<Measured>({
+    widths: {},
+    doneText: 0,
+  });
 
   // Every transaction gives a new editor state, which redraws the toolbar.
   const state = useSyncExternalStore(
     controller.subscribe,
     () => controller.editor()?.state ?? null,
   );
+
+  const model = toolbarModel({
+    theme,
+    isActive: (name, attributes) =>
+      controller.editor()?.isActive(name, attributes) ?? false,
+  });
+  const plusItems = model.insert ? insertItems(theme, 'plus') : [];
+
+  // What the frame leaves the bar: its width minus 16px. Controls that do not
+  // fit collapse in a fixed order (Done to its icon, then toggles into More).
+  const available = Math.max(0, visible.width - 16);
+  const present: Exclude<ControlId, 'done'>[] = [
+    ...(model.style === null ? [] : (['style'] as const)),
+    ...model.marks.map((toggle) => toggle.id),
+    ...model.lists.map((toggle) => toggle.id),
+    ...(plusItems.length === 0 ? [] : (['insert'] as const)),
+  ];
+  // Until Done's text has been on show and measured, nothing collapses: the
+  // first pass draws the bar whole so that it can be measured.
+  const collapse: Collapse =
+    measured.doneText === 0
+      ? { visible: present, inMore: [], doneIconOnly: false }
+      : collapseToolbar({
+          widths: Object.fromEntries(
+            [...present, 'done' as const].map((id) => [
+              id,
+              measured.widths[id] ?? DEFAULT_WIDTH[id],
+            ]),
+          ),
+          available,
+          doneTextWidth: measured.doneText,
+        });
+  const moved = new Set<string>(collapse.inMore);
 
   useLayoutEffect(() => {
     const element = root.current;
@@ -144,17 +218,42 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
         ? previous
         : { width, height },
     );
+    // Each control is measured while it is on the bar; one that has moved
+    // keeps the width it had. Done's text is measured while it is shown.
+    const widths: Partial<Record<ControlId, number>> = {
+      ...measured.widths,
+    };
+    let changed = false;
+    for (const control of element.querySelectorAll<HTMLElement>(
+      '[data-roving]',
+    )) {
+      const id = control.dataset['roving'] ?? '';
+      if (!CONTROL_IDS.has(id) || (id === 'done' && collapse.doneIconOnly)) {
+        continue;
+      }
+      const measuredWidth = control.offsetWidth;
+      if (measuredWidth > 0 && widths[id as ControlId] !== measuredWidth) {
+        widths[id as ControlId] = measuredWidth;
+        changed = true;
+      }
+    }
+    const textWidth = doneText.current?.offsetWidth ?? 0;
+    const text = textWidth > 0 ? textWidth : measured.doneText;
+    if (changed || text !== measured.doneText) {
+      setMeasured({ widths, doneText: text });
+    }
   });
 
-  const model = toolbarModel({
-    theme,
-    isActive: (name, attributes) =>
-      controller.editor()?.isActive(name, attributes) ?? false,
-  });
   const keys = [
     ...(model.style === null ? [] : ['style']),
-    ...model.marks.map((toggle) => toggle.id),
-    ...model.lists.map((toggle) => toggle.id),
+    ...model.marks
+      .filter((toggle) => !moved.has(toggle.id))
+      .map((toggle) => toggle.id),
+    ...model.lists
+      .filter((toggle) => !moved.has(toggle.id))
+      .map((toggle) => toggle.id),
+    ...(plusItems.length === 0 ? [] : ['insert']),
+    ...(collapse.inMore.length === 0 ? [] : ['more']),
     'done',
   ];
   const { rove, onKeyDown: roveKeys } = useRoving(keys);
@@ -220,6 +319,15 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     );
   };
 
+  const insert = (item: InsertItem): void => {
+    const editor = controller.editor();
+    if (editor === null) return;
+    item.run(editor.chain().focus()).run();
+    store.announce(
+      formatString('text.announce.inserted', { item: item.label }),
+    );
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (
       event.key === 'Escape' &&
@@ -243,7 +351,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     width: size.width,
   });
   const pinned = placement.mode === 'pinned';
-  const maxWidth = Math.max(0, visible.width - 16);
+  const maxWidth = available;
   const tooltipSide = placement.mode === 'below' ? 'top' : 'bottom';
   const platform = currentPlatform();
 
@@ -279,6 +387,23 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     );
   };
 
+  const shownMarks = model.marks.filter((toggle) => !moved.has(toggle.id));
+  const shownLists = model.lists.filter((toggle) => !moved.has(toggle.id));
+  const moreEntries: readonly MoreEntry[] = [...model.marks, ...model.lists]
+    .filter((control) => moved.has(control.id))
+    .map((control) => {
+      const { name, Icon } = TOGGLES[control.id];
+      return {
+        id: control.id,
+        name: STRINGS[name],
+        icon: <Icon />,
+        pressed: control.pressed,
+        run: () => {
+          toggle(control.id);
+        },
+      };
+    });
+
   // The groups the theme leaves non-empty, in the toolbar's order.
   const groups: { readonly key: string; readonly node: ReactElement }[] = [
     ...(model.style === null
@@ -301,20 +426,38 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
             ),
           },
         ]),
-    ...(model.marks.length === 0
+    ...(shownMarks.length === 0
       ? []
       : [
           {
             key: 'marks',
-            node: <>{model.marks.map(toggleButton)}</>,
+            node: <>{shownMarks.map(toggleButton)}</>,
           },
         ]),
-    ...(model.lists.length === 0
+    ...(shownLists.length === 0
       ? []
       : [
           {
             key: 'lists',
-            node: <>{model.lists.map(toggleButton)}</>,
+            node: <>{shownLists.map(toggleButton)}</>,
+          },
+        ]),
+    ...(plusItems.length === 0
+      ? []
+      : [
+          {
+            key: 'insert',
+            node: (
+              <InsertMenu
+                items={plusItems}
+                onChoose={insert}
+                onReturn={() => {
+                  controller.focusField();
+                }}
+                rove={rove}
+                tooltipSide={tooltipSide}
+              />
+            ),
           },
         ]),
   ];
@@ -353,6 +496,14 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
           </Fragment>
         ))}
         {groups.length === 0 ? null : <Divider />}
+        <MoreMenu
+          entries={moreEntries}
+          onReturn={() => {
+            controller.focusField();
+          }}
+          rove={rove}
+          tooltipSide={tooltipSide}
+        />
         <Tooltip label={STRINGS['text.done.tooltip']} placement={tooltipSide}>
           <button
             type="button"
@@ -367,7 +518,9 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
             {...rove('done')}
           >
             <CheckIcon />
-            {STRINGS['text.done']}
+            {collapse.doneIconOnly ? null : (
+              <span ref={doneText}>{STRINGS['text.done']}</span>
+            )}
           </button>
         </Tooltip>
       </div>

@@ -78,6 +78,25 @@ describe('toolbarModel', () => {
     ]);
   });
 
+  it('puts Insert after the lists when the theme allows a quote or a divider', () => {
+    expect(
+      toolbarModel({ theme: DEFAULT_TEXT_THEME, isActive: none }).insert,
+    ).toBe(true);
+    const onlyQuote = narrowTextTheme(DEFAULT_TEXT_THEME, {
+      nodes: ['blockquote'],
+    });
+    expect(toolbarModel({ theme: onlyQuote, isActive: none }).insert).toBe(
+      true,
+    );
+  });
+
+  it('has no Insert control when nothing is insertable', () => {
+    const theme = narrowTextTheme(DEFAULT_TEXT_THEME, {
+      nodes: ['bulletList', 'orderedList'],
+    });
+    expect(toolbarModel({ theme, isActive: none }).insert).toBe(false);
+  });
+
   it('lists only the list the theme allows', () => {
     const theme = narrowTextTheme(DEFAULT_TEXT_THEME, {
       nodes: ['orderedList'],

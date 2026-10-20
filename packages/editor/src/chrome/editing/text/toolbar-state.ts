@@ -9,21 +9,19 @@
  * Insert menu, the Custom style toggle, Link); a control is never listed
  * before it works.
  */
-import type { HeadingLevel, TextTheme } from '@plakboek/content/rich-text';
+import type { TextTheme } from '@plakboek/content/rich-text';
+import {
+  STYLE_LEVEL,
+  type HeadingStyleId,
+} from '../../../client/text/heading-styles.js';
+import { insertItems } from '../../../client/text/insert-items.js';
+
+export { STYLE_LEVEL };
 
 /** The text styles of the menu, in the order they are listed. */
 export type StyleId = 'paragraph' | 'title' | 'heading' | 'subheading';
 
-/** The heading level each style stands for: the page's own title owns h1. */
-export const STYLE_LEVEL: Readonly<
-  Record<Exclude<StyleId, 'paragraph'>, HeadingLevel>
-> = { title: 2, heading: 3, subheading: 4 };
-
-const STYLES: readonly Exclude<StyleId, 'paragraph'>[] = [
-  'title',
-  'heading',
-  'subheading',
-];
+const STYLES: readonly HeadingStyleId[] = ['title', 'heading', 'subheading'];
 
 /** The toggles of the marks and lists groups, in the order they are drawn. */
 export type ToggleId =
@@ -51,6 +49,8 @@ export type ToolbarModel = {
   readonly style: StyleControl | null;
   readonly marks: readonly ToggleControl[];
   readonly lists: readonly ToggleControl[];
+  /** Whether the Insert menu has anything to offer; absent from the bar when not. */
+  readonly insert: boolean;
 };
 
 export type ToolbarInput = {
@@ -87,6 +87,7 @@ export function toolbarModel(input: ToolbarInput): ToolbarModel {
       id,
       pressed: isActive(id),
     })),
+    insert: insertItems(theme, 'plus').length > 0,
   };
 }
 

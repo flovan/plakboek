@@ -10,7 +10,7 @@
 import type { ChainedCommands } from '@tiptap/core';
 import type { TextTheme } from '@plakboek/content/rich-text';
 import { STRINGS, type StringKey } from '../../chrome/strings.js';
-import { STYLE_LEVEL } from '../../chrome/editing/text/toolbar-state.js';
+import { STYLE_LEVEL } from './heading-styles.js';
 
 export type InsertItemId =
   | 'paragraph'
