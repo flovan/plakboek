@@ -619,6 +619,59 @@
     background: var(--pk-overlay-selected-fill);
   }
 
+  /* While a text field is active the tint goes, so the text stays readable. */
+  .pk-overlay-selected[data-field-active] {
+    background: transparent;
+  }
+
+  /*
+   * Text field decoration: a hint chip in an empty field and a dashed boundary
+   * with a halo around the active field. Decoration only; the site's own
+   * elements get nothing.
+   */
+  .pk-field-decor {
+    display: contents;
+  }
+
+  .pk-field-boundary {
+    position: absolute;
+    box-sizing: border-box;
+    pointer-events: none;
+    border: 1px dashed var(--pk-overlay-outline);
+    box-shadow: 0 0 0 2px var(--pk-overlay-halo);
+    forced-color-adjust: none;
+  }
+
+  .pk-field-chip {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid var(--pk-border);
+    border-radius: 4px;
+    background: var(--pk-surface);
+    color: var(--pk-text-muted);
+    font:
+      400 12px/16px system-ui,
+      sans-serif;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  @media (forced-colors: active) {
+    .pk-field-boundary {
+      border-color: Highlight;
+    }
+
+    .pk-field-chip {
+      border-color: CanvasText;
+      background: Canvas;
+      color: CanvasText;
+    }
+  }
+
   @media (forced-colors: active) {
     .pk-overlay-selected {
       border-width: 4px;
@@ -871,6 +924,30 @@
     background: var(--pk-surface);
     box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
     pointer-events: auto;
+  }
+
+  /* The notice for text the theme no longer allows: a popover beside the field. */
+  .pk-unsupported-notice {
+    position: absolute;
+    z-index: 1;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 320px;
+    padding: 16px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+    pointer-events: auto;
+  }
+
+  @media (forced-colors: active) {
+    .pk-unsupported-notice {
+      border-color: CanvasText;
+      background: Canvas;
+    }
   }
 
   /* The needs-input marker: attention colour, white text, a pointer control that selects its block. */

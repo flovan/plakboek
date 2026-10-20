@@ -1585,6 +1585,10 @@ function Shell(props: {
               onPick: pickEntry,
               onDragStart: startDrag,
               onLiftDrag: liftDrag,
+              onKeepUnsupported: () => {
+                controller.keepUnsupported();
+              },
+              onRemoveUnsupported: () => controller.removeUnsupported(),
               onPropertiesChange: changeProperties,
               onPropertiesBlur: blurProperties,
               onLayoutChange: changeLayout,

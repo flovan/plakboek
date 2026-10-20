@@ -101,6 +101,9 @@ export type ShellAppProps = {
     readonly onDragStart?: (id: string, origin: Point) => void;
     /** Called when Space or Enter on the drag handle lifts the item. */
     readonly onLiftDrag?: (id: string) => void;
+    /** Called by the unsupported-formatting notice's buttons. */
+    readonly onKeepUnsupported?: () => void;
+    readonly onRemoveUnsupported?: () => Promise<unknown>;
     /** Called when a Properties control changes a value: render it and queue the save. */
     readonly onPropertiesChange?: PropertiesPanelProps['onPropertiesChange'];
     /** Called when a Properties control loses focus: save the block's edit now. */
@@ -291,6 +294,8 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               onPick={editor?.onPick}
               onDragStart={editor?.onDragStart}
               onLiftDrag={editor?.onLiftDrag}
+              onKeepUnsupported={editor?.onKeepUnsupported}
+              onRemoveUnsupported={editor?.onRemoveUnsupported}
             />,
             chromeHost.root,
           )

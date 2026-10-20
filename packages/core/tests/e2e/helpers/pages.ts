@@ -6,6 +6,11 @@
  * exported.
  */
 import { randomBytes } from 'node:crypto';
+import { getTextTheme, registerTextTheme } from '@plakboek/content';
+import {
+  resolveTextTheme,
+  type TextThemeInput,
+} from '@plakboek/content/rich-text';
 import { createPage, getPage, insertBlock, publishPage } from '@plakboek/pages';
 import { sql } from 'drizzle-orm';
 import { closeAllDbs } from '../../../src/runtime/db.ts';
@@ -53,8 +58,19 @@ export async function createEditablePage(input: {
   readonly title?: string;
   readonly blocks: readonly FactoryBlock[];
   readonly publish?: boolean;
+  /**
+   * A wider text theme to hold the blocks' text to while the page is made, in
+   * this worker process only, so a spec can store a document the e2e host's
+   * own theme (which the running site enforces) no longer allows. The host
+   * theme is restored before this returns.
+   */
+  readonly textTheme?: TextThemeInput;
 }): Promise<EditablePage> {
   const { default: config } = await import('../../e2e-host/plakboek.config.ts');
+  const hostTheme = getTextTheme();
+  if (input.textTheme !== undefined) {
+    registerTextTheme(resolveTextTheme(input.textTheme));
+  }
   const runtime = createRuntime({ config }, readRuntimeEnv(process.env));
   try {
     const rows = await runtime.db.db.execute<{ id: string; role: string }>(
@@ -113,6 +129,7 @@ export async function createEditablePage(input: {
     }
     return { pageId: page.id, slug, path: `/${slug}` };
   } finally {
+    registerTextTheme(hostTheme);
     await closeAllDbs();
   }
 }

@@ -166,3 +166,8 @@ html > *:not(head):not(body) {
   padding-left: 18px;
   border-left: 4px solid #999;
 }
+
+/* A prose field with no text still has a box to click and to draw a hint in. */
+.prose-flow {
+  min-height: 40px;
+}

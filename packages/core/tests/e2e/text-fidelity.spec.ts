@@ -8,9 +8,11 @@
  */
 import { expect, test, type Frame, type Locator } from '@playwright/test';
 import {
+  chrome,
   framedSite,
   HOST,
   openEditor,
+  selectedId,
   typeInField,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -328,5 +330,179 @@ test.describe('pasting keeps only what the theme allows', () => {
     await paste(frame, null, 'just some words');
     await expect(field.locator('p')).toContainText('just some words');
     await expect(page.locator(`${HOST} [data-toast-message]`)).toHaveCount(0);
+  });
+});
+
+/** What the e2e host's theme declares, plus one size only a wider theme knows. */
+const WIDER_THEME = {
+  colors: [
+    { label: 'Accent', token: 'accent' },
+    { label: 'Muted', token: 'text-muted' },
+  ],
+  sizes: [
+    { label: 'Large', token: 'xl' },
+    { label: 'Huge', token: 'huge' },
+  ],
+  align: true,
+  ctaVariants: [
+    { label: 'Primary', value: 'primary' },
+    { label: 'Secondary', value: 'secondary' },
+  ],
+};
+
+const OUT_OF_THEME_BODY = {
+  type: 'doc',
+  content: [
+    {
+      type: 'paragraph',
+      content: [
+        text('Kept words '),
+        {
+          type: 'text',
+          text: 'in a size the theme dropped',
+          marks: [{ type: 'textSize', attrs: { token: 'huge' } }],
+        },
+      ],
+    },
+  ],
+};
+
+async function openOutOfTheme(
+  page: Parameters<typeof openEditor>[0],
+): Promise<{ frame: Frame; field: Locator; pageId: string }> {
+  const created = await createEditablePage({
+    textTheme: WIDER_THEME,
+    blocks: [section({ type: 'prose', props: { body: OUT_OF_THEME_BODY } })],
+  });
+  await openEditor(page, created.path);
+  const frame = await framedSite(page);
+  return {
+    frame,
+    field: frame.locator('.prose-flow').first(),
+    pageId: created.pageId,
+  };
+}
+
+test.describe('stored text the theme no longer allows is kept until the editor chooses', () => {
+  const NOTICE = '[data-unsupported-notice]';
+
+  test('a click shows the notice instead of a caret, and Keep as is changes nothing', async ({
+    page,
+  }) => {
+    const { field, pageId } = await openOutOfTheme(page);
+    const before = await readBlockProps(pageId, 'prose');
+
+    await field.locator('p').click();
+    const notice = chrome(page).locator(NOTICE);
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText(
+      'This text has formatting the theme no longer allows',
+    );
+    // the field was not mounted: no editor, no caret, nothing that can strip it
+    await expect(field).not.toHaveAttribute('contenteditable', 'true');
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+    // the block is selected and keeps its toolbar
+    expect(await selectedId(page)).not.toBeNull();
+    await expect(
+      chrome(page).getByRole('button', { name: 'Duplicate' }),
+    ).toBeVisible();
+
+    await notice.getByRole('button', { name: 'Keep as is' }).click();
+    await expect(notice).toHaveCount(0);
+    await expect(field).not.toHaveAttribute('contenteditable', 'true');
+    // typing goes nowhere and nothing is queued
+    await page.keyboard.type('zzz');
+    await expect(field.locator('p')).toContainText('Kept words');
+    await page.waitForTimeout(1500);
+    expect(await readBlockProps(pageId, 'prose')).toEqual(before);
+  });
+
+  test('Remove unsupported formatting keeps every word, saves, and the field becomes editable', async ({
+    page,
+  }) => {
+    const { field, pageId } = await openOutOfTheme(page);
+    await field.locator('p').click();
+    const notice = chrome(page).locator(NOTICE);
+    await expect(notice).toBeVisible();
+
+    await notice
+      .getByRole('button', { name: 'Remove unsupported formatting' })
+      .click();
+    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+    await expect(notice).toHaveCount(0);
+    await expect(field).toHaveAttribute('contenteditable', 'true');
+
+    const stored = JSON.stringify(
+      (await readBlockProps(pageId, 'prose'))['body'],
+    );
+    expect(stored).toContain('Kept words ');
+    expect(stored).toContain('in a size the theme dropped');
+    expect(stored).not.toContain('textSize');
+
+    // the caret is at the end of the field
+    await page.keyboard.type('!');
+    await expect(field.locator('p')).toHaveText(
+      'Kept words in a size the theme dropped!',
+    );
+  });
+
+  test('a failed remove-formatting save keeps the notice and shows the save error row', async ({
+    page,
+  }) => {
+    const { field } = await openOutOfTheme(page);
+    await field.locator('p').click();
+    const notice = chrome(page).locator(NOTICE);
+    await expect(notice).toBeVisible();
+
+    await page.route('**/cms/api/pages/*/edit', (route) => route.abort());
+    await notice
+      .getByRole('button', { name: 'Remove unsupported formatting' })
+      .click();
+    await expect(page.getByText('Could not save your changes')).toBeVisible();
+    await expect(notice).toBeVisible();
+    await expect(field).not.toHaveAttribute('contenteditable', 'true');
+  });
+});
+
+test.describe('an empty field invites typing', () => {
+  const CHIP = '[data-field-chip]';
+
+  test('the chip shows while the block is selected, is not saved, and leaves with the first character', async ({
+    page,
+  }) => {
+    const { field, pageId } = await openProse(page, { type: 'doc' });
+    await expect(chrome(page).locator(CHIP)).toHaveCount(0);
+
+    await field.click({ position: { x: 4, y: 4 } });
+    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+    const chip = chrome(page).locator(CHIP);
+    await expect(chip).toHaveText('Start typing, or press / for more');
+
+    await page.keyboard.type('Hi');
+    await expect(chip).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect
+      .poll(async () =>
+        JSON.stringify((await readBlockProps(pageId, 'prose'))['body']),
+      )
+      .toContain('Hi');
+    expect(
+      JSON.stringify((await readBlockProps(pageId, 'prose'))['body']),
+    ).not.toContain('Start typing');
+  });
+
+  test('the selection tint is dropped while a field is active', async ({
+    page,
+  }) => {
+    const { field } = await openProse(page);
+    await expect(chrome(page).locator('[data-field-boundary]')).toHaveCount(0);
+    await typeInField(page, field.locator('.t-p').first(), '');
+    await expect(
+      chrome(page).locator('[data-overlay-selected]'),
+    ).toHaveAttribute('data-field-active', '');
+    await page.keyboard.press('Escape');
+    await expect(
+      chrome(page).locator('[data-overlay-selected]'),
+    ).not.toHaveAttribute('data-field-active', '');
   });
 });

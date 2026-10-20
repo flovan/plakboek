@@ -18,17 +18,20 @@ import { Selection } from '@tiptap/pm/state';
 import {
   isEmptyRichTextDocument,
   isRichTextDocumentInTheme,
+  stripOutOfTheme,
 } from '@plakboek/content/rich-text';
+import { EDIT_ATTRIBUTE } from '@plakboek/render';
 import { DEFAULT_TEXT_RENDERERS, type TextRenderers } from '@plakboek/render';
 import { formatString } from '../../chrome/strings.js';
 import type { EditorStore } from '../session/store.js';
 import { textOf } from '../session/selection-announcement.js';
 import { labelOf } from '../session/tree-model.js';
+import { hasPending } from '../session/save-queue.js';
 import { beginInlineEdit, endInlineEdit } from '../frame/patch.js';
 import { buildTextExtensions } from './extensions.js';
 import { cleanPastedHtml, pasteLostFormatting } from './paste.js';
 import { createRendererShells, type RendererShells } from './shells.js';
-import type { FieldTarget } from './field-target.js';
+import { findEditableField, type FieldTarget } from './field-target.js';
 import {
   cleanChildren,
   restoreField,
@@ -79,6 +82,19 @@ export type TextController = {
   /** The field being edited, or null. */
   active(): FieldTarget | null;
   /**
+   * "Keep as is" on the unsupported-formatting notice: closes it and leaves
+   * the stored text untouched and the field read-only.
+   */
+  keepUnsupported(): void;
+  /**
+   * "Remove unsupported formatting": rewrites the field with everything the
+   * theme no longer allows stripped (every word kept) as a normal write, and,
+   * once it is saved, edits the field with the caret at its end. When the save
+   * fails the notice stays and the save error row shows. Resolves with whether
+   * the field is now being edited.
+   */
+  removeUnsupported(): Promise<boolean>;
+  /**
    * Whether the event happened inside the active field, so the browser keeps
    * it (caret, word selection). Also remembers where a press began.
    */
@@ -127,6 +143,8 @@ export function createTextController(
   const renderers = options.renderers ?? DEFAULT_TEXT_RENDERERS;
   let current: Session | null = null;
   let pressInside = false;
+  /** The field the unsupported-formatting notice is about. */
+  let refused: FieldTarget | null = null;
 
   function blockLabel(id: string): string {
     const { model, session } = store.getState();
@@ -183,7 +201,8 @@ export function createTextController(
     const present = stored !== undefined && stored !== null;
     if (present && !isRichTextDocumentInTheme(stored, theme)) {
       // Formatting the theme no longer allows: the field stays read-only and
-      // its words are kept as they are.
+      // its words are kept as they are until the editor chooses otherwise.
+      refused = target;
       store.setTextField({
         blockId: target.blockId,
         key: target.key,
@@ -285,6 +304,87 @@ export function createTextController(
     );
   }
 
+  /** Resolves once everything queued is sent, or sending has stopped. */
+  function settled(): Promise<'saved' | 'failed'> {
+    const outcome = (): 'saved' | 'failed' | null => {
+      const { queue } = store.getState();
+      if (queue.status === 'failed' || queue.status === 'paused') {
+        return 'failed';
+      }
+      return hasPending(queue) ? null : 'saved';
+    };
+    const now = outcome();
+    if (now !== null) return Promise.resolve(now);
+    return new Promise((resolve) => {
+      const stop = store.subscribe(() => {
+        const next = outcome();
+        if (next === null) return;
+        stop();
+        resolve(next);
+      });
+    });
+  }
+
+  function keepUnsupported(): void {
+    refused = null;
+    const field = store.getState().textField;
+    if (field !== null && field.unsupported) store.setTextField(null);
+  }
+
+  async function removeUnsupported(): Promise<boolean> {
+    const target = refused;
+    const field = store.getState().textField;
+    if (target === null || field === null || !field.unsupported) return false;
+    const theme = target.property.textTheme;
+    const stored = store.getState().model?.get(target.blockId)?.props[
+      target.key
+    ];
+    if (theme === undefined) return false;
+    const stripped = stripOutOfTheme(stored, theme);
+    if (stripped === null) return false;
+    const frameDocument = target.element.ownerDocument;
+    // A normal write: previewed, queued, undoable by the session undo.
+    const response = await changeProperties(
+      target.blockId,
+      {
+        [target.key]: isEmptyRichTextDocument(stripped) ? undefined : stripped,
+      },
+      target.key,
+      true,
+    );
+    if (response === null || (response as { ok?: unknown }).ok !== true) {
+      return false;
+    }
+    ready(target.blockId);
+    if ((await settled()) !== 'saved') return false;
+    const now = store.getState();
+    // The block was patched by the write: the field is looked up again.
+    const element = Array.from(
+      frameDocument.querySelectorAll(`[${EDIT_ATTRIBUTE.block}]`),
+    )
+      .find(
+        (block) => block.getAttribute(EDIT_ATTRIBUTE.block) === target.blockId,
+      )
+      ?.querySelector(`[${EDIT_ATTRIBUTE.field}="${target.key}"]`);
+    if (
+      element === undefined ||
+      element === null ||
+      now.model === null ||
+      now.session === null ||
+      now.selection.selectedId !== target.blockId
+    ) {
+      refused = null;
+      store.setTextField(null);
+      return false;
+    }
+    const next = findEditableField(element, now.model, now.session.catalogue);
+    refused = null;
+    store.setTextField(null);
+    if (next === null) return false;
+    enter(next);
+    return current !== null;
+  }
+
   // The session follows the store: another selection, a mode that is not Edit,
   // lost editing, a picker, a delete confirmation or a drag all end it.
   const unsubscribe = store.subscribe(() => {
@@ -311,6 +411,8 @@ export function createTextController(
     enter,
     exit,
     active: () => current?.target ?? null,
+    keepUnsupported,
+    removeUnsupported,
     ownsEvent(event) {
       const inside =
         current !== null && containsNode(current.target.element, event.target);

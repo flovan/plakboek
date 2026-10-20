@@ -9,6 +9,8 @@ import {
 } from 'react';
 import type { CatalogueEntry } from '../../api-types.js';
 import { EmptyPrompts } from '../../chrome/editing/empty-prompts.js';
+import { FieldDecor } from '../../chrome/editing/text/field-decor.js';
+import { UnsupportedNotice } from '../../chrome/editing/text/unsupported-notice.js';
 import { InsertPoints } from '../../chrome/editing/insert-points.js';
 import { NeedsInputMarkers } from '../../chrome/editing/needs-input.js';
 import { Picker } from '../../chrome/editing/picker.js';
@@ -28,6 +30,11 @@ import {
   type PickerOpener,
 } from '../session/store.js';
 import { createBoxTracker, type BoxesState } from './boxes.js';
+import {
+  createFieldTracker,
+  type FieldBox,
+  type FieldsWanted,
+} from './field-boxes.js';
 import { DragDecoration } from './drag-layer.js';
 import {
   chipPlacement,
@@ -91,6 +98,28 @@ function wantedIds(state: EditorState): readonly string[] {
     if (node.needsInput.length > 0) ids.add(node.id);
   }
   return [...ids];
+}
+
+/**
+ * The rich text fields of the selected block, so their chip, boundary and
+ * notice can be drawn; null when no block with such a field is selected.
+ */
+function wantedFields(state: EditorState): FieldsWanted | null {
+  const { model, session, selection } = state;
+  if (model === null || session === null || selection.selectedId === null) {
+    return null;
+  }
+  const node = model.get(selection.selectedId);
+  if (node === undefined) return null;
+  const keys =
+    session.catalogue
+      .find((entry) => entry.key === node.type)
+      ?.properties.filter(
+        (property) =>
+          property.fieldType === 'rich_text' && property.constraint === 'none',
+      )
+      .map((property) => property.key) ?? [];
+  return keys.length === 0 ? null : { blockId: node.id, keys };
 }
 
 /** The frame the layer sits in: the one passed, else the one its document is shown in. */
@@ -183,6 +212,10 @@ export function OverlayLayer(props: {
   readonly onDragStart?: (id: string, origin: Point) => void;
   /** Called when Space or Enter on the drag handle lifts the item. */
   readonly onLiftDrag?: (id: string) => void;
+  /** Called by the unsupported-formatting notice's "Keep as is". */
+  readonly onKeepUnsupported?: () => void;
+  /** Called by the notice's "Remove unsupported formatting". */
+  readonly onRemoveUnsupported?: () => Promise<unknown>;
 }): ReactElement {
   const {
     frame,
@@ -196,6 +229,8 @@ export function OverlayLayer(props: {
     onPick,
     onDragStart,
     onLiftDrag,
+    onKeepUnsupported,
+    onRemoveUnsupported,
   } = props;
   const layer = useRef<HTMLDivElement>(null);
   const [frameElement, setFrameElement] = useState<HTMLIFrameElement | null>(
@@ -323,6 +358,47 @@ export function OverlayLayer(props: {
     };
   }, [frame, store, active]);
 
+  // The rich text fields of the selected block, for the chip, the boundary and
+  // the notice.
+  const [fields, setFields] = useState<readonly FieldBox[]>([]);
+  const textField = useEditorStore(
+    store ?? NO_STORE,
+    (current) => current.textField,
+  );
+  useEffect(() => {
+    if (!active || store === undefined) {
+      setFields([]);
+      return undefined;
+    }
+    const target = frameFor(layer.current, frame);
+    if (target === null) return undefined;
+    const tracker = createFieldTracker(target, {
+      read: () => wantedFields(store.getState()),
+      onChange: setFields,
+    });
+    let previous = store.getState();
+    const unsubscribe = store.subscribe(() => {
+      const next = store.getState();
+      if (
+        next.selection !== previous.selection ||
+        next.model !== previous.model ||
+        next.textField !== previous.textField
+      ) {
+        tracker.refresh();
+      }
+      previous = next;
+    });
+    return () => {
+      unsubscribe();
+      tracker.dispose();
+    };
+  }, [frame, store, active]);
+  const fieldActive = textField !== null && !textField.unsupported;
+  const unsupportedBox =
+    textField !== null && textField.unsupported
+      ? (fields.find((item) => item.key === textField.key)?.box ?? null)
+      : null;
+
   let drawn: {
     readonly outline: Box;
     readonly section: Box | null;
@@ -438,9 +514,14 @@ export function OverlayLayer(props: {
               <div
                 className="pk-overlay-selected"
                 data-overlay-selected={selectedId ?? ''}
+                {...(fieldActive ? { 'data-field-active': '' } : {})}
                 style={boxStyle(selection.selected)}
               />
             )}
+            <FieldDecor
+              fields={fields}
+              activeKey={fieldActive ? (textField?.key ?? null) : null}
+            />
             {selection === null ||
             selection.selected === null ||
             flash === null ||
@@ -542,6 +623,17 @@ export function OverlayLayer(props: {
                   onOpen={onOpenPicker}
                 />
               </>
+            )}
+            {unsupportedBox === null ||
+            onKeepUnsupported === undefined ||
+            onRemoveUnsupported === undefined ? null : (
+              <UnsupportedNotice
+                key={textField?.blockId}
+                anchor={unsupportedBox}
+                visible={selection?.visible ?? visible}
+                onKeep={onKeepUnsupported}
+                onRemove={onRemoveUnsupported}
+              />
             )}
             {toolbarItem === null ? null : (
               <Toolbar
