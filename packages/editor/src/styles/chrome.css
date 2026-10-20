@@ -1065,6 +1065,13 @@
     .pk-overlay-flash {
       display: none;
     }
+
+    /* A pressed toggle of the text toolbar reads as selected, not by colour alone. */
+    .pk-toolbar [aria-pressed='true'] {
+      background: Highlight;
+      color: HighlightText;
+      forced-color-adjust: none;
+    }
   }
 
   /*

@@ -4,6 +4,7 @@ import {
   accordionItem,
   accordionList,
   badge,
+  card,
   carousel,
   heading,
   note,
@@ -56,6 +57,7 @@ export default defineConfig({
     slides,
     slide,
     note,
+    card,
   ],
   // The constraints the Properties panel has to honour: one property is not
   // shown, one has a fixed value, one offers only two of its three choices.

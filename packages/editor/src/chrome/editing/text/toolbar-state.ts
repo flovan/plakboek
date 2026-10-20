@@ -9,18 +9,48 @@
  * Insert menu, the Custom style toggle, Link); a control is never listed
  * before it works.
  */
-import type { TextTheme } from '@plakboek/content/rich-text';
+import type { HeadingLevel, TextTheme } from '@plakboek/content/rich-text';
 
-/** The toggles of the marks group, in the order they are drawn. */
-export type ToggleId = 'bold';
+/** The text styles of the menu, in the order they are listed. */
+export type StyleId = 'paragraph' | 'title' | 'heading' | 'subheading';
+
+/** The heading level each style stands for: the page's own title owns h1. */
+export const STYLE_LEVEL: Readonly<
+  Record<Exclude<StyleId, 'paragraph'>, HeadingLevel>
+> = { title: 2, heading: 3, subheading: 4 };
+
+const STYLES: readonly Exclude<StyleId, 'paragraph'>[] = [
+  'title',
+  'heading',
+  'subheading',
+];
+
+/** The toggles of the marks and lists groups, in the order they are drawn. */
+export type ToggleId =
+  | 'bold'
+  | 'italic'
+  | 'underline'
+  | 'strike'
+  | 'bulletList'
+  | 'orderedList';
 
 export type ToggleControl = {
   readonly id: ToggleId;
   readonly pressed: boolean;
 };
 
+export type StyleControl = {
+  /** The style at the selection, as the button shows it. */
+  readonly current: StyleId;
+  /** The rows of the menu: Paragraph, then each heading style the theme allows. */
+  readonly options: readonly StyleId[];
+};
+
 export type ToolbarModel = {
+  /** Absent when the theme allows paragraphs only. */
+  readonly style: StyleControl | null;
   readonly marks: readonly ToggleControl[];
+  readonly lists: readonly ToggleControl[];
 };
 
 export type ToolbarInput = {
@@ -32,14 +62,67 @@ export type ToolbarInput = {
   ) => boolean;
 };
 
-const MARKS: readonly ToggleId[] = ['bold'];
+const MARKS = ['bold', 'italic', 'underline', 'strike'] as const;
+const LISTS = ['bulletList', 'orderedList'] as const;
 
 export function toolbarModel(input: ToolbarInput): ToolbarModel {
   const { theme, isActive } = input;
+  const allowed = STYLES.filter((style) =>
+    theme.headingLevels.includes(STYLE_LEVEL[style]),
+  );
+  const current: StyleId =
+    allowed.find((style) =>
+      isActive('heading', { level: STYLE_LEVEL[style] }),
+    ) ?? 'paragraph';
   return {
+    style:
+      allowed.length === 0
+        ? null
+        : { current, options: ['paragraph', ...allowed] },
     marks: MARKS.filter((id) => theme.marks.includes(id)).map((id) => ({
       id,
       pressed: isActive(id),
     })),
+    lists: LISTS.filter((id) => theme.nodes.includes(id)).map((id) => ({
+      id,
+      pressed: isActive(id),
+    })),
   };
+}
+
+/** What changed between two models of one field, in the order it is announced. */
+export type ToolbarChange =
+  | { readonly kind: 'toggle'; readonly id: ToggleId; readonly on: boolean }
+  | { readonly kind: 'style'; readonly style: StyleId };
+
+/**
+ * The toggles that went on or off and the style that changed, so a screen
+ * reader hears "Bold on." or "Heading." whether the change came from a button,
+ * a shortcut or anything else that edits the field.
+ */
+export function toolbarChanges(
+  before: ToolbarModel,
+  after: ToolbarModel,
+): readonly ToolbarChange[] {
+  const changes: ToolbarChange[] = [];
+  if (
+    before.style !== null &&
+    after.style !== null &&
+    before.style.current !== after.style.current
+  ) {
+    changes.push({ kind: 'style', style: after.style.current });
+  }
+  const was = new Map(
+    [...before.marks, ...before.lists].map((toggle) => [
+      toggle.id,
+      toggle.pressed,
+    ]),
+  );
+  for (const toggle of [...after.marks, ...after.lists]) {
+    const previous = was.get(toggle.id);
+    if (previous !== undefined && previous !== toggle.pressed) {
+      changes.push({ kind: 'toggle', id: toggle.id, on: toggle.pressed });
+    }
+  }
+  return changes;
 }

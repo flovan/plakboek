@@ -182,6 +182,24 @@ const Prose: BlockComponent<{ body?: unknown }> = ({ props, edit }) => (
   </div>
 );
 
+/**
+ * A block with a short title and a rich text caption the host narrows to bold,
+ * italic and link, so a spec can prove the toolbar offers exactly that.
+ */
+const Card: BlockComponent<{ title: string; caption?: unknown }> = ({
+  props,
+  edit,
+}) => (
+  <div {...edit} className="card">
+    <h3 {...edit.field('title')} className="card-title">
+      {props.title}
+    </h3>
+    <div {...edit.field('caption')} className="card-caption">
+      <RichText value={props.caption} />
+    </div>
+  </div>
+);
+
 /** Renders the same whatever its required note says, so a spec can leave it empty. */
 const Note: BlockComponent<{ note: string }> = ({ edit }) => (
   <div {...edit} className="note" aria-hidden="true" style={{ height: 24 }} />
@@ -327,6 +345,36 @@ export const prose = defineBlock({
     body: { fieldType: 'rich_text', label: 'Body', options: {} },
   },
   component: Prose,
+});
+
+export const card = defineBlock({
+  key: 'card',
+  editor: { label: 'Card' },
+  schemaVersion: 1,
+  properties: {
+    title: {
+      fieldType: 'short_text',
+      label: 'Title',
+      required: true,
+      options: { maxLength: 120 },
+    },
+    // The narrowing example: exactly bold, italic and link.
+    caption: {
+      fieldType: 'rich_text',
+      label: 'Caption',
+      options: {
+        narrow: {
+          marks: ['bold', 'italic', 'link'],
+          nodes: [],
+          headingLevels: [],
+          colors: false,
+          sizes: false,
+          align: false,
+        },
+      },
+    },
+  },
+  component: Card,
 });
 
 export const accordion = defineBlock({

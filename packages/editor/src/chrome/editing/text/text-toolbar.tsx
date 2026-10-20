@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -8,6 +9,7 @@ import {
   type ReactElement,
 } from 'react';
 import type { Editor } from '@tiptap/core';
+import type { EditorState } from '@tiptap/pm/state';
 import type { TextTheme } from '@plakboek/content/rich-text';
 import {
   fieldBarPlacement,
@@ -15,12 +17,35 @@ import {
 } from '../../../client/overlay/geometry.js';
 import type { EditorStore } from '../../../client/session/store.js';
 import type { TextController } from '../../../client/text/controller.js';
-import { BoldIcon, CheckIcon } from '../../icons.js';
-import { formatString, STRINGS } from '../../strings.js';
+import {
+  BoldIcon,
+  CheckIcon,
+  ItalicIcon,
+  ListBulletIcon,
+  ListNumberedIcon,
+  StrikethroughIcon,
+  UnderlineIcon,
+} from '../../icons.js';
+import { formatString, STRINGS, type StringKey } from '../../strings.js';
 import { Tooltip } from '../../tooltip.js';
 import { useRoving } from './crumbs.js';
 import { boxStyle, DONE_BUTTON } from './field-bar.js';
-import { toolbarModel, type ToggleId } from './toolbar-state.js';
+import {
+  ariaShortcut,
+  currentPlatform,
+  shortcutLabel,
+  type ShortcutId,
+} from './shortcuts.js';
+import { StyleMenu } from './style-menu.js';
+import {
+  STYLE_LEVEL,
+  toolbarChanges,
+  toolbarModel,
+  type StyleId,
+  type ToggleControl,
+  type ToolbarModel,
+  type ToggleId,
+} from './toolbar-state.js';
 
 export type TextToolbarProps = {
   readonly controller: TextController;
@@ -45,7 +70,50 @@ const TOGGLES = {
     Icon: BoldIcon,
     run: (editor: Editor) => editor.chain().toggleBold().run(),
   },
-} as const;
+  italic: {
+    name: 'text.mark.italic',
+    Icon: ItalicIcon,
+    run: (editor: Editor) => editor.chain().toggleItalic().run(),
+  },
+  underline: {
+    name: 'text.mark.underline',
+    Icon: UnderlineIcon,
+    run: (editor: Editor) => editor.chain().toggleUnderline().run(),
+  },
+  strike: {
+    name: 'text.mark.strike',
+    Icon: StrikethroughIcon,
+    run: (editor: Editor) => editor.chain().toggleStrike().run(),
+  },
+  bulletList: {
+    name: 'text.list.bullet',
+    Icon: ListBulletIcon,
+    run: (editor: Editor) => editor.chain().toggleBulletList().run(),
+  },
+  orderedList: {
+    name: 'text.list.ordered',
+    Icon: ListNumberedIcon,
+    run: (editor: Editor) => editor.chain().toggleOrderedList().run(),
+  },
+} as const satisfies Record<
+  ToggleId,
+  {
+    name: StringKey;
+    Icon: typeof BoldIcon;
+    run: (editor: Editor) => boolean;
+  }
+>;
+
+const STYLE_NAME = {
+  paragraph: 'text.style.paragraph',
+  title: 'text.style.title',
+  heading: 'text.style.heading',
+  subheading: 'text.style.subheading',
+} as const satisfies Record<StyleId, StringKey>;
+
+function Divider(): ReactElement {
+  return <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />;
+}
 
 /**
  * The floating toolbar of the rich text field being edited. It replaces the
@@ -83,7 +151,12 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     isActive: (name, attributes) =>
       controller.editor()?.isActive(name, attributes) ?? false,
   });
-  const keys = [...model.marks.map((toggle) => toggle.id), 'done'];
+  const keys = [
+    ...(model.style === null ? [] : ['style']),
+    ...model.marks.map((toggle) => toggle.id),
+    ...model.lists.map((toggle) => toggle.id),
+    'done',
+  ];
   const { rove, onKeyDown: roveKeys } = useRoving(keys);
 
   // Alt+F10 in the field lands on the toolbar's current control.
@@ -98,18 +171,52 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     };
   }, [controller]);
 
+  // What a change did is announced from the editor's state, so a button, a
+  // shortcut and anything else that edits the field are heard alike. A caret
+  // moving into formatted text is not a change: only an edit, or a mark
+  // toggled at a caret, is.
+  const last = useRef<{
+    readonly state: EditorState;
+    readonly model: ToolbarModel;
+  } | null>(null);
+  useEffect(() => {
+    const before = last.current;
+    last.current = state === null ? null : { state, model };
+    if (before === null || state === null) return;
+    const edited =
+      before.state.doc !== state.doc ||
+      (before.state.selection.eq(state.selection) &&
+        before.state.storedMarks !== state.storedMarks);
+    if (!edited) return;
+    const heard = toolbarChanges(before.model, model).map((change) =>
+      change.kind === 'style'
+        ? formatString('text.announce.style', {
+            style: STRINGS[STYLE_NAME[change.style]],
+          })
+        : formatString(change.on ? 'text.announce.on' : 'text.announce.off', {
+            name: STRINGS[TOGGLES[change.id].name],
+          }),
+    );
+    if (heard.length > 0) store.announce(heard.join(' '));
+  });
+
   if (state === null) return null;
 
   const toggle = (id: ToggleId): void => {
     const editor = controller.editor();
     if (editor === null) return;
-    const control = TOGGLES[id];
-    control.run(editor);
+    TOGGLES[id].run(editor);
+  };
+
+  const chooseStyle = (style: StyleId): void => {
+    const editor = controller.editor();
+    if (editor === null) return;
+    if (style === 'paragraph') editor.chain().setParagraph().run();
+    else editor.chain().setHeading({ level: STYLE_LEVEL[style] }).run();
     store.announce(
-      formatString(
-        editor.isActive(id) ? 'text.announce.on' : 'text.announce.off',
-        { name: STRINGS[control.name] },
-      ),
+      formatString('text.announce.style', {
+        style: STRINGS[STYLE_NAME[style]],
+      }),
     );
   };
 
@@ -138,6 +245,79 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
   const pinned = placement.mode === 'pinned';
   const maxWidth = Math.max(0, visible.width - 16);
   const tooltipSide = placement.mode === 'below' ? 'top' : 'bottom';
+  const platform = currentPlatform();
+
+  const toggleButton = (control: ToggleControl): ReactElement => {
+    const { name, Icon } = TOGGLES[control.id];
+    const shortcut: ShortcutId = control.id;
+    return (
+      <Tooltip
+        key={control.id}
+        label={formatString('text.withShortcut', {
+          name: STRINGS[name],
+          shortcut: shortcutLabel(shortcut, platform),
+        })}
+        placement={tooltipSide}
+      >
+        <button
+          type="button"
+          className={TOGGLE}
+          aria-label={STRINGS[name]}
+          aria-pressed={control.pressed}
+          aria-keyshortcuts={ariaShortcut(shortcut, platform)}
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
+          onClick={() => {
+            toggle(control.id);
+          }}
+          {...rove(control.id)}
+        >
+          <Icon />
+        </button>
+      </Tooltip>
+    );
+  };
+
+  // The groups the theme leaves non-empty, in the toolbar's order.
+  const groups: { readonly key: string; readonly node: ReactElement }[] = [
+    ...(model.style === null
+      ? []
+      : [
+          {
+            key: 'style',
+            node: (
+              <StyleMenu
+                current={model.style.current}
+                options={model.style.options}
+                onChoose={chooseStyle}
+                onReturn={() => {
+                  controller.focusField();
+                }}
+                rove={rove}
+                platform={platform}
+                tooltipSide={tooltipSide}
+              />
+            ),
+          },
+        ]),
+    ...(model.marks.length === 0
+      ? []
+      : [
+          {
+            key: 'marks',
+            node: <>{model.marks.map(toggleButton)}</>,
+          },
+        ]),
+    ...(model.lists.length === 0
+      ? []
+      : [
+          {
+            key: 'lists',
+            node: <>{model.lists.map(toggleButton)}</>,
+          },
+        ]),
+  ];
   return (
     // The wrapper is always there so the bar keeps its place in the tree when
     // it changes side. Pinned, it spans the field and the bar sticks inside it.
@@ -166,32 +346,13 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
             : { left: placement.left, top: placement.top, maxWidth }
         }
       >
-        {model.marks.map((control) => {
-          const { name, Icon } = TOGGLES[control.id];
-          return (
-            <Tooltip
-              key={control.id}
-              label={STRINGS[name]}
-              placement={tooltipSide}
-            >
-              <button
-                type="button"
-                className={TOGGLE}
-                aria-label={STRINGS[name]}
-                aria-pressed={control.pressed}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                }}
-                onClick={() => {
-                  toggle(control.id);
-                }}
-                {...rove(control.id)}
-              >
-                <Icon />
-              </button>
-            </Tooltip>
-          );
-        })}
+        {groups.map((group, at) => (
+          <Fragment key={group.key}>
+            {at === 0 ? null : <Divider />}
+            {group.node}
+          </Fragment>
+        ))}
+        {groups.length === 0 ? null : <Divider />}
         <Tooltip label={STRINGS['text.done.tooltip']} placement={tooltipSide}>
           <button
             type="button"
