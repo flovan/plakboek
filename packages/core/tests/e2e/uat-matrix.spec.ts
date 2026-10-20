@@ -350,10 +350,11 @@ test.describe('the site’s own controls', () => {
       'true',
     );
     await drillOnto(page, frame.getByText('Second entry text'));
-    await expect(page.locator(LIVE_REGION)).toContainText('Selected Text');
+    // selecting text leaves its field again, which announces the block
+    await expect(page.locator(LIVE_REGION)).toContainText('Text selected');
     await clearSelection(page);
     await drillOnto(page, frame.getByText('Second tab text'));
-    await expect(page.locator(LIVE_REGION)).toContainText('Selected Text');
+    await expect(page.locator(LIVE_REGION)).toContainText('Text selected');
   });
 });
 

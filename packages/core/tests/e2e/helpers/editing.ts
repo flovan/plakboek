@@ -174,6 +174,12 @@ export async function selectContainer(
   const id = await target.getAttribute('data-pk-block');
   if (id === null) throw new Error('The target is not a block');
   await target.click();
+  // A click on editable text also starts a field session; leaving it first
+  // keeps the first Escape from being spent on the field.
+  if ((await page.locator(HOST).getAttribute('data-text-field')) !== null) {
+    await page.keyboard.press('Escape');
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+  }
   for (let climbs = 0; climbs < 6; climbs += 1) {
     await expect.poll(() => selectedId(page)).not.toBeNull();
     const current = await selectedId(page);

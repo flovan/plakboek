@@ -75,8 +75,10 @@ test.describe('opening a page for editing', () => {
     await frame.getByRole('heading', { name: 'Beta heading' }).click();
 
     await expectSelectedOver(page, frame, HEADING_B);
+    // the click on a heading's text also starts typing in it, and the
+    // announcement says so
     await expect(page.locator(LIVE_REGION)).toHaveText(
-      'Selected Heading, 1 of 4 in Column 1.',
+      'Editing Text. Press Escape to stop editing.',
     );
   });
 });
@@ -154,7 +156,8 @@ test.describe('scoped selection', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    const headingA = frame.getByRole('heading', { name: 'Alpha heading' });
+    // the heading is a text box while it is typed in, so it is found by place
+    const headingA = frame.locator(HEADING_A);
     await headingA.click();
     await expectSelectedOver(page, frame, HEADING_A);
 
@@ -257,7 +260,7 @@ test.describe('Edit and Interact', () => {
     await openEditor(page, created.path);
     const frame = await framedSite(page);
     await expect(mode(page)).toHaveText('Edit');
-    await frame.getByRole('heading', { name: 'Beta heading' }).click();
+    await selectItem(page, frame.locator(HEADING_B));
     await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
 
     // I switches to Interact: nothing is selected, the iframe is in the tab

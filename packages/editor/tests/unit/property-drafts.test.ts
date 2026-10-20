@@ -41,6 +41,17 @@ describe('property drafts', () => {
     expect(shownValue(drafts, node, 'n')).toBe(1);
   });
 
+  it('shows what was typed on the page over the stored value, and a draft over both', () => {
+    const live = { text: 'Hello wor' };
+    expect(shownValue(NO_DRAFTS, node, 'text', live)).toBe('Hello wor');
+    // a key the page has not typed into is the stored value
+    expect(shownValue(NO_DRAFTS, node, 'n', live)).toBe(1);
+    // an emptied field on the page shows empty, not the stored value
+    expect(shownValue(NO_DRAFTS, node, 'text', { text: '' })).toBe('');
+    const drafts = withChange(NO_DRAFTS, node, 'text', 'From the panel');
+    expect(shownValue(drafts, node, 'text', live)).toBe('From the panel');
+  });
+
   it('keeps a draft that is waiting for its render however the queue looks', () => {
     const drafts = withChange(NO_DRAFTS, node, 'text', 'Hel');
     expect(reconcileDrafts(drafts, node, savedQueue)).toBe(drafts);

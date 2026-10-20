@@ -106,6 +106,8 @@ export type ShellAppProps = {
     readonly onRemoveUnsupported?: () => Promise<unknown>;
     /** Called by Done on a short text field's bar. */
     readonly onFieldDone?: () => void;
+    /** The text session the Properties panel hands over to when a control of the property typed on the page takes focus. */
+    readonly textSession?: PropertiesPanelProps['textSession'];
     /** Called when a Properties control changes a value: render it and queue the save. */
     readonly onPropertiesChange?: PropertiesPanelProps['onPropertiesChange'];
     /** Called when a Properties control loses focus: save the block's edit now. */
@@ -195,6 +197,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               chromeHost={chromeHost}
               onPropertiesChange={editor.onPropertiesChange}
               onPropertiesBlur={editor.onPropertiesBlur}
+              textSession={editor.textSession}
               onLayoutChange={editor.onLayoutChange}
               columnAxis={editor.columnAxis}
               onAddColumn={editor.onAddColumn}

@@ -1592,6 +1592,7 @@ function Shell(props: {
               onFieldDone: () => {
                 void controller.exit('done');
               },
+              textSession: controller,
               onPropertiesChange: changeProperties,
               onPropertiesBlur: blurProperties,
               onLayoutChange: changeLayout,

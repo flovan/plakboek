@@ -9,6 +9,7 @@ import {
   framedSite,
   HOST,
   openEditor,
+  openProperties,
   selectedId,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -50,7 +51,7 @@ async function openHeading(
 test('one click on a heading, a retype and Enter: the session ends with the block selected and the new title is still there after a reload', async ({
   page,
 }) => {
-  const { field } = await openHeading(page, 'A short title');
+  const { field, pageId } = await openHeading(page, 'A short title');
   // a click in the middle of the words starts the session on the heading itself
   await field.click();
   await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
@@ -67,7 +68,9 @@ test('one click on a heading, a retype and Enter: the session ends with the bloc
   await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
   expect(await selectedId(page)).toBe(id);
   await expect(field).toHaveText('A new title');
-  await expect(page.getByText(SAVED)).toBeVisible();
+  await expect
+    .poll(async () => (await readBlockProps(pageId, 'heading'))['text'])
+    .toBe('A new title');
 
   await page.reload();
   const reloaded = await framedSite(page);
@@ -170,5 +173,51 @@ test.describe('the compact field bar', () => {
     expect(
       Math.abs(barBox.y - (fieldBox.y + fieldBox.height + 8)),
     ).toBeLessThan(2);
+  });
+});
+
+test.describe('the Properties panel and the page agree', () => {
+  test('typing on the page shows in the panel input, and focusing the panel input hands the property over', async ({
+    page,
+  }) => {
+    const { field } = await openHeading(page, 'Panel title');
+    await openProperties(page, field);
+    const input = page.getByLabel('Text', { exact: true });
+    await expect(input).toHaveValue('Panel title');
+
+    // the block is selected, so one click puts the caret in the heading
+    await field.click();
+    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.type('Typed on the page');
+    await expect(input).toHaveValue('Typed on the page');
+
+    // focusing the panel input ends the page session, keeping what was typed
+    await input.click();
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+    await expect(input).toHaveValue('Typed on the page');
+    await expect(field).toHaveText('Typed on the page');
+
+    // the panel then edits the page as it always did
+    await input.press('End');
+    await input.pressSequentially(' and in the panel');
+    await expect(field).toHaveText('Typed on the page and in the panel');
+    await expect(page.getByText(SAVED)).toBeVisible();
+  });
+
+  test('a value saved from the page is what the panel and a reload show', async ({
+    page,
+  }) => {
+    const { field, pageId } = await openHeading(page, 'Before');
+    await openProperties(page, field);
+    const input = page.getByLabel('Text', { exact: true });
+    await field.click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.type('After');
+    await page.keyboard.press('Enter');
+    await expect
+      .poll(async () => (await readBlockProps(pageId, 'heading'))['text'])
+      .toBe('After');
+    await expect(input).toHaveValue('After');
   });
 });

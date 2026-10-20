@@ -54,6 +54,18 @@ export type PropertiesPanelProps = {
   ) => Promise<PreviewResponse | null>;
   /** A field lost focus: the block's edit is saved now. */
   readonly onPropertiesBlur?: (blockId: string) => void;
+  /**
+   * The text session on the page. Focusing a control of the property being
+   * typed on the page ends that session first (flushing it), so the panel then
+   * edits and previews as it always does.
+   */
+  readonly textSession?: {
+    readonly active: () => {
+      readonly blockId: string;
+      readonly key: string;
+    } | null;
+    readonly exit: (reason: 'panel') => Promise<void>;
+  };
   /** A layout choice (column widths, alignment, fill): render it and queue the save. */
   readonly onLayoutChange?: LayoutChangeHandler;
   /** Whether a section's columns sit side by side or stacked in the site. */
@@ -147,9 +159,19 @@ function BlockProperties(props: {
   readonly entry: CatalogueEntry;
   readonly onPropertiesChange: PropertiesPanelProps['onPropertiesChange'];
   readonly onPropertiesBlur: PropertiesPanelProps['onPropertiesBlur'];
+  readonly textSession: PropertiesPanelProps['textSession'];
 }): ReactElement {
-  const { store, node, entry, onPropertiesChange, onPropertiesBlur } = props;
+  const {
+    store,
+    node,
+    entry,
+    onPropertiesChange,
+    onPropertiesBlur,
+    textSession,
+  } = props;
   const queue = useEditorStore(store, (state) => state.queue);
+  /** What the editor typed on the page into this block and the model lacks. */
+  const live = useEditorStore(store, (state) => state.liveValues[node.id]);
   const [drafts, setDraftState] = useState<Drafts>(NO_DRAFTS);
   const draftsRef = useRef<Drafts>(NO_DRAFTS);
   /** Which required values the latest render found empty, while drafts are open. */
@@ -237,29 +259,45 @@ function BlockProperties(props: {
           const fixed = property.constraint === 'fixed';
           const invalid = draft?.stage === 'invalid';
           return (
-            <PropertyField
+            // A control taking focus hands the property over from the page.
+            <div
               key={property.key}
-              fieldKey={property.key}
-              label={property.label}
-              {...(property.description === undefined
-                ? {}
-                : { description: property.description })}
-              source={property}
-              required={property.required}
-              value={
-                fixed
-                  ? property.fixedValue
-                  : shownValue(drafts, node, property.key)
-              }
-              needsInput={needs.includes(property.key)}
-              error={invalid ? STRINGS[refusalKey(property)] : null}
-              onChange={(value, immediate) => {
-                change(property, value, immediate);
+              className="contents"
+              onFocus={() => {
+                const active = textSession?.active();
+                if (
+                  active !== null &&
+                  active !== undefined &&
+                  active.blockId === node.id &&
+                  active.key === property.key
+                ) {
+                  void textSession?.exit('panel');
+                }
               }}
-              onBlur={() => {
-                onPropertiesBlur?.(node.id);
-              }}
-            />
+            >
+              <PropertyField
+                fieldKey={property.key}
+                label={property.label}
+                {...(property.description === undefined
+                  ? {}
+                  : { description: property.description })}
+                source={property}
+                required={property.required}
+                value={
+                  fixed
+                    ? property.fixedValue
+                    : shownValue(drafts, node, property.key, live)
+                }
+                needsInput={needs.includes(property.key)}
+                error={invalid ? STRINGS[refusalKey(property)] : null}
+                onChange={(value, immediate) => {
+                  change(property, value, immediate);
+                }}
+                onBlur={() => {
+                  onPropertiesBlur?.(node.id);
+                }}
+              />
+            </div>
           );
         })}
       </div>
@@ -287,6 +325,7 @@ export function PropertiesPanel(props: PropertiesPanelProps): ReactElement {
     store,
     onPropertiesChange,
     onPropertiesBlur,
+    textSession,
     onLayoutChange,
     columnAxis,
     onAddColumn,
@@ -363,6 +402,7 @@ export function PropertiesPanel(props: PropertiesPanelProps): ReactElement {
           entry={entry}
           onPropertiesChange={onPropertiesChange}
           onPropertiesBlur={onPropertiesBlur}
+          textSession={textSession}
         />
       );
     const section = node.kind === 'section';
