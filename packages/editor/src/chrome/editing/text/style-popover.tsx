@@ -74,15 +74,16 @@ export function StylePopover(props: StylePopoverProps): ReactElement {
     (all.find((item) => item.dataset['current'] === '') ?? all[0])?.focus();
   }, [open]);
 
+  // Closing puts the popover back on the left edge, so each open measures from there.
   useLayoutEffect(() => {
     const element = popover.current;
-    if (!open || element === null) return;
+    if (!open || element === null) {
+      setAlignEnd(false);
+      return;
+    }
     const view = element.ownerDocument.defaultView;
     if (view === null) return;
-    setAlignEnd(false);
-    if (element.getBoundingClientRect().right > view.innerWidth - 8) {
-      setAlignEnd(true);
-    }
+    setAlignEnd(element.getBoundingClientRect().right > view.innerWidth - 8);
   }, [open]);
 
   // A press anywhere else closes the popover.

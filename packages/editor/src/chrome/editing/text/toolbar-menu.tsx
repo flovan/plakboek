@@ -67,14 +67,16 @@ export function ToolbarMenu(props: ToolbarMenuProps): ReactElement {
   }, [open]);
 
   // Hung from the button's left edge, the menu may pass the frame's right edge.
+  // Closing puts it back on the left edge, so each open measures from there.
   useLayoutEffect(() => {
     const element = menu.current;
-    if (!open || element === null) return;
+    if (!open || element === null) {
+      setAlignEnd(false);
+      return;
+    }
     const view = element.ownerDocument.defaultView;
     if (view === null) return;
-    setAlignEnd(false);
-    const right = element.getBoundingClientRect().right;
-    if (right > view.innerWidth - 8) setAlignEnd(true);
+    setAlignEnd(element.getBoundingClientRect().right > view.innerWidth - 8);
   }, [open]);
 
   // A press anywhere else closes the menu.
