@@ -310,6 +310,72 @@ test('a mailto and a tel address are accepted, Ctrl+K edits the link at the care
   await expect.poll(() => storedBody(pageId)).not.toContain('"link"');
 });
 
+test('a click on a web link in the active field opens its popover and opens no tab', async ({
+  context,
+  page,
+}) => {
+  const created = await createEditablePage({
+    blocks: [
+      section(paragraph('Intro '.repeat(60)), {
+        type: 'prose',
+        props: {
+          body: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  { type: 'text', text: 'Plain words, then ' },
+                  {
+                    type: 'text',
+                    text: 'a web link',
+                    marks: [
+                      {
+                        type: 'link',
+                        attrs: {
+                          href: 'https://example.com/away',
+                          pageId: null,
+                          target: null,
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      }),
+    ],
+  });
+  await openEditor(page, created.path);
+  const frame = await framedSite(page);
+  const field = frame.locator('.prose-flow').first();
+  const opened: string[] = [];
+  context.on('page', (opener) => {
+    opened.push(opener.url());
+  });
+
+  await field.click({ position: { x: 4, y: 4 } });
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+  // the shell's link handling skips a click that is already cancelled when it
+  // reaches the window, so what matters is the state at the document
+  await frame.evaluate(() => {
+    const seen: boolean[] = [];
+    Reflect.set(window, '__clickCancelled', seen);
+    document.addEventListener('click', (event) => {
+      seen.push(event.defaultPrevented);
+    });
+  });
+  await field.locator('a').click();
+  await expect(chrome(page).locator(POPOVER)).toBeVisible();
+  expect(
+    await frame.evaluate(() => Reflect.get(window, '__clickCancelled')),
+  ).toEqual([true]);
+  expect(opened).toEqual([]);
+  expect(frame.url()).not.toContain('example.com');
+});
+
 test('Open in new tab is off by default and stored as _blank when switched on', async ({
   page,
 }) => {

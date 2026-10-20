@@ -175,6 +175,20 @@ export const ThemedLink = Link.extend<ThemedLinkOptions>({
             onOpen();
             return true;
           },
+          // `handleClick` only cancels ProseMirror's own handling. The click
+          // itself must be cancelled too, or the shell's frame-link listener
+          // (which skips a default-prevented click) would follow the address.
+          handleDOMEvents: {
+            click(view, event) {
+              const element = event.target as Partial<Element> | null;
+              if (typeof element?.closest !== 'function') return false;
+              const anchor = element.closest('a');
+              if (anchor !== null && view.dom.contains(anchor)) {
+                event.preventDefault();
+              }
+              return false;
+            },
+          },
         },
       }),
     ];
