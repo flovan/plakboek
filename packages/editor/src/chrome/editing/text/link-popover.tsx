@@ -135,13 +135,15 @@ export function LinkPopover(props: LinkPopoverProps): ReactElement | null {
     store.announce(announcement);
   };
 
-  const apply = (): void => {
-    if (target === null) return;
+  // `submitted` is the target Enter was pressed on, which the state of this render may not hold yet.
+  const apply = (submitted?: LinkTarget): void => {
+    const chosen = submitted ?? target;
+    if (chosen === null) return;
     const title =
-      target.pageId !== null && picked?.pageId === target.pageId
+      chosen.pageId !== null && picked?.pageId === chosen.pageId
         ? picked.title
         : null;
-    const tr = linkTransaction(editor.state, context, target, title);
+    const tr = linkTransaction(editor.state, context, chosen, title);
     if (tr === null) return;
     editor.view.dispatch(tr);
     finish(
@@ -185,6 +187,9 @@ export function LinkPopover(props: LinkPopoverProps): ReactElement | null {
             setPicked({ pageId: next.pageId, title });
           }
         }}
+        onInvalid={() => {
+          setTarget(null);
+        }}
         onSubmit={apply}
       />
       <div className="flex gap-2 pt-2">
@@ -201,7 +206,9 @@ export function LinkPopover(props: LinkPopoverProps): ReactElement | null {
           type="button"
           aria-disabled={target === null}
           className={`${POPOVER_BUTTON} border-transparent bg-accent text-accent-contrast aria-disabled:cursor-default aria-disabled:opacity-60`}
-          onClick={apply}
+          onClick={() => {
+            apply();
+          }}
         >
           {STRINGS['text.link.apply']}
         </button>

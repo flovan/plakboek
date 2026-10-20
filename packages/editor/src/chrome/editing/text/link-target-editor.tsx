@@ -22,12 +22,22 @@ export type LinkTargetEditorProps = {
   readonly search?: PageSearch;
   /**
    * Called with each target that is complete and allowed, as it is typed or
-   * picked, with the picked page's title (null for an address). An invalid
-   * address is not reported, so the owner keeps the last valid target.
+   * picked, with the picked page's title (null for an address) and whether it
+   * was typed or picked, so an owner can save a pick at once and a typed
+   * address after a pause.
    */
-  readonly onChange: (target: LinkTarget, title: string | null) => void;
-  /** Enter in the address input with a valid address: the owner applies. */
-  readonly onSubmit?: () => void;
+  readonly onChange: (
+    target: LinkTarget,
+    title: string | null,
+    source: 'typed' | 'pick',
+  ) => void;
+  /**
+   * An address that is empty or not allowed is being shown: no target is
+   * complete, so an owner that applies on a button has nothing to apply.
+   */
+  readonly onInvalid?: () => void;
+  /** Enter in the address input with a valid address: the owner applies this target. */
+  readonly onSubmit?: (target: LinkTarget) => void;
   /**
    * Whether the first field takes the focus when the section appears. A
    * popover whose own first field is elsewhere (the Button popover's label)
@@ -54,16 +64,19 @@ const SEGMENTS: readonly { readonly id: Segment; readonly label: string }[] = [
 type WebAddressProps = {
   readonly initial: string;
   readonly focusOnMount: boolean;
-  /** Reports an address that passed the policy; `text` is what the input shows. */
+  /** Reports an address that passed the policy. */
   readonly onValid: (address: string) => void;
-  readonly onSubmit: (() => void) | undefined;
+  /** Reports that what the input shows is empty or not allowed. */
+  readonly onInvalid: () => void;
+  /** Enter with a valid address: the address, already reported by `onValid`. */
+  readonly onSubmit: (address: string) => void;
   /** What the input shows is remembered by the owner, so a segment switch keeps it. */
   readonly onText: (text: string) => void;
 };
 
 /** The address input: valid addresses apply as they are typed, an invalid one says why once the input is left. */
 function WebAddress(props: WebAddressProps): ReactElement {
-  const { initial, focusOnMount, onValid, onSubmit, onText } = props;
+  const { initial, focusOnMount, onValid, onInvalid, onSubmit, onText } = props;
   const [text, setText] = useState(initial);
   const [showError, setShowError] = useState(false);
   const inputId = useId();
@@ -104,6 +117,8 @@ function WebAddress(props: WebAddressProps): ReactElement {
           if (address !== '' && isAllowedHref(address)) {
             setShowError(false);
             onValid(address);
+          } else {
+            onInvalid();
           }
         }}
         onBlur={() => {
@@ -117,8 +132,7 @@ function WebAddress(props: WebAddressProps): ReactElement {
             setShowError(true);
             return;
           }
-          onValid(trimmed);
-          onSubmit?.();
+          onSubmit(trimmed);
         }}
       />
       <p
@@ -176,7 +190,7 @@ function usePageGone(
  * else on Page.
  */
 export function LinkTargetEditor(props: LinkTargetEditorProps): ReactElement {
-  const { value, locale, search, onChange, onSubmit } = props;
+  const { value, locale, search, onChange, onInvalid, onSubmit } = props;
   const focusOnOpen = props.focusOnOpen !== false;
   const [segment, setSegment] = useState<Segment>(
     search === undefined || (value?.pageId === null && value.href !== null)
@@ -260,7 +274,11 @@ export function LinkTargetEditor(props: LinkTargetEditorProps): ReactElement {
             selectedId={value?.pageId ?? null}
             focusOnMount={focusField}
             onPick={(page) => {
-              onChange({ href: null, pageId: page.id, target }, page.title);
+              onChange(
+                { href: null, pageId: page.id, target },
+                page.title,
+                'pick',
+              );
             }}
           />
         </>
@@ -269,9 +287,20 @@ export function LinkTargetEditor(props: LinkTargetEditorProps): ReactElement {
           initial={webText}
           focusOnMount={focusField}
           onText={setWebText}
-          onSubmit={onSubmit}
+          onInvalid={() => {
+            onInvalid?.();
+          }}
+          onSubmit={(address) => {
+            const submitted: LinkTarget = {
+              href: address,
+              pageId: null,
+              target,
+            };
+            onChange(submitted, null, 'typed');
+            onSubmit?.(submitted);
+          }}
           onValid={(address) => {
-            onChange({ href: address, pageId: null, target }, null);
+            onChange({ href: address, pageId: null, target }, null, 'typed');
           }}
         />
       )}
@@ -287,7 +316,11 @@ export function LinkTargetEditor(props: LinkTargetEditorProps): ReactElement {
             const tab = event.target.checked;
             setNewTab(tab);
             if (value !== null) {
-              onChange({ ...value, target: tab ? '_blank' : null }, null);
+              onChange(
+                { ...value, target: tab ? '_blank' : null },
+                null,
+                'pick',
+              );
             }
           }}
         />

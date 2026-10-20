@@ -32,7 +32,7 @@ export type LinkControlProps = {
   /** A required value is empty: the border takes the attention colour. */
   readonly attention: boolean;
   readonly describedBy: string | undefined;
-  /** Called with a complete, allowed target, or `undefined` when the link is removed; always at once. */
+  /** Called with a complete, allowed target, or `undefined` when the link is removed. */
   readonly onChange: (value: unknown, immediate: boolean) => void;
   readonly onBlur: () => void;
 };
@@ -45,9 +45,9 @@ function border(props: Pick<LinkControlProps, 'invalid' | 'attention'>) {
 /**
  * The Properties control of a `link` property: the same Link target section
  * the link and button popovers use, drawn inline in the panel. A target is
- * written as soon as it is complete and allowed (a page picked, an address
- * that passes the policy, the new-tab switch moved), and "Remove link" clears
- * it. The page list scrolls inside the control.
+ * written as soon as it is complete and allowed: a page picked and the new-tab
+ * switch at once, a typed address after a pause (or on Enter). "Remove link"
+ * clears it. The page list scrolls inside the control.
  */
 export function LinkControl(props: LinkControlProps): ReactElement {
   const { id, labelId, fieldKey, disabled, onChange, onBlur } = props;
@@ -80,7 +80,11 @@ export function LinkControl(props: LinkControlProps): ReactElement {
           locale={locale}
           focusOnOpen={false}
           {...(search === undefined ? {} : { search })}
-          onChange={(next) => {
+          onChange={(next, _title, source) => {
+            // A pick is saved at once; a typed address waits for a pause.
+            onChange(next, source === 'pick');
+          }}
+          onSubmit={(next) => {
             onChange(next, true);
           }}
         />
