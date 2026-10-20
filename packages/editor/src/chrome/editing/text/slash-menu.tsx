@@ -25,8 +25,9 @@ const ROW =
  * The '/' menu: a listbox of the items the field's theme allows, hung from the
  * typed `/query` (below it, above when there is more room there, 8px inside
  * the frame). It never takes focus: the field keeps the caret and the arrow
- * keys, Enter and Escape are handled by the field's own '/' plugin. The
- * listbox names its active row for assistive technology.
+ * keys, Enter and Escape are handled by the field's own '/' plugin. Because
+ * the field is what has the focus, the field is what names the listbox and
+ * its active row for assistive technology while the menu is open.
  */
 export function SlashMenu(props: SlashMenuProps): ReactElement | null {
   const { controller, visible } = props;
@@ -36,6 +37,39 @@ export function SlashMenu(props: SlashMenuProps): ReactElement | null {
   const base = useId();
   const list = useRef<HTMLDivElement>(null);
   const activeIndex = state?.activeIndex ?? 0;
+  const open = state !== null;
+  const hasItems = (state?.items.length ?? 0) > 0;
+  const listId = `${base}-list`;
+  const idOf = (index: number): string => `${base}-${String(index)}`;
+
+  // The field keeps the focus, so it takes the combobox attributes while the menu is open.
+  useEffect(() => {
+    if (!open) return undefined;
+    const field = controller.editor()?.view.dom;
+    if (field === undefined) return undefined;
+    const before = field.getAttribute('role');
+    field.setAttribute('role', 'combobox');
+    field.setAttribute('aria-haspopup', 'listbox');
+    field.setAttribute('aria-expanded', 'true');
+    if (hasItems) field.setAttribute('aria-controls', listId);
+    return () => {
+      if (before === null) field.removeAttribute('role');
+      else field.setAttribute('role', before);
+      field.removeAttribute('aria-haspopup');
+      field.removeAttribute('aria-expanded');
+      field.removeAttribute('aria-controls');
+    };
+  }, [open, hasItems, listId, controller]);
+
+  useEffect(() => {
+    if (!open || !hasItems) return undefined;
+    const field = controller.editor()?.view.dom;
+    if (field === undefined) return undefined;
+    field.setAttribute('aria-activedescendant', idOf(activeIndex));
+    return () => {
+      field.removeAttribute('aria-activedescendant');
+    };
+  }, [open, hasItems, activeIndex, controller]);
 
   useEffect(() => {
     list.current
@@ -46,7 +80,6 @@ export function SlashMenu(props: SlashMenuProps): ReactElement | null {
   if (state === null) return null;
   const placement = slashPlacement(state.rect, visible);
   const platform = currentPlatform();
-  const idOf = (index: number): string => `${base}-${String(index)}`;
   return (
     <div
       className="pk-picker"
@@ -60,15 +93,15 @@ export function SlashMenu(props: SlashMenuProps): ReactElement | null {
       }}
     >
       {state.items.length === 0 ? (
-        <p className="m-0 px-3 py-4 text-body text-text-muted">
+        <p role="status" className="m-0 px-3 py-4 text-body text-text-muted">
           {STRINGS['text.slash.none']}
         </p>
       ) : (
         <div
           ref={list}
+          id={listId}
           role="listbox"
           aria-label={STRINGS['text.slash.label']}
-          aria-activedescendant={idOf(activeIndex)}
           className="min-h-0 flex-1 overflow-y-auto"
         >
           {state.items.map((item, index) => {
