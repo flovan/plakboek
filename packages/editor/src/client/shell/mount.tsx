@@ -94,7 +94,10 @@ import {
   type EditorState,
   type PickerOpener,
 } from '../session/store.js';
-import { createTextController } from '../text/controller.js';
+import {
+  createTextController,
+  type TextController,
+} from '../text/controller.js';
 import { findEditableField } from '../text/field-target.js';
 import { createDragSession } from './drag-session.js';
 import { drawerFits, setDrawerColumn } from './drawer.js';
@@ -181,6 +184,7 @@ function Shell(props: {
   const hooksRef = useRef<HooksRuntime | null>(null);
   const runnerRef = useRef<SaveRunner | null>(null);
   const previewRef = useRef<PreviewRunner | null>(null);
+  const textControllerRef = useRef<TextController | null>(null);
   const status = useEditorStore(store, (state) => state.status);
   const session = useEditorStore(store, (state) => state.session);
   // The first client render must match the server markup, which was rendered
@@ -415,6 +419,10 @@ function Shell(props: {
     });
     previewRef.current = preview;
     return () => {
+      // A running text session ends first, while the runners still take its
+      // last write: effect cleanups run in declaration order and the
+      // controller is created further down.
+      void textControllerRef.current?.exit('reload');
       previewRef.current = null;
       preview.cancel();
       runnerRef.current = null;
@@ -571,7 +579,15 @@ function Shell(props: {
       }),
     [store, changeProperties, blurProperties, host, textRenderers],
   );
-  useEffect(() => () => controller.dispose(), [controller]);
+  useEffect(() => {
+    textControllerRef.current = controller;
+    return () => {
+      if (textControllerRef.current === controller) {
+        textControllerRef.current = null;
+      }
+      controller.dispose();
+    };
+  }, [controller]);
   // The marker specs and tools wait on while a field session runs.
   useEffect(() => {
     const sync = (): void => {

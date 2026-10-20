@@ -291,7 +291,7 @@ export function createTextController(
         }),
       );
     }
-    if (reason !== 'reload') ready(target.blockId);
+    ready(target.blockId);
   }
 
   async function exit(reason: TextExitReason): Promise<void> {
@@ -343,7 +343,7 @@ export function createTextController(
       // preview never holds back the action that follows the session.
       void changeProperties(blockId, { [key]: value }, key, true, true);
     }
-    if (reason !== 'reload') ready(blockId);
+    ready(blockId);
     // Once everything queued is sent the model holds the value, so the
     // panel reads the model again; until then it keeps showing the typing.
     if (reason === 'reload') store.clearLiveValues(blockId);
