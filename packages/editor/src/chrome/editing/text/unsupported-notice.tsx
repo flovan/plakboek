@@ -83,9 +83,12 @@ export function UnsupportedNotice(props: UnsupportedNoticeProps): ReactElement {
           className={`${BUTTON} border-transparent bg-accent text-accent-contrast`}
           onClick={() => {
             setBusy(true);
-            void Promise.resolve(onRemove()).finally(() => {
-              setBusy(false);
-            });
+            void Promise.resolve(onRemove())
+              // The save queue already reports a save that failed.
+              .catch(() => undefined)
+              .finally(() => {
+                setBusy(false);
+              });
           }}
         >
           {STRINGS['text.unsupported.remove']}
