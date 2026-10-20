@@ -76,9 +76,31 @@ const catalogue = [
     property('lockedTitle', 'short_text', 'fixed'),
     property('count', 'integer'),
   ]),
+  entry('button', [
+    property('label', 'short_text'),
+    property('variant', 'select'),
+    property('fixedLabel', 'short_text', 'fixed'),
+    property('size', 'integer'),
+    {
+      ...property('link', 'link'),
+      options: { labelProperty: 'label', variantProperty: 'variant' },
+    },
+    { ...property('bare', 'link'), options: {} },
+    {
+      ...property('wrong', 'link'),
+      options: { labelProperty: 'size', variantProperty: 'label' },
+    },
+    {
+      ...property('unknown', 'link'),
+      options: { labelProperty: 'nobody', variantProperty: 'fixedLabel' },
+    },
+    property('lockedLink', 'link', 'fixed'),
+  ]),
 ];
 const model = createTreeModel(
-  buildNodes([section('s', [column('c', [block('b', 'prose')])])]),
+  buildNodes([
+    section('s', [column('c', [block('b', 'prose'), block('btn', 'button')])]),
+  ]),
 );
 
 /** A block element holding a field element, as the host's markup does. */
@@ -88,6 +110,49 @@ function fieldIn(tag: string, key: string): { field: Fake; text: Fake } {
   const text = element('P', {}, field);
   return { field, text };
 }
+
+/** A link field of the button block `btn`. */
+function linkField(key: string): Fake {
+  const root = element('DIV', { 'data-pk-block': 'btn' });
+  return element('DIV', { 'data-pk-field': key }, root);
+}
+
+describe('findEditableField for a link field', () => {
+  it('answers a button, with the label and style properties the link options name', () => {
+    const field = linkField('link');
+    const target = findEditableField(element('A', {}, field), model, catalogue);
+    expect(target).toMatchObject({
+      blockId: 'btn',
+      key: 'link',
+      kind: 'button',
+      element: field,
+      labelKey: 'label',
+      variantKey: 'variant',
+    });
+  });
+
+  it('answers a button with no sibling keys when the options name none', () => {
+    const target = findEditableField(linkField('bare'), model, catalogue);
+    expect(target?.kind).toBe('button');
+    expect(target).not.toHaveProperty('labelKey');
+    expect(target).not.toHaveProperty('variantKey');
+  });
+
+  it('ignores a named property of the wrong type, an unknown one and one the editor may not write', () => {
+    for (const key of ['wrong', 'unknown']) {
+      const target = findEditableField(linkField(key), model, catalogue);
+      expect(target?.kind).toBe('button');
+      expect(target).not.toHaveProperty('labelKey');
+      expect(target).not.toHaveProperty('variantKey');
+    }
+  });
+
+  it('answers null for a link property that is fixed', () => {
+    expect(
+      findEditableField(linkField('lockedLink'), model, catalogue),
+    ).toBeNull();
+  });
+});
 
 describe('findEditableField', () => {
   it('answers a rich text field of a known block, from a click anywhere inside it', () => {

@@ -63,6 +63,7 @@ const VARIABLES: Readonly<Record<string, readonly string[]>> = {
   'takeover.body': ['name'],
   'text.announce.editingRich': ['label'],
   'text.announce.editingPlain': ['label'],
+  'text.announce.editingButton': ['label'],
   'text.announce.stopped': ['label'],
   'text.announce.on': ['name'],
   'text.announce.off': ['name'],

@@ -43,35 +43,38 @@ export function FieldDecor(props: FieldDecorProps): ReactElement | null {
   if (fields.length === 0) return null;
   return (
     <>
-      {fields.map((field) => (
-        <div key={field.key} className="pk-field-decor" aria-hidden="true">
-          {activeKey === field.key && isSmaller(field) ? (
-            <div
-              className="pk-field-boundary"
-              data-field-boundary={field.key}
-              style={boxStyle(field.box)}
-            />
-          ) : null}
-          {field.empty ? (
-            <div
-              className="pk-field-chip"
-              data-field-chip={field.key}
-              style={{
-                left: field.box.left + CHIP_INSET,
-                top: field.box.top + CHIP_INSET,
-              }}
-            >
-              {
-                STRINGS[
-                  field.kind === 'plain'
-                    ? 'text.field.placeholder.plain'
-                    : 'text.field.placeholder.rich'
-                ]
-              }
-            </div>
-          ) : null}
-        </div>
-      ))}
+      {fields.map((field) =>
+        // A button is not typed into: it has no placeholder and no boundary.
+        field.kind === 'button' ? null : (
+          <div key={field.key} className="pk-field-decor" aria-hidden="true">
+            {activeKey === field.key && isSmaller(field) ? (
+              <div
+                className="pk-field-boundary"
+                data-field-boundary={field.key}
+                style={boxStyle(field.box)}
+              />
+            ) : null}
+            {field.empty ? (
+              <div
+                className="pk-field-chip"
+                data-field-chip={field.key}
+                style={{
+                  left: field.box.left + CHIP_INSET,
+                  top: field.box.top + CHIP_INSET,
+                }}
+              >
+                {
+                  STRINGS[
+                    field.kind === 'plain'
+                      ? 'text.field.placeholder.plain'
+                      : 'text.field.placeholder.rich'
+                  ]
+                }
+              </div>
+            ) : null}
+          </div>
+        ),
+      )}
     </>
   );
 }

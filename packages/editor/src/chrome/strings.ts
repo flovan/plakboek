@@ -402,6 +402,8 @@ export const STRINGS = Object.freeze({
     'Editing {label}. Press Escape to stop editing, or Alt+F10 for formatting.',
   'text.announce.editingPlain':
     'Editing {label}. Press Escape to stop editing.',
+  'text.announce.editingButton':
+    'Editing {label}. Button options are open. Press Escape to stop editing.',
   'text.announce.stopped': 'Stopped editing. {label} selected.',
   'text.announce.on': '{name} on.',
   'text.announce.off': '{name} off.',

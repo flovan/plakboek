@@ -1196,6 +1196,19 @@ function Shell(props: {
       if (event.defaultPrevented) return;
       // The delete confirmation owns the keyboard while it is open.
       if (store.getState().deleteRequest !== null) return;
+      // The Button popover of a button block ends on Escape from the moment
+      // the session starts, before the popover has taken the focus.
+      if (
+        event.key === 'Escape' &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        controller.active()?.kind === 'button'
+      ) {
+        event.preventDefault();
+        void controller.exit('escape');
+        return;
+      }
       if (tabKey(event)) return;
       const target =
         focusedChrome(event) ?? event.composedPath()[0] ?? event.target;

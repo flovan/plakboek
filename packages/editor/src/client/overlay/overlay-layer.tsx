@@ -4,12 +4,14 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type ReactElement,
 } from 'react';
 import type { CatalogueEntry } from '../../api-types.js';
 import { EmptyPrompts } from '../../chrome/editing/empty-prompts.js';
 import { FieldBar } from '../../chrome/editing/text/field-bar.js';
+import { ButtonPopover } from '../../chrome/editing/text/button-popover.js';
 import { CtaMarkers } from '../../chrome/editing/text/cta-markers.js';
 import { CustomStyleMarker } from '../../chrome/editing/text/custom-style-marker.js';
 import { FieldDecor } from '../../chrome/editing/text/field-decor.js';
@@ -108,7 +110,7 @@ function wantedIds(state: EditorState): readonly string[] {
 }
 
 /**
- * The text fields (rich and short) of the selected block, so their chip,
+ * The text fields (rich and short) and link fields of the selected block, so their chip,
  * boundary, bar and notice can be drawn; null when no block with such a field
  * is selected.
  */
@@ -125,7 +127,8 @@ function wantedFields(state: EditorState): FieldsWanted | null {
       ?.properties.filter(
         (property) =>
           (property.fieldType === 'rich_text' ||
-            property.fieldType === 'short_text') &&
+            property.fieldType === 'short_text' ||
+            property.fieldType === 'link') &&
           property.constraint === 'none',
       ) ?? [];
   if (fields.length === 0) return null;
@@ -134,6 +137,9 @@ function wantedFields(state: EditorState): FieldsWanted | null {
     keys: fields.map((property) => property.key),
     plain: fields
       .filter((property) => property.fieldType === 'short_text')
+      .map((property) => property.key),
+    button: fields
+      .filter((property) => property.fieldType === 'link')
       .map((property) => property.key),
   };
 }
@@ -237,6 +243,50 @@ function RichFieldToolbar(props: {
       theme={theme}
       field={box}
       visible={visible}
+      {...(search === undefined ? {} : { search })}
+    />
+  );
+}
+
+/**
+ * The Button popover of the button block being edited, hung from its link
+ * field. Nothing is drawn while the field is out of the frame.
+ */
+function BlockButton(props: {
+  readonly store: EditorStore;
+  readonly controller: TextController;
+  readonly textField: NonNullable<EditorState['textField']>;
+  readonly fields: readonly FieldBox[];
+  readonly visible: Box;
+  readonly search: PageSearch | undefined;
+}): ReactElement | null {
+  const { store, controller, textField, fields, visible, search } = props;
+  // A number that changes each time the popover is asked for.
+  const request = useSyncExternalStore(controller.subscribe, () =>
+    controller.buttonRequest(),
+  );
+  const box = fields.find((item) => item.key === textField.key)?.box ?? null;
+  const target = controller.active();
+  if (
+    request === 0 ||
+    box === null ||
+    target === null ||
+    target.kind !== 'button' ||
+    target.blockId !== textField.blockId ||
+    !isVisibleIn(box, visible)
+  ) {
+    return null;
+  }
+  return (
+    <ButtonPopover
+      key={request}
+      mode="block"
+      controller={controller}
+      store={store}
+      target={target}
+      anchor={box}
+      visible={visible}
+      locale={store.getState().session?.locale ?? ''}
       {...(search === undefined ? {} : { search })}
     />
   );
@@ -525,6 +575,7 @@ export function OverlayLayer(props: {
   const fieldActive = textField !== null && !textField.unsupported;
   const plainActive = fieldActive && textField.kind === 'plain';
   const richActive = fieldActive && textField.kind === 'rich';
+  const buttonActive = fieldActive && textField.kind === 'button';
   const unsupportedBox =
     textField !== null && textField.unsupported
       ? (fields.find((item) => item.key === textField.key)?.box ?? null)
@@ -796,6 +847,16 @@ export function OverlayLayer(props: {
             ) : null}
             {richActive && textController !== undefined ? (
               <RichFieldToolbar
+                store={store}
+                controller={textController}
+                textField={textField}
+                fields={fields}
+                visible={selection?.visible ?? visible}
+                search={onSearchPages}
+              />
+            ) : null}
+            {buttonActive && textController !== undefined ? (
+              <BlockButton
                 store={store}
                 controller={textController}
                 textField={textField}

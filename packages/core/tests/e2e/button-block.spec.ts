@@ -18,6 +18,7 @@ import { e2eUsers } from './helpers/host.ts';
 import {
   createEditablePage,
   heading,
+  paragraph,
   readBlockProps,
   section,
 } from './helpers/pages.ts';
@@ -158,4 +159,203 @@ test('a web address typed in the link control is stored once it is allowed, and 
   await expect
     .poll(async () => (await readBlockProps(created.pageId, 'button'))['link'])
     .toBeUndefined();
+});
+
+const POPOVER = '[data-button-popover]';
+
+test('clicking a Button block opens its popover on the page, with no caret and no Remove button: a style change renders live and a label and a page link are saved', async ({
+  page,
+}) => {
+  const word = tag();
+  const target = await createEditablePage({
+    title: `Contact ${word}`,
+    blocks: [],
+  });
+  const created = await createEditablePage({
+    blocks: [
+      section(paragraph('Intro '.repeat(60)), {
+        type: 'button',
+        props: {
+          label: 'Book',
+          link: {
+            href: 'https://example.com/book',
+            pageId: null,
+            target: null,
+          },
+          variant: 'primary',
+        },
+      }),
+    ],
+  });
+  await openEditor(page, created.path);
+  const frame = await framedSite(page);
+  const cta = frame.locator('.button-block .t-cta');
+
+  await cta.click();
+  const popover = chrome(page).locator(POPOVER);
+  await expect(popover).toBeVisible();
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+  // nothing in the block is typed into
+  await expect(frame.locator('.button-block [contenteditable]')).toHaveCount(0);
+  await expect(
+    popover.getByRole('button', { name: 'Remove button' }),
+  ).toHaveCount(0);
+  await expect(popover.getByLabel('Label')).toHaveValue('Book');
+  await expect(chrome(page).locator('[data-overlay-selected]')).toHaveCount(1);
+
+  // the style renders live and is saved as the block's own property
+  await popover.getByRole('radio', { name: 'Secondary' }).click();
+  await expect(cta).toHaveAttribute('data-variant', 'secondary');
+  await expect
+    .poll(
+      async () => (await readBlockProps(created.pageId, 'button'))['variant'],
+    )
+    .toBe('secondary');
+
+  // the label follows as it is typed
+  await popover.getByLabel('Label').fill('Book now');
+  await expect(cta).toHaveText('Book now');
+  await expect
+    .poll(async () => (await readBlockProps(created.pageId, 'button'))['label'])
+    .toBe('Book now');
+
+  // the link is picked by page, stored by id
+  await popover.getByRole('radio', { name: 'Page' }).click();
+  await popover.getByLabel('Search pages').fill(word);
+  await popover.getByRole('option', { name: `Contact ${word}` }).click();
+  await expect(cta).toHaveAttribute('href', target.path);
+  await expect
+    .poll(async () => (await readBlockProps(created.pageId, 'button'))['link'])
+    .toEqual({ href: null, pageId: target.pageId, target: null });
+
+  // Done closes it with the block still selected
+  await popover.getByRole('button', { name: 'Done' }).click();
+  await expect(popover).toHaveCount(0);
+  await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+  await expect(chrome(page).locator('[data-overlay-selected]')).toHaveCount(1);
+
+  await page.reload();
+  const reloaded = (await framedSite(page)).locator('.button-block .t-cta');
+  await expect(reloaded).toHaveText('Book now');
+  await expect(reloaded).toHaveAttribute('data-variant', 'secondary');
+  await expect(reloaded).toHaveAttribute('href', target.path);
+});
+
+test('Escape closes the Button popover and leaves the block selected', async ({
+  page,
+}) => {
+  const created = await createEditablePage({
+    blocks: [
+      section(heading('Top'), {
+        type: 'button',
+        props: {
+          label: 'Go',
+          link: { href: 'https://example.com/', pageId: null, target: null },
+        },
+      }),
+    ],
+  });
+  await openEditor(page, created.path);
+  const frame = await framedSite(page);
+  await frame.locator('.button-block .t-cta').click();
+  const popover = chrome(page).locator(POPOVER);
+  await expect(popover).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await expect(chrome(page).locator('[data-overlay-selected]')).toHaveCount(1);
+  await expect(page.locator(`${HOST} [role="status"].sr-only`)).toContainText(
+    'Stopped editing',
+  );
+});
+
+test('a Button block and a button typed into a text with the same label, link and style render the same markup, for the editor and for a visitor', async ({
+  page,
+  request,
+}) => {
+  const link = { href: 'https://example.com/same', pageId: null, target: null };
+  const created = await createEditablePage({
+    publish: true,
+    blocks: [
+      section(
+        {
+          type: 'prose',
+          props: {
+            body: {
+              type: 'doc',
+              content: [
+                {
+                  type: 'cta',
+                  attrs: { label: 'Same', ...link, variant: 'secondary' },
+                },
+              ],
+            },
+          },
+        },
+        {
+          type: 'button',
+          props: { label: 'Same', link, variant: 'secondary' },
+        },
+      ),
+    ],
+  });
+
+  const buttons = (html: string): string[] =>
+    html.match(/<a[^>]*class="t-cta"[^>]*>[^<]*<\/a>/g) ?? [];
+  const visitor = buttons(await (await request.get(created.path)).text());
+  expect(visitor).toHaveLength(2);
+  expect(visitor[0]).toBe(visitor[1]);
+
+  await openEditor(page, created.path);
+  const frame = await framedSite(page);
+  const outer = (selector: string): Promise<string> =>
+    frame
+      .locator(selector)
+      .first()
+      .evaluate((element) => element.outerHTML);
+  expect(await outer('.button-block .t-cta')).toBe(
+    await outer('.prose-flow .t-cta'),
+  );
+});
+
+test('a Button block whose page is not available shows a visitor nothing and its data is kept, and one with no link says it needs one in the editor', async ({
+  page,
+  request,
+}) => {
+  // a draft page has no public address yet
+  const draft = await createEditablePage({ title: 'Not yet', blocks: [] });
+  const created = await createEditablePage({
+    publish: true,
+    blocks: [
+      section(paragraph('Hello'), {
+        type: 'button',
+        props: {
+          label: 'Go',
+          link: { href: null, pageId: draft.pageId, target: null },
+        },
+      }),
+    ],
+  });
+
+  const visitor = await (await request.get(created.path)).text();
+  expect(visitor).toContain('Hello');
+  expect(visitor).not.toContain('t-cta');
+  expect((await readBlockProps(created.pageId, 'button'))['label']).toBe('Go');
+
+  // a block still being made, with no link at all, is marked in the editor
+  const unfinished = await createEditablePage({
+    blocks: [
+      section(paragraph('Hello'), { type: 'button', props: { label: 'Go' } }),
+    ],
+  });
+  await openEditor(page, unfinished.path);
+  const frame = await framedSite(page);
+  await expect(frame.locator('.button-block .t-cta')).toHaveText('Go');
+  await expect(frame.locator('.button-block .t-cta')).not.toHaveAttribute(
+    'href',
+    /.+/,
+  );
+  await openProperties(page, frame.locator('.button-block .t-cta'));
+  await expect(
+    sheet(page).locator('[data-field="link"] [data-needs-input-tag]'),
+  ).toHaveText('Needs input');
 });

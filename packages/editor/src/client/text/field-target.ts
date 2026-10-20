@@ -11,12 +11,20 @@ export type FieldTarget = {
   readonly blockId: string;
   /** The property key the field is marked with. */
   readonly key: string;
-  /** A `rich_text` property is typed as formatted text, a `short_text` one as one plain line. */
-  readonly kind: 'rich' | 'plain';
+  /**
+   * A `rich_text` property is typed as formatted text, a `short_text` one as
+   * one plain line, and a `link` one is edited in the Button popover: the
+   * field is the block's button, so nothing is typed into it.
+   */
+  readonly kind: 'rich' | 'plain' | 'button';
   readonly element: Element;
   readonly property: CatalogueProperty;
   /** The `maxLength` of a plain field's property, when it has one. */
   readonly maxLength?: number;
+  /** A button field's sibling short text property that holds its label, when the link options name one. */
+  readonly labelKey?: string;
+  /** A button field's sibling select property that holds its style, when the link options name one. */
+  readonly variantKey?: string;
 };
 
 const FIELD_SELECTOR = `[${EDIT_ATTRIBUTE.field}]`;
@@ -59,8 +67,8 @@ function elementOf(start: unknown): ElementLike | null {
 /**
  * The editable field under `start` (the element a click landed on), or null.
  * It is a field only when its owning block is in the model, the property is a
- * `rich_text` or `short_text` one with no placement constraint, and the
- * element is not a control.
+ * `rich_text`, `short_text` or `link` one with no placement constraint, and
+ * the element is not a control.
  */
 export function findEditableField(
   start: unknown,
@@ -92,6 +100,30 @@ export function findEditableField(
       property,
     };
   }
+  if (property.fieldType === 'link') {
+    const siblings = siblingsOf(catalogue, node.type);
+    const labelKey = siblingKey(
+      property.options,
+      'labelProperty',
+      siblings,
+      'short_text',
+    );
+    const variantKey = siblingKey(
+      property.options,
+      'variantProperty',
+      siblings,
+      'select',
+    );
+    return {
+      blockId,
+      key,
+      kind: 'button',
+      element: field as unknown as Element,
+      property,
+      ...(labelKey === undefined ? {} : { labelKey }),
+      ...(variantKey === undefined ? {} : { variantKey }),
+    };
+  }
   if (property.fieldType !== 'short_text') return null;
   const maxLength = maxLengthOf(property.options);
   return {
@@ -110,5 +142,35 @@ function maxLengthOf(options: unknown): number | undefined {
   const value: unknown = Reflect.get(options, 'maxLength');
   return typeof value === 'number' && Number.isInteger(value) && value >= 1
     ? value
+    : undefined;
+}
+
+function siblingsOf(
+  catalogue: readonly CatalogueEntry[],
+  type: string,
+): readonly CatalogueProperty[] {
+  return catalogue.find((entry) => entry.key === type)?.properties ?? [];
+}
+
+/**
+ * The key a link property's options name under `option`, only when it is a
+ * property of the same block of the expected field type that the editor may
+ * write (not fixed). Anything else is ignored, so a popover never writes a
+ * property the block does not declare.
+ */
+function siblingKey(
+  options: unknown,
+  option: 'labelProperty' | 'variantProperty',
+  siblings: readonly CatalogueProperty[],
+  fieldType: 'short_text' | 'select',
+): string | undefined {
+  if (typeof options !== 'object' || options === null) return undefined;
+  const named: unknown = Reflect.get(options, option);
+  if (typeof named !== 'string') return undefined;
+  const sibling = siblings.find((item) => item.key === named);
+  return sibling !== undefined &&
+    sibling.fieldType === fieldType &&
+    sibling.constraint !== 'fixed'
+    ? named
     : undefined;
 }

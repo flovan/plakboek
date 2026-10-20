@@ -82,7 +82,7 @@ export type DragState = {
 export type TextFieldState = {
   readonly blockId: string;
   readonly key: string;
-  readonly kind: 'rich' | 'plain';
+  readonly kind: 'rich' | 'plain' | 'button';
   readonly unsupported: boolean;
 };
 

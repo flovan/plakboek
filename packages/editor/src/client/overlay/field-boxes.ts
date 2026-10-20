@@ -20,12 +20,14 @@ export type FieldsWanted = {
   readonly keys: readonly string[];
   /** The keys among them that are short text (plain). */
   readonly plain?: readonly string[];
+  /** The keys among them that are links edited as a button (nothing is typed into them). */
+  readonly button?: readonly string[];
 };
 
 export type FieldBox = {
   readonly key: string;
-  /** Rich text, or one plain line of short text. */
-  readonly kind: 'rich' | 'plain';
+  /** Rich text, one plain line of short text, or a button. */
+  readonly kind: 'rich' | 'plain' | 'button';
   /** The field's box; a ghost box when the field takes up no room. */
   readonly box: Box;
   /** The box of the block that holds the field. */
@@ -138,7 +140,12 @@ export function createFieldTracker(
           if (box === null) continue;
           found.push({
             key,
-            kind: wanted.plain?.includes(key) === true ? 'plain' : 'rich',
+            kind:
+              wanted.button?.includes(key) === true
+                ? 'button'
+                : wanted.plain?.includes(key) === true
+                  ? 'plain'
+                  : 'rich',
             box,
             block: blockBox,
             empty: isEmptyFieldElement(field),

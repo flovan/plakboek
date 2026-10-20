@@ -9,6 +9,10 @@
  * mark, so the server's render of the block waits until the session ends and
  * never replaces the element under the caret.
  *
+ * A button block (a `link` field) is the other kind of session: no editor is
+ * mounted, the Button popover edits the block's properties, and it ends the
+ * same ways.
+ *
  * A session ends on Escape, Done, a click elsewhere, a different selection, a
  * structural action, an undo or redo, a frame reload and lock loss. Never on
  * blur alone. Every ending flushes the pending save first.
@@ -126,6 +130,13 @@ export type TextController = {
   /** Puts keyboard focus back in the field with its selection as it was. */
   focusField(): void;
   /**
+   * The Button popover of a button block writes one of its three properties
+   * (the link, its label or its style) through the normal property preview
+   * and save. Only the keys the session's field names are written; anything
+   * else, and any call between sessions, does nothing.
+   */
+  setBlockProperty(key: string, value: unknown, immediate: boolean): void;
+  /**
    * Alt+F10 in the field: focuses the toolbar's current control, through the
    * function the toolbar registered. Does nothing without a toolbar.
    */
@@ -203,6 +214,8 @@ export function createTextController(
   const { store, changeProperties, ready, focusRegion, announce } = options;
   const renderers = options.renderers ?? DEFAULT_TEXT_RENDERERS;
   let current: Session | null = null;
+  /** The button block being edited in its popover: the other kind of session, with no editor. */
+  let blockButton: FieldTarget | null = null;
   let pressInside = false;
   /** The field the unsupported-formatting notice is about. */
   let refused: FieldTarget | null = null;
@@ -227,7 +240,30 @@ export function createTextController(
     return textOf(labelOf(model, byKey, id));
   }
 
+  /** Ends the button block's session: flushes what was queued for the block and hands back. */
+  function exitBlockButton(reason: TextExitReason): void {
+    const target = blockButton;
+    if (target === null) return;
+    blockButton = null;
+    buttonToken = 0;
+    store.setTextField(null);
+    notify();
+    if (reason === 'escape' || reason === 'done') {
+      focusRegion();
+      announce(
+        formatString('text.announce.stopped', {
+          label: blockLabel(target.blockId),
+        }),
+      );
+    }
+    if (reason !== 'reload') ready(target.blockId);
+  }
+
   async function exit(reason: TextExitReason): Promise<void> {
+    if (blockButton !== null) {
+      exitBlockButton(reason);
+      return;
+    }
     const session = current;
     if (session === null) {
       // A field the editor refused to mount has no editor to end.
@@ -286,10 +322,35 @@ export function createTextController(
     }
   }
 
-  function enter(target: FieldTarget, point?: { x: number; y: number }): void {
-    if (current !== null) void exit('click');
+  /** A button block's field: no editor, the Button popover edits its properties. */
+  function enterBlockButton(target: FieldTarget): void {
     const state = store.getState();
     if (state.status !== 'editing' || state.mode !== 'edit') return;
+    blockButton = target;
+    buttonCounter += 1;
+    buttonToken = buttonCounter;
+    store.setTextField({
+      blockId: target.blockId,
+      key: target.key,
+      kind: 'button',
+      unsupported: false,
+    });
+    announce(
+      formatString('text.announce.editingButton', {
+        label: target.property.label,
+      }),
+    );
+    notify();
+  }
+
+  function enter(target: FieldTarget, point?: { x: number; y: number }): void {
+    if (current !== null || blockButton !== null) void exit('click');
+    const state = store.getState();
+    if (state.status !== 'editing' || state.mode !== 'edit') return;
+    if (target.kind === 'button') {
+      enterBlockButton(target);
+      return;
+    }
     const rich = target.kind === 'rich';
     const theme = target.property.textTheme;
     if (rich && theme === undefined) return;
@@ -599,7 +660,7 @@ export function createTextController(
   return {
     enter,
     exit,
-    active: () => current?.target ?? null,
+    active: () => current?.target ?? blockButton,
     editor: () => current?.editor ?? null,
     subscribe(listener) {
       listeners.add(listener);
@@ -616,6 +677,13 @@ export function createTextController(
     closeButton,
     focusField() {
       current?.editor.view.focus();
+    },
+    setBlockProperty(key, value, immediate) {
+      const target = blockButton;
+      if (target === null) return;
+      const allowed = [target.key, target.labelKey, target.variantKey];
+      if (!allowed.includes(key)) return;
+      void changeProperties(target.blockId, { [key]: value }, key, immediate);
     },
     focusToolbar() {
       toolbarFocus?.();
