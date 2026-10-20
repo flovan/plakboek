@@ -797,6 +797,42 @@
     border-top: 1px solid var(--pk-border);
   }
 
+  /*
+   * The custom-style marker: a 2px dashed bar (4px dash, 2px gap, so it is not
+   * a link underline and not colour alone) under each line box of text that
+   * carries custom style, with a 1px halo below it. Decoration only.
+   */
+  .pk-custom-style {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .pk-custom-style-bar {
+    position: absolute;
+    height: 2px;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to right,
+      var(--pk-overlay-custom-style) 0 4px,
+      transparent 4px 6px
+    );
+    box-shadow: 0 1px 0 var(--pk-overlay-halo);
+  }
+
+  @media (forced-colors: active) {
+    .pk-custom-style-bar {
+      height: 3px;
+      forced-color-adjust: none;
+      background: repeating-linear-gradient(
+        to right,
+        Highlight 0 4px,
+        transparent 4px 6px
+      );
+      box-shadow: none;
+    }
+  }
+
   .pk-toolbar-menu {
     position: absolute;
     top: 100%;

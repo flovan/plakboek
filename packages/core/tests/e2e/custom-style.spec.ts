@@ -329,3 +329,162 @@ test('with custom values off the swatches and sizes are there but no custom inpu
   await expect(size.getByRole('radio', { name: 'Large' })).toBeVisible();
   await expect(size.locator('input')).toHaveCount(0);
 });
+
+const BARS = '[data-custom-style-bar]';
+
+function accentDoc(before: string, word: string) {
+  return {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: before },
+          {
+            type: 'text',
+            text: word,
+            marks: [{ type: 'textColor', attrs: { token: 'accent' } }],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+test('the marker shows under custom-styled text only while its block is selected, never on hover, and never reaches a visitor', async ({
+  page,
+  playwright,
+}) => {
+  const created = await createEditablePage({
+    publish: true,
+    blocks: [
+      section(
+        paragraph('Intro '.repeat(60)),
+        { type: 'prose', props: { body: accentDoc('Selected ', 'accent') } },
+        { type: 'prose', props: { body: accentDoc('Other ', 'drift') } },
+      ),
+    ],
+  });
+  await openEditor(page, created.path);
+  const frame = await framedSite(page);
+  const fields = frame.locator('.prose-flow');
+  const marks = chrome(page).locator(BARS);
+
+  // nothing selected: a page at rest looks like the visitor page, even hovered
+  await fields.nth(1).hover();
+  await expect(marks).toHaveCount(0);
+
+  // select the first block by entering its field and leaving with Escape
+  await fields.first().click();
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+  await page.keyboard.press('Escape');
+  await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+  await expect(marks).toHaveCount(1);
+
+  // it sits under the word: 2px tall, on the word's line, as wide as the word
+  const word = fields.first().locator('span').filter({ hasText: 'accent' });
+  const wordBox = await word.boundingBox();
+  const barBox = await marks.first().boundingBox();
+  if (wordBox === null || barBox === null) throw new Error('No boxes');
+  expect(barBox.height).toBe(2);
+  expect(Math.abs(barBox.x - wordBox.x)).toBeLessThan(2);
+  expect(Math.abs(barBox.width - wordBox.width)).toBeLessThan(2);
+  expect(Math.abs(barBox.y - (wordBox.y + wordBox.height))).toBeLessThan(4);
+
+  // hovering the other block draws nothing for it
+  await fields.nth(1).hover();
+  await expect(marks).toHaveCount(1);
+
+  // the field being edited is marked from the live editor too
+  await fields.first().click();
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+  await expect(marks).toHaveCount(1);
+
+  // and a visitor's response carries neither the marker nor any chrome
+  const anonymous = await playwright.request.newContext({
+    baseURL: process.env.E2E_BASE_URL,
+  });
+  const html = await (await anonymous.get(created.path)).text();
+  expect(html).toContain('accent');
+  expect(html).toMatch(/color:\s*var\(--color-accent\)/);
+  for (const marker of [
+    'plakboek-chrome',
+    'pk-custom-style',
+    'custom-style-bar',
+  ]) {
+    expect(html).not.toContain(marker);
+  }
+  await anonymous.dispose();
+});
+
+test('a marker follows a run that wraps onto more lines, and an alignment marks its paragraph measure', async ({
+  page,
+}) => {
+  const long = 'wrapping '.repeat(60).trim();
+  const created = await createEditablePage({
+    blocks: [
+      section(paragraph('Intro '.repeat(60)), {
+        type: 'prose',
+        props: {
+          body: {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  {
+                    type: 'text',
+                    text: long,
+                    marks: [{ type: 'textColor', attrs: { token: 'accent' } }],
+                  },
+                ],
+              },
+              {
+                type: 'paragraph',
+                attrs: { textAlign: 'center' },
+                content: [{ type: 'text', text: 'Centred line' }],
+              },
+            ],
+          },
+        },
+      }),
+    ],
+  });
+  await openEditor(page, created.path);
+  const frame = await framedSite(page);
+  const field = frame.locator('.prose-flow').first();
+  await field.click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+
+  const bars = chrome(page).locator(BARS);
+  const firstParagraph = await field.locator('p').first().boundingBox();
+  const secondParagraph = await field.locator('p').nth(1).boundingBox();
+  if (firstParagraph === null || secondParagraph === null) {
+    throw new Error('No boxes');
+  }
+  // one bar per line box of the wrapped run, and one for the centred line
+  const lines = await field
+    .locator('p')
+    .first()
+    .evaluate((element) => {
+      const range = element.ownerDocument.createRange();
+      range.selectNodeContents(element);
+      return new Set(
+        [...range.getClientRects()].map((rect) => Math.round(rect.bottom)),
+      ).size;
+    });
+  expect(lines).toBeGreaterThan(2);
+  await expect(bars).toHaveCount(lines + 1);
+  const boxes = (
+    await Promise.all((await bars.all()).map((bar) => bar.boundingBox()))
+  ).filter((box) => box !== null);
+  // the centred paragraph's bar spans its full measure, not just its words
+  const centred = boxes.find(
+    (box) => box.y > secondParagraph.y && box.y < secondParagraph.y + 40,
+  );
+  if (centred === undefined) throw new Error('No bar under the centred line');
+  expect(Math.abs(centred.width - secondParagraph.width)).toBeLessThan(2);
+  // nothing is drawn beyond the run: no bar under the intro above
+  expect(boxes.every((box) => box.y > firstParagraph.y)).toBe(true);
+});

@@ -1,5 +1,11 @@
+import { getSchema } from '@tiptap/core';
+import { Node as PMNode } from '@tiptap/pm/model';
+import { resolveTextTheme } from '@plakboek/content/rich-text';
 import { describe, expect, it } from 'vitest';
+import { buildLockedExtensions } from '../../src/client/text/extensions.js';
+import { unlockExtensions } from '../../src/client/text/unlock.js';
 import {
+  customStylePositions,
   customStyleRuns,
   flattenedText,
   type JsonNode,
@@ -161,5 +167,65 @@ describe('customStyleRuns', () => {
   it('returns an empty list for a document with none', () => {
     expect(customStyleRuns(doc(paragraph([text('plain')])))).toEqual([]);
     expect(customStyleRuns(doc())).toEqual([]);
+  });
+});
+
+describe('customStylePositions', () => {
+  const theme = resolveTextTheme({
+    colors: [{ label: 'Accent', token: 'accent' }],
+    sizes: [{ label: 'Large', token: 'xl' }],
+    align: true,
+  });
+  const schema = getSchema([
+    ...buildLockedExtensions(),
+    ...unlockExtensions(theme),
+  ]);
+  const build = (json: JsonNode): PMNode => PMNode.fromJSON(schema, json);
+  const coloured = (value: string, mark = 'textColor'): JsonNode => ({
+    type: 'text',
+    text: value,
+    marks: [
+      { type: mark, attrs: { token: mark === 'textColor' ? 'accent' : 'xl' } },
+    ],
+  });
+
+  it('gives the positions of a coloured run, merging a size run next to it', () => {
+    const runs = customStylePositions(
+      build(
+        doc(
+          paragraph([text('ab '), coloured('cd'), coloured('ef', 'textSize')]),
+        ),
+      ),
+    );
+    // position 0 is before the paragraph, so its text starts at 1
+    expect(runs).toEqual([{ kind: 'style', from: 4, to: 8 }]);
+  });
+
+  it('lists an aligned block before the runs inside it, and none for plain text', () => {
+    const runs = customStylePositions(
+      build(
+        doc(
+          paragraph([text('plain')]),
+          paragraph([text('x '), coloured('y')], 'center'),
+        ),
+      ),
+    );
+    expect(runs).toEqual([
+      { kind: 'align', from: 8, to: 11 },
+      { kind: 'style', from: 10, to: 11 },
+    ]);
+    expect(
+      customStylePositions(build(doc(paragraph([text('plain')])))),
+    ).toEqual([]);
+  });
+
+  it('agrees with the stored-document runs on what is custom', () => {
+    const json = doc(
+      paragraph([text('one '), coloured('two')]),
+      paragraph([coloured('three', 'textSize')], 'right'),
+    );
+    expect(customStylePositions(build(json)).map((run) => run.kind)).toEqual(
+      customStyleRuns(json).map((run) => run.kind),
+    );
   });
 });
