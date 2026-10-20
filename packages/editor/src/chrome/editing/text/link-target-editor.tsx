@@ -203,12 +203,12 @@ export function LinkTargetEditor(props: LinkTargetEditorProps): ReactElement {
     event.preventDefault();
     event.stopPropagation();
     const next: Segment = segment === 'page' ? 'web' : 'page';
+    // React clears `currentTarget` once the handler returns, so keep the group.
+    const group = event.currentTarget;
     choose(next, false);
     // The newly selected radio is the one tab stop; focus follows the selection.
     requestAnimationFrame(() => {
-      (event.currentTarget as HTMLElement)
-        .querySelector<HTMLElement>(`[data-segment="${next}"]`)
-        ?.focus();
+      group.querySelector<HTMLElement>(`[data-segment="${next}"]`)?.focus();
     });
   };
 
