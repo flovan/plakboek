@@ -145,6 +145,8 @@ const OrderedList = Node.create({
 export type TextExtensionHooks = {
   /** Escape was pressed inside the field. */
   readonly onEscape?: () => void;
+  /** Alt+F10 was pressed inside the field: focus goes to the toolbar. */
+  readonly onFocusToolbar?: () => void;
   /**
    * Node and mark views derived from the host's renderers, so the field keeps
    * the host's own markup while it is edited. Without them the editor uses its
@@ -199,7 +201,8 @@ const RendererShellViews = Extension.create<TextExtensionHooks>({
 
 /**
  * Escape ends the field session. The key is consumed here so that the shell's
- * own Escape (climb the selection) does not also run.
+ * own Escape (climb the selection) does not also run. Alt+F10 hands the
+ * keyboard to the toolbar.
  */
 const TextFieldKeymap = Extension.create<TextExtensionHooks>({
   name: 'textFieldKeymap',
@@ -212,6 +215,12 @@ const TextFieldKeymap = Extension.create<TextExtensionHooks>({
     return {
       Escape: () => {
         const handler = this.options.onEscape;
+        if (handler === undefined) return false;
+        handler();
+        return true;
+      },
+      'Alt-F10': () => {
+        const handler = this.options.onFocusToolbar;
         if (handler === undefined) return false;
         handler();
         return true;

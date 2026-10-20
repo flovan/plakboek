@@ -11,12 +11,14 @@ import type { CatalogueEntry } from '../../api-types.js';
 import { EmptyPrompts } from '../../chrome/editing/empty-prompts.js';
 import { FieldBar } from '../../chrome/editing/text/field-bar.js';
 import { FieldDecor } from '../../chrome/editing/text/field-decor.js';
+import { TextToolbar } from '../../chrome/editing/text/text-toolbar.js';
 import { UnsupportedNotice } from '../../chrome/editing/text/unsupported-notice.js';
 import { InsertPoints } from '../../chrome/editing/insert-points.js';
 import { NeedsInputMarkers } from '../../chrome/editing/needs-input.js';
 import { Picker } from '../../chrome/editing/picker.js';
 import { Toolbar } from '../../chrome/editing/toolbar.js';
 import { formatString } from '../../chrome/strings.js';
+import type { TextController } from '../text/controller.js';
 import { frameElementOf } from '../chrome-host/shape.js';
 import { rowLabel } from '../session/page-tree.js';
 import { measureSiblingAxis } from '../frame/sibling-axis.js';
@@ -193,6 +195,45 @@ function PlainFieldBar(props: {
   );
 }
 
+/**
+ * The toolbar of the rich text field being edited, hidden while the field is
+ * fully scrolled out of the frame (the session goes on).
+ */
+function RichFieldToolbar(props: {
+  readonly store: EditorStore;
+  readonly controller: TextController;
+  readonly textField: NonNullable<EditorState['textField']>;
+  readonly fields: readonly FieldBox[];
+  readonly visible: Box;
+}): ReactElement | null {
+  const { store, controller, textField, fields, visible } = props;
+  const box = fields.find((item) => item.key === textField.key)?.box ?? null;
+  const state = store.getState();
+  const node = state.model?.get(textField.blockId);
+  const property = state.session?.catalogue
+    .find((entry) => entry.key === node?.type)
+    ?.properties.find((item) => item.key === textField.key);
+  const theme = property?.textTheme;
+  if (
+    box === null ||
+    property === undefined ||
+    theme === undefined ||
+    !isVisibleIn(box, visible)
+  ) {
+    return null;
+  }
+  return (
+    <TextToolbar
+      controller={controller}
+      store={store}
+      label={property.label}
+      theme={theme}
+      field={box}
+      visible={visible}
+    />
+  );
+}
+
 /** The frame the layer sits in: the one passed, else the one its document is shown in. */
 function frameFor(
   layer: HTMLDivElement | null,
@@ -289,6 +330,8 @@ export function OverlayLayer(props: {
   readonly onRemoveUnsupported?: () => Promise<unknown>;
   /** Called by Done on a short text field's bar. */
   readonly onFieldDone?: () => void;
+  /** The text session, for the rich text toolbar's commands. */
+  readonly textController?: TextController;
 }): ReactElement {
   const {
     frame,
@@ -305,6 +348,7 @@ export function OverlayLayer(props: {
     onKeepUnsupported,
     onRemoveUnsupported,
     onFieldDone,
+    textController,
   } = props;
   const layer = useRef<HTMLDivElement>(null);
   const [frameElement, setFrameElement] = useState<HTMLIFrameElement | null>(
@@ -469,6 +513,7 @@ export function OverlayLayer(props: {
   }, [frame, store, active]);
   const fieldActive = textField !== null && !textField.unsupported;
   const plainActive = fieldActive && textField.kind === 'plain';
+  const richActive = fieldActive && textField.kind === 'rich';
   const unsupportedBox =
     textField !== null && textField.unsupported
       ? (fields.find((item) => item.key === textField.key)?.box ?? null)
@@ -553,8 +598,9 @@ export function OverlayLayer(props: {
   const toolbarItem =
     store === undefined ||
     confirming ||
-    // The compact field bar takes the toolbar's place while short text is typed.
-    plainActive ||
+    // The field's own bar (the compact one for short text, the text toolbar
+    // for rich text) takes the block toolbar's place while a field is typed.
+    fieldActive ||
     pointerDragging ||
     selection === null ||
     selection.selected === null ||
@@ -719,6 +765,15 @@ export function OverlayLayer(props: {
                 fields={fields}
                 visible={selection?.visible ?? visible}
                 onDone={onFieldDone}
+              />
+            ) : null}
+            {richActive && textController !== undefined ? (
+              <RichFieldToolbar
+                store={store}
+                controller={textController}
+                textField={textField}
+                fields={fields}
+                visible={selection?.visible ?? visible}
               />
             ) : null}
             {toolbarItem === null ? null : (

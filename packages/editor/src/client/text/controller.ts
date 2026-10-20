@@ -87,6 +87,23 @@ export type TextController = {
   exit(reason: TextExitReason): Promise<void>;
   /** The field being edited, or null. */
   active(): FieldTarget | null;
+  /** The running session's editor, for the text toolbar's commands; null between sessions. */
+  editor(): Editor | null;
+  /**
+   * Calls the listener on every editor transaction (a keystroke, a selection
+   * move, a toolbar command) and when a session starts or ends; returns the
+   * function that stops it. The toolbar reads its state through this.
+   */
+  readonly subscribe: (listener: () => void) => () => void;
+  /** Puts keyboard focus back in the field with its selection as it was. */
+  focusField(): void;
+  /**
+   * Alt+F10 in the field: focuses the toolbar's current control, through the
+   * function the toolbar registered. Does nothing without a toolbar.
+   */
+  focusToolbar(): void;
+  /** The toolbar registers (and, with null, withdraws) how to focus itself. */
+  setToolbarFocus(focus: (() => void) | null): void;
   /**
    * "Keep as is" on the unsupported-formatting notice: closes it and leaves
    * the stored text untouched and the field read-only.
@@ -161,6 +178,12 @@ export function createTextController(
   let pressInside = false;
   /** The field the unsupported-formatting notice is about. */
   let refused: FieldTarget | null = null;
+  const listeners = new Set<() => void>();
+  let toolbarFocus: (() => void) | null = null;
+
+  function notify(): void {
+    for (const listener of listeners) listener();
+  }
 
   function blockLabel(id: string): string {
     const { model, session } = store.getState();
@@ -200,6 +223,7 @@ export function createTextController(
     restoreField(target.element, snapshot, interim);
     endInlineEdit(block);
     store.setTextField(null);
+    notify();
     if (reason === 'escape' || reason === 'done') {
       focusRegion();
       announce(
@@ -290,6 +314,9 @@ export function createTextController(
                 onEscape: () => {
                   void exit('escape');
                 },
+                onFocusToolbar: () => {
+                  toolbarFocus?.();
+                },
                 shells,
               })
             : buildPlainExtensions({
@@ -341,6 +368,8 @@ export function createTextController(
       touched: false,
     };
     current = session;
+    // The toolbar follows every transaction, selection moves included.
+    editor.on('transaction', notify);
     // Registered after the first transaction, so a node the editor adds by
     // itself on mount is not a change.
     editor.on('update', () => {
@@ -372,6 +401,7 @@ export function createTextController(
         { label: target.property.label },
       ),
     );
+    notify();
   }
 
   /** Resolves once everything queued is sent, or sending has stopped. */
@@ -481,6 +511,22 @@ export function createTextController(
     enter,
     exit,
     active: () => current?.target ?? null,
+    editor: () => current?.editor ?? null,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    focusField() {
+      current?.editor.view.focus();
+    },
+    focusToolbar() {
+      toolbarFocus?.();
+    },
+    setToolbarFocus(focus) {
+      toolbarFocus = focus;
+    },
     keepUnsupported,
     removeUnsupported,
     ownsEvent(event) {

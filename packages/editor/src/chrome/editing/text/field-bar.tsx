@@ -35,7 +35,7 @@ export type FieldBarProps = {
   readonly onDone: () => void;
 };
 
-function boxStyle(box: Box): CSSProperties {
+export function boxStyle(box: Box): CSSProperties {
   return {
     left: box.left,
     top: box.top,
@@ -44,7 +44,7 @@ function boxStyle(box: Box): CSSProperties {
   };
 }
 
-const DONE_BUTTON =
+export const DONE_BUTTON =
   'flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-2 text-body font-semibold text-text hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-focus-ring';
 
 /**

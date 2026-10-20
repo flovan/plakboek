@@ -7,6 +7,7 @@ import { OverlayLayer } from '../client/overlay/overlay-layer.js';
 import { ShellDragLayer } from '../client/overlay/shell-drag-layer.js';
 import type { InsertSlot } from '../client/session/insertion.js';
 import type { MoveDirection } from '../client/session/move-targets.js';
+import type { TextController } from '../client/text/controller.js';
 import {
   NO_STORE,
   useEditorStore,
@@ -106,6 +107,8 @@ export type ShellAppProps = {
     readonly onRemoveUnsupported?: () => Promise<unknown>;
     /** Called by Done on a short text field's bar. */
     readonly onFieldDone?: () => void;
+    /** The text session: the rich text toolbar runs its commands through it. */
+    readonly textController?: TextController;
     /** The text session the Properties panel hands over to when a control of the property typed on the page takes focus. */
     readonly textSession?: PropertiesPanelProps['textSession'];
     /** Called when a Properties control changes a value: render it and queue the save. */
@@ -302,6 +305,7 @@ export function ShellApp(props: ShellAppProps): ReactElement {
               onKeepUnsupported={editor?.onKeepUnsupported}
               onRemoveUnsupported={editor?.onRemoveUnsupported}
               onFieldDone={editor?.onFieldDone}
+              textController={editor?.textController}
             />,
             chromeHost.root,
           )

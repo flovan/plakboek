@@ -1593,6 +1593,7 @@ function Shell(props: {
                 void controller.exit('done');
               },
               textSession: controller,
+              textController: controller,
               onPropertiesChange: changeProperties,
               onPropertiesBlur: blurProperties,
               onLayoutChange: changeLayout,
