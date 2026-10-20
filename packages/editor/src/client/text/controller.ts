@@ -101,6 +101,16 @@ export type TextController = {
    * while it is closed. Changes are announced through `subscribe`.
    */
   slash(): SlashState | null;
+  /**
+   * The link popover of the running session: a number that changes each time
+   * it is asked for (the toolbar's Link, Mod-K, a click on a link), 0 while it
+   * is closed. Changes are announced through `subscribe`.
+   */
+  linkRequest(): number;
+  /** Asks for the link popover; does nothing between sessions. */
+  openLink(): void;
+  /** Closes the link popover without touching the field. */
+  closeLink(): void;
   /** Puts keyboard focus back in the field with its selection as it was. */
   focusField(): void;
   /**
@@ -187,6 +197,8 @@ export function createTextController(
   const listeners = new Set<() => void>();
   let toolbarFocus: (() => void) | null = null;
   let slashState: SlashState | null = null;
+  let linkToken = 0;
+  let linkCounter = 0;
 
   function notify(): void {
     for (const listener of listeners) listener();
@@ -210,6 +222,7 @@ export function createTextController(
     }
     current = null;
     slashState = null;
+    linkToken = 0;
     const { target, editor, block, snapshot, shells } = session;
     const { blockId, key } = target;
     const value = savedValue(editor, target.kind);
@@ -328,6 +341,7 @@ export function createTextController(
                 onStyleReset: () => {
                   announce(formatString('text.announce.styleReset'));
                 },
+                onLink: openLink,
                 onSlash: (next) => {
                   slashState = next;
                   notify();
@@ -423,6 +437,19 @@ export function createTextController(
         { label: target.property.label },
       ),
     );
+    notify();
+  }
+
+  function openLink(): void {
+    if (current === null) return;
+    linkCounter += 1;
+    linkToken = linkCounter;
+    notify();
+  }
+
+  function closeLink(): void {
+    if (linkToken === 0) return;
+    linkToken = 0;
     notify();
   }
 
@@ -541,6 +568,9 @@ export function createTextController(
       };
     },
     slash: () => slashState,
+    linkRequest: () => linkToken,
+    openLink,
+    closeLink,
     focusField() {
       current?.editor.view.focus();
     },

@@ -32,6 +32,19 @@ describe('toolbarModel', () => {
     expect(
       [...model.marks, ...model.lists].every((toggle) => !toggle.pressed),
     ).toBe(true);
+    // Link sits after the lists, and is its own control rather than a toggle
+    expect(model.link).toEqual({ pressed: false });
+  });
+
+  it('presses Link while the caret is in a link, and has none without the mark', () => {
+    expect(
+      toolbarModel({
+        theme: DEFAULT_TEXT_THEME,
+        isActive: (name) => name === 'link',
+      }).link,
+    ).toEqual({ pressed: true });
+    const noLink = narrowTextTheme(DEFAULT_TEXT_THEME, { marks: ['bold'] });
+    expect(toolbarModel({ theme: noLink, isActive: none }).link).toBeNull();
   });
 
   it('presses the toggles that apply at the selection', () => {
@@ -68,6 +81,7 @@ describe('toolbarModel', () => {
     const model = toolbarModel({ theme, isActive: none });
     expect(model.marks.map((toggle) => toggle.id)).toEqual(['bold', 'italic']);
     expect(model.lists).toEqual([]);
+    expect(model.link).toEqual({ pressed: false });
     // no heading level, so no Text style menu at all
     expect(model.style).toBeNull();
   });

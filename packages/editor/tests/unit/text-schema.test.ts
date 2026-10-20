@@ -32,6 +32,7 @@ describe('the locked base text schema', () => {
     expect(Object.keys(schema.marks).sort()).toEqual([
       'bold',
       'italic',
+      'link',
       'strike',
       'underline',
     ]);

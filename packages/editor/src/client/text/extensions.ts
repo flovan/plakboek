@@ -31,6 +31,7 @@ import {
 } from '@plakboek/content/rich-text';
 import { resetStyle } from './commands.js';
 import { insertItems, type InsertItem } from './insert-items.js';
+import { ThemedLink } from './link.js';
 import type { RendererShells } from './shells.js';
 import { slashExtension, type SlashState } from './slash.js';
 import { unlockExtensions } from './unlock.js';
@@ -154,6 +155,11 @@ export type TextExtensionHooks = {
   /** Reset style ran from the keyboard (Mod-Backslash) and changed something. */
   readonly onStyleReset?: () => void;
   /**
+   * The link popover was asked for: Mod-K, or a click on a link in the field.
+   * Without it the field has no link key and a click on a link does nothing.
+   */
+  readonly onLink?: () => void;
+  /**
    * The '/' menu changed (opened, filtered, moved, closed with null). Without
    * it the field has no '/' menu at all.
    */
@@ -238,6 +244,19 @@ const TextFieldKeymap = Extension.create<TextExtensionHooks>({
         handler();
         return true;
       },
+      // Link: opens the link popover for the selection or the link at the
+      // caret. A field whose theme has no link leaves the key alone.
+      'Mod-k': () => {
+        const handler = this.options.onLink;
+        if (
+          handler === undefined ||
+          this.editor.schema.marks['link'] === undefined
+        ) {
+          return false;
+        }
+        handler();
+        return true;
+      },
       // Reset style: strips colour, size and alignment from the selection in
       // one step. Without custom style in the schema or the selection the key
       // is left alone.
@@ -305,9 +324,9 @@ function slashExtensions(
 
 /**
  * The extension set of one rich_text property: the locked base narrowed by the
- * property's effective theme. The link and button extensions join it in
- * later plans; until then a theme that names them simply has no such extension
- * yet, and the server still validates every write.
+ * property's effective theme. The button extension joins it in a later plan;
+ * until then a theme that names it simply has no such extension yet, and the
+ * server still validates every write.
  */
 export function buildTextExtensions(
   theme: TextTheme,
@@ -318,6 +337,10 @@ export function buildTextExtensions(
     ...(theme.nodes.includes('orderedList') ? [OrderedList] : []),
     // Colour, size and alignment, only when the theme declares them.
     ...unlockExtensions(theme),
+    // Links, only when the theme names the mark.
+    ...(theme.marks.includes('link')
+      ? [ThemedLink.configure({ onOpen: hooks.onLink ?? null })]
+      : []),
     TextFieldKeymap.configure(hooks),
     ...slashExtensions(theme, hooks),
     ...(hooks.shells === undefined

@@ -5,9 +5,8 @@
  *
  * A control the theme does not allow is not in the model at all (and its mark
  * or node is not in the field's schema either), so the toolbar never offers
- * what the server would refuse. Later plans add their own control here (the
- * Insert menu, the Custom style toggle, Link); a control is never listed
- * before it works.
+ * what the server would refuse. Later plans add their own control here; a
+ * control is never listed before it works.
  */
 import type {
   TextPaletteEntry,
@@ -66,6 +65,11 @@ export type ToolbarModel = {
   readonly style: StyleControl | null;
   readonly marks: readonly ToggleControl[];
   readonly lists: readonly ToggleControl[];
+  /**
+   * The Link button, pressed while the caret is in a link; absent when the
+   * theme has no link mark. It opens the link popover rather than toggling.
+   */
+  readonly link: { readonly pressed: boolean } | null;
   /** Whether the Insert menu has anything to offer; absent from the bar when not. */
   readonly insert: boolean;
   /** Absent when the theme declares no colour, size or alignment. */
@@ -106,6 +110,7 @@ export function toolbarModel(input: ToolbarInput): ToolbarModel {
       id,
       pressed: isActive(id),
     })),
+    link: theme.marks.includes('link') ? { pressed: isActive('link') } : null,
     insert: insertItems(theme, 'plus').length > 0,
     customStyle:
       theme.colors.length === 0 && theme.sizes.length === 0 && !theme.align

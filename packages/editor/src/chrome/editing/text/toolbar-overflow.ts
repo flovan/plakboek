@@ -4,7 +4,7 @@
  * width minus 16px. Under pressure the controls collapse in a fixed order:
  * Done loses its text first; then Strikethrough, Underline, Numbered list and
  * Bulleted list move, in that order, into a More menu placed before Done. The
- * Text style button and whatever else is not listed here never move.
+ * Text style button, Link and whatever else is not listed here never move.
  */
 
 /** The controls that can be measured here (Done is measured with its text). */
@@ -16,6 +16,7 @@ export type ControlId =
   | 'strike'
   | 'bulletList'
   | 'orderedList'
+  | 'link'
   | 'insert'
   | 'customStyle'
   | 'done';
@@ -36,6 +37,7 @@ export const CONTROL_GROUPS: readonly (readonly GroupedControlId[])[] = [
   ['style'],
   ['bold', 'italic', 'underline', 'strike'],
   ['bulletList', 'orderedList'],
+  ['link'],
   ['insert'],
 ];
 

@@ -147,10 +147,14 @@ const PICKER_MAX_HEIGHT = 360;
 const PICKER_GAP = 8;
 const PICKER_MIN_HEIGHT = 160;
 
-export function pickerPlacement(anchor: Box, visible: Box): PickerPlacement {
+export function pickerPlacement(
+  anchor: Box,
+  visible: Box,
+  tallest: number = PICKER_MAX_HEIGHT,
+): PickerPlacement {
   const cap = Math.max(
     PICKER_MIN_HEIGHT,
-    Math.min(PICKER_MAX_HEIGHT, visible.height - 16),
+    Math.min(tallest, visible.height - 16),
   );
   const below =
     visible.top +
@@ -186,8 +190,12 @@ export function pickerPlacement(anchor: Box, visible: Box): PickerPlacement {
  * follows the typed `/query` (kept 8px inside the visible part) instead of
  * centring on the anchor, so the menu hangs from the caret.
  */
-export function slashPlacement(anchor: Box, visible: Box): PickerPlacement {
-  const placed = pickerPlacement(anchor, visible);
+export function slashPlacement(
+  anchor: Box,
+  visible: Box,
+  tallest?: number,
+): PickerPlacement {
+  const placed = pickerPlacement(anchor, visible, tallest);
   const left = Math.max(
     visible.left + PICKER_GAP,
     Math.min(

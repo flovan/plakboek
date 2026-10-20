@@ -254,10 +254,10 @@ test('in a frame narrower than the bar Done goes icon-only and Strikethrough, Un
   const toolbar = chrome(page).locator(TOOLBAR);
   await expect(toolbar).toBeVisible();
   // the windows this editor supports leave the bar room to spare, so the
-  // frame itself is made narrower than the bar (the Custom style label never
-  // collapses, so it is the narrowest that still holds the bar)
+  // frame itself is made narrower than the bar (the Custom style label and
+  // Link never collapse, so 500px is about the narrowest that still holds it)
   await page.locator(FRAME).evaluate((frame) => {
-    frame.style.width = '480px';
+    frame.style.width = '500px';
   });
   const more = toolbar.getByRole('button', { name: 'More formatting' });
   await expect(more).toBeVisible();

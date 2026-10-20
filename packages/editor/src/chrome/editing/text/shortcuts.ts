@@ -14,6 +14,7 @@ export type ShortcutId =
   | 'strike'
   | 'bulletList'
   | 'orderedList'
+  | 'link'
   | 'paragraph'
   | 'title'
   | 'heading'
@@ -36,6 +37,7 @@ export const TEXT_SHORTCUTS: Readonly<Record<ShortcutId, Shortcut>> = {
   strike: { mod: true, shift: true, key: 'S' },
   bulletList: { mod: true, shift: true, key: '8' },
   orderedList: { mod: true, shift: true, key: '7' },
+  link: { mod: true, key: 'K' },
   paragraph: { mod: true, alt: true, key: '0' },
   title: { mod: true, alt: true, key: '2' },
   heading: { mod: true, alt: true, key: '3' },

@@ -1020,8 +1020,31 @@
     pointer-events: auto;
   }
 
+  /*
+   * The link popover: 320px, hung below the selection (above it when there is
+   * more room there). The page list is the one part that scrolls, so the
+   * popover itself is capped by its inline max-height and clips.
+   */
+  .pk-link-popover {
+    position: absolute;
+    z-index: 1;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 320px;
+    padding: 16px;
+    overflow: hidden;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+    pointer-events: auto;
+  }
+
   @media (forced-colors: active) {
-    .pk-unsupported-notice {
+    .pk-unsupported-notice,
+    .pk-link-popover {
       border-color: CanvasText;
       background: Canvas;
     }

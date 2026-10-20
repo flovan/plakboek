@@ -239,7 +239,7 @@ test('the Text style menu lists exactly four rows, chooses h2, h3 and h4, and h1
   await expect(reloaded.locator('h1')).toHaveCount(0);
 });
 
-test('a property narrowed to bold, italic and link shows exactly Bold, Italic and Done', async ({
+test('a property narrowed to bold, italic and link shows exactly Bold, Italic, Link and Done', async ({
   page,
 }) => {
   const created = await createEditablePage({
@@ -260,10 +260,11 @@ test('a property narrowed to bold, italic and link shows exactly Bold, Italic an
 
   const toolbar = chrome(page).locator(TOOLBAR);
   const buttons = toolbar.getByRole('button');
-  await expect(buttons).toHaveCount(3);
+  await expect(buttons).toHaveCount(4);
   await expect(buttons.nth(0)).toHaveAccessibleName('Bold');
   await expect(buttons.nth(1)).toHaveAccessibleName('Italic');
-  await expect(buttons.nth(2)).toHaveAccessibleName('Done editing');
+  await expect(buttons.nth(2)).toHaveAccessibleName('Link');
+  await expect(buttons.nth(3)).toHaveAccessibleName('Done editing');
   await expect(
     toolbar.getByRole('button', { name: /^Text style/ }),
   ).toHaveCount(0);

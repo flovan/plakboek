@@ -71,6 +71,7 @@ describe('the editor schema of the default theme', () => {
     expect(Object.keys(schema.marks).sort()).toEqual([
       'bold',
       'italic',
+      'link',
       'strike',
       'underline',
     ]);

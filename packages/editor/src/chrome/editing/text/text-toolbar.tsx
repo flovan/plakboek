@@ -26,6 +26,7 @@ import {
   BoldIcon,
   CheckIcon,
   ItalicIcon,
+  LinkIcon,
   ListBulletIcon,
   ListNumberedIcon,
   PaletteIcon,
@@ -45,6 +46,7 @@ import {
   type ShortcutId,
 } from './shortcuts.js';
 import { InsertMenu } from './insert-menu.js';
+import { LinkPopover } from './link-popover.js';
 import { MoreMenu, type MoreEntry } from './more-menu.js';
 import { StyleMenu } from './style-menu.js';
 import {
@@ -138,6 +140,7 @@ const DEFAULT_WIDTH: Readonly<Record<ControlId, number>> = {
   strike: 32,
   bulletList: 32,
   orderedList: 32,
+  link: 32,
   insert: 32,
   customStyle: 118,
   done: 0,
@@ -214,6 +217,12 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     () => controller.editor()?.state ?? null,
   );
 
+  // The link popover is asked for by the Link button, Mod-K and a click on a
+  // link; the number changes with each request so a repeat starts afresh.
+  const linkRequest = useSyncExternalStore(controller.subscribe, () =>
+    controller.linkRequest(),
+  );
+
   const model = toolbarModel({
     theme,
     isActive: (name, attributes) =>
@@ -228,6 +237,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     ...(model.style === null ? [] : (['style'] as const)),
     ...model.marks.map((toggle) => toggle.id),
     ...model.lists.map((toggle) => toggle.id),
+    ...(model.link === null ? [] : (['link'] as const)),
     ...(plusItems.length === 0 ? [] : (['insert'] as const)),
   ];
   // Until Done's text has been on show and measured, nothing collapses: the
@@ -292,6 +302,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     ...model.lists
       .filter((toggle) => !moved.has(toggle.id))
       .map((toggle) => toggle.id),
+    ...(model.link === null ? [] : ['link']),
     ...(plusItems.length === 0 ? [] : ['insert']),
     ...(model.customStyle === null ? [] : ['customStyle']),
     ...(collapse.inMore.length === 0 ? [] : ['more']),
@@ -434,6 +445,37 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
     );
   };
 
+  const linkButton =
+    model.link === null ? null : (
+      <Tooltip
+        label={formatString('text.withShortcut', {
+          name: STRINGS['text.link'],
+          shortcut: shortcutLabel('link', platform),
+        })}
+        placement={tooltipSide}
+      >
+        <button
+          type="button"
+          className={TOGGLE}
+          aria-label={STRINGS['text.link']}
+          aria-pressed={model.link.pressed}
+          aria-haspopup="dialog"
+          aria-expanded={linkRequest !== 0}
+          aria-keyshortcuts={ariaShortcut('link', platform)}
+          data-link-button=""
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
+          onClick={() => {
+            controller.openLink();
+          }}
+          {...rove('link')}
+        >
+          <LinkIcon />
+        </button>
+      </Tooltip>
+    );
+
   const shownMarks = model.marks.filter((toggle) => !moved.has(toggle.id));
   const shownLists = model.lists.filter((toggle) => !moved.has(toggle.id));
   const moreEntries: readonly MoreEntry[] = [...model.marks, ...model.lists]
@@ -489,6 +531,7 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
             node: <>{shownLists.map(toggleButton)}</>,
           },
         ]),
+    ...(linkButton === null ? [] : [{ key: 'link', node: linkButton }]),
     ...(plusItems.length === 0
       ? []
       : [
@@ -567,74 +610,87 @@ export function TextToolbar(props: TextToolbarProps): ReactElement | null {
   const rowFirst = placement.mode === 'above';
 
   return (
-    // The wrapper is always there so the bar keeps its place in the tree when
-    // it changes side. Pinned, it spans the field and the bar sticks inside it.
-    <div
-      className="pk-toolbar-pin"
-      data-pinned={pinned ? '' : undefined}
-      style={pinned ? boxStyle(field) : undefined}
-    >
+    <>
+      {/* The wrapper is always there so the bar keeps its place in the tree when
+        it changes side. Pinned, it spans the field and the bar sticks inside it. */}
       <div
-        ref={root}
-        className="pk-toolbar"
-        data-toolbar=""
-        data-text-toolbar=""
-        data-placement={placement.mode}
-        data-rows={customRow === null ? '1' : '2'}
-        role="toolbar"
-        aria-label={formatString('text.toolbar.label', { label })}
-        aria-orientation="horizontal"
-        onKeyDown={onKeyDown}
-        // A press on the bar leaves the caret where it is.
-        onMouseDown={(event) => {
-          if (event.target === event.currentTarget) event.preventDefault();
-        }}
-        style={
-          pinned
-            ? { maxWidth }
-            : { left: placement.left, top: placement.top, maxWidth }
-        }
+        className="pk-toolbar-pin"
+        data-pinned={pinned ? '' : undefined}
+        style={pinned ? boxStyle(field) : undefined}
       >
-        {rowFirst ? customRow : null}
-        <div className="pk-toolbar-row" data-main-row="">
-          {groups.map((group, at) => (
-            <Fragment key={group.key}>
-              {at === 0 ? null : <Divider />}
-              {group.node}
-            </Fragment>
-          ))}
-          {groups.length === 0 ? null : <Divider />}
-          {customToggle}
-          <MoreMenu
-            entries={moreEntries}
-            onReturn={() => {
-              controller.focusField();
-            }}
-            rove={rove}
-            tooltipSide={tooltipSide}
-          />
-          <Tooltip label={STRINGS['text.done.tooltip']} placement={tooltipSide}>
-            <button
-              type="button"
-              className={DONE_BUTTON}
-              aria-label={STRINGS['text.done.label']}
-              onMouseDown={(event) => {
-                event.preventDefault();
+        <div
+          ref={root}
+          className="pk-toolbar"
+          data-toolbar=""
+          data-text-toolbar=""
+          data-placement={placement.mode}
+          data-rows={customRow === null ? '1' : '2'}
+          role="toolbar"
+          aria-label={formatString('text.toolbar.label', { label })}
+          aria-orientation="horizontal"
+          onKeyDown={onKeyDown}
+          // A press on the bar leaves the caret where it is.
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) event.preventDefault();
+          }}
+          style={
+            pinned
+              ? { maxWidth }
+              : { left: placement.left, top: placement.top, maxWidth }
+          }
+        >
+          {rowFirst ? customRow : null}
+          <div className="pk-toolbar-row" data-main-row="">
+            {groups.map((group, at) => (
+              <Fragment key={group.key}>
+                {at === 0 ? null : <Divider />}
+                {group.node}
+              </Fragment>
+            ))}
+            {groups.length === 0 ? null : <Divider />}
+            {customToggle}
+            <MoreMenu
+              entries={moreEntries}
+              onReturn={() => {
+                controller.focusField();
               }}
-              onClick={() => {
-                void controller.exit('done');
-              }}
-              {...rove('done')}
+              rove={rove}
+              tooltipSide={tooltipSide}
+            />
+            <Tooltip
+              label={STRINGS['text.done.tooltip']}
+              placement={tooltipSide}
             >
-              <CheckIcon />
-              {collapse.doneIconOnly ? null : (
-                <span ref={doneText}>{STRINGS['text.done']}</span>
-              )}
-            </button>
-          </Tooltip>
+              <button
+                type="button"
+                className={DONE_BUTTON}
+                aria-label={STRINGS['text.done.label']}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                }}
+                onClick={() => {
+                  void controller.exit('done');
+                }}
+                {...rove('done')}
+              >
+                <CheckIcon />
+                {collapse.doneIconOnly ? null : (
+                  <span ref={doneText}>{STRINGS['text.done']}</span>
+                )}
+              </button>
+            </Tooltip>
+          </div>
+          {rowFirst ? null : customRow}
         </div>
-        {rowFirst ? null : customRow}
       </div>
-    </div>
+      {linkRequest !== 0 && model.link !== null ? (
+        <LinkPopover
+          key={linkRequest}
+          controller={controller}
+          store={store}
+          visible={visible}
+        />
+      ) : null}
+    </>
   );
 }
