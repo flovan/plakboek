@@ -38,6 +38,7 @@ import { ColumnsGroup } from './columns-group.js';
 import { PropertyField } from './controls.js';
 import { LayoutGroup, type LayoutChangeHandler } from './layout-group.js';
 import { LinkSearchContext } from './link-control.js';
+import { TextFieldContext, type TextFieldAccess } from './rich-text-row.js';
 import { PlacementGroup } from './placement-group.js';
 import type { PageSearch } from '../text/page-picker.js';
 
@@ -68,6 +69,10 @@ export type PropertiesPanelProps = {
       readonly key: string;
     } | null;
     readonly exit: (reason: 'panel') => Promise<void>;
+    /** Whether the block marks the property as a field the editor can type in on the page. */
+    readonly fieldFor: (blockId: string, key: string) => unknown;
+    /** Selects the block, brings the field into view and puts the caret at its end. */
+    readonly enterField: (blockId: string, key: string) => boolean;
   };
   /** A layout choice (column widths, alignment, fill): render it and queue the save. */
   readonly onLayoutChange?: LayoutChangeHandler;
@@ -249,6 +254,20 @@ function BlockProperties(props: {
     void settle(property.key, immediate);
   };
 
+  const textFields = useMemo<TextFieldAccess | null>(
+    () =>
+      textSession === undefined
+        ? null
+        : {
+            blockId: node.id,
+            has: (key) => textSession.fieldFor(node.id, key) !== null,
+            enter: (key) => {
+              textSession.enterField(node.id, key);
+            },
+          },
+    [node.id, textSession],
+  );
+
   const open = Object.keys(drafts).length > 0;
   const needs = open && liveNeeds !== null ? liveNeeds : node.needsInput;
 
@@ -258,54 +277,56 @@ function BlockProperties(props: {
       aria-label={STRINGS['panel.group.settings']}
     >
       <h3 className={GROUP_HEADING}>{STRINGS['panel.group.settings']}</h3>
-      <div className="flex flex-col gap-4">
-        {entry.properties.map((property) => {
-          const draft = drafts[property.key];
-          const fixed = property.constraint === 'fixed';
-          const invalid = draft?.stage === 'invalid';
-          return (
-            // A control taking focus hands the property over from the page.
-            <div
-              key={property.key}
-              className="contents"
-              onFocus={() => {
-                const active = textSession?.active();
-                if (
-                  active !== null &&
-                  active !== undefined &&
-                  active.blockId === node.id &&
-                  active.key === property.key
-                ) {
-                  void textSession?.exit('panel');
-                }
-              }}
-            >
-              <PropertyField
-                fieldKey={property.key}
-                label={property.label}
-                {...(property.description === undefined
-                  ? {}
-                  : { description: property.description })}
-                source={property}
-                required={property.required}
-                value={
-                  fixed
-                    ? property.fixedValue
-                    : shownValue(drafts, node, property.key, live)
-                }
-                needsInput={needs.includes(property.key)}
-                error={invalid ? STRINGS[refusalKey(property)] : null}
-                onChange={(value, immediate) => {
-                  change(property, value, immediate);
+      <TextFieldContext.Provider value={textFields}>
+        <div className="flex flex-col gap-4">
+          {entry.properties.map((property) => {
+            const draft = drafts[property.key];
+            const fixed = property.constraint === 'fixed';
+            const invalid = draft?.stage === 'invalid';
+            return (
+              // A control taking focus hands the property over from the page.
+              <div
+                key={property.key}
+                className="contents"
+                onFocus={() => {
+                  const active = textSession?.active();
+                  if (
+                    active !== null &&
+                    active !== undefined &&
+                    active.blockId === node.id &&
+                    active.key === property.key
+                  ) {
+                    void textSession?.exit('panel');
+                  }
                 }}
-                onBlur={() => {
-                  onPropertiesBlur?.(node.id);
-                }}
-              />
-            </div>
-          );
-        })}
-      </div>
+              >
+                <PropertyField
+                  fieldKey={property.key}
+                  label={property.label}
+                  {...(property.description === undefined
+                    ? {}
+                    : { description: property.description })}
+                  source={property}
+                  required={property.required}
+                  value={
+                    fixed
+                      ? property.fixedValue
+                      : shownValue(drafts, node, property.key, live)
+                  }
+                  needsInput={needs.includes(property.key)}
+                  error={invalid ? STRINGS[refusalKey(property)] : null}
+                  onChange={(value, immediate) => {
+                    change(property, value, immediate);
+                  }}
+                  onBlur={() => {
+                    onPropertiesBlur?.(node.id);
+                  }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </TextFieldContext.Provider>
     </section>
   );
 }

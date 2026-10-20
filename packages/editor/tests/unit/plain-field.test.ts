@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPlainExtensions,
   clampPlainText,
+  documentText,
   plainDocument,
   plainFieldPlugin,
   plainTextOf,
@@ -170,5 +171,49 @@ describe('pasting', () => {
 
   it('leaves a clipboard with no plain text to the editor', () => {
     expect(paste(stateWith('', 10), '', 10).handled).toBe(false);
+  });
+});
+
+describe('documentText', () => {
+  const p = (...content: unknown[]) => ({ type: 'paragraph', content });
+  const t = (text: string) => ({ type: 'text', text });
+
+  it('gives one line per block and keeps the words of marked text together', () => {
+    expect(
+      documentText({
+        type: 'doc',
+        content: [
+          p(t('Hello '), { ...t('bold'), marks: [{ type: 'bold' }] }),
+          { type: 'heading', content: [t('Next')] },
+        ],
+      }),
+    ).toBe('Hello bold\nNext');
+  });
+
+  it('breaks a line at a hard break and walks lists', () => {
+    expect(
+      documentText({
+        type: 'doc',
+        content: [
+          p(t('a'), { type: 'hardBreak' }, t('b')),
+          {
+            type: 'bulletList',
+            content: [{ type: 'listItem', content: [p(t('one'))] }],
+          },
+        ],
+      }),
+    ).toBe('a\nb\none');
+  });
+
+  it('reads a button by its label and anything that is not a document as empty', () => {
+    expect(
+      documentText({
+        type: 'doc',
+        content: [{ type: 'cta', attrs: { label: 'Buy now' } }],
+      }),
+    ).toBe('Buy now');
+    expect(documentText(undefined)).toBe('');
+    expect(documentText('text')).toBe('');
+    expect(documentText({ type: 'doc' })).toBe('');
   });
 });

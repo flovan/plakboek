@@ -27,7 +27,7 @@ export type ControlKind =
   | 'json'
   | 'repeater'
   | 'link-target'
-  | 'note-rich-text'
+  | 'rich-text-row'
   | 'note-media'
   | 'note-entry';
 
@@ -73,7 +73,7 @@ const KIND_BY_WIDGET: Readonly<Record<string, ControlKind>> = {
   'json-editor': 'json',
   'repeater-list': 'repeater',
   'link-picker': 'link-target',
-  'rich-text-editor': 'note-rich-text',
+  'rich-text-editor': 'rich-text-row',
   'image-picker': 'note-media',
   'file-picker': 'note-media',
   'entry-picker': 'note-entry',

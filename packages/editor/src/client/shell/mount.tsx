@@ -556,6 +556,7 @@ function Shell(props: {
         announce: (text) => {
           store.announce(text);
         },
+        frameDocument: () => frameOf(host)?.contentDocument ?? null,
         ...(textRenderers === undefined ? {} : { renderers: textRenderers }),
       }),
     [store, changeProperties, blurProperties, host, textRenderers],

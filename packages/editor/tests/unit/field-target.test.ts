@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { CatalogueEntry, CatalogueProperty } from '../../src/api-types.js';
-import { findEditableField } from '../../src/client/text/field-target.js';
+import {
+  findEditableField,
+  findFieldForProperty,
+} from '../../src/client/text/field-target.js';
 import { createTreeModel } from '../../src/client/session/tree-model.js';
 import { block, buildNodes, column, section } from './support/model.js';
 
@@ -223,5 +226,64 @@ describe('findEditableField', () => {
     expect(findEditableField(null, model, catalogue)).toBeNull();
     expect(findEditableField({}, model, catalogue)).toBeNull();
     expect(findEditableField('text', model, catalogue)).toBeNull();
+  });
+});
+
+describe('findFieldForProperty', () => {
+  /** A document of fields, each inside the block it belongs to. */
+  function documentOf(fields: readonly Fake[]) {
+    return {
+      querySelectorAll: (selector: string) =>
+        selector === '[data-pk-field]' ? fields : [],
+    };
+  }
+
+  it("finds the block's own field for a property", () => {
+    const { field } = fieldIn('DIV', 'body');
+    expect(
+      findFieldForProperty(documentOf([field]), 'b', 'body', model, catalogue),
+    ).toMatchObject({
+      blockId: 'b',
+      key: 'body',
+      kind: 'rich',
+      element: field,
+    });
+  });
+
+  it('finds a field the block root itself carries', () => {
+    const root = element('DIV', {
+      'data-pk-block': 'btn',
+      'data-pk-field': 'link',
+    });
+    expect(
+      findFieldForProperty(documentOf([root]), 'btn', 'link', model, catalogue),
+    ).toMatchObject({ blockId: 'btn', key: 'link', kind: 'button' });
+  });
+
+  it('skips a field of another block or another property', () => {
+    const { field } = fieldIn('DIV', 'body');
+    const doc = documentOf([field]);
+    expect(
+      findFieldForProperty(doc, 'btn', 'body', model, catalogue),
+    ).toBeNull();
+    expect(
+      findFieldForProperty(doc, 'b', 'caption', model, catalogue),
+    ).toBeNull();
+  });
+
+  it('answers null for a property the block does not mark, or one that is fixed', () => {
+    expect(
+      findFieldForProperty(documentOf([]), 'b', 'body', model, catalogue),
+    ).toBeNull();
+    const { field } = fieldIn('DIV', 'locked');
+    expect(
+      findFieldForProperty(
+        documentOf([field]),
+        'b',
+        'locked',
+        model,
+        catalogue,
+      ),
+    ).toBeNull();
   });
 });

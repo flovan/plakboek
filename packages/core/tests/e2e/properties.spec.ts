@@ -322,14 +322,15 @@ test.describe('every widget edits its property and the block re-renders live', (
     await expect(add).toBeFocused();
   });
 
-  test('what cannot be chosen yet is shown read-only with a note on where it will be edited', async ({
+  test('what cannot be chosen yet is shown read-only with a note on where it will be edited, and formatted text with a preview', async ({
     page,
   }) => {
     await openDemo(page);
     const notes = page.locator(`${HOST} [data-note]`);
+    // formatted text is a preview with a note, not a note (see text-properties.spec)
     await expect(
-      page.locator(`${HOST} [data-note="note-rich-text"]`),
-    ).toContainText('Formatted text is edited on the page.');
+      page.locator(`${HOST} [data-rich-text-row="body"]`),
+    ).toContainText('This text is not editable on the page.');
     await expect(page.locator(`${HOST} [data-note="note-media"]`)).toHaveCount(
       2,
     );
@@ -344,7 +345,7 @@ test.describe('every widget edits its property and the block re-renders live', (
     await expect(
       page.locator(`${HOST} [data-note="note-entry"]`),
     ).toContainText('Choosing an entry is available once entry editing ships.');
-    await expect(notes).toHaveCount(4);
+    await expect(notes).toHaveCount(3);
   });
 });
 

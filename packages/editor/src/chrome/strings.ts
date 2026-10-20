@@ -341,8 +341,6 @@ export const STRINGS = Object.freeze({
   'panel.invalid': 'This value is not valid.',
   'panel.jsonFallbackInvalid':
     'This is valid JSON, but not a value this property accepts.',
-  'panel.richTextNote':
-    'Formatted text is edited on the page. Editing it there arrives in the next release.',
   'panel.mediaNote':
     'Choosing a file is available once the media library ships.',
   'panel.entryNote': 'Choosing an entry is available once entry editing ships.',

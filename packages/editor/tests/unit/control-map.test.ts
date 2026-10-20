@@ -36,7 +36,7 @@ describe('controlFor', () => {
     ['json-editor', 'json', 'json'],
     ['repeater-list', 'repeater', 'repeater'],
     ['link-picker', 'link', 'link-target'],
-    ['rich-text-editor', 'rich_text', 'note-rich-text'],
+    ['rich-text-editor', 'rich_text', 'rich-text-row'],
     ['image-picker', 'image', 'note-media'],
     ['file-picker', 'file', 'note-media'],
     ['entry-picker', 'reference', 'note-entry'],

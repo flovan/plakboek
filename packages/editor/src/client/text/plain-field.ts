@@ -49,6 +49,50 @@ export function plainTextOf(doc: unknown): string {
   return text;
 }
 
+/**
+ * The words of a formatted document as plain text, one line per block, for a
+ * read-only preview. A button counts by its label; unknown nodes are walked
+ * for the text they hold.
+ */
+export function documentText(doc: unknown): string {
+  const lines: string[] = [];
+  let line = '';
+  const flush = (): void => {
+    if (line !== '') lines.push(line);
+    line = '';
+  };
+  const walk = (node: unknown): void => {
+    if (typeof node !== 'object' || node === null) return;
+    const type: unknown = Reflect.get(node, 'type');
+    const text: unknown = Reflect.get(node, 'text');
+    if (typeof text === 'string') {
+      line += text;
+      return;
+    }
+    if (type === 'hardBreak') {
+      flush();
+      return;
+    }
+    if (type === 'cta') {
+      const attrs: unknown = Reflect.get(node, 'attrs');
+      const label: unknown =
+        typeof attrs === 'object' && attrs !== null
+          ? Reflect.get(attrs, 'label')
+          : undefined;
+      if (typeof label === 'string') line += label;
+      return;
+    }
+    const content: unknown = Reflect.get(node, 'content');
+    if (Array.isArray(content)) {
+      for (const child of content as unknown[]) walk(child);
+    }
+    if (type !== 'doc') flush();
+  };
+  walk(doc);
+  flush();
+  return lines.join('\n');
+}
+
 const LINE_BREAKS = new RegExp('\\r\\n|[\\r\\n\\u2028\\u2029]', 'gu');
 
 function isHighSurrogate(code: number): boolean {

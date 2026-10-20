@@ -136,6 +136,33 @@ export function findEditableField(
   };
 }
 
+/**
+ * The field a block marks for one of its properties, resolved the way a click
+ * on it would be, or null when the block never marks that property or the
+ * property is not editable on the page. Only the block's own fields count (the
+ * block's root included), never a nested block's.
+ */
+export function findFieldForProperty(
+  frameDocument: {
+    querySelectorAll(selector: string): ArrayLike<unknown>;
+  },
+  blockId: string,
+  key: string,
+  model: TreeModel,
+  catalogue: readonly CatalogueEntry[],
+): FieldTarget | null {
+  for (const candidate of Array.from(
+    frameDocument.querySelectorAll(FIELD_SELECTOR),
+  )) {
+    if (!isElementLike(candidate)) continue;
+    if (candidate.getAttribute(EDIT_ATTRIBUTE.field) !== key) continue;
+    const owner = candidate.closest(BLOCK_SELECTOR);
+    if (owner?.getAttribute(EDIT_ATTRIBUTE.block) !== blockId) continue;
+    return findEditableField(candidate, model, catalogue);
+  }
+  return null;
+}
+
 /** The `maxLength` option of a short text property, when it is a usable one. */
 function maxLengthOf(options: unknown): number | undefined {
   if (typeof options !== 'object' || options === null) return undefined;

@@ -28,7 +28,11 @@ import { EDIT_ATTRIBUTE } from '@plakboek/render';
 import { DEFAULT_TEXT_RENDERERS, type TextRenderers } from '@plakboek/render';
 import { formatString } from '../../chrome/strings.js';
 import type { EditorStore } from '../session/store.js';
-import { textOf } from '../session/selection-announcement.js';
+import { selectCrumb } from '../session/scope.js';
+import {
+  selectAndAnnounce,
+  textOf,
+} from '../session/selection-announcement.js';
 import { labelOf } from '../session/tree-model.js';
 import { hasPending } from '../session/save-queue.js';
 import { beginInlineEdit, endInlineEdit } from '../frame/patch.js';
@@ -42,7 +46,11 @@ import {
 } from './plain-field.js';
 import { cleanPastedHtml, pasteLostFormatting } from './paste.js';
 import { createRendererShells, type RendererShells } from './shells.js';
-import { findEditableField, type FieldTarget } from './field-target.js';
+import {
+  findEditableField,
+  findFieldForProperty,
+  type FieldTarget,
+} from './field-target.js';
 import {
   cleanChildren,
   restoreField,
@@ -80,7 +88,12 @@ export type TextControllerOptions = {
    * so it keeps the host's own markup. The default map when the host has none.
    */
   readonly renderers?: TextRenderers;
+  /** The framed site's document, for finding a block's field by property; without it no field is found. */
+  readonly frameDocument?: () => Document | null;
 };
+
+/** The room left above a field the Properties panel scrolls into view. */
+export const FIELD_CLEARANCE = 48;
 
 export type TextController = {
   /**
@@ -89,6 +102,19 @@ export type TextController = {
    * there, else to the end of the field.
    */
   enter(target: FieldTarget, point?: { x: number; y: number }): void;
+  /**
+   * The field the block marks for the property and the editor may type in, or
+   * null (the block never marks it, it is not editable text, or the page is
+   * not showing it).
+   */
+  fieldFor(blockId: string, key: string): FieldTarget | null;
+  /**
+   * Selects the block, scrolls the field into view with `FIELD_CLEARANCE` above
+   * it when it is outside the frame's viewport, and starts the session with the
+   * caret at the end. Returns false, and does nothing, when there is no such
+   * field.
+   */
+  enterField(blockId: string, key: string): boolean;
   /** Ends the session after flushing its pending save; resolves once flushed. */
   exit(reason: TextExitReason): Promise<void>;
   /** The field being edited, or null. */
@@ -196,6 +222,11 @@ function savedValue(editor: Editor, kind: FieldTarget['kind']): unknown {
   return isEmptyRichTextDocument(json) ? undefined : json;
 }
 
+/** What the Properties panel is shown while the field is typed in: a line of text, or the document. */
+function liveValueOf(editor: Editor, kind: FieldTarget['kind']): unknown {
+  return kind === 'plain' ? plainTextOf(editor.getJSON()) : editor.getJSON();
+}
+
 /** How long typing waits before the Properties panel is shown the new value. */
 const LIVE_VALUE_DELAY_MS = 150;
 
@@ -279,8 +310,8 @@ export function createTextController(
     const value = savedValue(editor, target.kind);
     if (session.live.timer !== null) clearTimeout(session.live.timer);
     // The panel shows what was typed from now until the write has landed.
-    if (session.touched && target.kind === 'plain') {
-      store.setLiveValue(blockId, key, plainTextOf(editor.getJSON()));
+    if (session.touched) {
+      store.setLiveValue(blockId, key, liveValueOf(editor, target.kind));
     }
     const changed = JSON.stringify(editor.getJSON()) !== session.initial;
     // What the field shows until the server's render replaces the block.
@@ -306,19 +337,17 @@ export function createTextController(
       await changeProperties(blockId, { [key]: value }, key, true);
     }
     if (reason !== 'reload') ready(blockId);
-    if (target.kind === 'plain') {
-      // Once everything queued is sent the model holds the value, so the
-      // panel reads the model again; until then it keeps showing the typing.
-      if (reason === 'reload') store.clearLiveValues(blockId);
-      else {
-        void settled().then((outcome) => {
-          // A failed or paused queue keeps the typing on show, like a draft
-          // the engine refused.
-          if (outcome === 'saved' && current?.target.blockId !== blockId) {
-            store.clearLiveValues(blockId);
-          }
-        });
-      }
+    // Once everything queued is sent the model holds the value, so the
+    // panel reads the model again; until then it keeps showing the typing.
+    if (reason === 'reload') store.clearLiveValues(blockId);
+    else {
+      void settled().then((outcome) => {
+        // A failed or paused queue keeps the typing on show, like a draft
+        // the engine refused.
+        if (outcome === 'saved' && current?.target.blockId !== blockId) {
+          store.clearLiveValues(blockId);
+        }
+      });
     }
   }
 
@@ -341,6 +370,44 @@ export function createTextController(
       }),
     );
     notify();
+  }
+
+  function fieldFor(blockId: string, key: string): FieldTarget | null {
+    const frameDocument = options.frameDocument?.() ?? null;
+    const { model, session } = store.getState();
+    if (frameDocument === null || model === null || session === null) {
+      return null;
+    }
+    return findFieldForProperty(
+      frameDocument,
+      blockId,
+      key,
+      model,
+      session.catalogue,
+    );
+  }
+
+  function enterField(blockId: string, key: string): boolean {
+    const state = store.getState();
+    if (state.status !== 'editing' || state.mode !== 'edit') return false;
+    const target = fieldFor(blockId, key);
+    if (target === null || state.model === null) return false;
+    if (state.selection.selectedId !== blockId) {
+      selectAndAnnounce(store, selectCrumb(state.model, blockId));
+    }
+    const view = target.element.ownerDocument.defaultView;
+    if (view !== null) {
+      const box = target.element.getBoundingClientRect();
+      const height = target.element.ownerDocument.documentElement.clientHeight;
+      if (box.top < FIELD_CLEARANCE || box.bottom > height) {
+        view.scrollBy({
+          top: box.top - FIELD_CLEARANCE,
+          behavior: 'instant',
+        });
+      }
+    }
+    enter(target);
+    return store.getState().textField !== null;
   }
 
   function enter(target: FieldTarget, point?: { x: number; y: number }): void {
@@ -504,14 +571,12 @@ export function createTextController(
         target.key,
         false,
       );
-      if (target.kind === 'plain') {
-        // The panel follows the typing, at most once per delay.
-        session.live.value = plainTextOf(editor.getJSON());
-        session.live.timer ??= setTimeout(() => {
-          session.live.timer = null;
-          store.setLiveValue(target.blockId, target.key, session.live.value);
-        }, LIVE_VALUE_DELAY_MS);
-      }
+      // The panel follows the typing, at most once per delay.
+      session.live.value = liveValueOf(editor, target.kind);
+      session.live.timer ??= setTimeout(() => {
+        session.live.timer = null;
+        store.setLiveValue(target.blockId, target.key, session.live.value);
+      }, LIVE_VALUE_DELAY_MS);
     });
     store.setTextField({
       blockId: target.blockId,
@@ -659,6 +724,8 @@ export function createTextController(
 
   return {
     enter,
+    fieldFor,
+    enterField,
     exit,
     active: () => current?.target ?? blockButton,
     editor: () => current?.editor ?? null,
