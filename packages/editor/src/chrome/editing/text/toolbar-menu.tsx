@@ -11,6 +11,7 @@ import {
 import { formatString, STRINGS } from '../../strings.js';
 import { Tooltip } from '../../tooltip.js';
 import type { Rove } from './crumbs.js';
+import { useOutsidePress } from './outside-press.js';
 
 /** A 32px icon button of the toolbar that opens a menu. */
 const MENU_BUTTON =
@@ -80,19 +81,7 @@ export function ToolbarMenu(props: ToolbarMenuProps): ReactElement {
   }, [open]);
 
   // A press anywhere else closes the menu.
-  useEffect(() => {
-    if (!open) return undefined;
-    const element = wrapper.current;
-    if (element === null) return undefined;
-    const onPress = (event: Event): void => {
-      if (!event.composedPath().includes(element)) setOpen(false);
-    };
-    const owner = element.ownerDocument;
-    owner.addEventListener('pointerdown', onPress, true);
-    return () => {
-      owner.removeEventListener('pointerdown', onPress, true);
-    };
-  }, [open]);
+  useOutsidePress(wrapper, () => setOpen(false), { enabled: open });
 
   const closeToButton = (): void => {
     setOpen(false);

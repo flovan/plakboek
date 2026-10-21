@@ -36,6 +36,10 @@ function paragraphDoc(text: string) {
   };
 }
 
+function tag(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
+
 test.beforeEach(async ({ page }) => {
   await signIn(page, e2eUsers().editor);
 });
@@ -76,6 +80,35 @@ async function startField(page: Page, field: Locator): Promise<void> {
   await expect(field).toBeFocused();
 }
 
+/** Selects the first run of text that holds `words`, the way a drag over them would. */
+async function selectWords(
+  frame: Frame,
+  field: Locator,
+  words: string,
+): Promise<void> {
+  await field.evaluate((element, wanted) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (
+      let node = walker.nextNode();
+      node !== null;
+      node = walker.nextNode()
+    ) {
+      const at = (node.textContent ?? '').indexOf(wanted);
+      if (at !== -1) {
+        window
+          .getSelection()
+          ?.setBaseAndExtent(node, at, node, at + wanted.length);
+        return;
+      }
+    }
+    throw new Error(`No text holds ${wanted}`);
+  }, words);
+  // the editor learns of the selection from the browser's own event, a task later
+  await expect
+    .poll(() => frame.evaluate(() => String(window.getSelection())))
+    .toBe(words);
+}
+
 /** Waits until `selector` is (or is no longer) under the closed chrome root. */
 async function expectChrome(
   page: Page,
@@ -101,4 +134,115 @@ test('Text style by pointer: pressing Title in the menu converts the paragraph a
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expect.poll(() => storedBody(pageId)).toContain('"level":2');
+});
+
+test('Insert menu by pointer: pressing Quote turns the empty paragraph into a quote', async ({
+  page,
+}) => {
+  const { field } = await openProse(page, 'First line');
+  await startField(page, field);
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.press('Enter');
+
+  await clickFrameChrome(page, '[data-menu-button="insert"]');
+  await clickFrameChrome(page, '[data-insert-item]', 'Quote');
+  await expect(field.locator('blockquote')).toHaveCount(1);
+});
+
+test('link popover by pointer: the Web address segment and input, then a page row, act inside the popover', async ({
+  page,
+}) => {
+  const word = tag();
+  const target = await createEditablePage({
+    title: `Team ${word}`,
+    blocks: [],
+  });
+  const { frame, field, pageId } = await openProse(
+    page,
+    'Read our story today',
+  );
+  await startField(page, field);
+  await selectWords(frame, field, 'our story');
+
+  await clickFrameChrome(page, '[data-link-button]');
+  await expectChrome(page, '[data-link-popover]', 1);
+  await clickFrameChrome(page, '[data-segment="web"]');
+  await expectChrome(page, '[data-link-popover]', 1);
+  await expectChrome(page, '[data-link-input="web"]', 1);
+  await clickFrameChrome(page, '[data-link-input="web"]');
+  await page.keyboard.type('https://example.com');
+  await page.keyboard.press('Enter');
+  await expect(field.locator('a[href="https://example.com"]')).toHaveText(
+    'our story',
+  );
+
+  // a second link, to a page, picked by its row
+  await selectWords(frame, field, 'today');
+  await clickFrameChrome(page, '[data-link-button]');
+  await expectChrome(page, '[data-link-popover]', 1);
+  await clickFrameChrome(page, '[data-link-input="page"]');
+  await page.keyboard.type(word);
+  await clickFrameChrome(page, `[data-page-id="${target.pageId}"]`);
+  await expectChrome(page, '[data-link-popover]', 1);
+  await clickFrameChrome(page, '[data-link-popover] button', 'Apply link');
+  await expectChrome(page, '[data-link-popover]', 0);
+
+  await page.keyboard.press('Escape');
+  await expect.poll(() => storedBody(pageId)).toContain(target.pageId);
+});
+
+test('Custom style by pointer: a size row, the custom size input and a colour swatch apply and keep their popovers open until pressed outside', async ({
+  page,
+}) => {
+  const { frame, field } = await openProse(page, 'Colour this word');
+  await startField(page, field);
+  await selectWords(frame, field, 'word');
+
+  await clickFrameChrome(page, '[data-custom-toggle]');
+  await clickFrameChrome(page, '[data-popover-button="size"]');
+  await expectChrome(page, '[data-popover="size"]', 1);
+  await clickFrameChrome(page, '[data-size-row="xl"]');
+  await expect(field.locator('span[data-pk-size-token="xl"]')).toHaveText(
+    'word',
+  );
+
+  await clickFrameChrome(page, '[data-popover-button="size"]');
+  await expectChrome(page, '[data-popover="size"]', 1);
+  await clickFrameChrome(page, '[data-custom-input="size"]');
+  await expectChrome(page, '[data-popover="size"]', 1);
+  await page.keyboard.type('20');
+  await expect(field.locator('span[data-pk-size-value="20px"]')).toHaveText(
+    'word',
+  );
+  // a press on the text of the field is outside the popover
+  await field.click({ position: { x: 4, y: 4 } });
+  await expectChrome(page, '[data-popover="size"]', 0);
+
+  await selectWords(frame, field, 'word');
+  await clickFrameChrome(page, '[data-popover-button="color"]');
+  await expectChrome(page, '[data-popover="color"]', 1);
+  await clickFrameChrome(page, '[data-swatch="accent"]');
+  await expect(field.locator('span[data-pk-color-token="accent"]')).toHaveText(
+    'word',
+  );
+});
+
+test('Button block by pointer: a press in the Label input of its popover edits the label and leaves the popover open', async ({
+  page,
+}) => {
+  const { frame } = await open(page, [
+    section(paragraph('Intro '.repeat(60)), {
+      type: 'button',
+      props: { label: 'Book', variant: 'primary' },
+    }),
+  ]);
+  const cta = frame.locator('.button-block .t-cta');
+  await cta.click();
+  await expectChrome(page, '[data-button-popover]', 1);
+
+  await clickFrameChrome(page, '[data-button-label]');
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('Book now');
+  await expectChrome(page, '[data-button-popover]', 1);
+  await expect(cta).toHaveText('Book now');
 });

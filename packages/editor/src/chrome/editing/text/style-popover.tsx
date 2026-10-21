@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { Tooltip } from '../../tooltip.js';
 import type { Rove } from './crumbs.js';
+import { useOutsidePress } from './outside-press.js';
 
 /** A 40px row of a Custom style popover. */
 export const POPOVER_ROW =
@@ -87,19 +88,7 @@ export function StylePopover(props: StylePopoverProps): ReactElement {
   }, [open]);
 
   // A press anywhere else closes the popover.
-  useEffect(() => {
-    if (!open) return undefined;
-    const element = wrapper.current;
-    if (element === null) return undefined;
-    const onPress = (event: Event): void => {
-      if (!event.composedPath().includes(element)) setOpen(false);
-    };
-    const owner = element.ownerDocument;
-    owner.addEventListener('pointerdown', onPress, true);
-    return () => {
-      owner.removeEventListener('pointerdown', onPress, true);
-    };
-  }, [open]);
+  useOutsidePress(wrapper, () => setOpen(false), { enabled: open });
 
   const closeToField = (): void => {
     setOpen(false);

@@ -12,6 +12,7 @@ import {
 } from '../../../client/text/link.js';
 import { STRINGS } from '../../strings.js';
 import { LinkTargetEditor } from './link-target-editor.js';
+import { useOutsidePress } from './outside-press.js';
 import type { PageSearch } from './page-picker.js';
 
 export type LinkPopoverProps = {
@@ -88,8 +89,7 @@ export function LinkPopover(props: LinkPopoverProps): ReactElement | null {
     readonly title: string;
   } | null>(null);
 
-  // Escape closes the popover and nothing else, wherever the focus is; a press
-  // anywhere but here or on the Link button closes it as well.
+  // Escape closes the popover and nothing else, wherever the focus is.
   useEffect(() => {
     const element = root.current;
     if (element === null) return undefined;
@@ -108,20 +108,16 @@ export function LinkPopover(props: LinkPopoverProps): ReactElement | null {
       controller.closeLink();
       controller.focusField();
     };
-    const onPress = (event: Event): void => {
-      const path = event.composedPath();
-      if (path.includes(element) || path.some((node) => isLinkButton(node))) {
-        return;
-      }
-      controller.closeLink();
-    };
     owner.addEventListener('keydown', onKey, true);
-    owner.addEventListener('pointerdown', onPress, true);
     return () => {
       owner.removeEventListener('keydown', onKey, true);
-      owner.removeEventListener('pointerdown', onPress, true);
     };
   }, [controller]);
+
+  // A press anywhere but here or on the Link button closes it as well.
+  useOutsidePress(root, () => controller.closeLink(), {
+    alsoInside: isLinkButton,
+  });
 
   const editor = controller.editor();
   if (editor === null || context === null) return null;

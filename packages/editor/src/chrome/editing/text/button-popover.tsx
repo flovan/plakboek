@@ -28,6 +28,7 @@ import {
 import { STRINGS } from '../../strings.js';
 import { POPOVER_BUTTON } from './link-popover.js';
 import { LinkTargetEditor, SEGMENT } from './link-target-editor.js';
+import { useOutsidePress } from './outside-press.js';
 import { LINK_INPUT, type PageSearch } from './page-picker.js';
 
 type ButtonPopoverCommon = {
@@ -142,8 +143,7 @@ function PopoverView(props: {
     labelInput.current?.select();
   }, []);
 
-  // Escape closes the popover and nothing else, wherever the focus is; a press
-  // anywhere but here closes it as well.
+  // Escape closes the popover and nothing else, wherever the focus is.
   const latest = useRef(model);
   latest.current = model;
   useEffect(() => {
@@ -163,19 +163,16 @@ function PopoverView(props: {
       event.stopPropagation();
       latest.current.onEscape();
     };
-    const onPress = (event: Event): void => {
-      if (event.composedPath().includes(element)) return;
-      // (inside a shadow root the focused element is that root's, not the document's)
-      const rootNode = element.getRootNode() as Document | ShadowRoot;
-      latest.current.onOutside(event, element.contains(rootNode.activeElement));
-    };
     owner.addEventListener('keydown', onKey, true);
-    owner.addEventListener('pointerdown', onPress, true);
     return () => {
       owner.removeEventListener('keydown', onKey, true);
-      owner.removeEventListener('pointerdown', onPress, true);
     };
   }, []);
+
+  // A press anywhere but here closes it as well.
+  useOutsidePress(root, (event, hadFocus) => {
+    latest.current.onOutside(event, hadFocus);
+  });
 
   const placement = slashPlacement(model.anchor, visible, POPOVER_MAX_HEIGHT);
   const empty = model.hasLabel && label.trim() === '';
