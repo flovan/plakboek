@@ -5,6 +5,7 @@
  */
 import { EDIT_ATTRIBUTE } from '@plakboek/render';
 import type { CatalogueEntry, CatalogueProperty } from '../../api-types.js';
+import { GHOST_SIZE } from '../overlay/boxes.js';
 import type { TreeModel } from '../session/tree-model.js';
 
 export type FieldTarget = {
@@ -159,6 +160,63 @@ export function findFieldForProperty(
     const owner = candidate.closest(BLOCK_SELECTOR);
     if (owner?.getAttribute(EDIT_ATTRIBUTE.block) !== blockId) continue;
     return findEditableField(candidate, model, catalogue);
+  }
+  return null;
+}
+
+/** Whether the point is inside the box an element is drawn from where it takes up no room: its rect, each zero dimension widened. */
+function holdsPoint(rect: DOMRect, x: number, y: number): boolean {
+  const width = rect.width > 0 ? rect.width : GHOST_SIZE;
+  const height = rect.height > 0 ? rect.height : GHOST_SIZE;
+  return (
+    x >= rect.left &&
+    x < rect.left + width &&
+    y >= rect.top &&
+    y < rect.top + height
+  );
+}
+
+/**
+ * The block's own empty text field under a point, for a field that renders at
+ * no size and so is never what `elementFromPoint` returns. It counts where the
+ * point is inside the ghost box the field's outline is drawn from: its
+ * top-left corner, each zero dimension widened to the ghost size. Only a
+ * rich or plain text field qualifies (a button field is edited in its
+ * popover), only the block's own fields count (the root included, never a
+ * nested block's), and a field with no box at all (`display: contents` or no
+ * client rects) is never hit.
+ */
+export function findZeroSizeFieldAt(
+  frameDocument: Pick<Document, 'querySelectorAll' | 'defaultView'>,
+  blockId: string,
+  x: number,
+  y: number,
+  model: TreeModel,
+  catalogue: readonly CatalogueEntry[],
+): FieldTarget | null {
+  for (const candidate of Array.from(
+    frameDocument.querySelectorAll(FIELD_SELECTOR),
+  )) {
+    if (!isElementLike(candidate)) continue;
+    if (
+      candidate.closest(BLOCK_SELECTOR)?.getAttribute(EDIT_ATTRIBUTE.block) !==
+      blockId
+    ) {
+      continue;
+    }
+    const geometry = candidate as unknown as Element;
+    const rect = geometry.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) continue;
+    if (geometry.getClientRects().length === 0) continue;
+    if (
+      frameDocument.defaultView?.getComputedStyle(geometry).display ===
+      'contents'
+    ) {
+      continue;
+    }
+    if (!holdsPoint(rect, x, y)) continue;
+    const target = findEditableField(candidate, model, catalogue);
+    if (target !== null && target.kind !== 'button') return target;
   }
   return null;
 }

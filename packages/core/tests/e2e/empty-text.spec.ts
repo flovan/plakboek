@@ -8,6 +8,7 @@ import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
   framedSite,
   frameBoxOf,
+  HOST,
   openEditor,
   selectedId,
 } from './helpers/editing.ts';
@@ -15,6 +16,7 @@ import { e2eUsers } from './helpers/host.ts';
 import {
   createEditablePage,
   heading,
+  readBlockProps,
   section,
   type FactoryBlock,
 } from './helpers/pages.ts';
@@ -47,13 +49,27 @@ async function ghostPoint(frame: Frame): Promise<{ x: number; y: number }> {
 }
 
 test.describe('an empty text with no box of its own', () => {
-  test('is selected by one click when it ends its column', async ({ page }) => {
-    const { frame, id } = await open(page, [section(heading('H1'), bareText)]);
+  test('is selected by one click when it ends its column, and typed in', async ({
+    page,
+  }) => {
+    const { frame, pageId, id } = await open(page, [
+      section(heading('H1'), bareText),
+    ]);
     const { x, y } = await ghostPoint(frame);
 
     await page.mouse.click(x, y);
 
     await expect.poll(() => selectedId(page)).toBe(id);
+    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+    await page.keyboard.type('Hello');
+    await expect(frame.locator(BARE)).toHaveText('Hello');
+    await page.keyboard.press('Escape');
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+    await expect
+      .poll(async () =>
+        JSON.stringify((await readBlockProps(pageId, 'bareText')).body),
+      )
+      .toContain('Hello');
   });
 
   test('is selected by one click when it is alone in a new section', async ({
@@ -65,5 +81,21 @@ test.describe('an empty text with no box of its own', () => {
     await page.mouse.click(x, y);
 
     await expect.poll(() => selectedId(page)).toBe(id);
+  });
+
+  test('is entered with Enter from the page region', async ({ page }) => {
+    const { frame, id } = await open(page, [section(heading('H1'), bareText)]);
+    const { x, y } = await ghostPoint(frame);
+
+    await page.mouse.click(x, y);
+    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+    await page.keyboard.press('Escape');
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+    await expect.poll(() => selectedId(page)).toBe(id);
+
+    await page.keyboard.press('Enter');
+    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+    await page.keyboard.type('Again');
+    await expect(frame.locator(BARE)).toHaveText('Again');
   });
 });

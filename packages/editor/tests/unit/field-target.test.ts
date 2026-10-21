@@ -3,6 +3,7 @@ import type { CatalogueEntry, CatalogueProperty } from '../../src/api-types.js';
 import {
   findEditableField,
   findFieldForProperty,
+  findZeroSizeFieldAt,
 } from '../../src/client/text/field-target.js';
 import { createTreeModel } from '../../src/client/session/tree-model.js';
 import { block, buildNodes, column, section } from './support/model.js';
@@ -285,5 +286,106 @@ describe('findFieldForProperty', () => {
         catalogue,
       ),
     ).toBeNull();
+  });
+});
+
+describe('findZeroSizeFieldAt', () => {
+  type Boxed = Fake & {
+    getBoundingClientRect(): {
+      left: number;
+      top: number;
+      width: number;
+      height: number;
+    };
+    getClientRects(): { length: number };
+    display: string;
+  };
+
+  /** A field element placed at (10, 100) with the given size, display and client rect count. */
+  function boxed(
+    base: Fake,
+    box: { width?: number; height?: number; display?: string; rects?: number },
+  ): Boxed {
+    return Object.assign(base, {
+      display: box.display ?? 'block',
+      getBoundingClientRect: () => ({
+        left: 10,
+        top: 100,
+        width: box.width ?? 200,
+        height: box.height ?? 0,
+      }),
+      getClientRects: () => ({ length: box.rects ?? 1 }),
+    });
+  }
+
+  function documentOf(fields: readonly Boxed[]): Document {
+    return {
+      querySelectorAll: (selector: string) =>
+        selector === '[data-pk-field]' ? fields : [],
+      defaultView: {
+        getComputedStyle: (target: Boxed) => ({ display: target.display }),
+      },
+    } as unknown as Document;
+  }
+
+  const at = (doc: Document, x = 40, y = 108, blockId = 'b') =>
+    findZeroSizeFieldAt(doc, blockId, x, y, model, catalogue);
+
+  it("answers the block's own empty field where its ghost box holds the point", () => {
+    const { field } = fieldIn('DIV', 'body');
+    expect(at(documentOf([boxed(field, {})]))).toMatchObject({
+      blockId: 'b',
+      key: 'body',
+      kind: 'rich',
+      element: field,
+    });
+  });
+
+  it('answers a zero-width field, a plain field and the field the block root carries', () => {
+    const narrow = boxed(fieldIn('DIV', 'body').field, {
+      width: 0,
+      height: 20,
+    });
+    expect(at(documentOf([narrow]), 20, 105)?.kind).toBe('rich');
+    const plain = boxed(fieldIn('H2', 'title').field, {});
+    expect(at(documentOf([plain]))?.kind).toBe('plain');
+    const root = boxed(
+      element('DIV', { 'data-pk-block': 'b', 'data-pk-field': 'body' }),
+      {},
+    );
+    expect(at(documentOf([root]))).toMatchObject({ element: root });
+  });
+
+  it('answers null outside every ghost box', () => {
+    const doc = documentOf([boxed(fieldIn('DIV', 'body').field, {})]);
+    expect(at(doc, 40, 130)).toBeNull();
+    expect(at(doc, 5, 108)).toBeNull();
+    expect(at(doc, 40, 99)).toBeNull();
+  });
+
+  it('never answers a sized field, a display: contents field or one with no client rects', () => {
+    const field = (extra: Parameters<typeof boxed>[1]) =>
+      boxed(fieldIn('DIV', 'body').field, extra);
+    for (const doc of [
+      documentOf([field({ height: 30 })]),
+      documentOf([field({ display: 'contents', width: 0, height: 0 })]),
+      documentOf([field({ rects: 0 })]),
+    ]) {
+      expect(at(doc)).toBeNull();
+    }
+  });
+
+  it("never answers a nested block's field, a button field or another block's field", () => {
+    const { field } = fieldIn('DIV', 'body');
+    const doc = documentOf([boxed(field, {})]);
+    expect(at(doc, 40, 108, 'btn')).toBeNull();
+    const nested = element(
+      'DIV',
+      { 'data-pk-field': 'body' },
+      element('DIV', { 'data-pk-block': 'inner' }, field),
+    );
+    expect(at(documentOf([boxed(nested, {})]))).toBeNull();
+    const button = boxed(linkField('link'), {});
+    expect(at(documentOf([button]), 40, 108, 'btn')).toBeNull();
   });
 });

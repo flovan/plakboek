@@ -98,7 +98,10 @@ import {
   createTextController,
   type TextController,
 } from '../text/controller.js';
-import { findEditableField } from '../text/field-target.js';
+import {
+  findEditableField,
+  findZeroSizeFieldAt,
+} from '../text/field-target.js';
 import { createDragSession } from './drag-session.js';
 import { drawerFits, setDrawerColumn } from './drawer.js';
 import { watchFrame } from './frame-watch.js';
@@ -1312,14 +1315,27 @@ function Shell(props: {
               // One click on editable text selects its block and puts the
               // caret at the pointer; anywhere else the region takes focus.
               const latest = store.getState();
+              const catalogue = latest.session?.catalogue ?? [];
+              // A field that renders at no size is never under the point, so
+              // it is found through the ghost box of the selected block.
               const field =
                 latest.model === null
                   ? null
-                  : findEditableField(
+                  : (findEditableField(
                       claimed.document.elementFromPoint(x, y),
                       latest.model,
-                      latest.session?.catalogue ?? [],
-                    );
+                      catalogue,
+                    ) ??
+                    (latest.selection.selectedId === null
+                      ? null
+                      : findZeroSizeFieldAt(
+                          claimed.document,
+                          latest.selection.selectedId,
+                          x,
+                          y,
+                          latest.model,
+                          catalogue,
+                        )));
               if (
                 field !== null &&
                 field.blockId === latest.selection.selectedId

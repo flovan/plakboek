@@ -10,9 +10,11 @@ import {
   chromeBoxOf,
   frameBoxOf,
   framedSite,
+  HOST,
   LIVE_REGION,
   openEditor,
   SELECTED,
+  selectedId,
   selectItem,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -25,7 +27,6 @@ import {
 import { signIn } from './helpers/session.ts';
 
 const EMPTY = 'p[data-pk-type="text"]';
-const SELECTED_EMPTY = 'Selected Text, 2 of 3 in Column 1. Needs input.';
 
 /** H1, an empty Text and H2 in one column. */
 async function pageWithEmptyText(): Promise<EditablePage> {
@@ -58,6 +59,18 @@ async function expectGhostBox(
     .toEqual([0, 24]);
 }
 
+async function emptyId(frame: Frame): Promise<string | null> {
+  return await frame.locator(EMPTY).getAttribute('data-pk-block');
+}
+
+/** One click on the empty paragraph also starts typing in it. */
+async function expectTypingInEmpty(page: Page): Promise<void> {
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+  await expect(page.locator(LIVE_REGION)).toHaveText(
+    'Editing Text. Press Escape to stop editing.',
+  );
+}
+
 async function selectHeading(
   page: Page,
   frame: Frame,
@@ -83,7 +96,9 @@ test.describe('an empty block can be selected again', () => {
 
     await page.mouse.click(x, y);
 
-    await expect(page.locator(LIVE_REGION)).toHaveText(SELECTED_EMPTY);
+    await expectTypingInEmpty(page);
+    await page.keyboard.press('Escape');
+    await expect.poll(() => selectedId(page)).toBe(await emptyId(frame));
     await expectGhostBox(page, frame, SELECTED);
   });
 
@@ -94,7 +109,9 @@ test.describe('an empty block can be selected again', () => {
     await selectHeading(page, frame, 'H1');
     await page.mouse.click(x, y);
 
-    await expect(page.locator(LIVE_REGION)).toHaveText(SELECTED_EMPTY);
+    await expectTypingInEmpty(page);
+    await page.keyboard.press('Escape');
+    await expect.poll(() => selectedId(page)).toBe(await emptyId(frame));
   });
 
   test('hover outlines it at its ghost box', async ({ page }) => {
