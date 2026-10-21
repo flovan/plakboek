@@ -13,7 +13,6 @@ import { EmptyPrompts } from '../../chrome/editing/empty-prompts.js';
 import { FieldBar } from '../../chrome/editing/text/field-bar.js';
 import { ButtonPopover } from '../../chrome/editing/text/button-popover.js';
 import { CtaMarkers } from '../../chrome/editing/text/cta-markers.js';
-import { CustomStyleMarker } from '../../chrome/editing/text/custom-style-marker.js';
 import { FieldDecor } from '../../chrome/editing/text/field-decor.js';
 import { SlashMenu } from '../../chrome/editing/text/slash-menu.js';
 import type { PageSearch } from '../../chrome/editing/text/page-picker.js';
@@ -709,12 +708,6 @@ export function OverlayLayer(props: {
             />
             {store === undefined ? null : (
               <>
-                <CustomStyleMarker
-                  store={store}
-                  controller={textController}
-                  frame={frameElement}
-                  fields={fields}
-                />
                 <CtaMarkers
                   store={store}
                   controller={textController}

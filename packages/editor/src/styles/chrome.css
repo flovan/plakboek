@@ -90,7 +90,6 @@
   --color-frame-border: var(--pk-frame-border);
   --color-overlay-selected-fill: var(--pk-overlay-selected-fill);
   --color-overlay-drag-source: var(--pk-overlay-drag-source);
-  --color-overlay-custom-style: var(--pk-overlay-custom-style);
   --color-attention: var(--pk-attention);
   --color-attention-marker: var(--pk-attention-marker);
   --color-destructive-contrast: var(--pk-destructive-contrast);
@@ -139,7 +138,6 @@
    */
   --pk-overlay-selected-fill: rgba(79, 70, 229, 0.08);
   --pk-overlay-drag-source: rgba(24, 24, 27, 0.16);
-  --pk-overlay-custom-style: #0f766e;
   --pk-attention: #b45309;
   --pk-attention-marker: #b45309;
   --pk-destructive-contrast: #ffffff;
@@ -162,7 +160,6 @@
     --pk-input-fill: #18181b;
     --pk-attention: #fbbf24;
     --pk-destructive-contrast: #09090b;
-    --pk-overlay-custom-style: #0f766e;
   }
 }
 
@@ -188,7 +185,6 @@
   --pk-input-fill: #ffffff;
   --pk-attention: #b45309;
   --pk-destructive-contrast: #ffffff;
-  --pk-overlay-custom-style: #0f766e;
 }
 
 :host([data-theme='dark']) {
@@ -208,7 +204,6 @@
   --pk-input-fill: #18181b;
   --pk-attention: #fbbf24;
   --pk-destructive-contrast: #09090b;
-  --pk-overlay-custom-style: #0f766e;
 }
 
 /*
@@ -225,7 +220,6 @@
     --pk-frame-border: CanvasText;
     --pk-overlay-selected-fill: transparent;
     --pk-attention-marker: Highlight;
-    --pk-overlay-custom-style: Highlight;
   }
 }
 
@@ -795,42 +789,6 @@
 
   .pk-toolbar[data-rows='2'] .pk-toolbar-row + .pk-toolbar-row {
     border-top: 1px solid var(--pk-border);
-  }
-
-  /*
-   * The custom-style marker: a 2px dashed bar (4px dash, 2px gap, so it is not
-   * a link underline and not colour alone) under each line box of text that
-   * carries custom style, with a 1px halo below it. Decoration only.
-   */
-  .pk-custom-style {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-  }
-
-  .pk-custom-style-bar {
-    position: absolute;
-    height: 2px;
-    pointer-events: none;
-    background: repeating-linear-gradient(
-      to right,
-      var(--pk-overlay-custom-style) 0 4px,
-      transparent 4px 6px
-    );
-    box-shadow: 0 1px 0 var(--pk-overlay-halo);
-  }
-
-  @media (forced-colors: active) {
-    .pk-custom-style-bar {
-      height: 3px;
-      forced-color-adjust: none;
-      background: repeating-linear-gradient(
-        to right,
-        Highlight 0 4px,
-        transparent 4px 6px
-      );
-      box-shadow: none;
-    }
   }
 
   .pk-toolbar-menu {

@@ -5,6 +5,7 @@ import {
   type ReactElement,
 } from 'react';
 import { isCompleteCta } from '@plakboek/content/rich-text';
+import { EDIT_ATTRIBUTE } from '@plakboek/render';
 import { documentBox } from '../../../client/chrome-host/coordinates.js';
 import { sameBox, type Box } from '../../../client/overlay/geometry.js';
 import type { FieldBox } from '../../../client/overlay/field-boxes.js';
@@ -21,7 +22,6 @@ import {
 } from '../../../client/text/style-runs.js';
 import { AlertIcon } from '../../icons.js';
 import { STRINGS } from '../../strings.js';
-import { fieldElement } from './custom-style-marker.js';
 
 /** One marker: the button's box and what it lacks. */
 type Marker = {
@@ -36,6 +36,32 @@ type Drawn = {
 };
 
 const NOTHING: Drawn = { markers: [], selected: null };
+
+const BLOCK_SELECTOR = `[${EDIT_ATTRIBUTE.block}]`;
+const FIELD_SELECTOR = `[${EDIT_ATTRIBUTE.field}]`;
+
+/** The block's own field with this key, never one of a nested block's. */
+function fieldElement(
+  frameDocument: Document,
+  blockId: string,
+  key: string,
+): Element | null {
+  const block = Array.from(frameDocument.querySelectorAll(BLOCK_SELECTOR)).find(
+    (element) => element.getAttribute(EDIT_ATTRIBUTE.block) === blockId,
+  );
+  if (block === undefined) return null;
+  const candidates = [
+    ...(block.matches(FIELD_SELECTOR) ? [block] : []),
+    ...block.querySelectorAll(FIELD_SELECTOR),
+  ];
+  return (
+    candidates.find(
+      (field) =>
+        field.getAttribute(EDIT_ATTRIBUTE.field) === key &&
+        field.closest(BLOCK_SELECTOR) === block,
+    ) ?? null
+  );
+}
 
 function boxStyle(box: Box): CSSProperties {
   return {
