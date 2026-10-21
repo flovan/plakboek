@@ -149,7 +149,7 @@ test('Insert menu by pointer: pressing Quote turns the empty paragraph into a qu
   await expect(field.locator('blockquote')).toHaveCount(1);
 });
 
-test('link popover by pointer: the Web address segment and input, then a page row, act inside the popover', async ({
+test('link popover by pointer: the URL segment and input, then a page row, act inside the popover', async ({
   page,
 }) => {
   const word = tag();

@@ -299,10 +299,10 @@ describe('STRINGS', () => {
       'No pages match "pricing".',
     );
     expect(STRINGS['text.web.error']).toBe(
-      'Enter a web address like https://example.com, or an email or phone link.',
+      'Enter a URL like https://example.com, or an email or phone link.',
     );
     expect(STRINGS['text.link.broken']).toBe(
-      'This page no longer exists. Choose another page or a web address.',
+      'This page no longer exists. Choose another page or a URL.',
     );
     expect(STRINGS['text.cta.needsLink']).toBe('Needs a link');
     expect(STRINGS['text.unsupported.heading']).toBe(

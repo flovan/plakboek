@@ -1,7 +1,7 @@
 /**
  * The standalone Button block, on the real page, in a real browser: its label
  * and link are set in the Properties panel (the link with the same Page search
- * and Web address section the popovers use), and it renders through the same
+ * and URL section the popovers use), and it renders through the same
  * renderer as a button typed into a text. Assertions are on what is stored and
  * rendered, never on how the editor builds its controls.
  */
@@ -115,7 +115,7 @@ test('add a Button block, set its label and point it at a page in Properties: it
   });
 });
 
-test('a web address typed in the link control is stored once it is allowed, and Remove link clears it', async ({
+test('a URL typed in the link control is stored once it is allowed, and Remove link clears it', async ({
   page,
 }) => {
   const created = await createEditablePage({
@@ -131,8 +131,8 @@ test('a web address typed in the link control is stored once it is allowed, and 
   await openProperties(page, frame.locator('.button-block .t-cta'));
 
   const link = sheet(page).locator('[data-link-control]');
-  await link.getByRole('radio', { name: 'Web address' }).click();
-  const address = link.getByLabel('Web address', { exact: true });
+  await link.getByRole('radio', { name: 'URL' }).click();
+  const address = link.getByLabel('URL', { exact: true });
   await address.fill('javascript:alert(1)');
   await address.blur();
   await expect(link.getByRole('alert')).toBeVisible();

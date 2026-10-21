@@ -1,6 +1,6 @@
 /**
  * Links in rich text on the real page, in a real browser: the toolbar's Link
- * button opens a popover that links the selection to a web address, the link
+ * button opens a popover that links the selection to a URL, the link
  * is stored with exactly the target that was chosen and is rendered on the
  * page after a reload, and an address the href policy refuses cannot become a
  * link. Assertions are on what is stored and rendered, never on how the
@@ -81,7 +81,7 @@ async function selectOurStory(
     .toBe('our story');
 }
 
-test('select two words, link them to a web address: stored with that address, rendered as an anchor after a reload', async ({
+test('select two words, link them to a URL: stored with that URL, rendered as an anchor after a reload', async ({
   page,
 }) => {
   const { field, pageId } = await openProse(page);
@@ -98,10 +98,10 @@ test('select two words, link them to a web address: stored with that address, re
   await expect(popover).toHaveAccessibleName('Link');
   expect((await popover.boundingBox())?.width).toBe(320);
 
-  // a new link opens on Page; the web address is the other segment
+  // a new link opens on Page; the URL is the other segment
   await expect(popover.getByRole('radio', { name: 'Page' })).toBeChecked();
-  await popover.getByRole('radio', { name: 'Web address' }).click();
-  const address = popover.getByLabel('Web address');
+  await popover.getByRole('radio', { name: 'URL' }).click();
+  const address = popover.getByLabel('URL', { exact: true });
   await expect(address).toBeFocused();
   await address.fill('https://example.com');
   await popover.getByRole('button', { name: 'Apply link' }).click();
@@ -139,7 +139,7 @@ test('select two words, link them to a web address: stored with that address, re
   await expect(anchor).toHaveAttribute('href', 'https://example.com');
 });
 
-test('a script address shows the web address error and cannot be applied', async ({
+test('a script URL shows the URL error and cannot be applied', async ({
   page,
 }) => {
   const { field, pageId } = await openProse(page);
@@ -150,12 +150,12 @@ test('a script address shows the web address error and cannot be applied', async
     .click();
 
   const popover = chrome(page).locator(POPOVER);
-  await popover.getByRole('radio', { name: 'Web address' }).click();
-  const address = popover.getByLabel('Web address');
+  await popover.getByRole('radio', { name: 'URL' }).click();
+  const address = popover.getByLabel('URL', { exact: true });
   await address.fill('javascript:alert(1)');
   await address.blur();
   await expect(popover.getByRole('alert')).toHaveText(
-    'Enter a web address like https://example.com, or an email or phone link.',
+    'Enter a URL like https://example.com, or an email or phone link.',
   );
 
   const apply = popover.getByRole('button', { name: 'Apply link' });
@@ -268,8 +268,10 @@ test('a mailto and a tel address are accepted, Ctrl+K edits the link at the care
 
   await page.keyboard.press('ControlOrMeta+k');
   await expect(popover).toBeVisible();
-  await popover.getByRole('radio', { name: 'Web address' }).click();
-  await popover.getByLabel('Web address').fill('mailto:hello@example.com');
+  await popover.getByRole('radio', { name: 'URL' }).click();
+  await popover
+    .getByLabel('URL', { exact: true })
+    .fill('mailto:hello@example.com');
   await page.keyboard.press('Enter');
   await expect(popover).toHaveCount(0);
   await expect(status).toHaveText('Link added.');
@@ -279,10 +281,8 @@ test('a mailto and a tel address are accepted, Ctrl+K edits the link at the care
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ControlOrMeta+k');
-  await expect(
-    popover.getByRole('radio', { name: 'Web address' }),
-  ).toBeChecked();
-  const address = popover.getByLabel('Web address');
+  await expect(popover.getByRole('radio', { name: 'URL' })).toBeChecked();
+  const address = popover.getByLabel('URL', { exact: true });
   await expect(address).toHaveValue('mailto:hello@example.com');
   await address.fill('tel:+3212345678');
   await popover.getByRole('button', { name: 'Apply link' }).click();
@@ -383,8 +383,10 @@ test('Open in new tab is off by default and stored as _blank when switched on', 
   await selectOurStory(page, field);
   await page.keyboard.press('ControlOrMeta+k');
   const popover = chrome(page).locator(POPOVER);
-  await popover.getByRole('radio', { name: 'Web address' }).click();
-  await popover.getByLabel('Web address').fill('https://example.com/new');
+  await popover.getByRole('radio', { name: 'URL' }).click();
+  await popover
+    .getByLabel('URL', { exact: true })
+    .fill('https://example.com/new');
   const newTab = popover.getByRole('switch', { name: 'Open in new tab' });
   await expect(newTab).not.toBeChecked();
   await newTab.check();
@@ -531,7 +533,7 @@ test('a link to a page that no longer exists opens on Page and says so', async (
   const popover = chrome(page).locator(POPOVER);
   await expect(popover.getByRole('radio', { name: 'Page' })).toBeChecked();
   await expect(popover.getByRole('alert')).toHaveText(
-    'This page no longer exists. Choose another page or a web address.',
+    'This page no longer exists. Choose another page or a URL.',
   );
   // the link can still be removed
   await popover.getByRole('button', { name: 'Remove link' }).click();
