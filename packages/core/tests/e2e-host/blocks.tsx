@@ -189,6 +189,17 @@ const Prose: BlockComponent<{ body?: unknown }> = ({ props, edit }) => (
 );
 
 /**
+ * A text block like a host that gives an empty text no box: the field is the
+ * block root, with no class and no style, so with no text it renders at no
+ * size and specs can reach a field that has no box of its own.
+ */
+const BareText: BlockComponent<{ body?: unknown }> = ({ props, edit }) => (
+  <div {...edit} {...edit.field('body')}>
+    <RichText value={props.body} />
+  </div>
+);
+
+/**
  * A prose-like block whose body keeps the theme's palettes but refuses free
  * values, so a spec can prove no custom input is offered and the server holds
  * the line (the brand-strict case).
@@ -412,6 +423,21 @@ export const prose = defineBlock({
     body: { fieldType: 'rich_text', label: 'Body', options: {} },
   },
   component: Prose,
+});
+
+export const bareText = defineBlock({
+  key: 'bareText',
+  editor: { label: 'Bare text' },
+  schemaVersion: 1,
+  properties: {
+    body: {
+      fieldType: 'rich_text',
+      label: 'Body',
+      required: true,
+      options: {},
+    },
+  },
+  component: BareText,
 });
 
 export const brandProse = defineBlock({
