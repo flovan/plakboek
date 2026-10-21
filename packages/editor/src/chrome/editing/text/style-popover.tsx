@@ -235,6 +235,8 @@ export type CustomValueInputProps = {
   readonly inputMode: 'numeric' | 'text';
   /** The input's own stable marker for the tests and the keyboard. */
   readonly name: string;
+  /** What the input shows when it opens: the value already applied, if custom. */
+  readonly initial?: string;
 };
 
 /**
@@ -256,8 +258,9 @@ export function CustomValueInput(props: CustomValueInputProps): ReactElement {
     after,
     inputMode,
     name,
+    initial,
   } = props;
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initial ?? '');
   const [showError, setShowError] = useState(false);
   const inputId = useId();
   const noteId = useId();

@@ -2,6 +2,7 @@ import type { MouseEvent, ReactElement, ReactNode } from 'react';
 import {
   CUSTOM_SIZE_MAX,
   CUSTOM_SIZE_MIN,
+  isCustomSizeValue,
   parseCustomSize,
 } from '@plakboek/content/rich-text';
 import { CheckIcon, ChevronDownIcon } from '../../icons.js';
@@ -114,6 +115,11 @@ function List(props: SizePopoverProps & { readonly api: PopoverApi }) {
             max: String(CUSTOM_SIZE_MAX),
           })}
           inputMode="numeric"
+          initial={
+            current !== null && isCustomSizeValue(current)
+              ? String(Number.parseInt(current, 10))
+              : ''
+          }
           after={STRINGS['text.size.unit']}
           parse={parseCustomSize}
           onApply={(value) => {

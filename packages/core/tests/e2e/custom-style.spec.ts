@@ -176,6 +176,8 @@ test('a custom hex is stored literally, a size takes a token or a 20px literal, 
   await toolbar.getByRole('button', { name: /^Text size/ }).click();
   const again = toolbar.getByRole('dialog', { name: /^Text size/ });
   await expect(again.getByText('Between 8 and 200 pixels.')).toBeVisible();
+  // over a theme size the custom input starts empty
+  await expect(again.getByLabel('Custom size')).toHaveValue('');
   await again.getByLabel('Custom size').fill('5');
   await page.keyboard.press('Enter');
   await expect(
@@ -194,6 +196,20 @@ test('a custom hex is stored literally, a size takes a token or a 20px literal, 
     'word',
   );
   await expect(field.locator('span[data-pk-size-token]')).toHaveCount(0);
+
+  // opened again, each custom input shows the value already applied
+  await toolbar.getByRole('button', { name: /^Text size/ }).click();
+  const reopenedSize = toolbar.getByRole('dialog', { name: /^Text size/ });
+  await expect(reopenedSize.getByLabel('Custom size')).toHaveValue('20');
+  await page.keyboard.press('Escape');
+  await expect(reopenedSize).toHaveCount(0);
+  await toolbar.getByRole('button', { name: /^Text color/ }).click();
+  const reopenedColour = toolbar.getByRole('dialog', { name: /^Text color/ });
+  await expect(reopenedColour.getByLabel('Custom color')).toHaveValue(
+    '#12ab34',
+  );
+  await page.keyboard.press('Escape');
+  await expect(reopenedColour).toHaveCount(0);
 
   await toolbar.getByRole('button', { name: 'Done editing' }).click();
   await expect.poll(() => storedBody(pageId)).toContain('"value":"20px"');

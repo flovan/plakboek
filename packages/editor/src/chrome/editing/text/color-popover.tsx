@@ -1,5 +1,8 @@
 import type { CSSProperties, MouseEvent, ReactElement } from 'react';
-import { parseCustomColor } from '@plakboek/content/rich-text';
+import {
+  isCustomColorValue,
+  parseCustomColor,
+} from '@plakboek/content/rich-text';
 import { CheckIcon, ChevronDownIcon } from '../../icons.js';
 import { STRINGS } from '../../strings.js';
 import { Tooltip } from '../../tooltip.js';
@@ -128,6 +131,9 @@ function Grid(props: ColorPopoverProps & { readonly api: PopoverApi }) {
           hint={STRINGS['text.color.hint']}
           error={STRINGS['text.color.error']}
           inputMode="text"
+          initial={
+            current !== null && isCustomColorValue(current) ? current : ''
+          }
           parse={parseCustomColor}
           onApply={(value) => {
             onChoose({ value }, value);
