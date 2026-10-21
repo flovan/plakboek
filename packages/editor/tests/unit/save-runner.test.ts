@@ -117,6 +117,7 @@ function setup(
   }> = () => Promise.reject(new Error('not read')),
   frame: () => HTMLIFrameElement | null = () => null,
   hooks: () => HooksRuntime | null = () => null,
+  onAdded?: (blockId: string, announcement: string) => boolean,
 ): Setup {
   const store = createEditorStore();
   store.opened(session());
@@ -133,6 +134,7 @@ function setup(
     frameUrl: '/x?_edit=frame',
     hooks,
     idleMs: 1000,
+    ...(onAdded === undefined ? {} : { onAdded }),
   });
   return { store, runner, edit: editFn, treeRead: treeFn };
 }
@@ -421,6 +423,55 @@ describe('the save runner', () => {
     expect(state.selection).toEqual({ scopeId: 'c1', selectedId: 'h9' });
     expect(state.announcement).toBe('Added heading. Needs input.');
     expect(state.propertiesRequest?.id).toBe('h9');
+  });
+
+  describe('when the shell takes over a new block that lacks a value', () => {
+    function addHeading(onAdded?: (id: string, text: string) => boolean) {
+      const added: ModelNode = {
+        ...buildNodes([block('h9', 'heading')])[0]!,
+        parentId: 'c1',
+        sortOrder: 2500,
+        needsInput: ['text'],
+      };
+      const ctx = setup(
+        () => Promise.resolve(responseFor([...tree, added], 6)),
+        undefined,
+        undefined,
+        undefined,
+        onAdded,
+      );
+      const model = ctx.store.getState().model;
+      if (model === null) throw new Error('not open');
+      const intent: Intent = {
+        kind: 'insert',
+        position: { parentId: 'c1', previousId: 'h2', nextId: null },
+        node: { id: 'h9', type: 'heading' },
+      };
+      ctx.runner.perform(
+        intent,
+        buildUndoEntry(intent, model, { kind: 'added', itemId: 'h9' }),
+      );
+      return ctx;
+    }
+
+    it('passes the block and the added announcement on, and neither announces nor asks for the panel when the shell takes it', async () => {
+      const onAdded = vi.fn(() => true);
+      const ctx = addHeading(onAdded);
+      await ctx.runner.flush();
+      expect(onAdded).toHaveBeenCalledWith('h9', 'Added heading. Needs input.');
+      const state = ctx.store.getState();
+      expect(state.announcement).toBe('');
+      expect(state.propertiesRequest).toBeNull();
+      expect(state.selection).toEqual({ scopeId: 'c1', selectedId: 'h9' });
+    });
+
+    it('announces and asks for the panel as before when the shell declines', async () => {
+      const ctx = addHeading(() => false);
+      await ctx.runner.flush();
+      const state = ctx.store.getState();
+      expect(state.announcement).toBe('Added heading. Needs input.');
+      expect(state.propertiesRequest?.id).toBe('h9');
+    });
   });
 
   describe('when a retry meets a stale version after the first attempt got no answer', () => {

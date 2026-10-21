@@ -411,6 +411,11 @@ function Shell(props: {
       frame: () => frameOf(host),
       frameUrl: island.frameUrl,
       hooks: () => hooksRef.current,
+      // A new block opens where it is filled in: its text on the page, or a
+      // button's popover. Anything else keeps the Properties panel.
+      onAdded: (id, message) =>
+        textControllerRef.current?.enterNew(id, { announcePrefix: message }) ??
+        false,
     });
     runnerRef.current = runner;
     // The live preview of a property change renders into the same frame.
@@ -878,7 +883,8 @@ function Shell(props: {
       });
       if (moveFocus) {
         requestAnimationFrame(() => {
-          focusRegion(host);
+          // A new block's text may have taken the focus: it keeps it.
+          if (textControllerRef.current?.active() == null) focusRegion(host);
         });
       }
     },

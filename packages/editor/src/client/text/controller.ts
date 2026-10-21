@@ -99,13 +99,26 @@ export type TextControllerOptions = {
 /** The room left above a field the Properties panel scrolls into view. */
 export const FIELD_CLEARANCE = 48;
 
+/** How a session is started when something else has just happened to the block. */
+export type TextEntryOptions = {
+  /**
+   * What the live region says first (a block was just added): it and the
+   * session's own announcement are spoken as one message.
+   */
+  readonly announcePrefix?: string;
+};
+
 export type TextController = {
   /**
    * Starts a session on the field, ending a running one first. The caret goes
    * to `point` (frame viewport coordinates) when the editor finds a position
    * there, else to the end of the field.
    */
-  enter(target: FieldTarget, point?: { x: number; y: number }): void;
+  enter(
+    target: FieldTarget,
+    point?: { x: number; y: number },
+    options?: TextEntryOptions,
+  ): void;
   /**
    * The field the block marks for the property and the editor may type in, or
    * null (the block never marks it, it is not editable text, or the page is
@@ -118,7 +131,20 @@ export type TextController = {
    * caret at the end. Returns false, and does nothing, when there is no such
    * field.
    */
-  enterField(blockId: string, key: string): boolean;
+  enterField(blockId: string, key: string, options?: TextEntryOptions): boolean;
+  /**
+   * Puts an unfinished block where its first missing required value is filled
+   * in: the text on the page, or, for a button block lacking its label or
+   * link, its Button popover. Answers false, and does nothing, when the block
+   * lacks nothing or the missing value is not edited on the page.
+   */
+  enterMissing(blockId: string, options?: TextEntryOptions): boolean;
+  /**
+   * The on-page surface of a block that was just added: `enterMissing` while
+   * it lacks a value, else the first property the block declares when that is
+   * text on the page. Answers false, and does nothing, when neither is.
+   */
+  enterNew(blockId: string, options?: TextEntryOptions): boolean;
   /** Ends the session after flushing its pending save; resolves once flushed. */
   exit(reason: TextExitReason): Promise<void>;
   /** The field being edited, or null. */
@@ -358,10 +384,22 @@ export function createTextController(
     }
   }
 
+  /** The message a session starts with: the prefix, when there is one, and the session's own words. */
+  function announcement(text: string, options?: TextEntryOptions): string {
+    return options?.announcePrefix === undefined
+      ? text
+      : `${options.announcePrefix} ${text}`;
+  }
+
   /** A button block's field: no editor, the Button popover edits its properties. */
-  function enterBlockButton(target: FieldTarget): void {
+  function enterBlockButton(
+    target: FieldTarget,
+    options?: TextEntryOptions,
+  ): void {
     const state = store.getState();
     if (state.status !== 'editing' || state.mode !== 'edit') return;
+    // The popover and the Properties sheet edit the same block: one at a time.
+    store.closeProperties();
     blockButton = target;
     buttonCounter += 1;
     buttonToken = buttonCounter;
@@ -372,9 +410,12 @@ export function createTextController(
       unsupported: false,
     });
     announce(
-      formatString('text.announce.editingButton', {
-        label: target.property.label,
-      }),
+      announcement(
+        formatString('text.announce.editingButton', {
+          label: target.property.label,
+        }),
+        options,
+      ),
     );
     notify();
   }
@@ -394,7 +435,11 @@ export function createTextController(
     );
   }
 
-  function enterField(blockId: string, key: string): boolean {
+  function enterField(
+    blockId: string,
+    key: string,
+    options?: TextEntryOptions,
+  ): boolean {
     const state = store.getState();
     if (state.status !== 'editing' || state.mode !== 'edit') return false;
     const target = fieldFor(blockId, key);
@@ -413,16 +458,64 @@ export function createTextController(
         });
       }
     }
-    enter(target);
+    enter(target, undefined, options);
     return store.getState().textField !== null;
   }
 
-  function enter(target: FieldTarget, point?: { x: number; y: number }): void {
+  /** The button field whose label or style a missing key belongs to, when every missing key does. */
+  function buttonFor(
+    blockId: string,
+    missing: readonly string[],
+  ): string | null {
+    const { model, session } = store.getState();
+    const type = model?.get(blockId)?.type;
+    const entry = session?.catalogue.find((item) => item.key === type);
+    if (entry === undefined) return null;
+    for (const property of entry.properties) {
+      if (property.fieldType !== 'link') continue;
+      const target = fieldFor(blockId, property.key);
+      if (target === null || target.kind !== 'button') continue;
+      const owned = [target.key, target.labelKey, target.variantKey];
+      if (missing.every((key) => owned.includes(key))) return target.key;
+    }
+    return null;
+  }
+
+  function enterMissing(blockId: string, options?: TextEntryOptions): boolean {
+    const missing = store.getState().model?.get(blockId)?.needsInput ?? [];
+    const first = missing[0];
+    if (first === undefined) return false;
+    const target = fieldFor(blockId, first);
+    if (target !== null && target.kind !== 'button') {
+      return enterField(blockId, first, options);
+    }
+    const button = buttonFor(blockId, missing);
+    return button === null ? false : enterField(blockId, button, options);
+  }
+
+  function enterNew(blockId: string, options?: TextEntryOptions): boolean {
+    const { model, session } = store.getState();
+    const node = model?.get(blockId);
+    if (node === undefined) return false;
+    if (node.needsInput.length > 0) return enterMissing(blockId, options);
+    const entry = session?.catalogue.find((item) => item.key === node.type);
+    const first = entry?.properties[0];
+    if (first === undefined) return false;
+    const target = fieldFor(blockId, first.key);
+    if (target === null || target.kind === 'button') return false;
+    return enterField(blockId, first.key, options);
+  }
+
+  function enter(
+    target: FieldTarget,
+    point?: { x: number; y: number },
+    options?: TextEntryOptions,
+  ): void {
     if (current !== null || blockButton !== null) void exit('click');
     const state = store.getState();
     if (state.status !== 'editing' || state.mode !== 'edit') return;
     if (target.kind === 'button') {
-      enterBlockButton(target);
+      enterBlockButton(target, options);
       return;
     }
     const rich = target.kind === 'rich';
@@ -592,9 +685,12 @@ export function createTextController(
       unsupported: false,
     });
     announce(
-      formatString(
-        rich ? 'text.announce.editingRich' : 'text.announce.editingPlain',
-        { label: target.property.label },
+      announcement(
+        formatString(
+          rich ? 'text.announce.editingRich' : 'text.announce.editingPlain',
+          { label: target.property.label },
+        ),
+        options,
       ),
     );
     notify();
@@ -726,6 +822,9 @@ export function createTextController(
       state.drag !== null
     ) {
       void exit('structure');
+    } else if (field.kind === 'button' && state.propertiesOpen) {
+      // Asking for Properties ends the popover: the two never show together.
+      void exit('panel');
     }
   });
 
@@ -733,6 +832,8 @@ export function createTextController(
     enter,
     fieldFor,
     enterField,
+    enterMissing,
+    enterNew,
     exit,
     active: () => current?.target ?? blockButton,
     editor: () => current?.editor ?? null,

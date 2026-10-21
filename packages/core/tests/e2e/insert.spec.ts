@@ -9,8 +9,10 @@ import {
   chrome,
   frameBoxOf,
   framedSite,
+  HOST,
   LIVE_REGION,
   openEditor,
+  regionFocused,
   SELECTED,
   selectItem,
   tabToRegion,
@@ -107,16 +109,34 @@ test.describe('the insert points and the picker', () => {
     const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
     await expect(picker).toBeVisible();
     await page.keyboard.type('tex');
-    await expect(picker.getByRole('option')).toHaveCount(1);
+    // Bare text matches too; Text is the best match and so comes first
+    await expect(picker.getByRole('option').first()).toHaveText(/^Text/);
     await page.keyboard.press('Enter');
 
     await expect(picker).toHaveCount(0);
     await expect
       .poll(() => tagsInFirstColumn(frame))
       .toEqual(['h2', 'p', 'h2']);
-    await expectSaved(page);
-    await expect(page.locator(LIVE_REGION)).toContainText('Added Text.');
     await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
+    // the missing text is typed at once: one message says added, needs input and editing
+    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+    await expect(page.locator(LIVE_REGION)).toHaveText(
+      /^Added Text\. Needs input\. Editing .+\. Press Escape to stop editing\.$/,
+    );
+    await page.keyboard.type('New text');
+    await expect(
+      frame.locator('section.section').first().locator('p'),
+    ).toHaveText('New text');
+
+    // Escape leaves the block selected with the focus on the page, and Enter goes back in
+    await page.keyboard.press('Escape');
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+    await expect.poll(() => regionFocused(page)).toBe(true);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
+    await page.keyboard.press('Enter');
+    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+    await page.keyboard.press('Escape');
+    await expectSaved(page);
 
     await page.reload();
     const reloaded = await framedSite(page);
@@ -224,7 +244,9 @@ test.describe('empty places and the blocks that need a value', () => {
     // its text is required and still empty
     await expect(chrome(page).locator(MARKER)).toHaveCount(1);
     await expect(chrome(page).locator(MARKER)).toHaveText('Needs input');
-    await expect(live).toHaveText(/Added Heading\. Needs input\.$/);
+    await expect(live).toHaveText(
+      /^Added Heading\. Needs input\. Editing .+\. Press Escape to stop editing\./,
+    );
   });
 
   test('a block whose required values are filled shows no marker', async ({
