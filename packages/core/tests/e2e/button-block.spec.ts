@@ -25,6 +25,7 @@ import {
 import { signIn } from './helpers/session.ts';
 
 const SAVED = 'All changes saved';
+const POPOVER = '[data-button-popover]';
 
 function tag(): string {
   return Math.random().toString(36).slice(2, 8);
@@ -54,7 +55,7 @@ async function addButtonAfterHeading(page: Page, frame: Frame) {
   return frame.locator('.button-block');
 }
 
-test('add a Button block, set its label and point it at a page in Properties: it renders like a CTA and is still there after a reload', async ({
+test('add a Button block: only its popover opens; Properties and the popover never show together, and a page link set in Properties renders like a CTA after a reload', async ({
   page,
 }) => {
   const word = tag();
@@ -73,16 +74,30 @@ test('add a Button block, set its label and point it at a page in Properties: it
   // nothing to show a visitor yet, so the editor shows the unfinished button
   await expect(block.locator('.t-cta')).not.toHaveAttribute('href', /.+/);
 
-  await chrome(page)
-    .getByRole('button', { name: /^Properties of / })
-    .click();
+  // a new button is set up where it is seen: its popover, with the focus on Label
+  const popover = chrome(page).locator(POPOVER);
+  await expect(popover).toBeVisible();
+  await expect(popover.getByLabel('Label')).toBeFocused();
+  await expect(sheet(page)).not.toHaveAttribute('data-open', '');
+  await page.keyboard.type('See pricing');
+  await expect(block.locator('.t-cta')).toHaveText('See pricing');
+
+  // asking for Properties (a double click in Page structure; the field's own
+  // bar replaces the block toolbar while the popover is open) ends the popover
+  await page
+    .locator(HOST)
+    .getByRole('treeitem', { name: /^Button/ })
+    .dblclick();
   await expect(sheet(page)).toHaveAttribute('data-open', '');
+  await expect(popover).toHaveCount(0);
+  await expect(sheet(page).getByRole('textbox', { name: 'Label' })).toHaveValue(
+    'See pricing',
+  );
   // the link is required and still empty
   await expect(
     sheet(page).locator('[data-field="link"][data-needs-input]'),
   ).toHaveCount(1);
 
-  await sheet(page).getByRole('textbox', { name: 'Label' }).fill('See pricing');
   const search = sheet(page).getByLabel('Search pages');
   await search.fill(word);
   const row = sheet(page).getByRole('option', { name: `Pricing ${word}` });
@@ -100,6 +115,16 @@ test('add a Button block, set its label and point it at a page in Properties: it
   await expect(
     sheet(page).locator('[data-field="link"][data-needs-input]'),
   ).toHaveCount(0);
+
+  // saved, so what follows cannot be mistaken for a lost write
+  await expect
+    .poll(async () => (await readBlockProps(created.pageId, 'button'))['link'])
+    .toEqual({ href: null, pageId: target.pageId, target: null });
+
+  // a click on the button on the page closes the sheet and opens the popover
+  await block.locator('.t-cta').click();
+  await expect(popover).toBeVisible();
+  await expect(sheet(page)).not.toHaveAttribute('data-open', '');
 
   await page.reload();
   const reloaded = await framedSite(page);
@@ -160,8 +185,6 @@ test('a URL typed in the link control is stored once it is allowed, and Remove l
     .poll(async () => (await readBlockProps(created.pageId, 'button'))['link'])
     .toBeUndefined();
 });
-
-const POPOVER = '[data-button-popover]';
 
 test('clicking a Button block opens its popover on the page, with no caret and no Remove button: a style change renders live and a label and a page link are saved', async ({
   page,
@@ -358,4 +381,18 @@ test('a Button block whose page is not available shows a visitor nothing and its
   await expect(
     sheet(page).locator('[data-field="link"] [data-needs-input-tag]'),
   ).toHaveText('Needs input');
+});
+
+test('the Needs input badge of a Button block with no label and no link opens its popover, not the Properties sheet', async ({
+  page,
+}) => {
+  const created = await createEditablePage({
+    blocks: [section(paragraph('Hello'), { type: 'button', props: {} })],
+  });
+  await openEditor(page, created.path);
+
+  await chrome(page).locator('[data-marker]').click();
+
+  await expect(chrome(page).locator(POPOVER)).toBeVisible();
+  await expect(sheet(page)).not.toHaveAttribute('data-open', '');
 });

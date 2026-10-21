@@ -77,11 +77,10 @@ test('the whole structure flow is done with the keyboard alone, and the page tha
   await page.keyboard.press('Enter');
   await expect(frame.locator('section.section h2')).toHaveCount(1);
 
-  // the new heading needs its text: Properties opens on it
-  const control = page.getByRole('textbox', { name: 'Text' });
-  await expect(control).toBeFocused();
+  // the new heading needs its text: it is typed on the page at once, and Escape ends it
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
   await page.keyboard.type('Keyboard title');
-  await page.keyboard.press('Tab');
+  await page.keyboard.press('Escape');
   await expect(frame.locator('section.section h2')).toHaveText(
     'Keyboard title',
   );
@@ -93,9 +92,9 @@ test('the whole structure flow is done with the keyboard alone, and the page tha
   await expect(picker).toBeVisible();
   await page.keyboard.type('tex');
   await page.keyboard.press('Enter');
-  await expect(control).toBeFocused();
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
   await page.keyboard.type('Keyboard body');
-  await page.keyboard.press('Tab');
+  await page.keyboard.press('Escape');
   await expect.poll(order).toEqual(['h2:Keyboard title', 'p:Keyboard body']);
 
   // Alt+ArrowUp lifts the text over the heading

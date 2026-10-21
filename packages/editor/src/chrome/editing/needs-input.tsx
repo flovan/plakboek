@@ -161,20 +161,9 @@ export function NeedsInputMarkers(
               })}
               onClick={() => {
                 if (model === null) return;
-                // A missing text is typed where it belongs: on the page.
-                const missing = model.get(id)?.needsInput[0];
-                const field =
-                  missing === undefined
-                    ? null
-                    : (textController?.fieldFor(id, missing) ?? null);
-                if (
-                  missing !== undefined &&
-                  field !== null &&
-                  field.kind !== 'button' &&
-                  textController?.enterField(id, missing) === true
-                ) {
-                  return;
-                }
+                // A missing value is filled in where it belongs: the text on the
+                // page, a button's popover. The rest is in the Properties panel.
+                if (textController?.enterMissing(id) === true) return;
                 selectAndAnnounce(store, selectCrumb(model, id));
                 store.requestProperties(id);
               }}

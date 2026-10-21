@@ -538,7 +538,7 @@ test.describe('undo and focus', () => {
     await expect(textControl(page)).toBeFocused();
   });
 
-  test('adding a heading opens Properties with focus in its empty Text control, and selecting another block afterwards leaves focus alone', async ({
+  test('adding a Note, whose required value is not on the page, opens Properties with focus in its empty control, and selecting another block afterwards leaves focus alone', async ({
     page,
   }) => {
     await openPageWithHeading(page);
@@ -554,15 +554,15 @@ test.describe('undo and focus', () => {
       .getByRole('button', { name: 'Add after Heading' })
       .click();
     const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
-    await picker.getByRole('combobox').fill('head');
+    await picker.getByRole('combobox').fill('note');
     await page.keyboard.press('Enter');
 
     await expect(sheet(page)).toHaveAttribute('data-open', '');
-    const control = textControl(page);
+    const control = sheet(page).getByRole('textbox', { name: 'Note' });
     await expect(control).toHaveValue('');
     await expect(control).toBeFocused();
     await expect(
-      page.locator(`${HOST} [data-field="text"] [data-needs-input-tag]`),
+      page.locator(`${HOST} [data-field="note"] [data-needs-input-tag]`),
     ).toHaveText('Needs input');
 
     // clicking another block in the frame selects it; the panel does not take focus
@@ -572,7 +572,7 @@ test.describe('undo and focus', () => {
       .locator('h2')
       .first()
       .click();
-    await expect(control).not.toBeFocused();
+    await expect(textControl(page)).not.toBeFocused();
     expect(
       await page
         .locator(HOST)
