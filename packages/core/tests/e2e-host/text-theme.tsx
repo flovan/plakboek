@@ -86,6 +86,28 @@ export default defineTextTheme({
         {children}
       </a>
     ),
+    textColor: ({ token, value, children }) => (
+      <span
+        className="t-color"
+        style={{
+          color:
+            token === null ? (value ?? undefined) : `var(--color-${token})`,
+        }}
+      >
+        {children}
+      </span>
+    ),
+    textSize: ({ token, value, children }) => (
+      <span
+        className="t-size"
+        style={{
+          fontSize:
+            token === null ? (value ?? undefined) : `var(--text-${token})`,
+        }}
+      >
+        {children}
+      </span>
+    ),
     ctaRow: ({ children }) => <div className="t-cta-row">{children}</div>,
   },
 });

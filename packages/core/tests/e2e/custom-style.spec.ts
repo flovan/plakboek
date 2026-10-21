@@ -96,6 +96,10 @@ test('unlock, colour a word Accent: it is stored as a token and rendered through
   await expect(field.locator('span[data-pk-color-token="accent"]')).toHaveText(
     'word',
   );
+  // drawn by the host's colour renderer while it is edited
+  await expect(field.locator('span[data-pk-color-token="accent"]')).toHaveClass(
+    't-color',
+  );
   await expect(page.locator(`${HOST} [role="status"].sr-only`)).toHaveText(
     'Color set to Accent.',
   );
@@ -156,6 +160,10 @@ test('a custom hex is stored literally, a size takes a token or a 20px literal, 
   await size.getByRole('radio', { name: 'Large' }).click();
   await expect(field.locator('span[data-pk-size-token="xl"]')).toHaveText(
     'word',
+  );
+  // drawn by the host's size renderer while it is edited
+  await expect(field.locator('span[data-pk-size-token="xl"]')).toHaveClass(
+    't-size',
   );
   await expect(
     toolbar.getByRole('button', { name: 'Text size: Large' }),
