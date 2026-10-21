@@ -22,8 +22,15 @@
 import { createElement, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
-import { TEXT_ALIGNS, type TextAlign } from '@plakboek/content/rich-text';
+import {
+  isCustomColorValue,
+  isCustomSizeValue,
+  TEXT_ALIGNS,
+  TOKEN_PATTERN,
+  type TextAlign,
+} from '@plakboek/content/rich-text';
 import type { TextRenderers } from '@plakboek/render';
+import { linkTargetOf } from './link.js';
 
 export type RendererShell = {
   readonly dom: HTMLElement;
@@ -164,6 +171,25 @@ function alignOf(value: unknown): TextAlign | null {
   return TEXT_ALIGNS.find((align) => align === value) ?? null;
 }
 
+/**
+ * The token or the literal of a colour or size mark, exactly one of them and
+ * only when it is valid; null when the mark holds neither, so a stored value
+ * that is not valid never reaches a host renderer.
+ */
+function styleChoiceOf(
+  attrs: Readonly<Record<string, unknown>>,
+  isLiteral: (value: string) => boolean,
+): { token: string | null; value: string | null } | null {
+  const { token, value } = attrs;
+  if (typeof token === 'string' && TOKEN_PATTERN.test(token)) {
+    return { token, value: null };
+  }
+  if (typeof value === 'string' && isLiteral(value)) {
+    return { token: null, value };
+  }
+  return null;
+}
+
 export function createRendererShells(
   renderers: TextRenderers,
   frameDocument: Document,
@@ -265,7 +291,7 @@ export function createRendererShells(
           return null;
       }
     },
-    markView(name) {
+    markView(name, attrs) {
       switch (name) {
         case 'bold':
           return shellFor(
@@ -291,6 +317,40 @@ export function createRendererShells(
             (children) => renderers.strike({ children }),
             true,
           );
+        case 'link': {
+          const target = linkTargetOf(attrs);
+          if (target === null) return null;
+          // A page link has no address of its own while it is edited.
+          const href = target.pageId === null ? (target.href ?? '#') : '#';
+          const shell = shellFor(
+            `link:${target.pageId === null ? 'href' : 'page'}:${target.target ?? ''}:${href}`,
+            (children) =>
+              renderers.link({ href, target: target.target, children }),
+            true,
+          );
+          // The click that opens the popover and the frame-link cancel both
+          // look for the nearest anchor: a renderer without one keeps the
+          // editor's own.
+          const anchor = shell?.contentDOM?.closest('a') ?? null;
+          return anchor === null ? null : shell;
+        }
+        case 'textColor':
+        case 'textSize': {
+          const choice = styleChoiceOf(
+            attrs,
+            name === 'textColor' ? isCustomColorValue : isCustomSizeValue,
+          );
+          if (choice === null) return null;
+          const { token, value } = choice;
+          return shellFor(
+            `${name}:${token === null ? 'value' : 'token'}:${token ?? value}`,
+            (children) =>
+              name === 'textColor'
+                ? renderers.textColor({ token, value, children })
+                : renderers.textSize({ token, value, children }),
+            true,
+          );
+        }
         default:
           return null;
       }

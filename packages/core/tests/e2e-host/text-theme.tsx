@@ -74,6 +74,18 @@ export default defineTextTheme({
           {label}
         </a>
       ),
+    // A class beside the default look, so a spec can tell the host drew the
+    // link while it is edited and not only after Done.
+    link: ({ href, target, children }) => (
+      <a
+        className="t-link"
+        href={href}
+        target={target ?? undefined}
+        rel={target === '_blank' ? 'noopener noreferrer' : undefined}
+      >
+        {children}
+      </a>
+    ),
     ctaRow: ({ children }) => <div className="t-cta-row">{children}</div>,
   },
 });

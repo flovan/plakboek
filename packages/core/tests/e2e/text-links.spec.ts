@@ -109,6 +109,10 @@ test('select two words, link them to a URL: stored with that URL, rendered as an
   // the popover is gone, the field kept its focus, the words are linked
   await expect(popover).toHaveCount(0);
   await expect(field.locator('a')).toHaveText('our story');
+  // drawn by the host's link renderer while it is edited, not only after Done
+  await expect(field.locator('a[href="https://example.com"]')).toHaveClass(
+    't-link',
+  );
   await expect(page.locator(`${HOST} [role="status"].sr-only`)).toHaveText(
     'Link added.',
   );
@@ -235,6 +239,11 @@ test('link to a page by searching its title: the id is stored, and the link foll
   await expect(page.locator(`${HOST} [role="status"].sr-only`)).toHaveText(
     'Link added.',
   );
+  // a page link points nowhere while it is edited, and keeps its page id
+  const live = field.locator('a[data-pk-page]');
+  await expect(live).toHaveClass('t-link');
+  await expect(live).toHaveAttribute('href', '#');
+  await expect(live).toHaveAttribute('data-pk-page', target.pageId);
 
   await page.keyboard.press('Escape');
   await expect

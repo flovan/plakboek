@@ -202,6 +202,18 @@ html > *:not(head):not(body) {
   margin-top: 21px;
 }
 
+/* Links: the site resets anchors, and the theme's own class brings the look
+   back, as a Tailwind base does. */
+.prose-flow a {
+  color: inherit;
+  text-decoration: inherit;
+}
+
+.prose-flow a.t-link {
+  color: #0a5fd0;
+  text-decoration: underline;
+}
+
 /* A prose field with no text still has a box to click and to draw a hint in. */
 .prose-flow {
   min-height: 40px;

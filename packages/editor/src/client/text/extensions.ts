@@ -22,6 +22,7 @@ import {
   wrappingInputRule,
   type Extensions,
 } from '@tiptap/core';
+import type { Mark } from '@tiptap/pm/model';
 import { Plugin } from '@tiptap/pm/state';
 import type { MarkViewConstructor, NodeViewConstructor } from '@tiptap/pm/view';
 import StarterKit, { type StarterKitOptions } from '@tiptap/starter-kit';
@@ -34,7 +35,7 @@ import { resetStyle } from './commands.js';
 import { createCtaNode } from './cta.js';
 import { insertItems, type InsertItem } from './insert-items.js';
 import { ThemedLink } from './link.js';
-import type { RendererShells } from './shells.js';
+import type { RendererShell, RendererShells } from './shells.js';
 import { slashExtension, type SlashState } from './slash.js';
 import { unlockExtensions } from './unlock.js';
 
@@ -192,7 +193,50 @@ const SHELL_NODES = [
   'cta',
 ] as const;
 
-const SHELL_MARKS = ['bold', 'italic', 'underline', 'strike'] as const;
+const SHELL_MARKS = [
+  'bold',
+  'italic',
+  'underline',
+  'strike',
+  'link',
+  'textColor',
+  'textSize',
+] as const;
+
+/**
+ * The attributes a mark's own `toDOM` writes, as strings. A shell of a mark
+ * that writes some carries exactly those, so the live element keeps what the
+ * editor wrote before (a link's address and page id, a colour's marker).
+ */
+function writtenAttributes(mark: Mark): Record<string, string> {
+  const spec = mark.type.spec.toDOM?.(mark, true);
+  const written: Record<string, string> = {};
+  if (!Array.isArray(spec)) return written;
+  const attrs: unknown = spec[1];
+  if (typeof attrs !== 'object' || attrs === null || Array.isArray(attrs)) {
+    return written;
+  }
+  for (const [key, value] of Object.entries(attrs)) {
+    if (typeof value === 'string') written[key] = value;
+  }
+  return written;
+}
+
+/**
+ * Puts the mark's written attributes on its shell: the anchor of a link, the
+ * root otherwise. A colour or size keeps its marker but not its inline style,
+ * so the look on screen is the host renderer's own.
+ */
+function carryAttributes(mark: Mark, shell: RendererShell): void {
+  const written = writtenAttributes(mark);
+  const name = mark.type.name;
+  const holder =
+    name === 'link' ? (shell.contentDOM?.closest('a') ?? shell.dom) : shell.dom;
+  for (const [key, value] of Object.entries(written)) {
+    if (key === 'style') continue;
+    holder.setAttribute(key, value);
+  }
+}
 
 /**
  * Hands the editor view the shells as plugin props. TipTap builds the view's
@@ -219,8 +263,11 @@ const RendererShellViews = Extension.create<TextExtensionHooks>({
     }
     const markViews: Record<string, MarkViewConstructor> = {};
     for (const name of SHELL_MARKS) {
-      markViews[name] = ((mark) =>
-        shells.markView(name, mark.attrs)) as MarkViewConstructor;
+      markViews[name] = ((mark) => {
+        const shell = shells.markView(name, mark.attrs);
+        if (shell !== null) carryAttributes(mark, shell);
+        return shell;
+      }) as MarkViewConstructor;
     }
     return [new Plugin({ props: { nodeViews, markViews } })];
   },
