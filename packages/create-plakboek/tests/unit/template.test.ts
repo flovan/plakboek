@@ -413,6 +413,10 @@ describe('starter template host code', () => {
     expect(text).toContain("key: 'text'");
     expect(text).toMatch(/body: \{[^}]*fieldType: 'rich_text'/s);
     expect(text).toContain("<div {...edit} {...edit.field('body')}");
+    expect(text).toMatch(
+      /<div \{\.\.\.edit\} \{\.\.\.edit\.field\('body'\)\} className="[^"]*\bmin-h-6\b/,
+    );
+    expect(text).toMatch(/body: \{[^}]*required: true/s);
     expect(text).toContain('<RichText value={props.body} />');
     expect(text).toContain("from '@plakboek/render'");
   });
