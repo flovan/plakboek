@@ -49,7 +49,7 @@ const EDITOR_ATTRIBUTES = ['contenteditable', 'draggable'] as const;
 
 /**
  * The element's children as markup with the editor's own residue taken out:
- * placeholder separators and widgets, `contenteditable` and `draggable`
+ * placeholder separators and widgets, selection highlights, `contenteditable` and `draggable`
  * attributes, and the editor's class names. Used as the interim content of a
  * field that was changed, until the server's render replaces the block.
  */
@@ -61,6 +61,12 @@ export function cleanChildren(element: Element): string {
     content.querySelectorAll('.ProseMirror-separator, .ProseMirror-widget'),
   )) {
     residue.remove();
+  }
+  // The blurred-selection highlight: its text stays, the wrapper goes.
+  for (const highlight of Array.from(
+    content.querySelectorAll('[data-pk-selection]'),
+  )) {
+    highlight.replaceWith(...Array.from(highlight.childNodes));
   }
   for (const node of Array.from(content.querySelectorAll('*'))) {
     for (const name of EDITOR_ATTRIBUTES) node.removeAttribute(name);

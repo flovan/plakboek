@@ -29,6 +29,7 @@ import {
   DEFAULT_TEXT_THEME,
   type TextTheme,
 } from '@plakboek/content/rich-text';
+import { BlurredSelection } from './blurred-selection.js';
 import { resetStyle } from './commands.js';
 import { createCtaNode } from './cta.js';
 import { insertItems, type InsertItem } from './insert-items.js';
@@ -351,6 +352,7 @@ export function buildTextExtensions(
       ? [createCtaNode(theme, { onOpen: hooks.onButton })]
       : []),
     TextFieldKeymap.configure(hooks),
+    BlurredSelection,
     ...slashExtensions(theme, hooks),
     ...(hooks.shells === undefined
       ? []

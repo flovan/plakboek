@@ -32,12 +32,13 @@ test.beforeEach(async ({ page }) => {
 async function openProse(
   page: Parameters<typeof openEditor>[0],
   text = 'Make this bold',
+  body: object = paragraphDoc(text),
 ): Promise<{ frame: Frame; field: Locator; pageId: string }> {
   const created = await createEditablePage({
     blocks: [
       section(paragraph('Intro '.repeat(60)), {
         type: 'prose',
-        props: { body: paragraphDoc(text) },
+        props: { body },
       }),
     ],
   });
@@ -304,4 +305,68 @@ test('the whole flow is done with the keyboard: Alt+F10 into the toolbar, arrows
   await page.keyboard.press('Escape');
   await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
   await expect.poll(() => storedBody(pageId)).toContain('"Z"');
+});
+
+test('Alt+F10, Bold with Enter: the field highlights the range the command acted on and nothing else', async ({
+  page,
+}) => {
+  const { frame, field } = await openProse(page, 'Hello brave new world', {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Hello brave ' },
+          { type: 'text', text: 'new', marks: [{ type: 'bold' }] },
+          { type: 'text', text: ' world' },
+        ],
+      },
+    ],
+  });
+  await field.click();
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+  await expect(field).toBeFocused();
+  const selected = () =>
+    frame.evaluate(() => document.getSelection()?.toString() ?? '');
+  // select exactly 'brave new', across the bold run; the session is still
+  // settling right after the click, so a short run of keys may be retried
+  await expect(async () => {
+    await page.keyboard.press('Home');
+    for (let step = 0; step < 6; step += 1) {
+      await page.keyboard.press('ArrowRight');
+    }
+    for (let step = 0; step < 9; step += 1) {
+      await page.keyboard.press('Shift+ArrowRight');
+    }
+    expect(await selected()).toBe('brave new');
+  }).toPass();
+  // the editor reads the browser's selection a frame later
+  await frame.evaluate(
+    () =>
+      new Promise<void>((done) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            done();
+          });
+        });
+      }),
+  );
+
+  const toolbar = chrome(page).locator(TOOLBAR);
+  await page.keyboard.press('Alt+F10');
+  await page.keyboard.press('ArrowRight');
+  const bold = toolbar.getByRole('button', { name: 'Bold' });
+  await expect(bold).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(bold).toHaveAttribute('aria-pressed', 'true');
+
+  // no stale native selection; the editor draws the range it acted on
+  expect(await selected()).toBe('');
+  const drawn = await field.locator('[data-pk-selection]').allTextContents();
+  expect(drawn.join('')).toBe('brave new');
+
+  await page.keyboard.press('Escape');
+  await expect(field).toBeFocused();
+  await expect.poll(selected).toBe('brave new');
+  await expect(field.locator('[data-pk-selection]')).toHaveCount(0);
 });
