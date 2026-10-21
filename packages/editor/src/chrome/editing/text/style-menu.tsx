@@ -9,6 +9,7 @@ import { CheckIcon, ChevronDownIcon } from '../../icons.js';
 import { formatString, STRINGS, type StringKey } from '../../strings.js';
 import { Tooltip } from '../../tooltip.js';
 import type { Rove } from './crumbs.js';
+import { useOutsidePress } from './outside-press.js';
 import { ariaShortcut, type Platform } from './shortcuts.js';
 import type { StyleId } from './toolbar-state.js';
 
@@ -68,19 +69,7 @@ export function StyleMenu(props: StyleMenuProps): ReactElement {
   }, [open]);
 
   // A press anywhere else closes the menu.
-  useEffect(() => {
-    if (!open) return undefined;
-    const element = wrapper.current;
-    if (element === null) return undefined;
-    const onPress = (event: Event): void => {
-      if (!event.composedPath().includes(element)) setOpen(false);
-    };
-    const owner = element.ownerDocument;
-    owner.addEventListener('pointerdown', onPress, true);
-    return () => {
-      owner.removeEventListener('pointerdown', onPress, true);
-    };
-  }, [open]);
+  useOutsidePress(wrapper, () => setOpen(false), { enabled: open });
 
   const openWithKeyboard = (): void => {
     withKeyboard.current = true;

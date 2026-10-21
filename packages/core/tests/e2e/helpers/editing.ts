@@ -71,6 +71,120 @@ export async function exposeFrameChrome(page: Page): Promise<void> {
   });
 }
 
+/** Where `holdFrameChrome` keeps the chrome's root on the frame's window. */
+const HELD_ROOT = 'plakboek.e2e.frameChromeRoot';
+
+/**
+ * Keeps the frame chrome's shadow root closed, as in the product, yet lets a
+ * spec find where its controls are. An init script like `exposeFrameChrome`
+ * that leaves the mode as asked: in documents whose address carries
+ * `_edit=frame` it only stores the root returned for a `plakboek-chrome`
+ * element on the frame's window. A spec reaches the chrome with
+ * `clickFrameChrome`, whose presses take the production path through the
+ * closed root; only the coordinates come from the stored reference. Open the
+ * editor with `exposeChrome: false` alongside it.
+ */
+export async function holdFrameChrome(page: Page): Promise<void> {
+  await page.addInitScript((key) => {
+    const marker = Symbol.for('plakboek.e2e.holdFrameChrome');
+    const proto = Element.prototype as unknown as Record<symbol, boolean>;
+    if (proto[marker] === true) return;
+    proto[marker] = true;
+    const original = Reflect.get(Element.prototype, 'attachShadow') as (
+      this: Element,
+      init: ShadowRootInit,
+    ) => ShadowRoot;
+    Element.prototype.attachShadow = function (init: ShadowRootInit) {
+      const root = original.call(this, init);
+      if (
+        location.search.includes('_edit=frame') &&
+        this.localName === 'plakboek-chrome'
+      ) {
+        Reflect.set(window, Symbol.for(key), root);
+      }
+      return root;
+    };
+  }, HELD_ROOT);
+}
+
+/** The first element under the held chrome root that matches, as a handle (null when none). */
+async function findFrameChrome(
+  page: Page,
+  selector: string,
+  text: string | undefined,
+) {
+  const frame = await framedSite(page);
+  const handle = await frame.evaluateHandle(
+    ({ key, selector: query, text: label }) => {
+      const root = Reflect.get(window, Symbol.for(key)) as
+        | ShadowRoot
+        | undefined;
+      if (root === undefined) return null;
+      return (
+        [...root.querySelectorAll(query)].find(
+          (element) =>
+            label === undefined || (element.textContent ?? '').trim() === label,
+        ) ?? null
+      );
+    },
+    { key: HELD_ROOT, selector, text },
+  );
+  return handle.asElement();
+}
+
+/** How many elements under the held chrome root match. */
+export async function frameChromeCount(
+  page: Page,
+  selector: string,
+): Promise<number> {
+  const frame = await framedSite(page);
+  return await frame.evaluate(
+    ({ key, selector: query }) => {
+      const root = Reflect.get(window, Symbol.for(key)) as
+        | ShadowRoot
+        | undefined;
+      return root === undefined ? 0 : root.querySelectorAll(query).length;
+    },
+    { key: HELD_ROOT, selector },
+  );
+}
+
+/** Whether the chrome host's shadow root is closed, as it is in the product. */
+export async function frameChromeIsClosed(page: Page): Promise<boolean> {
+  const frame = await framedSite(page);
+  return await frame.evaluate(
+    ({ key, tag }) => {
+      const host = document.querySelector(tag);
+      const held = Reflect.get(window, Symbol.for(key));
+      return host !== null && host.shadowRoot === null && held !== undefined;
+    },
+    { key: HELD_ROOT, tag: FRAME_CHROME },
+  );
+}
+
+/**
+ * Presses the centre of a chrome control with the real mouse, through the
+ * closed root: the control is found under the held root, only to read where it
+ * is. `text` picks the control whose trimmed text is exactly that.
+ */
+export async function clickFrameChrome(
+  page: Page,
+  selector: string,
+  text?: string,
+): Promise<void> {
+  await expect
+    .poll(async () => (await findFrameChrome(page, selector, text)) !== null, {
+      message: `${selector} ${text ?? ''} is not in the frame chrome`,
+    })
+    .toBe(true);
+  const element = await findFrameChrome(page, selector, text);
+  const box = element === null ? null : await element.boundingBox();
+  if (box === null) {
+    throw new Error(`${selector} ${text ?? ''} has no box in the frame chrome`);
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
+
 /**
  * Opens `<path>?_edit=1` and waits until the editing session runs and the
  * frame's clicks are claimed (the frame leaves the tab order only then). Locks
