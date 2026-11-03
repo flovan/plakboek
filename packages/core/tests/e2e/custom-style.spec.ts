@@ -321,11 +321,25 @@ test('Reset style strips colour, size and alignment in one undoable step and lea
   await expect(field.locator('strong')).toHaveText('Bold start');
 
   await toolbar.getByRole('button', { name: 'Done editing' }).click();
-  await expect.poll(() => storedBody(pageId)).toContain('"bold"');
-  const stored = await storedBody(pageId);
-  for (const word of ['textColor', 'textSize', 'textAlign']) {
-    expect(stored).not.toContain(word);
-  }
+  // the reset write lands after Done; a null textAlign is no alignment
+  await expect
+    .poll(async () => {
+      const stored = await storedBody(pageId);
+      const blocks = (
+        JSON.parse(stored) as {
+          content: { attrs?: { textAlign?: string | null } }[];
+        }
+      ).content;
+      return {
+        bold: stored.includes('"bold"'),
+        color: stored.includes('textColor'),
+        size: stored.includes('textSize'),
+        aligned: blocks.some(
+          (block) => (block.attrs?.textAlign ?? null) !== null,
+        ),
+      };
+    })
+    .toEqual({ bold: true, color: false, size: false, aligned: false });
 });
 
 test('with custom values off the swatches and sizes are there but no custom input is rendered', async ({
