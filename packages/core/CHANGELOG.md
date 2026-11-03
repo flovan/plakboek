@@ -1,5 +1,27 @@
 # @plakboek/core
 
+## 0.8.0
+
+### Minor Changes
+
+- [#24](https://github.com/flovan/plakboek/pull/24) [`82faa7c`](https://github.com/flovan/plakboek/commit/82faa7c2b929ecdfa2b66a77e2a6adf99c348c72) Thanks [@flovan](https://github.com/flovan)! - A host now declares one global text theme in `plakboek.config.ts` as `defineConfig({ textTheme: defineTextTheme({ ... }) })`. `defineConfig` registers it before blocks are defined, returns it as `config.textTheme`, refuses anything that is not a `defineTextTheme` result (`INVALID_TEXT_THEME`) and refuses a `rich_text` property whose `narrow` option would widen the theme (`TEXT_THEME_NARROWING_WIDENS`), including inside repeater sub-fields. It also registers the CMS `link` field type, which a host field type with the same key replaces. The `plakboek()` Vite plugin gains a `textTheme` option (default `/text-theme.{ts,tsx}`) that delivers the same module to the editor chunk through `virtual:plakboek/text-theme`; the editor boot accepts it as `BootEditorOptions.textTheme`.
+
+### Patch Changes
+
+- [#24](https://github.com/flovan/plakboek/pull/24) [`d39a29a`](https://github.com/flovan/plakboek/commit/d39a29ab81dbfc8cc66880cf8d405a95c4c2ebe0) Thanks [@flovan](https://github.com/flovan)! - The edit frame, the live preview and saved fragments render rich text through the host's text theme, with page links resolved whether or not the target page is published, so the markup the editor mounts on is the visitor's markup. The edit entrypoint and the editor API take the installation's `textTheme`, and the block catalogue carries each rich text property's effective theme (the installation's theme narrowed by the property) so the client builds its schema from exactly what the server accepts. `@plakboek/content` is now a runtime dependency of the editor.
+
+- [#24](https://github.com/flovan/plakboek/pull/24) [`d0bc2c4`](https://github.com/flovan/plakboek/commit/d0bc2c4432eab7cd3a2a7c7ff514e542ca253d35) Thanks [@flovan](https://github.com/flovan)! - Visitor pages render rich text through the host theme and resolve page links to live pages. `createVisitorHandler` takes the installation's `textTheme`, wraps every block's render in the text environment, and resolves every page id held by a rich text link, a call to action, a `link` field or a repeater sub-field in one batch before the synchronous render (none when a page holds no page links). A link to a page that is not live renders as plain text. `renderPageSnapshot`, `renderPageTree` and `renderBlockFragments` accept an optional `text` environment, and the server entry exports `collectPageLinkIds`.
+
+- Updated dependencies [[`5df8b25`](https://github.com/flovan/plakboek/commit/5df8b252af691ab705ff734964ea484b7275eac7), [`82faa7c`](https://github.com/flovan/plakboek/commit/82faa7c2b929ecdfa2b66a77e2a6adf99c348c72), [`ca10081`](https://github.com/flovan/plakboek/commit/ca1008154b77e5fdd902072ee03ebc96b7016593), [`0c80348`](https://github.com/flovan/plakboek/commit/0c80348184777737909111ac9e1d44f7eb136c17), [`d76b7f3`](https://github.com/flovan/plakboek/commit/d76b7f3c4863084d6ec3656eb5a30c788d670d94), [`1eb25da`](https://github.com/flovan/plakboek/commit/1eb25da597bb70a18f07f0b36d8c446fcbb91cc8), [`76944d9`](https://github.com/flovan/plakboek/commit/76944d97366680f36644a49cc0b701becff140df), [`043e68e`](https://github.com/flovan/plakboek/commit/043e68e1d3689c1bdde0c615cdb540abfb4fcddf), [`918ef74`](https://github.com/flovan/plakboek/commit/918ef74783c03ed823721d8b76be4760af691174), [`7a993be`](https://github.com/flovan/plakboek/commit/7a993be0e64ffc4e6cdb0f7460647800e72cd293), [`1f8409c`](https://github.com/flovan/plakboek/commit/1f8409c42a6ab6957103c9fe4ea4f2a199afce05), [`a57c007`](https://github.com/flovan/plakboek/commit/a57c007d31740e9d213951416b6f9a6169938490), [`e2491f4`](https://github.com/flovan/plakboek/commit/e2491f4f51f0da80a59ffa1cfc92d324ab8ab4ee), [`3c44c50`](https://github.com/flovan/plakboek/commit/3c44c50fb32e4a087a36d9755e7c1026309ba19c), [`eec59a9`](https://github.com/flovan/plakboek/commit/eec59a9c7861dffd5a0ba46c1423b3cd61c6479e), [`6970d2e`](https://github.com/flovan/plakboek/commit/6970d2e1b0e838c1a3c2a63b7e25d8a206dd0050), [`06575fd`](https://github.com/flovan/plakboek/commit/06575fdba0217d8bb84d10448ccca05511d98438), [`d39a29a`](https://github.com/flovan/plakboek/commit/d39a29ab81dbfc8cc66880cf8d405a95c4c2ebe0), [`4884ee4`](https://github.com/flovan/plakboek/commit/4884ee4b3f234770a9f32924204b4106f7552849), [`76c9854`](https://github.com/flovan/plakboek/commit/76c98549a1f9f75148eb523c61e4f348916f3221), [`2cbbab5`](https://github.com/flovan/plakboek/commit/2cbbab503ffebbfb21ea91d0a4a4e284915095b1), [`f889900`](https://github.com/flovan/plakboek/commit/f889900b62fd43cd365b12b4917b4833cf891eae), [`39521aa`](https://github.com/flovan/plakboek/commit/39521aa60c03846e1acd95fdd6961ca866d55d54), [`f70152c`](https://github.com/flovan/plakboek/commit/f70152c63d5c5439c777698f89e83eaee656abd2), [`3e8b2b4`](https://github.com/flovan/plakboek/commit/3e8b2b464e6183e902c65cc6d699f72a60e1b91d), [`1667816`](https://github.com/flovan/plakboek/commit/166781675c87ba3fe577a372ef2f7a8dae18e166), [`d0bc2c4`](https://github.com/flovan/plakboek/commit/d0bc2c4432eab7cd3a2a7c7ff514e542ca253d35)]:
+  - @plakboek/content@0.8.0
+  - @plakboek/pages@0.8.0
+  - @plakboek/editor@0.8.0
+  - @plakboek/render@0.8.0
+  - @plakboek/auth@0.8.0
+  - @plakboek/cache@0.8.0
+  - @plakboek/db@0.8.0
+  - @plakboek/permissions@0.8.0
+
 ## 0.7.0
 
 ### Minor Changes
