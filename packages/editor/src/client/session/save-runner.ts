@@ -418,7 +418,15 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
       const message = `${formatString('announce.added', { label: text(acted) })}${
         needsInput ? STRINGS['announce.needsInput'] : ''
       }`;
-      if (options.onAdded?.(acted, message) === true) return;
+      // The write is saved either way: a shell that cannot open its surface
+      // falls back to the announcement and the panel request.
+      let taken = false;
+      try {
+        taken = options.onAdded?.(acted, message) === true;
+      } catch {
+        taken = false;
+      }
+      if (taken) return;
       store.announce(message);
       if (needsInput) store.requestProperties(acted);
     } else if (info?.announceMove === true) {

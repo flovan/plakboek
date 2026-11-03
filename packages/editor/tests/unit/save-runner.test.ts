@@ -472,6 +472,17 @@ describe('the save runner', () => {
       expect(state.announcement).toBe('Added heading. Needs input.');
       expect(state.propertiesRequest?.id).toBe('h9');
     });
+
+    it('keeps the queue working and falls back to the announcement when the shell throws taking over a new block', async () => {
+      const ctx = addHeading(() => {
+        throw new Error('no surface');
+      });
+      expect(await ctx.runner.flush()).toBe(true);
+      const state = ctx.store.getState();
+      expect(state.queue.lastFailure).toBeNull();
+      expect(state.announcement).toBe('Added heading. Needs input.');
+      expect(state.propertiesRequest?.id).toBe('h9');
+    });
   });
 
   describe('when a retry meets a stale version after the first attempt got no answer', () => {
