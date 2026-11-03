@@ -82,10 +82,8 @@ test('type /sub and press Enter: the line becomes a Subheading, nothing of the s
   await expect(menu).toBeVisible();
   // the field keeps the caret: the menu takes no focus
   await expect(menu.getByRole('option')).toHaveText([/^Subheading/]);
-  await expect(menu.getByRole('listbox')).toHaveAttribute(
-    'aria-activedescendant',
-    /.+/,
-  );
+  // the field names the active menu item via aria-activedescendant while the menu is open
+  await expect(field).toHaveAttribute('aria-activedescendant', /.+/);
   expect((await menu.boundingBox())?.width).toBe(320);
 
   await page.keyboard.press('Enter');
