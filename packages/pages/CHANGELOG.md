@@ -1,5 +1,22 @@
 # @plakboek/pages
 
+## 0.8.0
+
+### Minor Changes
+
+- [#24](https://github.com/flovan/plakboek/pull/24) [`5df8b25`](https://github.com/flovan/plakboek/commit/5df8b252af691ab705ff734964ea484b7275eac7) Thanks [@flovan](https://github.com/flovan)! - Rich text is now validated against the registered text theme. `@plakboek/content` adds `registerTextTheme`, `getTextTheme` and `effectiveTextTheme`: every `rich_text` write is held to the registered theme narrowed by the property's `narrow` option, so a heading level, node, mark, palette token or href outside it is refused as invalid. It also ships a `link` field type (`LINK_FIELD_TYPE`, widget `link-picker`) whose value is an address or a page id plus an optional `_blank` target. `@plakboek/pages` keeps data, flags it and never crashes: a rich text value an edit leaves unchanged no longer blocks changes to other properties of its block when the theme was narrowed after it was written, while publishing still refuses it as invalid props.
+
+- [#24](https://github.com/flovan/plakboek/pull/24) [`3e8b2b4`](https://github.com/flovan/plakboek/commit/3e8b2b464e6183e902c65cc6d699f72a60e1b91d) Thanks [@flovan](https://github.com/flovan)! - Links can now point at pages. `@plakboek/pages` adds `searchPages`, which finds the non-trashed pages of one locale by title or path (literal match, at most 20, ordered by title), and `resolvePageLinkPaths`, which turns stored page ids into public paths in at most two statements, optionally leaving out pages that are not live. `@plakboek/editor` adds `GET /cms/api/pages/search?locale=&q=` behind the same gate as every editor route, and an `ApiClient.searchPages` method for the page picker.
+
+### Patch Changes
+
+- Updated dependencies [[`5df8b25`](https://github.com/flovan/plakboek/commit/5df8b252af691ab705ff734964ea484b7275eac7)]:
+  - @plakboek/content@0.8.0
+  - @plakboek/auth@0.8.0
+  - @plakboek/cache@0.8.0
+  - @plakboek/db@0.8.0
+  - @plakboek/permissions@0.8.0
+
 ## 0.7.0
 
 ### Minor Changes

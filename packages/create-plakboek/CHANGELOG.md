@@ -1,5 +1,17 @@
 # create-plakboek
 
+## 0.8.0
+
+### Minor Changes
+
+- [#24](https://github.com/flovan/plakboek/pull/24) [`b6a1874`](https://github.com/flovan/plakboek/commit/b6a18744da7d5146896c82175fdc04388f2436f0) Thanks [@flovan](https://github.com/flovan)! - The starter now ships a text theme (`text-theme.tsx`) and two new blocks: a Text block with in-place rich text and a Button block that renders through the theme's call-to-action renderer. The Heading block offers Title, Heading and Subheading (`h2` to `h4`) and no `h1`, the site name in the header is the page's single `h1`, and the token block in `app/app.css` is `@theme static` so stored colour and size tokens always exist in the built stylesheet. The README explains the theme, narrowing, renderer overrides and the inline styles that custom values and alignment need under a strict `style-src`.
+
+### Patch Changes
+
+- [#24](https://github.com/flovan/plakboek/pull/24) [`fbd1ebb`](https://github.com/flovan/plakboek/commit/fbd1ebbb1d1dd3e8c9cc8a11fdc6d08e2f7f11c9) Thanks [@flovan](https://github.com/flovan)! - The starter's production image now includes `text-theme.tsx`. `plakboek.config.ts` imports it, so `plakboek bootstrap` and the server failed in the container with "Cannot find module '/app/text-theme.tsx'".
+
+- [#24](https://github.com/flovan/plakboek/pull/24) [`1f8409c`](https://github.com/flovan/plakboek/commit/1f8409c42a6ab6957103c9fe4ea4f2a199afce05) Thanks [@flovan](https://github.com/flovan)! - The starter Text block keeps a one-line box when it is empty and its text is required, so an empty Text can be clicked into and is flagged as needing input.
+
 ## 0.7.0
 
 ### Minor Changes

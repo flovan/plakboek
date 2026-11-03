@@ -1,5 +1,0 @@
----
-'@plakboek/editor': minor
----
-
-An editor can put a button inside a text. Insert and the '/' menu list Button when the field's theme allows it: a new button takes its own line between paragraphs, with the default label and the theme's first look, and its popover opens on the label so it can be typed over. The popover edits the label (live, at most 200 characters, a long one wraps instead of being cut), the style (a segmented control for up to three looks, a select past that) and the link, which is the same section as the link popover, and removes the button (Control+Z brings it back). In the field a button is drawn by the host's own button renderer, adjacent buttons sit side by side like the visitor's row, arrow keys cross it, Enter after it starts a paragraph below and Backspace removes it. While a button is selected every control but Insert and Done reads as not available. A button with no label or no link shows the same attention marker as a block that needs input, and visitors never see an unfinished button.

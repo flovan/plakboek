@@ -1,5 +1,20 @@
 # @plakboek/render
 
+## 0.8.0
+
+### Minor Changes
+
+- [#24](https://github.com/flovan/plakboek/pull/24) [`1667816`](https://github.com/flovan/plakboek/commit/166781675c87ba3fe577a372ef2f7a8dae18e166) Thanks [@flovan](https://github.com/flovan)! - Rich text now renders through one host-overridable renderer map. `defineTextTheme` resolves the text theme data and merges `renderers` over plain semantic defaults; `<RichText value />` renders a stored document with no wrapper element, so the host's own field element stays the editor's root; `CtaButton` renders the standalone Button block exactly like a call to action inside text. Token colours and sizes render as `var(--color-<token>)` and `var(--text-<token>)`, links render only when their target passes the shared href policy or their page resolves, and adjacent calls to action share one row. A new `onRichTextIssue` hook reports an unknown node or mark once per render by type name. `@plakboek/content` is now a runtime dependency; the root entry imports only its client-safe `./rich-text` subpath.
+
+- [#24](https://github.com/flovan/plakboek/pull/24) [`d0bc2c4`](https://github.com/flovan/plakboek/commit/d0bc2c4432eab7cd3a2a7c7ff514e542ca253d35) Thanks [@flovan](https://github.com/flovan)! - Visitor pages render rich text through the host theme and resolve page links to live pages. `createVisitorHandler` takes the installation's `textTheme`, wraps every block's render in the text environment, and resolves every page id held by a rich text link, a call to action, a `link` field or a repeater sub-field in one batch before the synchronous render (none when a page holds no page links). A link to a page that is not live renders as plain text. `renderPageSnapshot`, `renderPageTree` and `renderBlockFragments` accept an optional `text` environment, and the server entry exports `collectPageLinkIds`.
+
+### Patch Changes
+
+- Updated dependencies [[`5df8b25`](https://github.com/flovan/plakboek/commit/5df8b252af691ab705ff734964ea484b7275eac7), [`3e8b2b4`](https://github.com/flovan/plakboek/commit/3e8b2b464e6183e902c65cc6d699f72a60e1b91d)]:
+  - @plakboek/content@0.8.0
+  - @plakboek/pages@0.8.0
+  - @plakboek/cache@0.8.0
+
 ## 0.7.0
 
 ### Minor Changes

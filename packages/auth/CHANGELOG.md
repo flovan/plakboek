@@ -1,5 +1,13 @@
 # @plakboek/auth
 
+## 0.8.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @plakboek/db@0.8.0
+  - @plakboek/permissions@0.8.0
+
 ## 0.7.0
 
 ### Patch Changes
