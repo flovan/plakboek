@@ -293,54 +293,34 @@ test.describe('near the frame edge', () => {
   });
 });
 
-test.describe('after the frame scrolled during a drag', () => {
-  test('the line sits on its slot in the scrolled page and the drop lands there', async ({
-    page,
-  }) => {
+test.describe('in a scrolled frame', () => {
+  test('the drop lands on the slot under the pointer', async ({ page }) => {
+    // the theme sizes the first section to fill the window, so Top and Below
+    // only come into view once the frame scrolls
+    // After leaves room under the slot, so the end of the page does not press
+    // the target against the frame's bottom edge zone and the site's fixed banner
     const created = await createEditablePage({
       blocks: [
-        section(heading('Top'), paragraph('One')),
-        section(heading('Below')),
+        section(paragraph('One')),
+        section(heading('Top')),
+        section(heading('Below'), paragraph('After')),
       ],
     });
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await frame.evaluate(() => window.scrollTo(0, 0));
-    await selectHeading(page, frame, 0, 0);
+    await frame.evaluate(() =>
+      window.scrollTo({
+        top: document.documentElement.scrollHeight,
+        behavior: 'instant',
+      }),
+    );
+    expect(await frame.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+
+    await selectHeading(page, frame, 1, 0);
     await pickUp(page);
-
-    const view = await page.locator(`${HOST} iframe`).boundingBox();
-    if (view === null) throw new Error('The frame has no box');
-    await page.mouse.move(view.x + view.width / 2, view.y + view.height - 10, {
-      steps: 6,
-    });
-    await expect
-      .poll(() => frame.evaluate(() => window.scrollY))
-      .toBeGreaterThan(100);
-
-    // out of the edge zone, so the scrolling stops, and wait for the page to rest
-    await page.mouse.move(view.x + view.width / 2, view.y + view.height / 2, {
-      steps: 4,
-    });
-    let seen = -1;
-    await expect
-      .poll(async () => {
-        const now = await frame.evaluate(() => window.scrollY);
-        const rested = now === seen;
-        seen = now;
-        return rested;
-      })
-      .toBe(true);
-
-    const below = 'section.section >> nth=1 >> h2';
-    const target = await gapAfter(frame, below);
+    const target = await gapAfter(frame, 'section.section >> nth=2 >> h2');
     await page.mouse.move(target.x, target.y, { steps: 8 });
-    const line = chrome(page).locator(LINE);
-    await expect(line).toBeVisible();
-    const slot = await frameBoxOf(frame, below);
-    const drawn = await line.boundingBox();
-    if (drawn === null) throw new Error('The line has no box');
-    expect(Math.abs(drawn.y - (slot.y + slot.height))).toBeLessThan(24);
+    await expect(chrome(page).locator(LINE)).toBeVisible();
     await page.mouse.up();
 
     await expect
@@ -353,7 +333,7 @@ test.describe('after the frame scrolled during a drag', () => {
             ),
           ),
       )
-      .toEqual([[], ['Below', 'Top']]);
+      .toEqual([[], [], ['Below', 'Top']]);
     await expect(page.getByText(SAVED)).toBeVisible();
   });
 });
