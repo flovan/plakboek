@@ -531,12 +531,18 @@ test('a link to a page that no longer exists opens on Page and says so', async (
   await field.click();
   await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
   await expect(field).toBeFocused();
-  await page.keyboard.press('Home');
-  for (let i = 0; i < 8; i += 1) await page.keyboard.press('ArrowRight');
-  // the caret is in the link once the toolbar says so
-  await expect(
-    chrome(page).locator(TOOLBAR).getByRole('button', { name: 'Link' }),
-  ).toHaveAttribute('aria-pressed', 'true');
+  // the caret is in the link once the toolbar says so; under load the field
+  // can settle after the keys land, so the caret is placed again until it holds
+  const linkButton = chrome(page)
+    .locator(TOOLBAR)
+    .getByRole('button', { name: 'Link' });
+  await expect(async () => {
+    await page.keyboard.press('Home');
+    for (let i = 0; i < 8; i += 1) await page.keyboard.press('ArrowRight');
+    await expect(linkButton).toHaveAttribute('aria-pressed', 'true', {
+      timeout: 1000,
+    });
+  }).toPass();
   await page.keyboard.press('ControlOrMeta+k');
 
   const popover = chrome(page).locator(POPOVER);
