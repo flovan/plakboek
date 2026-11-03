@@ -24,7 +24,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --prod --store-dir /pnpm/store
 
 # What runs: the server, the build, and the files `plakboek bootstrap` loads
-# (the config imports the blocks and the seed).
+# (the config imports the blocks, the seed and the text theme).
 FROM node:22-slim AS runtime
 WORKDIR /app
 ARG GIT_SHA=unknown
@@ -32,7 +32,7 @@ ENV NODE_ENV=production \
     PLAKBOEK_BUILD_ID=$GIT_SHA
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
-COPY --from=build /app/package.json /app/server.ts /app/plakboek.config.ts /app/seed.ts /app/tsconfig.json ./
+COPY --from=build /app/package.json /app/server.ts /app/plakboek.config.ts /app/seed.ts /app/text-theme.tsx /app/tsconfig.json ./
 COPY --from=build /app/blocks ./blocks
 USER node
 EXPOSE 3000
