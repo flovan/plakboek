@@ -298,6 +298,7 @@ describe('findZeroSizeFieldAt', () => {
       height: number;
     };
     getClientRects(): { length: number };
+    contains(node: unknown): boolean;
     display: string;
   };
 
@@ -315,11 +316,16 @@ describe('findZeroSizeFieldAt', () => {
         height: box.height ?? 0,
       }),
       getClientRects: () => ({ length: box.rects ?? 1 }),
+      contains: (node: unknown) => node === base,
     });
   }
 
-  function documentOf(fields: readonly Boxed[]): Document {
+  function documentOf(
+    fields: readonly Boxed[],
+    under: unknown = null,
+  ): Document {
     return {
+      elementFromPoint: () => under,
       querySelectorAll: (selector: string) =>
         selector === '[data-pk-field]' ? fields : [],
       defaultView: {
@@ -354,6 +360,15 @@ describe('findZeroSizeFieldAt', () => {
       {},
     );
     expect(at(documentOf([root]))).toMatchObject({ element: root });
+  });
+
+  it('answers the field where the element under the point is the field or holds it, and null where a sized element is painted over it', () => {
+    const field = boxed(fieldIn('DIV', 'body').field, {});
+    const holder = { contains: (node: unknown) => node === field };
+    const sibling = { contains: (node: unknown) => node === sibling };
+    expect(at(documentOf([field], field))?.element).toBe(field);
+    expect(at(documentOf([field], holder))?.element).toBe(field);
+    expect(at(documentOf([field], sibling))).toBeNull();
   });
 
   it('answers null outside every ghost box', () => {

@@ -184,16 +184,22 @@ function holdsPoint(rect: DOMRect, x: number, y: number): boolean {
  * rich or plain text field qualifies (a button field is edited in its
  * popover), only the block's own fields count (the root included, never a
  * nested block's), and a field with no box at all (`display: contents` or no
- * client rects) is never hit.
+ * client rects) is never hit. A sized element painted over the spot keeps the
+ * click, as it does for a ghost block: the field is only hit where the
+ * element under the point is the field, one inside it or one that holds it.
  */
 export function findZeroSizeFieldAt(
-  frameDocument: Pick<Document, 'querySelectorAll' | 'defaultView'>,
+  frameDocument: Pick<
+    Document,
+    'querySelectorAll' | 'defaultView' | 'elementFromPoint'
+  >,
   blockId: string,
   x: number,
   y: number,
   model: TreeModel,
   catalogue: readonly CatalogueEntry[],
 ): FieldTarget | null {
+  const under = frameDocument.elementFromPoint(x, y);
   for (const candidate of Array.from(
     frameDocument.querySelectorAll(FIELD_SELECTOR),
   )) {
@@ -215,6 +221,13 @@ export function findZeroSizeFieldAt(
       continue;
     }
     if (!holdsPoint(rect, x, y)) continue;
+    if (
+      under !== null &&
+      !under.contains(geometry) &&
+      !geometry.contains(under)
+    ) {
+      continue;
+    }
     const target = findEditableField(candidate, model, catalogue);
     if (target !== null && target.kind !== 'button') return target;
   }
