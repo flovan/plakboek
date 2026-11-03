@@ -61,6 +61,28 @@ const VARIABLES: Readonly<Record<string, readonly string[]>> = {
   'notice.lapsed': ['name'],
   'notice.takenOver.heading': ['name'],
   'takeover.body': ['name'],
+  'text.announce.editingRich': ['label'],
+  'text.announce.editingPlain': ['label'],
+  'text.announce.editingButton': ['label'],
+  'text.announce.stopped': ['label'],
+  'text.announce.on': ['name'],
+  'text.announce.off': ['name'],
+  'text.announce.style': ['style'],
+  'text.announce.inserted': ['item'],
+  'text.announce.colorSet': ['label'],
+  'text.announce.sizeSet': ['label'],
+  'text.announce.alignSet': ['align'],
+  'text.toolbar.label': ['label'],
+  'text.fieldBar.label': ['label'],
+  'text.withShortcut': ['name', 'shortcut'],
+  'text.style.label': ['style'],
+  'text.disabled.buttonLabel': ['name'],
+  'text.counter': ['count', 'max'],
+  'text.size.value': ['n'],
+  'text.size.hint': ['min', 'max'],
+  'text.size.error': ['min', 'max'],
+  'text.search.none': ['query'],
+  'text.panel.editOnPage.label': ['label'],
 };
 
 /**
@@ -235,6 +257,74 @@ describe('STRINGS', () => {
     expect(formatString('toolbar.moveLeft.label', { label: 'Text' })).toBe(
       'Move Text left',
     );
+  });
+
+  it('carries the Phase 9 text editing copy', () => {
+    expect(STRINGS['text.field.placeholder.rich']).toBe(
+      'Start typing, or press / for more',
+    );
+    expect(STRINGS['text.field.placeholder.plain']).toBe('Type here');
+    expect(formatString('text.announce.editingRich', { label: 'Body' })).toBe(
+      'Editing Body. Press Escape to stop editing, or Alt+F10 for formatting.',
+    );
+    expect(formatString('text.announce.editingPlain', { label: 'Body' })).toBe(
+      'Editing Body. Press Escape to stop editing.',
+    );
+    expect(formatString('text.announce.stopped', { label: 'Body' })).toBe(
+      'Stopped editing. Body selected.',
+    );
+    expect(formatString('text.announce.on', { name: 'Bold' })).toBe('Bold on.');
+    expect(
+      formatString('text.withShortcut', { name: 'Bold', shortcut: 'Ctrl+B' }),
+    ).toBe('Bold (Ctrl+B)');
+    expect(formatString('text.counter', { count: '12', max: '80' })).toBe(
+      '12 of 80 characters',
+    );
+    expect(STRINGS['text.style.title']).toBe('Title');
+    expect(STRINGS['text.style.heading']).toBe('Heading');
+    expect(STRINGS['text.style.subheading']).toBe('Subheading');
+    expect(STRINGS['text.mark.strike']).toBe('Strikethrough');
+    expect(STRINGS['text.done.tooltip']).toBe('Done (Escape)');
+    expect(STRINGS['text.customStyle.active']).toBe(
+      'Selection has custom style',
+    );
+    expect(formatString('text.size.error', { min: '8', max: '200' })).toBe(
+      'Enter a size between 8 and 200 pixels.',
+    );
+    expect(formatString('text.size.hint', { min: '8', max: '200' })).toBe(
+      'Between 8 and 200 pixels.',
+    );
+    expect(STRINGS['text.color.error']).toBe('Enter a hex color like #1d4ed8.');
+    expect(formatString('text.search.none', { query: 'pricing' })).toBe(
+      'No pages match "pricing".',
+    );
+    expect(STRINGS['text.web.error']).toBe(
+      'Enter a URL like https://example.com, or an email or phone link.',
+    );
+    expect(STRINGS['text.link.broken']).toBe(
+      'This page no longer exists. Choose another page or a URL.',
+    );
+    expect(STRINGS['text.cta.needsLink']).toBe('Needs a link');
+    expect(STRINGS['text.unsupported.heading']).toBe(
+      'This text has formatting the theme no longer allows',
+    );
+    expect(STRINGS['text.unsupported.remove']).toBe(
+      'Remove unsupported formatting',
+    );
+    expect(formatString('text.panel.editOnPage.label', { label: 'Body' })).toBe(
+      'Edit Body on the page',
+    );
+  });
+
+  it('offers only Title, Heading and Subheading as heading styles', () => {
+    const textValues = entries
+      .filter(([key]) => key.startsWith('text.'))
+      .map(([, value]) => value);
+    expect(textValues.length).toBeGreaterThan(100);
+    const bad = textValues.filter((value) =>
+      /\bh[1-6]\b|\b(node|mark|token)s?\b/i.test(value),
+    );
+    expect(bad).toEqual([]);
   });
 
   it('pairs every .one key with an .other key', () => {

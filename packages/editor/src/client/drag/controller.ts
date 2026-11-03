@@ -2,7 +2,10 @@
  * The pointer drag, started from the toolbar's handle. It only ever moves an item already on the page.
  *
  * A press on the handle only becomes a drag after the pointer has moved 4px, so a
- * click never starts one. From then on the shell covers the frame with a
+ * click never starts one. The handle is in the framed document, so until the
+ * drag is on the pointer's moves, its release and the keys arrive in the frame
+ * window; they are listened to there too and moved into the shell's
+ * coordinates. From then on the shell covers the frame with a
  * transparent capture surface and every pointer event is a shell event: the
  * drag never depends on events crossing the iframe boundary, and the site never
  * sees a press, move or release while it runs. The controller turns the shell's
@@ -96,6 +99,7 @@ export function startPointerDrag(options: PointerDragOptions): () => void {
     return () => undefined;
   }
   const view = shell;
+  const frameView = frame.contentWindow;
   let pointer: Point = origin;
   let active = false;
   let ended = false;
@@ -162,11 +166,16 @@ export function startPointerDrag(options: PointerDragOptions): () => void {
   function finish(): void {
     if (ended) return;
     ended = true;
-    view.removeEventListener('pointermove', onMove, true);
-    view.removeEventListener('pointerup', onUp, true);
+    view.removeEventListener('pointermove', onShellMove, true);
+    view.removeEventListener('pointerup', onShellUp, true);
     view.removeEventListener('pointercancel', onCancel, true);
     view.removeEventListener('keydown', onKey, true);
     view.removeEventListener('selectstart', onSelect, true);
+    frameView?.removeEventListener('pointermove', onFrameMove, true);
+    frameView?.removeEventListener('pointerup', onFrameUp, true);
+    frameView?.removeEventListener('pointercancel', onCancel, true);
+    frameView?.removeEventListener('keydown', onKey, true);
+    frameView?.removeEventListener('selectstart', onSelect, true);
     if (animation !== 0) view.cancelAnimationFrame(animation);
     animation = 0;
     if (active) {
@@ -179,8 +188,14 @@ export function startPointerDrag(options: PointerDragOptions): () => void {
     options.onEnd();
   }
 
-  function onMove(event: PointerEvent): void {
-    pointer = { x: event.clientX, y: event.clientY };
+  /** Where the frame window's own events must be moved to be the shell's. */
+  function frameOffset(): Point {
+    const box = contentBoxOf(frame);
+    return { x: box.left, y: box.top };
+  }
+
+  function onMove(event: PointerEvent, offset: Point = { x: 0, y: 0 }): void {
+    pointer = { x: event.clientX + offset.x, y: event.clientY + offset.y };
     if (active) return;
     if (
       Math.hypot(pointer.x - origin.x, pointer.y - origin.y) < DRAG_THRESHOLD
@@ -192,12 +207,12 @@ export function startPointerDrag(options: PointerDragOptions): () => void {
     animation = view.requestAnimationFrame(tick);
   }
 
-  function onUp(event: PointerEvent): void {
+  function onUp(event: PointerEvent, offset: Point = { x: 0, y: 0 }): void {
     if (!active) {
       finish();
       return;
     }
-    pointer = { x: event.clientX, y: event.clientY };
+    pointer = { x: event.clientX + offset.x, y: event.clientY + offset.y };
     // What is under the release, not what the last frame showed.
     const found = resolve(pointer, options.sceneOf());
     if (found.inside && found.slot !== null) {
@@ -229,11 +244,34 @@ export function startPointerDrag(options: PointerDragOptions): () => void {
     if (active) event.preventDefault();
   }
 
-  view.addEventListener('pointermove', onMove, true);
-  view.addEventListener('pointerup', onUp, true);
+  function onShellMove(event: PointerEvent): void {
+    onMove(event);
+  }
+  function onShellUp(event: PointerEvent): void {
+    onUp(event);
+  }
+  // Once the drag is on, the frame's own events are the drag's: the site's
+  // listeners do not see them.
+  function onFrameMove(event: PointerEvent): void {
+    onMove(event, frameOffset());
+    if (active) event.stopPropagation();
+  }
+  function onFrameUp(event: PointerEvent): void {
+    const wasActive = active;
+    onUp(event, frameOffset());
+    if (wasActive) event.stopPropagation();
+  }
+
+  view.addEventListener('pointermove', onShellMove, true);
+  view.addEventListener('pointerup', onShellUp, true);
   view.addEventListener('pointercancel', onCancel, true);
   view.addEventListener('keydown', onKey, true);
   view.addEventListener('selectstart', onSelect, true);
+  frameView?.addEventListener('pointermove', onFrameMove, true);
+  frameView?.addEventListener('pointerup', onFrameUp, true);
+  frameView?.addEventListener('pointercancel', onCancel, true);
+  frameView?.addEventListener('keydown', onKey, true);
+  frameView?.addEventListener('selectstart', onSelect, true);
 
   return () => {
     if (ended) return;

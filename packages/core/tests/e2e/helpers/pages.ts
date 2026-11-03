@@ -6,7 +6,19 @@
  * exported.
  */
 import { randomBytes } from 'node:crypto';
-import { createPage, getPage, insertBlock, publishPage } from '@plakboek/pages';
+import { getTextTheme, registerTextTheme } from '@plakboek/content';
+import {
+  resolveTextTheme,
+  type TextThemeInput,
+} from '@plakboek/content/rich-text';
+import {
+  createPage,
+  getPage,
+  insertBlock,
+  publishPage,
+  renamePage,
+  trashPage,
+} from '@plakboek/pages';
 import { sql } from 'drizzle-orm';
 import { closeAllDbs } from '../../../src/runtime/db.ts';
 import { readRuntimeEnv } from '../../../src/runtime/env.ts';
@@ -53,8 +65,19 @@ export async function createEditablePage(input: {
   readonly title?: string;
   readonly blocks: readonly FactoryBlock[];
   readonly publish?: boolean;
+  /**
+   * A wider text theme to hold the blocks' text to while the page is made, in
+   * this worker process only, so a spec can store a document the e2e host's
+   * own theme (which the running site enforces) no longer allows. The host
+   * theme is restored before this returns.
+   */
+  readonly textTheme?: TextThemeInput;
 }): Promise<EditablePage> {
   const { default: config } = await import('../../e2e-host/plakboek.config.ts');
+  const hostTheme = getTextTheme();
+  if (input.textTheme !== undefined) {
+    registerTextTheme(resolveTextTheme(input.textTheme));
+  }
   const runtime = createRuntime({ config }, readRuntimeEnv(process.env));
   try {
     const rows = await runtime.db.db.execute<{ id: string; role: string }>(
@@ -113,6 +136,7 @@ export async function createEditablePage(input: {
     }
     return { pageId: page.id, slug, path: `/${slug}` };
   } finally {
+    registerTextTheme(hostTheme);
     await closeAllDbs();
   }
 }
@@ -133,4 +157,82 @@ export async function releaseAllPageLocks(): Promise<void> {
   } finally {
     await closeAllDbs();
   }
+}
+
+/**
+ * The saved props of the first block of `blockType` on a page, read straight
+ * from the database: what a reload would show, without going through a page.
+ */
+export async function readBlockProps(
+  pageId: string,
+  blockType: string,
+): Promise<Record<string, unknown>> {
+  const { default: config } = await import('../../e2e-host/plakboek.config.ts');
+  const runtime = createRuntime({ config }, readRuntimeEnv(process.env));
+  try {
+    const rows = await runtime.db.db.execute<{
+      props: Record<string, unknown>;
+    }>(
+      sql`SELECT props FROM page_blocks WHERE owner_id = ${pageId} AND block_type = ${blockType} ORDER BY depth, sort_order LIMIT 1`,
+    );
+    const row = rows[0];
+    if (row === undefined) {
+      throw new Error(`The page ${pageId} has no ${blockType} block`);
+    }
+    return row.props;
+  } finally {
+    await closeAllDbs();
+  }
+}
+
+/**
+ * Runs `action` as the superadmin against the same throwaway database, with
+ * the page as it is now, so a spec can change a page behind the editor's back
+ * the way another editor would.
+ */
+async function asSuperadmin(
+  pageId: string,
+  action: (
+    deps: ReturnType<typeof createRuntime>['pages'],
+    actor: { readonly userId: string; readonly roleKey: string },
+    version: number,
+  ) => Promise<unknown>,
+): Promise<void> {
+  const { default: config } = await import('../../e2e-host/plakboek.config.ts');
+  const runtime = createRuntime({ config }, readRuntimeEnv(process.env));
+  try {
+    const rows = await runtime.db.db.execute<{ id: string; role: string }>(
+      sql`SELECT id, role_key AS role FROM "user" WHERE email = ${e2eUsers().superadmin.email}`,
+    );
+    const owner = rows[0];
+    if (owner === undefined) {
+      throw new Error('The e2e superadmin account does not exist');
+    }
+    const page = await getPage(runtime.pages.db, pageId);
+    if (page === null) throw new Error(`The page ${pageId} does not exist`);
+    await action(
+      runtime.pages,
+      { userId: owner.id, roleKey: owner.role },
+      page.version,
+    );
+  } finally {
+    await closeAllDbs();
+  }
+}
+
+/** Gives a page a new slug (and so a new public path), as another editor would. */
+export async function renamePageSlug(
+  pageId: string,
+  slug: string,
+): Promise<void> {
+  await asSuperadmin(pageId, async (deps, actor, baseVersion) => {
+    await renamePage(deps, actor, { pageId, baseVersion, slug });
+  });
+}
+
+/** Moves a page to the trash, so a link to it no longer has a page to point at. */
+export async function trashPageById(pageId: string): Promise<void> {
+  await asSuperadmin(pageId, async (deps, actor, baseVersion) => {
+    await trashPage(deps, actor, { pageId, baseVersion });
+  });
 }

@@ -5,19 +5,33 @@
  * follows a set of items the caller names, in one pass per animation frame
  * however many scrolls, resizes and mutations asked for it.
  *
+ * Boxes are in the framed document's own coordinates (the viewport rectangle
+ * moved by the scroll offset), because the overlay is drawn inside that
+ * document and scrolls with it. A scroll therefore changes no box: it does not
+ * measure again until the page has been quiet for 100ms, and only then to
+ * refresh the visible part of the document the placement rules read. The one
+ * exception is an item in a fixed or sticky box: it keeps its place on the
+ * screen while the page scrolls, so its document box moves with the scroll and
+ * is measured again in the next animation frame.
+ *
  * It reads the identity attributes the live render puts on every block
  * (`EDIT_ATTRIBUTE`) and never changes the framed site: its listeners are
  * passive and nothing is added to the framed document.
  */
 import { EDIT_ATTRIBUTE } from '@plakboek/render';
+import { documentBox, visibleDocumentBox } from '../chrome-host/coordinates.js';
 import { sameBox, type Box } from './geometry.js';
 
 /** The smallest box an item that renders at no size is given, so it can still be pointed at. */
 export const GHOST_SIZE = 24;
 
-/** What the overlay draws from. Item boxes are in the frame's own coordinates, `frame` is the frame's content box in the shell's. */
+/** How long the page must be quiet after a scroll before the visible part is read again. */
+export const SCROLL_QUIET_MS = 100;
+
+/** What the overlay draws from. Item boxes and `visible` are in the framed document's own coordinates. */
 export type BoxesState = {
-  readonly frame: Box;
+  /** The part of the document the frame shows when this was measured. */
+  readonly visible: Box;
   readonly boxes: ReadonlyMap<string, Box>;
   /** The ids of the columns the render marked empty. */
   readonly empty: readonly string[];
@@ -47,7 +61,7 @@ function hasObservers(view: Window): view is Window & typeof globalThis {
   );
 }
 
-/** The element's box, a ghost box where it takes up no room, and null where it generates none. */
+/** The element's box against the frame's viewport, a ghost box where it takes up no room, and null where it generates none. */
 export function measureLoose(element: Element, view: Window): Box | null {
   if (view.getComputedStyle(element).display === 'contents') return null;
   const rect = element.getBoundingClientRect();
@@ -59,9 +73,34 @@ export function measureLoose(element: Element, view: Window): Box | null {
   };
 }
 
+/**
+ * Whether the element, or an ancestor, is fixed to the viewport or sticky: its
+ * place in the document changes as the page scrolls.
+ */
+export function followsViewport(element: Element, view: Window): boolean {
+  for (
+    let node: Element | null = element;
+    node !== null;
+    node = node.parentElement
+  ) {
+    const { position } = view.getComputedStyle(node);
+    if (position === 'fixed' || position === 'sticky') return true;
+  }
+  return false;
+}
+
+/** `measureLoose`, in the framed document's own coordinates. */
+export function measureLooseInDocument(
+  element: Element,
+  view: Window,
+): Box | null {
+  const box = measureLoose(element, view);
+  return box === null ? null : documentBox(box, view);
+}
+
 function sameState(a: BoxesState | null, b: BoxesState | null): boolean {
   if (a === null || b === null) return a === b;
-  if (!sameBox(a.frame, b.frame)) return false;
+  if (!sameBox(a.visible, b.visible)) return false;
   if (
     a.boxes.size !== b.boxes.size ||
     a.empty.length !== b.empty.length ||
@@ -89,7 +128,10 @@ export function createBoxTracker(
   const shellWindow = topWindow;
   let detachDocument: (() => void) | null = null;
   let animationFrame = 0;
+  let quietTimer: number | null = null;
   let last: BoxesState | null = null;
+  /** Whether a measured item moves with the scroll (fixed or sticky). */
+  let followsScroll = false;
 
   function contentBox(): Box {
     const rect = frame.getBoundingClientRect();
@@ -129,29 +171,45 @@ export function createBoxTracker(
     }
     const boxes = new Map<string, Box>();
     const fixed: string[] = [];
+    let moving = false;
     for (const id of options.ids()) {
       const element = byId.get(id);
       if (element === undefined) continue;
-      const box = measureLoose(element, view);
+      const box = measureLooseInDocument(element, view);
       if (box === null) continue;
       boxes.set(id, box);
       if (view.getComputedStyle(element).position === 'fixed') fixed.push(id);
+      if (followsViewport(element, view)) moving = true;
     }
+    followsScroll = moving;
     const empty: string[] = [];
     for (const element of doc.querySelectorAll(EMPTY_SELECTOR)) {
       const id = element.getAttribute(EDIT_ATTRIBUTE.block);
       if (id === null) continue;
-      const box = measureLoose(element, view);
+      const box = measureLooseInDocument(element, view);
       if (box === null) continue;
       empty.push(id);
       boxes.set(id, box);
     }
-    emit({ frame: frameBox, boxes, empty, fixed });
+    emit({ visible: visibleDocumentBox(view), boxes, empty, fixed });
   }
 
   function schedule(): void {
     if (animationFrame !== 0) return;
     animationFrame = shellWindow.requestAnimationFrame(measureAll);
+  }
+
+  /**
+   * A scroll moves no box: measure again once the page has been quiet. An item
+   * that follows the viewport does move, and is measured again at once.
+   */
+  function scheduleQuiet(): void {
+    if (followsScroll) schedule();
+    if (quietTimer !== null) shellWindow.clearTimeout(quietTimer);
+    quietTimer = shellWindow.setTimeout(() => {
+      quietTimer = null;
+      schedule();
+    }, SCROLL_QUIET_MS);
   }
 
   function attach(): void {
@@ -176,12 +234,12 @@ export function createBoxTracker(
         subtree: true,
       });
     }
-    view.addEventListener('scroll', schedule, { passive: true });
+    view.addEventListener('scroll', scheduleQuiet, { passive: true });
     view.addEventListener('resize', schedule, { passive: true });
     detachDocument = () => {
       resizeObserver.disconnect();
       mutationObserver.disconnect();
-      view.removeEventListener('scroll', schedule);
+      view.removeEventListener('scroll', scheduleQuiet);
       view.removeEventListener('resize', schedule);
     };
     schedule();
@@ -205,6 +263,8 @@ export function createBoxTracker(
       if (animationFrame !== 0)
         shellWindow.cancelAnimationFrame(animationFrame);
       animationFrame = 0;
+      if (quietTimer !== null) shellWindow.clearTimeout(quietTimer);
+      quietTimer = null;
     },
   };
 }

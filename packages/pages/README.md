@@ -712,6 +712,20 @@ lock blocking one would be impractical. Each is gated by its own permission
 
 `resolveEditablePage` is not permission-gated and returns unpublished content: it belongs behind the editor's own session and permission checks, never on a visitor path.
 
+### Page links (D-18)
+
+A link stores a page row id, so a slug or hierarchy change never breaks it. `searchPages` backs the editor's page picker; `resolvePageLinkPaths` turns the ids a render found into public paths in one batch, before the synchronous render starts.
+
+| Export                         | Kind     | Purpose                                                                                                                            |
+| ------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `searchPages`                  | function | Finds the non-trashed pages of one locale by title or path, matched literally and case-insensitively; at most 20, ordered by title |
+| `resolvePageLinkPaths`         | function | Maps page ids to public paths in at most two statements (none for no ids); `liveOnly` leaves out pages that are not live           |
+| `PAGE_SEARCH_LIMIT`            | constant | `20`: the most results one search returns                                                                                          |
+| `PAGE_SEARCH_QUERY_MAX_LENGTH` | constant | `200`: the longest query a caller should accept                                                                                    |
+| `PageSearchResult`             | type     | One hit: `id`, `title`, `path`, `publicPath` and `live`                                                                            |
+| `SearchPagesInput`             | type     | Input to `searchPages`: `locale`, `query`, `defaultLocale`, `homeSlug`                                                             |
+| `ResolvePageLinkPathsInput`    | type     | Input to `resolvePageLinkPaths`: `pageIds`, `defaultLocale`, `homeSlug`, `liveOnly`                                                |
+
 ### Reserved page addresses (D-23)
 
 The CMS owns the first address segments `cms` and `api`. Creating, renaming, moving or translating a page so its hierarchy path starts with one (in any locale, compared case-insensitively) is refused with `ReservedPageSlugError`; a slug generated at the root skips them and takes the next free suffix (`cms-2`). A page that already sits there is kept as is and flagged at boot.

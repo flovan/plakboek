@@ -7,11 +7,14 @@
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
+  chrome,
   FRAME,
   framedSite,
   HOST,
   LIVE_REGION,
   openEditor,
+  openProperties,
+  selectItem,
   waitForShell,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -37,20 +40,26 @@ function textControl(page: Page) {
   return page.getByRole('textbox', { name: 'Text' });
 }
 
-/** Double-click down to a block and once more on it: the ask for its Properties. */
-async function openPropertiesOf(frame: Frame, selector: string): Promise<void> {
-  const target = frame.locator(selector).first();
-  await target.dblclick();
-  await target.dblclick();
-  await target.dblclick();
+/** Selects the block the selector finds and opens its Properties. */
+async function openPropertiesOf(
+  page: Page,
+  frame: Frame,
+  selector: string,
+): Promise<void> {
+  await openProperties(page, frame.locator(selector).first());
 }
 
-/** Double-click down to the `at`th heading of the first section and open its Properties. */
+/** Opens the Properties of the `at`th heading of the first section. */
 async function openPropertiesOfHeading(
+  page: Page,
   frame: Frame,
   at: number,
 ): Promise<void> {
-  await openPropertiesOf(frame, `section.section >> h2 >> nth=${String(at)}`);
+  await openPropertiesOf(
+    page,
+    frame,
+    `section.section >> h2 >> nth=${String(at)}`,
+  );
 }
 
 async function expectSaved(page: Page): Promise<void> {
@@ -71,7 +80,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe('changing a heading in the panel', () => {
-  test('double-clicking a heading opens its text in the panel, typing shows live in the frame without losing the caret, and it is saved after the pause', async ({
+  test('opening a heading from the toolbar shows its text in the panel, typing shows live in the frame without losing the caret, and it is saved after the pause', async ({
     page,
   }) => {
     await openPageWithHeading(page);
@@ -82,7 +91,8 @@ test.describe('changing a heading in the panel', () => {
       .locator('h2')
       .first();
 
-    await openPropertiesOfHeading(frame, 0);
+    // select the heading and ask for its Properties from the toolbar
+    await openProperties(page, first);
     await expect(sheet(page)).toHaveAttribute('data-open', '');
     const control = textControl(page);
     await expect(control).toHaveValue('Hello');
@@ -120,14 +130,13 @@ test.describe('the Properties sheet', () => {
     const frame = await framedSite(page);
     await expect(sheet(page)).not.toHaveAttribute('data-open', '');
 
-    // drill to a heading by clicks: it is selected, the sheet stays closed
+    // one click selects the heading: the sheet stays closed
     const target = frame
       .locator('section.section')
       .first()
       .locator('h2')
       .first();
-    await target.dblclick();
-    await target.dblclick();
+    await selectItem(page, target);
     await expect(sheet(page)).not.toHaveAttribute('data-open', '');
     expect(
       await page
@@ -153,7 +162,7 @@ async function openDemo(
   });
   await openEditor(page, created.path);
   const frame = await framedSite(page);
-  await openPropertiesOf(frame, DEMO);
+  await openPropertiesOf(page, frame, DEMO);
   await expect(sheet(page)).toHaveAttribute('data-open', '');
   return frame;
 }
@@ -313,14 +322,15 @@ test.describe('every widget edits its property and the block re-renders live', (
     await expect(add).toBeFocused();
   });
 
-  test('what cannot be chosen yet is shown read-only with a note on where it will be edited', async ({
+  test('what cannot be chosen yet is shown read-only with a note on where it will be edited, and formatted text with a preview', async ({
     page,
   }) => {
     await openDemo(page);
     const notes = page.locator(`${HOST} [data-note]`);
+    // formatted text is a preview with a note, not a note (see text-properties.spec)
     await expect(
-      page.locator(`${HOST} [data-note="note-rich-text"]`),
-    ).toContainText('Formatted text is edited on the page.');
+      page.locator(`${HOST} [data-rich-text-row="body"]`),
+    ).toContainText('This text is not editable on the page.');
     await expect(page.locator(`${HOST} [data-note="note-media"]`)).toHaveCount(
       2,
     );
@@ -335,7 +345,7 @@ test.describe('every widget edits its property and the block re-renders live', (
     await expect(
       page.locator(`${HOST} [data-note="note-entry"]`),
     ).toContainText('Choosing an entry is available once entry editing ships.');
-    await expect(notes).toHaveCount(4);
+    await expect(notes).toHaveCount(3);
   });
 });
 
@@ -361,7 +371,7 @@ test.describe('a host widget the editor has no control for', () => {
     await expect(page.locator(HOST)).toHaveAttribute('data-session', 'editing');
     await expect(page.locator(FRAME)).toHaveAttribute('tabindex', '-1');
     const reloaded = await framedSite(page);
-    await openPropertiesOf(reloaded, DEMO);
+    await openPropertiesOf(page, reloaded, DEMO);
     await expect(
       page.getByRole('textbox', { name: 'Brand colour' }),
     ).toHaveValue('#ff0000');
@@ -459,13 +469,13 @@ test.describe('invalid input and needs input', () => {
     await expect(title).not.toHaveAttribute('aria-invalid', 'true');
     await expect(shown(frame, 'title')).toHaveCount(0);
     // the marker on the page follows once the empty value is saved
-    await expect(page.locator(`${HOST} [data-marker]`)).toHaveCount(1);
+    await expect(chrome(page).locator('[data-marker]')).toHaveCount(1);
 
     // filling it again clears both, live
     await title.fill('Back again');
     await expect(field.locator('[data-needs-input-tag]')).toHaveCount(0);
     await expect(shown(frame, 'title')).toHaveText('Back again');
-    await expect(page.locator(`${HOST} [data-marker]`)).toHaveCount(0);
+    await expect(chrome(page).locator('[data-marker]')).toHaveCount(0);
   });
 });
 
@@ -480,7 +490,7 @@ test.describe('undo and focus', () => {
       .first()
       .locator('h2')
       .first();
-    await openPropertiesOfHeading(frame, 0);
+    await openPropertiesOfHeading(page, frame, 0);
     const control = textControl(page);
     await expect(control).toBeFocused();
 
@@ -517,17 +527,18 @@ test.describe('undo and focus', () => {
       .first()
       .locator('h2')
       .first();
-    // two double-clicks leave the heading selected without asking for Properties
-    await target.dblclick();
-    await target.dblclick();
+    // selecting the heading does not ask for Properties
+    await selectItem(page, target);
     await expect(sheet(page)).not.toHaveAttribute('data-open', '');
 
-    await page.getByRole('button', { name: 'Properties of Heading' }).click();
+    await chrome(page)
+      .getByRole('button', { name: 'Properties of Heading' })
+      .click();
     await expect(sheet(page)).toHaveAttribute('data-open', '');
     await expect(textControl(page)).toBeFocused();
   });
 
-  test('adding a heading opens Properties with focus in its empty Text control, and selecting another block afterwards leaves focus alone', async ({
+  test('adding a Note, whose required value is not on the page, opens Properties with focus in its empty control, and selecting another block afterwards leaves focus alone', async ({
     page,
   }) => {
     await openPageWithHeading(page);
@@ -537,20 +548,21 @@ test.describe('undo and focus', () => {
       .first()
       .locator('h2')
       .first();
-    await target.dblclick();
-    await target.dblclick();
+    await selectItem(page, target);
 
-    await page.getByRole('button', { name: 'Add after Heading' }).click();
-    const picker = page.getByRole('dialog', { name: 'Add a block' });
-    await picker.getByRole('combobox').fill('head');
+    await chrome(page)
+      .getByRole('button', { name: 'Add after Heading' })
+      .click();
+    const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
+    await picker.getByRole('combobox').fill('note');
     await page.keyboard.press('Enter');
 
     await expect(sheet(page)).toHaveAttribute('data-open', '');
-    const control = textControl(page);
+    const control = sheet(page).getByRole('textbox', { name: 'Note' });
     await expect(control).toHaveValue('');
     await expect(control).toBeFocused();
     await expect(
-      page.locator(`${HOST} [data-field="text"] [data-needs-input-tag]`),
+      page.locator(`${HOST} [data-field="note"] [data-needs-input-tag]`),
     ).toHaveText('Needs input');
 
     // clicking another block in the frame selects it; the panel does not take focus
@@ -560,7 +572,7 @@ test.describe('undo and focus', () => {
       .locator('h2')
       .first()
       .click();
-    await expect(control).not.toBeFocused();
+    await expect(textControl(page)).not.toBeFocused();
     expect(
       await page
         .locator(HOST)

@@ -61,11 +61,26 @@ describe('PropertyField for a widget the editor has no control for', () => {
     );
   });
 
-  it('draws a rich_text property as its read-only note, with a note that no standard field stands in', () => {
+  it('draws a rich_text property as its read-only preview with the not-editable note, and a note that a standard field stands in', () => {
     const markup = render('rich_text', undefined);
-    expect(markup).toContain(escaped(STRINGS['panel.richTextNote']));
+    expect(markup).toContain(escaped(STRINGS['text.panel.empty']));
+    expect(markup).toContain(escaped(STRINGS['text.panel.notEditable']));
+    expect(markup).not.toContain('data-edit-on-page');
     expect(markup).not.toContain('<textarea');
-    expect(markup).toContain(escaped(STRINGS['panel.customWidgetNoteOnly']));
-    expect(markup).not.toContain(escaped(STRINGS['panel.customWidgetNote']));
+    expect(markup).toContain(escaped(STRINGS['panel.customWidgetNote']));
+    expect(markup).not.toContain(
+      escaped(STRINGS['panel.customWidgetNoteOnly']),
+    );
+  });
+
+  it('shows the plain words of a rich_text document in the preview', () => {
+    const markup = render('rich_text', {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'Hello there' }] },
+      ],
+    });
+    expect(markup).toContain('Hello there');
+    expect(markup).not.toContain(escaped(STRINGS['text.panel.empty']));
   });
 });

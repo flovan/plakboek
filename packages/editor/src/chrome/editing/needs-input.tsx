@@ -5,7 +5,8 @@ import {
   type CSSProperties,
   type ReactElement,
 } from 'react';
-import { isVisibleIn, type Box } from '../../client/overlay/geometry.js';
+import { rootOfNode } from '../../client/chrome-host/shape.js';
+import type { Box } from '../../client/overlay/geometry.js';
 import { catalogueByKey } from '../../client/session/move-action.js';
 import { selectCrumb } from '../../client/session/scope.js';
 import { selectAndAnnounce } from '../../client/session/selection-announcement.js';
@@ -14,8 +15,18 @@ import {
   type EditorStore,
 } from '../../client/session/store.js';
 import { labelOf } from '../../client/session/tree-model.js';
+import type { TextController } from '../../client/text/controller.js';
 import { AlertIcon } from '../icons.js';
 import { formatString, STRINGS } from '../strings.js';
+
+function boxStyle(box: Box): CSSProperties {
+  return {
+    left: box.left,
+    top: box.top,
+    width: box.width,
+    height: box.height,
+  };
+}
 
 /** How far a marker sits inside its block's corner, and its height. */
 const INSET = 4;
@@ -23,10 +34,10 @@ const MARKER_HEIGHT = 20;
 
 export type NeedsInputMarkersProps = {
   readonly store: EditorStore;
-  /** The boxes of the blocks, in the shell's coordinates. */
+  /** The boxes of the blocks, in the framed document's coordinates. */
   readonly boxes: ReadonlyMap<string, Box>;
-  /** The frame's content box in the shell's coordinates. */
-  readonly frame: Box;
+  /** Starts typing on the page in a block's text field; without it a marker only opens the Properties. */
+  readonly textController?: TextController;
 };
 
 /** The ids of the blocks that still lack a required value. */
@@ -48,18 +59,20 @@ type Placement = {
  * A marker inside the top-right corner of every block with a required value
  * missing. It is a pointer control in the interaction plane, below the
  * toolbar: pressing it selects its block and opens its Properties with focus
- * on the first empty required control. It takes no focus of its own (the
+ * on the first empty required control, unless that one is a text the block
+ * marks on the page, which it starts typing in instead. It takes no focus of its own (the
  * keyboard reaches the same place through the block's toolbar), and while a
  * drag runs or the delete confirmation is open it is drawn but takes no
  * pointer. It moves to the left corner where it would sit under the floating
- * toolbar, and stays inside the frame while the top of its block is scrolled
- * away. It is gone the moment the last required value is filled, because the
+ * toolbar, and stays inside the visible top while the top of its block is
+ * scrolled away (`position: sticky` inside a wrapper over the block, so no
+ * script follows the scroll). It is gone the moment the last required value is filled, because the
  * model says nothing is missing any more.
  */
 export function NeedsInputMarkers(
   props: NeedsInputMarkersProps,
 ): ReactElement | null {
-  const { store, boxes, frame } = props;
+  const { store, boxes, textController } = props;
   const model = useEditorStore(store, (state) => state.model);
   const session = useEditorStore(store, (state) => state.session);
   const busy = useEditorStore(
@@ -73,31 +86,26 @@ export function NeedsInputMarkers(
   if (model !== null) {
     for (const id of needsInputIds(store)) {
       const box = boxes.get(id);
-      if (box !== undefined && isVisibleIn(box, frame)) {
-        placements.push({ id, box });
-      }
+      if (box !== undefined) placements.push({ id, box });
     }
   }
 
   // Whether the marker, at the right corner, would sit under the toolbar: its
-  // width is only known once it is drawn.
+  // width is only known once it is drawn. Everything is read from the frame
+  // document's viewport, which is where the toolbar and the markers are.
   useLayoutEffect(() => {
     const element = root.current;
-    const rootNode = element?.getRootNode();
-    const toolbar =
-      rootNode instanceof ShadowRoot || rootNode instanceof Document
-        ? rootNode.querySelector('[data-toolbar]')?.getBoundingClientRect()
-        : undefined;
+    const toolbar = rootOfNode(element)
+      ?.querySelector('[data-toolbar]')
+      ?.getBoundingClientRect();
     const next = new Set<string>();
     if (element !== null && toolbar !== undefined) {
       for (const marker of element.querySelectorAll<HTMLElement>(
         '[data-marker]',
       )) {
-        const placed = placements.find(
-          (entry) => entry.id === marker.dataset.marker,
-        );
-        if (placed === undefined) continue;
-        const right = placed.box.left + placed.box.width - INSET;
+        const pin = marker.parentElement?.getBoundingClientRect();
+        if (pin === undefined) continue;
+        const right = pin.right - INSET;
         const top = marker.getBoundingClientRect().top;
         if (
           right - marker.offsetWidth < toolbar.right &&
@@ -105,7 +113,7 @@ export function NeedsInputMarkers(
           top < toolbar.bottom &&
           top + MARKER_HEIGHT > toolbar.top
         ) {
-          next.add(placed.id);
+          next.add(marker.dataset.marker ?? '');
         }
       }
     }
@@ -134,37 +142,36 @@ export function NeedsInputMarkers(
       data-inert={busy ? '' : undefined}
     >
       {placements.map(({ id, box }) => {
-        const top = Math.min(
-          Math.max(box.top + INSET, frame.top + INSET),
-          box.top + Math.max(box.height - MARKER_HEIGHT - INSET, INSET),
-        );
         const left = flipped.has(id);
-        const style: CSSProperties = left
-          ? { left: box.left + INSET, top }
-          : {
-              left: box.left + box.width - INSET,
-              top,
-              transform: 'translateX(-100%)',
-            };
         return (
-          <button
+          <div
             key={id}
-            type="button"
-            tabIndex={-1}
-            className="pk-marker"
-            data-marker={id}
+            className="pk-marker-pin"
             data-side={left ? 'left' : 'right'}
-            style={style}
-            aria-label={formatString('marker.label', { label: labelText(id) })}
-            onClick={() => {
-              if (model === null) return;
-              selectAndAnnounce(store, selectCrumb(model, id));
-              store.requestProperties(id);
-            }}
+            style={boxStyle(box)}
           >
-            <AlertIcon />
-            {STRINGS['panel.needsInput']}
-          </button>
+            <button
+              type="button"
+              tabIndex={-1}
+              className="pk-marker"
+              data-marker={id}
+              data-side={left ? 'left' : 'right'}
+              aria-label={formatString('marker.label', {
+                label: labelText(id),
+              })}
+              onClick={() => {
+                if (model === null) return;
+                // A missing value is filled in where it belongs: the text on the
+                // page, a button's popover. The rest is in the Properties panel.
+                if (textController?.enterMissing(id) === true) return;
+                selectAndAnnounce(store, selectCrumb(model, id));
+                store.requestProperties(id);
+              }}
+            >
+              <AlertIcon />
+              {STRINGS['panel.needsInput']}
+            </button>
+          </div>
         );
       })}
     </div>

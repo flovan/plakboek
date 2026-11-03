@@ -590,6 +590,7 @@ describe('Dockerfile', () => {
       'server.ts',
       'plakboek.config.ts',
       'seed.ts',
+      'text-theme.tsx',
       'tsconfig.json',
       'blocks',
     ]) {

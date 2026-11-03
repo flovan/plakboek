@@ -73,6 +73,13 @@ export type SaveRunnerOptions = {
   readonly hooks: () => HooksRuntime | null;
   /** How long a property edit waits for more edits before it is sent. */
   readonly idleMs?: number;
+  /**
+   * The shell's chance to put a block that was just added straight into its
+   * on-page surface (its text, a button's popover). It gets the block's id and
+   * the added announcement. True means it did, so the runner neither announces
+   * nor asks for the Properties panel; false or no hook leaves both to the runner.
+   */
+  readonly onAdded?: (blockId: string, announcement: string) => boolean;
 };
 
 /** What a caller can say about where the page goes once a write lands. */
@@ -408,11 +415,19 @@ export function createSaveRunner(options: SaveRunnerOptions): SaveRunner {
     } else if (info?.announceAdded === true) {
       // A new item that still lacks a required value says so, and the panel is asked for.
       const needsInput = (model.get(acted)?.needsInput.length ?? 0) > 0;
-      store.announce(
-        `${formatString('announce.added', { label: text(acted) })}${
-          needsInput ? STRINGS['announce.needsInput'] : ''
-        }`,
-      );
+      const message = `${formatString('announce.added', { label: text(acted) })}${
+        needsInput ? STRINGS['announce.needsInput'] : ''
+      }`;
+      // The write is saved either way: a shell that cannot open its surface
+      // falls back to the announcement and the panel request.
+      let taken = false;
+      try {
+        taken = options.onAdded?.(acted, message) === true;
+      } catch {
+        taken = false;
+      }
+      if (taken) return;
+      store.announce(message);
       if (needsInput) store.requestProperties(acted);
     } else if (info?.announceMove === true) {
       const place = model.siblingIndex(acted);

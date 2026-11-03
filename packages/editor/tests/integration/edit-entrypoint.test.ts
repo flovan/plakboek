@@ -14,7 +14,10 @@ import {
   composed,
   createHarness,
   createHeadingPage,
+  createProsePage,
   harnessConfig,
+  harnessTextTheme,
+  proseDoc,
   publish,
   renderDocument,
   type Harness,
@@ -119,6 +122,32 @@ describe('the frame for a user who can edit', () => {
       cookieOf(harness.editor),
     );
     expect(response?.status).toBe(200);
+  });
+});
+
+describe('the frame renders rich text through the host theme', () => {
+  it('uses the host renderers and links to a page that was never published', async () => {
+    const target = await createHeadingPage(harness, {
+      title: 'Unpublished target',
+      text: 'Target',
+    });
+    await createProsePage(harness, {
+      title: 'Prose page',
+      body: proseDoc([{ text: 'See target', pageId: target.pageId }]),
+    });
+    const response = await callEntrypoint(
+      entrypoint({ textTheme: harnessTextTheme }),
+      '/prose-page?_edit=frame',
+      cookieOf(harness.editor),
+    );
+    expect(response?.status).toBe(200);
+    const html = await response!.text();
+    expect(html).toContain('class="h-3"');
+    expect(html).toMatch(
+      /<a [^>]*href="\/unpublished-target"[^>]*>See target<\/a>/,
+    );
+    expect(html).not.toContain('<script');
+    expect(html).not.toContain('<style');
   });
 });
 

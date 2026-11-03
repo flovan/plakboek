@@ -130,6 +130,9 @@ function isServerOnly(specifier: string): boolean {
     specifier === 'postgres' ||
     specifier === '@plakboek/pages' ||
     specifier === '@plakboek/auth' ||
+    // The content root pulls in the server-side field engine; only its
+    // client-safe `/rich-text` subpath may be reached from the root entry.
+    specifier === '@plakboek/content' ||
     specifier.startsWith('node:')
   );
 }

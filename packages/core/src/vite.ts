@@ -44,12 +44,16 @@ const RESOLVED_ID = `\0${VIRTUAL_ID}`;
 const RESOLVED_EDITOR_CLIENT_ID = `\0${EDITOR_CLIENT_ID}`;
 const BLOCK_EDIT_ID = 'virtual:plakboek/block-edit';
 const RESOLVED_BLOCK_EDIT_ID = `\0${BLOCK_EDIT_ID}`;
+const TEXT_THEME_ID = 'virtual:plakboek/text-theme';
+const RESOLVED_TEXT_THEME_ID = `\0${TEXT_THEME_ID}`;
 const DEV_SWAP_ID = 'virtual:plakboek/dev-swap';
 const RESOLVED_DEV_SWAP_ID = `\0${DEV_SWAP_ID}`;
 /** The custom HMR event a block change sends (D-29). */
 const BLOCKS_CHANGED_EVENT = 'plakboek:blocks-changed';
 /** Where block edit modules are found when the host sets no `blockEdit`. */
 const DEFAULT_BLOCK_EDIT_GLOB = '/blocks/**/*.edit.{ts,tsx}';
+/** Where the host's text theme module is found when it sets no `textTheme`. */
+const DEFAULT_TEXT_THEME_GLOB = '/text-theme.{ts,tsx}';
 
 export type PlakboekPluginOptions = {
   /** Path to the module whose default export is the `defineConfig` result. */
@@ -75,6 +79,20 @@ export type PlakboekPluginOptions = {
    * definition) imports one. Block definitions therefore stay hook-free.
    */
   readonly blockEdit?: string | readonly string[];
+  /**
+   * Where the host's text theme module is found: one Vite glob or a list of
+   * them, root-relative (a leading `/` is the project root). Defaults to
+   * `/text-theme.{ts,tsx}`; the first match is used, and with none the editor
+   * falls back to the default renderers.
+   *
+   * The module default-exports `defineTextTheme(...)`, the same module
+   * `plakboek.config.ts` passes as `textTheme`. It is loaded eagerly by the
+   * server config and by the editor's own chunk (through
+   * `virtual:plakboek/text-theme`) and nowhere else, so it may import only
+   * `react` and the `@plakboek/render` root; anything heavier would ship in
+   * the editor chunk.
+   */
+  readonly textTheme?: string | readonly string[];
 };
 
 /**
@@ -87,7 +105,8 @@ function editorClientSource(): string {
   return [
     `import { bootEditor } from ${JSON.stringify(entry)};`,
     `import { blockEditModules } from ${JSON.stringify(BLOCK_EDIT_ID)};`,
-    'bootEditor(document, { blockEdit: blockEditModules });',
+    `import { textTheme } from ${JSON.stringify(TEXT_THEME_ID)};`,
+    'bootEditor(document, { blockEdit: blockEditModules, textTheme });',
   ].join('\n');
 }
 
@@ -238,6 +257,24 @@ function blockEditSource(option: PlakboekPluginOptions['blockEdit']): string {
   return `export const blockEditModules = import.meta.glob(${JSON.stringify(patterns)});`;
 }
 
+/**
+ * The text theme module: the host's theme module, loaded eagerly, exported as
+ * `textTheme` (the first glob match, or `undefined`). Only the editor client
+ * imports it.
+ */
+function textThemeSource(option: PlakboekPluginOptions['textTheme']): string {
+  const patterns =
+    option === undefined
+      ? [DEFAULT_TEXT_THEME_GLOB]
+      : typeof option === 'string'
+        ? [option]
+        : [...option];
+  return [
+    `const modules = import.meta.glob(${JSON.stringify(patterns)}, { eager: true, import: 'default' });`,
+    'export const textTheme = Object.values(modules)[0];',
+  ].join('\n');
+}
+
 export function plakboek(options: PlakboekPluginOptions): Plugin {
   let root = process.cwd();
   let base = '/';
@@ -373,6 +410,9 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
       if (id === BLOCK_EDIT_ID || id === RESOLVED_BLOCK_EDIT_ID) {
         return RESOLVED_BLOCK_EDIT_ID;
       }
+      if (id === TEXT_THEME_ID || id === RESOLVED_TEXT_THEME_ID) {
+        return RESOLVED_TEXT_THEME_ID;
+      }
       if (id === DEV_SWAP_ID || id === RESOLVED_DEV_SWAP_ID) {
         return RESOLVED_DEV_SWAP_ID;
       }
@@ -382,6 +422,9 @@ export function plakboek(options: PlakboekPluginOptions): Plugin {
       if (id === RESOLVED_EDITOR_CLIENT_ID) return editorClientSource();
       if (id === RESOLVED_BLOCK_EDIT_ID)
         return blockEditSource(options.blockEdit);
+      if (id === RESOLVED_TEXT_THEME_ID) {
+        return textThemeSource(options.textTheme);
+      }
       if (id === RESOLVED_DEV_SWAP_ID) {
         return command === 'serve' ? devSwapSource() : 'export {};';
       }

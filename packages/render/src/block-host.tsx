@@ -33,6 +33,10 @@ import type { EditProxy } from './edit-proxy.js';
 import { reportRenderEvent, type RenderHooks } from './hooks.js';
 import { toBlockLayout } from './layout.js';
 import { EDIT_ATTRIBUTE, isLiveEdit } from './live-edit.js';
+import {
+  TextEnvironmentProvider,
+  type TextEnvironment,
+} from './rich-text/environment.js';
 
 /** The node shape both a snapshot block and a live tree node satisfy. */
 export type HostNode<N> = {
@@ -68,6 +72,14 @@ export type HostOptions<N extends HostNode<N>> = {
   readonly isDegraded?: (node: N) => boolean;
   /** Stands in for a block that renders nothing; absent means render nothing. */
   readonly placeholderFor?: (node: N, reason: PlaceholderReason) => ReactNode;
+  /**
+   * The text environment (theme, renderers, resolved page links) every
+   * block's own render sees. Each block is rendered by its own static-markup
+   * call, so a provider outside the recursion never reaches it; the host
+   * wraps each block's output instead. Absent means no provider, and rich
+   * text falls back to the default theme.
+   */
+  readonly text?: TextEnvironment;
 };
 
 type HostContext<N extends HostNode<N>> = HostOptions<N> & {
@@ -194,7 +206,16 @@ function BlockHost<N extends HostNode<N>>({
       Promise.resolve(rendered).catch(() => undefined);
       throw new AsyncBlockComponentError();
     }
-    const html = renderToStaticMarkup(<>{rendered as ReactNode}</>);
+    const output = rendered as ReactNode;
+    const html = renderToStaticMarkup(
+      context.text === undefined ? (
+        <>{output}</>
+      ) : (
+        <TextEnvironmentProvider environment={context.text}>
+          {output}
+        </TextEnvironmentProvider>
+      ),
+    );
     warnMissingBlockIdentity(component, edit, block, html);
     state.rendered.push(html);
     return sentinelFor(state, state.rendered.length - 1);

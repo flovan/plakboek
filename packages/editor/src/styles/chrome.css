@@ -247,7 +247,7 @@
   }
 }
 
-:host {
+:host(plakboek-editor) {
   position: fixed;
   inset: 0;
   z-index: 2147483647;
@@ -255,6 +255,67 @@
   overflow: hidden;
   isolation: isolate;
   background: var(--pk-stage);
+}
+
+/*
+ * The in-frame host (one per framed document, Edit mode only). The layout
+ * rules are important: inside the shadow tree they beat the site's own
+ * important rules. It sits at the document origin, as wide as the document
+ * and as tall as its `<html>` box (the height arrives in a constructed sheet,
+ * so the site document gets no `style` attribute), takes no pointer events
+ * and clips what is drawn past its box, so it never adds scrollable overflow.
+ * `all: initial` resets the inherited and token declarations the generic
+ * `:host` rules gave it; the viewport layer below sets them again.
+ */
+:host(plakboek-chrome) {
+  all: initial !important;
+  display: block !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: var(--pk-chrome-height, 0px) !important;
+  overflow: clip !important;
+  pointer-events: none !important;
+  z-index: 2147483647 !important;
+}
+
+/*
+ * The frame's viewport, fixed inside the host: chrome that must stay in view.
+ * The page layers (the decoration and interaction planes of the overlay) sit
+ * beside it at document coordinates and share its font and colour, which the
+ * host's `all: initial` reset.
+ */
+.pk-chrome-viewport,
+.pk-overlay,
+.pk-overlay-interaction {
+  color-scheme: light dark;
+  font:
+    400 14px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Helvetica,
+    Arial,
+    sans-serif;
+  color: var(--pk-text);
+}
+
+.pk-chrome-viewport {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+:host([data-theme='light']) .pk-chrome-viewport,
+:host([data-theme='light']) .pk-overlay,
+:host([data-theme='light']) .pk-overlay-interaction {
+  color-scheme: light;
+}
+
+:host([data-theme='dark']) .pk-chrome-viewport,
+:host([data-theme='dark']) .pk-overlay,
+:host([data-theme='dark']) .pk-overlay-interaction {
+  color-scheme: dark;
 }
 
 @layer components {
@@ -293,7 +354,6 @@
     border: 1px solid var(--pk-frame-border);
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-    overscroll-behavior: contain;
   }
 
   /*
@@ -491,11 +551,11 @@
 }
 
 /*
- * The hover overlay. A layer of the shell exactly over the frame's content
- * box (its position and size are set from the frame on every update), clipped
- * to it. Inside, a zero-size plane starts at the shell's own origin, so the
- * outline and chip boxes are placed in the shell's coordinates. Nothing in
- * the layer takes part in pointer interaction.
+ * The overlay. A layer of the in-frame chrome host over the whole document
+ * (the host is as tall as the page), so it scrolls with the page natively.
+ * Inside, a zero-size plane starts at the document's origin, so the outline
+ * and chip boxes are placed in the document's coordinates. Nothing in the
+ * decoration layer takes part in pointer interaction.
  *
  * The outline is a 2px border drawn inside the element's border box plus a
  * 1px outline (the halo) around it. Borders and outlines survive forced
@@ -504,13 +564,15 @@
 @layer components {
   .pk-overlay {
     position: absolute;
+    inset: 0;
     z-index: 2;
-    overflow: hidden;
     pointer-events: none;
   }
 
   .pk-overlay-plane {
     position: absolute;
+    top: 0;
+    left: 0;
     width: 0;
     height: 0;
     pointer-events: none;
@@ -551,6 +613,59 @@
     background: var(--pk-overlay-selected-fill);
   }
 
+  /* While a text field is active the tint goes, so the text stays readable. */
+  .pk-overlay-selected[data-field-active] {
+    background: transparent;
+  }
+
+  /*
+   * Text field decoration: a hint chip in an empty field and a dashed boundary
+   * with a halo around the active field. Decoration only; the site's own
+   * elements get nothing.
+   */
+  .pk-field-decor {
+    display: contents;
+  }
+
+  .pk-field-boundary {
+    position: absolute;
+    box-sizing: border-box;
+    pointer-events: none;
+    border: 1px dashed var(--pk-overlay-outline);
+    box-shadow: 0 0 0 2px var(--pk-overlay-halo);
+    forced-color-adjust: none;
+  }
+
+  .pk-field-chip {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid var(--pk-border);
+    border-radius: 4px;
+    background: var(--pk-surface);
+    color: var(--pk-text-muted);
+    font:
+      400 12px/16px system-ui,
+      sans-serif;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  @media (forced-colors: active) {
+    .pk-field-boundary {
+      border-color: Highlight;
+    }
+
+    .pk-field-chip {
+      border-color: CanvasText;
+      background: Canvas;
+      color: CanvasText;
+    }
+  }
+
   @media (forced-colors: active) {
     .pk-overlay-selected {
       border-width: 4px;
@@ -563,15 +678,60 @@
   }
 
   /*
-   * The interaction plane: the same box as the overlay, clipped to the frame,
-   * but part of the accessibility tree and the tab order. The plane itself
-   * takes no pointer events; only what it holds (the toolbar) does.
+   * The interaction plane: the same box as the overlay, but part of the
+   * accessibility tree and the tab order. The plane itself takes no pointer
+   * events; only what it holds (the toolbar) does.
    */
   .pk-overlay-interaction {
     position: absolute;
+    inset: 0;
     z-index: 3;
-    overflow: hidden;
     pointer-events: none;
+  }
+
+  /*
+   * Pinning. A wrapper over an item's box holds a chip, a marker or the
+   * toolbar that must stay inside the visible top while the item's own top
+   * has scrolled out: the child is `position: sticky`, so the browser keeps it
+   * there with no script. The padding is the child's inset from the item and
+   * the child cannot leave the wrapper's content box.
+   */
+  .pk-overlay-pin,
+  .pk-marker-pin,
+  .pk-toolbar-pin[data-pinned] {
+    position: absolute;
+    box-sizing: border-box;
+    pointer-events: none;
+  }
+
+  .pk-overlay-pin,
+  .pk-marker-pin {
+    padding: 4px;
+  }
+
+  .pk-toolbar-pin {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .pk-toolbar-pin[data-pinned] {
+    padding: 8px;
+  }
+
+  .pk-overlay-chip[data-placement='sticky'] {
+    position: sticky;
+    top: 4px;
+    width: max-content;
+    max-width: 100%;
+  }
+
+  .pk-toolbar[data-placement='pinned'] {
+    position: sticky;
+    top: 8px;
+    left: 8px;
   }
 
   .pk-toolbar {
@@ -588,6 +748,47 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
     pointer-events: auto;
     width: max-content;
+  }
+
+  /*
+   * The rows of the text toolbar. With one row they take no box of their own,
+   * so the bar is the 40px single row it always was; with the Custom style row
+   * open the bar is two stacked rows, a hairline between them, and the row
+   * order puts the extra row on the side away from the field.
+   */
+  .pk-toolbar-row {
+    display: contents;
+  }
+
+  /*
+   * Controls keep the width they were measured at: the bar collapses controls
+   * from those widths, so one that shrank to fit would be measured narrower
+   * than it is and undo the collapse that made room.
+   */
+  .pk-toolbar > *,
+  .pk-toolbar-row > * {
+    flex-shrink: 0;
+  }
+
+  .pk-toolbar[data-rows='2'] {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    height: auto;
+    padding: 0;
+  }
+
+  .pk-toolbar[data-rows='2'] .pk-toolbar-row {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 40px;
+    padding: 4px;
+  }
+
+  .pk-toolbar[data-rows='2'] .pk-toolbar-row + .pk-toolbar-row {
+    border-top: 1px solid var(--pk-border);
   }
 
   .pk-toolbar-menu {
@@ -722,7 +923,8 @@
   }
 
   .pk-empty-page {
-    position: absolute;
+    position: fixed;
+    inset: 0;
     box-sizing: border-box;
     display: flex;
     align-items: center;
@@ -759,9 +961,67 @@
     pointer-events: auto;
   }
 
-  /* The needs-input marker: attention colour, white text, a pointer control that selects its block. */
-  .pk-marker {
+  /* The notice for text the theme no longer allows: a popover beside the field. */
+  .pk-unsupported-notice {
     position: absolute;
+    z-index: 1;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 320px;
+    padding: 16px;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+    pointer-events: auto;
+  }
+
+  /*
+   * The link popover: 320px, hung below the selection (above it when there is
+   * more room there). The page list is the one part that scrolls, so the
+   * popover itself is capped by its inline max-height and clips.
+   */
+  .pk-link-popover {
+    position: absolute;
+    z-index: 1;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 320px;
+    padding: 16px;
+    overflow: hidden;
+    border: 1px solid var(--pk-border);
+    border-radius: 8px;
+    background: var(--pk-surface);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.24);
+    pointer-events: auto;
+  }
+
+  @media (forced-colors: active) {
+    .pk-unsupported-notice,
+    .pk-link-popover {
+      border-color: CanvasText;
+      background: Canvas;
+    }
+  }
+
+  /* The needs-input marker: attention colour, white text, a pointer control that selects its block. */
+  .pk-marker-pin {
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+  }
+
+  .pk-marker-pin[data-side='left'] {
+    justify-content: flex-start;
+  }
+
+  .pk-marker {
+    position: sticky;
+    top: 4px;
     box-sizing: border-box;
     display: flex;
     align-items: center;
@@ -785,6 +1045,35 @@
   .pk-marker:focus-visible {
     outline: 2px solid var(--pk-focus-ring);
     outline-offset: 2px;
+  }
+
+  /*
+   * The incomplete-button marker: the needs-input look at the top-right of a
+   * button that lacks a label or a link, and the selection box of the
+   * selected one. Decoration only; it takes no pointer.
+   */
+  .pk-cta-decor {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .pk-cta-marker {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 4px;
+    background: var(--pk-attention-marker);
+    color: var(--pk-overlay-chip-text);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    pointer-events: none;
+    forced-color-adjust: none;
   }
 
   /* While a drag runs or the delete confirmation is open the markers stay drawn and take no pointer. */
@@ -838,6 +1127,12 @@
     max-width: min(400px, calc(100% - 32px));
   }
 
+  /* A status message has no button, so its padding is even; it covers the undo toast. */
+  .pk-toast-message {
+    z-index: 5;
+    padding: 8px 16px;
+  }
+
   /* Shown only while it animates; with reduced motion it has no fill at all. */
   .pk-overlay-flash {
     position: absolute;
@@ -856,6 +1151,13 @@
 
     .pk-overlay-flash {
       display: none;
+    }
+
+    /* A pressed toggle of the text toolbar reads as selected, not by colour alone. */
+    .pk-toolbar [aria-pressed='true'] {
+      background: Highlight;
+      color: HighlightText;
+      forced-color-adjust: none;
     }
   }
 
@@ -910,6 +1212,7 @@
 
   .pk-drag-surface {
     position: absolute;
+    z-index: 3;
     pointer-events: auto;
     cursor: grabbing;
     user-select: none;

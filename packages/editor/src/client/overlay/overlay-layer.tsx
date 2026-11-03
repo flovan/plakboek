@@ -1,18 +1,30 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type ReactElement,
 } from 'react';
 import type { CatalogueEntry } from '../../api-types.js';
 import { EmptyPrompts } from '../../chrome/editing/empty-prompts.js';
+import { FieldBar } from '../../chrome/editing/text/field-bar.js';
+import { ButtonPopover } from '../../chrome/editing/text/button-popover.js';
+import { CtaMarkers } from '../../chrome/editing/text/cta-markers.js';
+import { FieldDecor } from '../../chrome/editing/text/field-decor.js';
+import { SlashMenu } from '../../chrome/editing/text/slash-menu.js';
+import type { PageSearch } from '../../chrome/editing/text/page-picker.js';
+import { TextToolbar } from '../../chrome/editing/text/text-toolbar.js';
+import { UnsupportedNotice } from '../../chrome/editing/text/unsupported-notice.js';
 import { InsertPoints } from '../../chrome/editing/insert-points.js';
 import { NeedsInputMarkers } from '../../chrome/editing/needs-input.js';
 import { Picker } from '../../chrome/editing/picker.js';
 import { Toolbar } from '../../chrome/editing/toolbar.js';
 import { formatString } from '../../chrome/strings.js';
+import type { TextController } from '../text/controller.js';
+import { frameElementOf } from '../chrome-host/shape.js';
 import { rowLabel } from '../session/page-tree.js';
 import { measureSiblingAxis } from '../frame/sibling-axis.js';
 import type { InsertSlot } from '../session/insertion.js';
@@ -26,11 +38,15 @@ import {
   type PickerOpener,
 } from '../session/store.js';
 import { createBoxTracker, type BoxesState } from './boxes.js';
-import { DragDecoration, DragLabel, DragSurface } from './drag-layer.js';
+import {
+  createFieldTracker,
+  type FieldBox,
+  type FieldsWanted,
+} from './field-boxes.js';
+import { DragDecoration } from './drag-layer.js';
 import {
   chipPlacement,
   isVisibleIn,
-  outlineRect,
   type Box,
   type ChipPlacement,
   type Point,
@@ -92,18 +108,235 @@ function wantedIds(state: EditorState): readonly string[] {
   return [...ids];
 }
 
-/** The frame the layer sits over: the one passed, else the one in its own root. */
+/**
+ * The text fields (rich and short) and link fields of the selected block, so their chip,
+ * boundary, bar and notice can be drawn; null when no block with such a field
+ * is selected.
+ */
+function wantedFields(state: EditorState): FieldsWanted | null {
+  const { model, session, selection } = state;
+  if (model === null || session === null || selection.selectedId === null) {
+    return null;
+  }
+  const node = model.get(selection.selectedId);
+  if (node === undefined) return null;
+  const fields =
+    session.catalogue
+      .find((entry) => entry.key === node.type)
+      ?.properties.filter(
+        (property) =>
+          (property.fieldType === 'rich_text' ||
+            property.fieldType === 'short_text' ||
+            property.fieldType === 'link') &&
+          property.constraint === 'none',
+      ) ?? [];
+  if (fields.length === 0) return null;
+  return {
+    blockId: node.id,
+    keys: fields.map((property) => property.key),
+    plain: fields
+      .filter((property) => property.fieldType === 'short_text')
+      .map((property) => property.key),
+    button: fields
+      .filter((property) => property.fieldType === 'link')
+      .map((property) => property.key),
+  };
+}
+
+/** The label and `maxLength` of the property a short text session is in. */
+function plainPropertyOf(
+  state: EditorState,
+  blockId: string,
+  key: string,
+): { readonly label: string; readonly maxLength?: number } | null {
+  const node = state.model?.get(blockId);
+  const property = state.session?.catalogue
+    .find((entry) => entry.key === node?.type)
+    ?.properties.find((item) => item.key === key);
+  if (property === undefined) return null;
+  const options: unknown = property.options;
+  const max: unknown =
+    typeof options === 'object' && options !== null
+      ? Reflect.get(options, 'maxLength')
+      : undefined;
+  return {
+    label: property.label,
+    ...(typeof max === 'number' && Number.isInteger(max) && max >= 1
+      ? { maxLength: max }
+      : {}),
+  };
+}
+
+/**
+ * The compact bar of the short text field being edited, hidden while the
+ * field is fully scrolled out of the frame (the session goes on).
+ */
+function PlainFieldBar(props: {
+  readonly store: EditorStore;
+  readonly textField: NonNullable<EditorState['textField']>;
+  readonly fields: readonly FieldBox[];
+  readonly visible: Box;
+  readonly onDone: () => void;
+}): ReactElement | null {
+  const { store, textField, fields, visible, onDone } = props;
+  const box = fields.find((item) => item.key === textField.key)?.box ?? null;
+  const property = plainPropertyOf(
+    store.getState(),
+    textField.blockId,
+    textField.key,
+  );
+  if (box === null || property === null || !isVisibleIn(box, visible)) {
+    return null;
+  }
+  return (
+    <FieldBar
+      store={store}
+      blockId={textField.blockId}
+      propertyKey={textField.key}
+      label={property.label}
+      {...(property.maxLength === undefined
+        ? {}
+        : { maxLength: property.maxLength })}
+      field={box}
+      visible={visible}
+      onDone={onDone}
+    />
+  );
+}
+
+/**
+ * The toolbar of the rich text field being edited, hidden while the field is
+ * fully scrolled out of the frame (the session goes on).
+ */
+function RichFieldToolbar(props: {
+  readonly store: EditorStore;
+  readonly controller: TextController;
+  readonly textField: NonNullable<EditorState['textField']>;
+  readonly fields: readonly FieldBox[];
+  readonly visible: Box;
+  readonly search: PageSearch | undefined;
+}): ReactElement | null {
+  const { store, controller, textField, fields, visible, search } = props;
+  const box = fields.find((item) => item.key === textField.key)?.box ?? null;
+  const state = store.getState();
+  const node = state.model?.get(textField.blockId);
+  const property = state.session?.catalogue
+    .find((entry) => entry.key === node?.type)
+    ?.properties.find((item) => item.key === textField.key);
+  const theme = property?.textTheme;
+  if (
+    box === null ||
+    property === undefined ||
+    theme === undefined ||
+    !isVisibleIn(box, visible)
+  ) {
+    return null;
+  }
+  return (
+    <TextToolbar
+      // The Custom style toggle lasts for one field session.
+      key={`${textField.blockId}:${textField.key}`}
+      controller={controller}
+      store={store}
+      label={property.label}
+      theme={theme}
+      field={box}
+      visible={visible}
+      {...(search === undefined ? {} : { search })}
+    />
+  );
+}
+
+/**
+ * The Button popover of the button block being edited, hung from its link
+ * field. Nothing is drawn while the field is out of the frame.
+ */
+function BlockButton(props: {
+  readonly store: EditorStore;
+  readonly controller: TextController;
+  readonly textField: NonNullable<EditorState['textField']>;
+  readonly fields: readonly FieldBox[];
+  readonly visible: Box;
+  readonly search: PageSearch | undefined;
+}): ReactElement | null {
+  const { store, controller, textField, fields, visible, search } = props;
+  // A number that changes each time the popover is asked for.
+  const request = useSyncExternalStore(controller.subscribe, () =>
+    controller.buttonRequest(),
+  );
+  const box = fields.find((item) => item.key === textField.key)?.box ?? null;
+  const target = controller.active();
+  if (
+    request === 0 ||
+    box === null ||
+    target === null ||
+    target.kind !== 'button' ||
+    target.blockId !== textField.blockId ||
+    !isVisibleIn(box, visible)
+  ) {
+    return null;
+  }
+  return (
+    <ButtonPopover
+      key={request}
+      mode="block"
+      controller={controller}
+      store={store}
+      target={target}
+      anchor={box}
+      visible={visible}
+      locale={store.getState().session?.locale ?? ''}
+      {...(search === undefined ? {} : { search })}
+    />
+  );
+}
+
+/** The frame the layer sits in: the one passed, else the one its document is shown in. */
 function frameFor(
   layer: HTMLDivElement | null,
   frame: HTMLIFrameElement | null | undefined,
 ): HTMLIFrameElement | null {
-  const root = layer?.getRootNode();
-  const target =
-    frame ??
-    (root instanceof ShadowRoot || root instanceof Document
-      ? root.querySelector('iframe')
-      : null);
-  return target instanceof HTMLIFrameElement ? target : null;
+  return frame ?? frameElementOf(layer);
+}
+
+/**
+ * A label chip. Above or inside its outline it sits at a fixed place; once the
+ * outline's top has scrolled out of the visible part it is drawn
+ * `position: sticky` inside a wrapper over the outline, so it stays 4px below
+ * the visible top as the page scrolls, with no script.
+ */
+function PlacedChip(props: {
+  readonly outline: Box;
+  readonly chip: ChipPlacement;
+  readonly text: string;
+  readonly marker: 'data-overlay-chip' | null;
+}): ReactElement | null {
+  const { outline, chip, text, marker } = props;
+  if (chip.mode === 'hidden') return null;
+  const attributes = marker === null ? {} : { [marker]: '' };
+  if (chip.mode === 'sticky') {
+    return (
+      <div className="pk-overlay-pin" style={boxStyle(outline)}>
+        <div
+          className="pk-overlay-chip"
+          data-placement="sticky"
+          {...attributes}
+        >
+          {text}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div
+      className="pk-overlay-chip"
+      data-placement={chip.mode}
+      style={{ left: chip.left, top: chip.top }}
+      {...attributes}
+    >
+      {text}
+    </div>
+  );
 }
 
 /**
@@ -111,21 +344,22 @@ function frameFor(
  * a label chip, plus the selected item's outline and the scope container's
  * dashed outline, drawn over the framed site.
  *
- * It is a layer of the shell, exactly over the frame's content box and
- * clipped to it, so everything it draws lives in the shell's shadow root and
- * the site's document is never touched. The layer does not take part in
- * pointer or keyboard interaction (`pointer-events: none`, `aria-hidden`);
- * hover is read from the frame by the tracker. Inside the clip, an
- * unclipped plane starts at the shell's origin, so boxes are placed with the
- * shell's own coordinates.
+ * It is rendered (by the shell's React tree, through a portal) into the chrome
+ * host's shadow root inside the framed document, so everything it draws is in
+ * the page's own coordinate space and scrolls with the page natively. Boxes
+ * are the document coordinates the trackers measured; a scroll changes none
+ * of them. The decoration layer does not take part in pointer or keyboard
+ * interaction (`pointer-events: none`, `aria-hidden`); hover is read from the
+ * frame by the tracker.
  *
  * With an editor store the overlay follows the session: it draws only while
  * the page is being edited in Edit mode, the hover outlines what a click would
  * select at the current scope, and the selection comes from the store. Without
  * one it is the plain hover overlay.
  *
- * The frame is looked up in the shadow root the layer sits in, unless one is
- * passed.
+ * The frame is the one the layer's document is shown in, unless one is passed.
+ * The pointer-anchored parts of a drag (the capture surface and the label)
+ * are not here: they stay in the shell (`ShellDragLayer`).
  */
 export function OverlayLayer(props: {
   readonly frame?: HTMLIFrameElement | null;
@@ -147,6 +381,16 @@ export function OverlayLayer(props: {
   readonly onDragStart?: (id: string, origin: Point) => void;
   /** Called when Space or Enter on the drag handle lifts the item. */
   readonly onLiftDrag?: (id: string) => void;
+  /** Called by the unsupported-formatting notice's "Keep as is". */
+  readonly onKeepUnsupported?: () => void;
+  /** Called by the notice's "Remove unsupported formatting". */
+  readonly onRemoveUnsupported?: () => Promise<unknown>;
+  /** Called by Done on a short text field's bar. */
+  readonly onFieldDone?: () => void;
+  /** The text session, for the rich text toolbar's commands. */
+  readonly textController?: TextController;
+  /** Finds pages for the link popover's picker. */
+  readonly onSearchPages?: PageSearch;
 }): ReactElement {
   const {
     frame,
@@ -160,8 +404,19 @@ export function OverlayLayer(props: {
     onPick,
     onDragStart,
     onLiftDrag,
+    onKeepUnsupported,
+    onRemoveUnsupported,
+    onFieldDone,
+    textController,
+    onSearchPages,
   } = props;
   const layer = useRef<HTMLDivElement>(null);
+  const [frameElement, setFrameElement] = useState<HTMLIFrameElement | null>(
+    null,
+  );
+  useLayoutEffect(() => {
+    setFrameElement(frameFor(layer.current, frame));
+  }, [frame]);
   const [state, setState] = useState<HoverState | null>(null);
   const [selection, setSelection] = useState<SelectionState | null>(null);
   const [axis, setAxis] = useState<'horizontal' | 'vertical'>('vertical');
@@ -170,6 +425,10 @@ export function OverlayLayer(props: {
   const selectedId = useEditorStore(
     store ?? NO_STORE,
     (current) => current.selection.selectedId,
+  );
+  const scopeId = useEditorStore(
+    store ?? NO_STORE,
+    (current) => current.selection.scopeId,
   );
   const active = useEditorStore(
     store ?? NO_STORE,
@@ -196,10 +455,10 @@ export function OverlayLayer(props: {
         ? {}
         : {
             resolve: (chain) => {
-              const { model, selection: scope } = store.getState();
+              const { model } = store.getState();
               return model === null
                 ? (chain[0] ?? null)
-                : hoverTarget(model, scope, chain);
+                : hoverTarget(model, chain);
             },
             selection: {
               read: () => store.getState().selection,
@@ -277,31 +536,68 @@ export function OverlayLayer(props: {
     };
   }, [frame, store, active]);
 
+  // The rich text fields of the selected block, for the chip, the boundary and
+  // the notice.
+  const [fields, setFields] = useState<readonly FieldBox[]>([]);
+  const textField = useEditorStore(
+    store ?? NO_STORE,
+    (current) => current.textField,
+  );
+  useEffect(() => {
+    if (!active || store === undefined) {
+      setFields([]);
+      return undefined;
+    }
+    const target = frameFor(layer.current, frame);
+    if (target === null) return undefined;
+    const tracker = createFieldTracker(target, {
+      read: () => wantedFields(store.getState()),
+      onChange: setFields,
+    });
+    let previous = store.getState();
+    const unsubscribe = store.subscribe(() => {
+      const next = store.getState();
+      if (
+        next.selection !== previous.selection ||
+        next.model !== previous.model ||
+        next.textField !== previous.textField
+      ) {
+        tracker.refresh();
+      }
+      previous = next;
+    });
+    return () => {
+      unsubscribe();
+      tracker.dispose();
+    };
+  }, [frame, store, active]);
+  const fieldActive = textField !== null && !textField.unsupported;
+  const plainActive = fieldActive && textField.kind === 'plain';
+  const richActive = fieldActive && textField.kind === 'rich';
+  const buttonActive = fieldActive && textField.kind === 'button';
+  const unsupportedBox =
+    textField !== null && textField.unsupported
+      ? (fields.find((item) => item.key === textField.key)?.box ?? null)
+      : null;
+
   let drawn: {
     readonly outline: Box;
     readonly section: Box | null;
     readonly chip: ChipPlacement;
   } | null = null;
   if (state !== null && !pointerDragging) {
-    const origin = { x: state.frame.left, y: state.frame.top };
-    const outline = outlineRect(state.element, origin);
     drawn = {
-      outline,
-      section:
-        state.section === null ? null : outlineRect(state.section, origin),
-      chip: chipPlacement({ outline, frame: state.frame }),
+      outline: state.element,
+      section: state.section,
+      chip: chipPlacement({ outline: state.element, visible: state.visible }),
     };
   }
-  const frameBox = measured?.frame ?? state?.frame ?? selection?.frame ?? null;
-  const origin =
-    frameBox === null ? null : { x: frameBox.left, y: frameBox.top };
-  const placed = useMemo((): ReadonlyMap<string, Box> => {
-    if (measured === null) return new Map();
-    const at = { x: measured.frame.left, y: measured.frame.top };
-    return new Map(
-      [...measured.boxes].map(([id, box]) => [id, outlineRect(box, at)]),
-    );
-  }, [measured]);
+  // The part of the document the frame showed when the boxes were measured.
+  const visible = measured?.visible ?? state?.visible ?? selection?.visible;
+  const placed: ReadonlyMap<string, Box> = useMemo(
+    () => measured?.boxes ?? new Map(),
+    [measured],
+  );
   // An item fixed to the viewport sits in no gap, so the gaps and the picker ignore it.
   const inFlow = useMemo((): ReadonlyMap<string, Box> => {
     if (measured === null || measured.fixed.length === 0) return placed;
@@ -332,12 +628,15 @@ export function OverlayLayer(props: {
     highlightBox === null ||
     measured === null ||
     highlightModel === null ||
-    !isVisibleIn(highlightBox, measured.frame)
+    !isVisibleIn(highlightBox, measured.visible)
       ? null
       : {
           id: highlight,
           outline: highlightBox,
-          chip: chipPlacement({ outline: highlightBox, frame: measured.frame }),
+          chip: chipPlacement({
+            outline: highlightBox,
+            visible: measured.visible,
+          }),
           text: rowLabel(
             highlightModel,
             new Map(
@@ -360,23 +659,23 @@ export function OverlayLayer(props: {
   const toolbarItem =
     store === undefined ||
     confirming ||
+    // The field's own bar (the compact one for short text, the text toolbar
+    // for rich text) takes the block toolbar's place while a field is typed.
+    fieldActive ||
     pointerDragging ||
     selection === null ||
     selection.selected === null ||
     selectedId === null ||
-    origin === null ||
-    (drag === null &&
-      !isVisibleIn(outlineRect(selection.selected, origin), selection.frame))
+    (drag === null && !isVisibleIn(selection.selected, selection.visible))
       ? null
-      : outlineRect(selection.selected, origin);
+      : selection.selected;
   const dragSource =
     drag === null ||
     drag.subject.id !== selectedId ||
     selection === null ||
-    selection.selected === null ||
-    origin === null
+    selection.selected === null
       ? null
-      : outlineRect(selection.selected, origin);
+      : selection.selected;
 
   return (
     <>
@@ -385,26 +684,37 @@ export function OverlayLayer(props: {
         className="pk-overlay"
         aria-hidden="true"
         data-overlay=""
-        style={frameBox === null ? undefined : boxStyle(frameBox)}
       >
-        {frameBox !== null && origin !== null ? (
-          <div
-            className="pk-overlay-plane"
-            style={{ left: -frameBox.left, top: -frameBox.top }}
-          >
+        {visible === undefined ? null : (
+          <div className="pk-overlay-plane">
             {selection === null || selection.scope === null ? null : (
               <div
                 className="pk-overlay-scope"
-                data-overlay-scope=""
-                style={boxStyle(outlineRect(selection.scope, origin))}
+                data-overlay-scope={scopeId ?? ''}
+                style={boxStyle(selection.scope)}
               />
             )}
             {selection === null || selection.selected === null ? null : (
               <div
                 className="pk-overlay-selected"
-                data-overlay-selected=""
-                style={boxStyle(outlineRect(selection.selected, origin))}
+                data-overlay-selected={selectedId ?? ''}
+                {...(fieldActive ? { 'data-field-active': '' } : {})}
+                style={boxStyle(selection.selected)}
               />
+            )}
+            <FieldDecor
+              fields={fields}
+              activeKey={fieldActive ? (textField?.key ?? null) : null}
+            />
+            {store === undefined ? null : (
+              <>
+                <CtaMarkers
+                  store={store}
+                  controller={textController}
+                  frame={frameElement}
+                  fields={fields}
+                />
+              </>
             )}
             {selection === null ||
             selection.selected === null ||
@@ -414,7 +724,7 @@ export function OverlayLayer(props: {
                 key={flash.token}
                 className="pk-overlay-flash"
                 data-overlay-flash=""
-                style={boxStyle(outlineRect(selection.selected, origin))}
+                style={boxStyle(selection.selected)}
                 onAnimationEnd={() => {
                   store?.clearFlash();
                 }}
@@ -439,16 +749,12 @@ export function OverlayLayer(props: {
                     data-overlay-outline=""
                     style={boxStyle(drawn.outline)}
                   />
-                  {drawn.chip.mode === 'hidden' ? null : (
-                    <div
-                      className="pk-overlay-chip"
-                      data-overlay-chip=""
-                      data-placement={drawn.chip.mode}
-                      style={{ left: drawn.chip.left, top: drawn.chip.top }}
-                    >
-                      {chipText(state)}
-                    </div>
-                  )}
+                  <PlacedChip
+                    outline={drawn.outline}
+                    chip={drawn.chip}
+                    text={chipText(state)}
+                    marker="data-overlay-chip"
+                  />
                 </div>
               </>
             )}
@@ -462,29 +768,23 @@ export function OverlayLayer(props: {
                   className="pk-overlay-outline"
                   style={boxStyle(highlighted.outline)}
                 />
-                {highlighted.chip.mode === 'hidden' ? null : (
-                  <div
-                    className="pk-overlay-chip"
-                    data-placement={highlighted.chip.mode}
-                    style={{
-                      left: highlighted.chip.left,
-                      top: highlighted.chip.top,
-                    }}
-                  >
-                    {highlighted.text}
-                  </div>
-                )}
+                <PlacedChip
+                  outline={highlighted.outline}
+                  chip={highlighted.chip}
+                  text={highlighted.text}
+                  marker={null}
+                />
               </div>
             )}
-            {store === undefined || origin === null ? null : (
+            {store === undefined ? null : (
               <DragDecoration
                 store={store}
-                frame={frameBox}
+                view={frameElement?.contentWindow ?? null}
                 source={dragSource}
               />
             )}
           </div>
-        ) : null}
+        )}
       </div>
       {store === undefined ||
       onMove === undefined ||
@@ -495,22 +795,14 @@ export function OverlayLayer(props: {
       onDismissPicker === undefined ||
       onPick === undefined ||
       !active ||
-      frameBox === null ? null : (
-        <div
-          className="pk-overlay-interaction"
-          data-overlay-interaction=""
-          style={boxStyle(frameBox)}
-        >
-          <div
-            className="pk-overlay-plane"
-            style={{ left: -frameBox.left, top: -frameBox.top }}
-          >
-            <DragSurface store={store} frame={frameBox} />
+      visible === undefined ? null : (
+        <div className="pk-overlay-interaction" data-overlay-interaction="">
+          <div className="pk-overlay-plane">
             {measured === null ? null : (
               <NeedsInputMarkers
                 store={store}
                 boxes={placed}
-                frame={measured.frame}
+                textController={textController}
               />
             )}
             {confirming || measured === null || drag !== null ? null : (
@@ -526,16 +818,61 @@ export function OverlayLayer(props: {
                   store={store}
                   empty={measured.empty}
                   boxes={placed}
-                  frame={measured.frame}
                   onOpen={onOpenPicker}
                 />
               </>
             )}
+            {unsupportedBox === null ||
+            onKeepUnsupported === undefined ||
+            onRemoveUnsupported === undefined ? null : (
+              <UnsupportedNotice
+                key={textField?.blockId}
+                anchor={unsupportedBox}
+                visible={selection?.visible ?? visible}
+                onKeep={onKeepUnsupported}
+                onRemove={onRemoveUnsupported}
+              />
+            )}
+            {plainActive && onFieldDone !== undefined ? (
+              <PlainFieldBar
+                store={store}
+                textField={textField}
+                fields={fields}
+                visible={selection?.visible ?? visible}
+                onDone={onFieldDone}
+              />
+            ) : null}
+            {richActive && textController !== undefined ? (
+              <RichFieldToolbar
+                store={store}
+                controller={textController}
+                textField={textField}
+                fields={fields}
+                visible={selection?.visible ?? visible}
+                search={onSearchPages}
+              />
+            ) : null}
+            {buttonActive && textController !== undefined ? (
+              <BlockButton
+                store={store}
+                controller={textController}
+                textField={textField}
+                fields={fields}
+                visible={selection?.visible ?? visible}
+                search={onSearchPages}
+              />
+            ) : null}
+            {richActive && textController !== undefined ? (
+              <SlashMenu
+                controller={textController}
+                visible={selection?.visible ?? visible}
+              />
+            ) : null}
             {toolbarItem === null ? null : (
               <Toolbar
                 store={store}
                 item={toolbarItem}
-                frame={frameBox}
+                visible={selection?.visible ?? visible}
                 axis={axis}
                 onMove={onMove}
                 onDuplicate={onDuplicate}
@@ -552,8 +889,8 @@ export function OverlayLayer(props: {
                 key={picker.token}
                 store={store}
                 slot={picker.slot}
-                anchor={slotAnchor(picker.slot, inFlow, frameBox)}
-                frame={frameBox}
+                anchor={slotAnchor(picker.slot, inFlow, visible)}
+                visible={visible}
                 onPick={onPick}
                 onClose={onClosePicker}
                 onDismiss={onDismissPicker}
@@ -562,7 +899,6 @@ export function OverlayLayer(props: {
           </div>
         </div>
       )}
-      {store === undefined ? null : <DragLabel store={store} />}
     </>
   );
 }

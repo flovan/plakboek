@@ -6,11 +6,14 @@
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
+  chrome,
+  exposeFrameChrome,
   FRAME,
   framedSite,
   HOST,
   openEditor,
   SELECTED,
+  selectItem,
   waitForShell,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -77,9 +80,8 @@ test.describe('the panel drawer', () => {
     const before = await page.locator(FRAME).boundingBox();
     expect(before?.x).toBeCloseTo(56, 0);
 
-    await target.dblclick();
-    await target.dblclick();
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await selectItem(page, target);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
 
     await railButton(page, 'Properties').click();
     await expect(page.locator(DRAWER)).toBeVisible();
@@ -100,7 +102,7 @@ test.describe('the panel drawer', () => {
     );
 
     // the selection is still on the heading, and its Properties are right here
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
     const text = page.locator(DRAWER).getByRole('textbox', { name: 'Text' });
     await expect(text).toHaveValue('Hello');
     await text.press('End');
@@ -112,7 +114,7 @@ test.describe('the panel drawer', () => {
     const restored = await page.locator(FRAME).boundingBox();
     expect(restored?.x).toBeCloseTo(before?.x ?? 0, 0);
     expect(restored?.width).toBeCloseTo(before?.width ?? 0, 0);
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
     await expect(target).toHaveText('Hello there');
   });
 });
@@ -196,7 +198,7 @@ test.describe('the drawer at the edges', () => {
       (box?.x ?? 0) + (box?.width ?? 0) / 2,
       (box?.y ?? 0) + (box?.height ?? 0) / 2,
     );
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
     await expect(page.locator(DRAWER)).toBeVisible();
 
     await railButton(page, 'Page structure').click();
@@ -229,7 +231,7 @@ test.describe('the drawer at the edges', () => {
     await expect(page.locator(`${DRAWER} [data-page-tree]`)).toBeVisible();
 
     await page.locator(`${DRAWER} [data-tree-row="${id}"]`).click();
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
     await expect(page.locator(DRAWER)).toBeVisible();
     await expect
       .poll(() => frame.evaluate(() => window.scrollY))
@@ -332,8 +334,10 @@ test.describe('the rail tools', () => {
     const redo = railButton(page, 'Redo');
     await expect(undo).toHaveAttribute('aria-disabled', 'true');
 
-    await frame.locator('section.section h2').first().dblclick();
-    await page.getByRole('button', { name: /^Duplicate / }).click();
+    await selectItem(page, frame.locator('section.section h2').first());
+    await chrome(page)
+      .getByRole('button', { name: /^Duplicate / })
+      .click();
     await expect.poll(() => headings(frame)).toEqual(['H1', 'H1']);
     await expect(page.locator(RAIL).getByRole('status')).toHaveText(
       'All changes saved',
@@ -366,6 +370,7 @@ test.describe('a notice in the full-width layout', () => {
       await signIn(tabA, editor);
       await openEditor(tabA, created.path);
       const tabB = await context.newPage();
+      await exposeFrameChrome(tabB);
       await tabB.goto(`${created.path}?_edit=1`);
       await waitForShell(tabB);
       await expect(tabB.locator(HOST)).toHaveAttribute(
@@ -376,15 +381,17 @@ test.describe('a notice in the full-width layout', () => {
 
       // tab A writes first, so tab B's write is refused as stale
       const frameA = await framedSite(tabA);
-      await frameA.locator('section.section h2').nth(1).dblclick();
-      await frameA.locator('section.section h2').nth(1).dblclick();
-      await tabA.getByRole('button', { name: /^Move .* down$/ }).click();
+      await selectItem(tabA, frameA.locator('section.section h2').nth(1));
+      await chrome(tabA)
+        .getByRole('button', { name: /^Move .* down$/ })
+        .click();
       await expect(tabA.getByText('All changes saved')).toBeVisible();
 
       const frameB = await framedSite(tabB);
-      await frameB.locator('section.section h2').nth(1).dblclick();
-      await frameB.locator('section.section h2').nth(1).dblclick();
-      await tabB.getByRole('button', { name: /^Move .* down$/ }).click();
+      await selectItem(tabB, frameB.locator('section.section h2').nth(1));
+      await chrome(tabB)
+        .getByRole('button', { name: /^Move .* down$/ })
+        .click();
 
       const properties = railButton(tabB, 'Properties');
       await expect(properties).toHaveAccessibleName(/new notice/);

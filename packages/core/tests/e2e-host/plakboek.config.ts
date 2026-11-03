@@ -4,20 +4,26 @@ import {
   accordionItem,
   accordionList,
   badge,
+  button,
+  card,
   carousel,
   heading,
   note,
   propsDemo,
+  prose,
   quote,
   section,
   siteForm,
   slide,
   slides,
   spacer,
+  brandProse,
+  bareText,
   tab,
   tabs,
   text,
 } from './blocks.tsx';
+import textTheme from './text-theme.tsx';
 
 export default defineConfig({
   siteName: 'Adversarial fixture',
@@ -33,6 +39,8 @@ export default defineConfig({
   // A host widget the editor has no control for: its property is edited with
   // the standard control of its field type.
   widgets: [{ fieldType: 'short_text', widget: 'colour-wheel' }],
+  // The one theme every rich text property is held to unless it narrows it.
+  textTheme,
   blocks: [
     section,
     heading,
@@ -43,6 +51,9 @@ export default defineConfig({
     spacer,
     siteForm,
     propsDemo,
+    prose,
+    brandProse,
+    bareText,
     quote,
     accordionList,
     accordionItem,
@@ -51,6 +62,8 @@ export default defineConfig({
     slides,
     slide,
     note,
+    card,
+    button,
   ],
   // The constraints the Properties panel has to honour: one property is not
   // shown, one has a fixed value, one offers only two of its three choices.

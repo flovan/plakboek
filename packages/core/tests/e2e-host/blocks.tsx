@@ -1,5 +1,11 @@
 import { defineBlock } from '@plakboek/core';
-import { Columns, type BlockComponent } from '@plakboek/render';
+import {
+  Columns,
+  CtaButton,
+  RichText,
+  type BlockComponent,
+} from '@plakboek/render';
+import textTheme from './text-theme.tsx';
 
 const VARIANTS = ['plain', 'transform', 'filter', 'contain', 'isolation'];
 
@@ -170,6 +176,75 @@ const Slide: BlockComponent<Record<string, never>> = ({ children, edit }) => (
   </div>
 );
 
+/**
+ * A block with one rich text field. The field element is the editor's mount
+ * point, so it holds `<RichText>` directly, with no wrapper of its own.
+ */
+const Prose: BlockComponent<{ body?: unknown }> = ({ props, edit }) => (
+  <div {...edit} className="prose-block">
+    <div {...edit.field('body')} className="prose-flow">
+      <RichText value={props.body} />
+    </div>
+  </div>
+);
+
+/**
+ * A text block like a host that gives an empty text no box: the field is the
+ * block root, with no class and no style, so with no text it renders at no
+ * size and specs can reach a field that has no box of its own.
+ */
+const BareText: BlockComponent<{ body?: unknown }> = ({ props, edit }) => (
+  <div {...edit} {...edit.field('body')}>
+    <RichText value={props.body} />
+  </div>
+);
+
+/**
+ * A prose-like block whose body keeps the theme's palettes but refuses free
+ * values, so a spec can prove no custom input is offered and the server holds
+ * the line (the brand-strict case).
+ */
+const BrandProse: BlockComponent<{ body?: unknown }> = ({ props, edit }) => (
+  <div {...edit} className="prose-block">
+    <div {...edit.field('body')} className="prose-flow">
+      <RichText value={props.body} />
+    </div>
+  </div>
+);
+
+/**
+ * A block with a short title and a rich text caption the host narrows to bold,
+ * italic and link, so a spec can prove the toolbar offers exactly that.
+ */
+const Card: BlockComponent<{ title: string; caption?: unknown }> = ({
+  props,
+  edit,
+}) => (
+  <div {...edit} className="card">
+    <h3 {...edit.field('title')} className="card-title">
+      {props.title}
+    </h3>
+    <div {...edit.field('caption')} className="card-caption">
+      <RichText value={props.caption} />
+    </div>
+  </div>
+);
+
+/**
+ * A standalone button: the same label, link and variant a button typed into a
+ * text has, drawn by the same renderer. The wrapper is the link field, so a
+ * click on it opens the Button popover.
+ */
+const ButtonBlock: BlockComponent<{
+  label?: string;
+  link?: unknown;
+  variant?: string;
+}> = ({ props, edit }) => (
+  <div {...edit} {...edit.field('link')} className="button-block">
+    <CtaButton label={props.label} link={props.link} variant={props.variant} />
+  </div>
+);
+
 /** Renders the same whatever its required note says, so a spec can leave it empty. */
 const Note: BlockComponent<{ note: string }> = ({ edit }) => (
   <div {...edit} className="note" aria-hidden="true" style={{ height: 24 }} />
@@ -305,6 +380,109 @@ export const quote = defineBlock({
     },
   },
   component: Quote,
+});
+
+export const button = defineBlock({
+  key: 'button',
+  editor: { label: 'Button' },
+  schemaVersion: 1,
+  properties: {
+    label: {
+      fieldType: 'short_text',
+      label: 'Label',
+      required: true,
+      options: { maxLength: 80 },
+    },
+    link: {
+      fieldType: 'link',
+      label: 'Link',
+      required: true,
+      options: { labelProperty: 'label', variantProperty: 'variant' },
+    },
+    variant: {
+      fieldType: 'select',
+      label: 'Style',
+      defaultValue: 'primary',
+      options: {
+        // The styles the text theme lists, so the two stay in step.
+        choices: textTheme.theme.ctaVariants.map((entry) => ({
+          value: entry.value,
+          labels: { en: entry.label },
+        })),
+      },
+    },
+  },
+  component: ButtonBlock,
+});
+
+export const prose = defineBlock({
+  key: 'prose',
+  editor: { label: 'Prose' },
+  schemaVersion: 1,
+  properties: {
+    body: { fieldType: 'rich_text', label: 'Body', options: {} },
+  },
+  component: Prose,
+});
+
+export const bareText = defineBlock({
+  key: 'bareText',
+  editor: { label: 'Bare text' },
+  schemaVersion: 1,
+  properties: {
+    body: {
+      fieldType: 'rich_text',
+      label: 'Body',
+      required: true,
+      options: {},
+    },
+  },
+  component: BareText,
+});
+
+export const brandProse = defineBlock({
+  key: 'brandProse',
+  editor: { label: 'Brand locked' },
+  schemaVersion: 1,
+  properties: {
+    body: {
+      fieldType: 'rich_text',
+      label: 'Body',
+      options: { narrow: { allowCustomValues: false } },
+    },
+  },
+  component: BrandProse,
+});
+
+export const card = defineBlock({
+  key: 'card',
+  editor: { label: 'Card' },
+  schemaVersion: 1,
+  properties: {
+    title: {
+      fieldType: 'short_text',
+      label: 'Title',
+      required: true,
+      options: { maxLength: 120 },
+    },
+    // The narrowing example: exactly bold, italic and link.
+    caption: {
+      fieldType: 'rich_text',
+      label: 'Caption',
+      required: true,
+      options: {
+        narrow: {
+          marks: ['bold', 'italic', 'link'],
+          nodes: [],
+          headingLevels: [],
+          colors: false,
+          sizes: false,
+          align: false,
+        },
+      },
+    },
+  },
+  component: Card,
 });
 
 export const accordion = defineBlock({

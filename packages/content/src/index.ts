@@ -115,6 +115,16 @@ export {
   RICH_TEXT_MAX_DEPTH,
 } from './field-types/rich-text.js';
 
+// field-types/text-theme-registry.ts
+export {
+  effectiveTextTheme,
+  getTextTheme,
+  registerTextTheme,
+} from './field-types/text-theme-registry.js';
+
+// field-types/link.ts
+export { LINK_FIELD_TYPE, LINK_FIELD_TYPE_KEY } from './field-types/link.js';
+
 // field-types/url.ts
 export { URL_MAX_LENGTH } from './field-types/url.js';
 

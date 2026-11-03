@@ -77,6 +77,49 @@ is declared in this file and checked when it is evaluated, so a bad
 configuration fails the process at start. A block file imports `defineBlock`
 from the package root, which stays safe for a client bundle.
 
+### The text theme
+
+One global text theme governs every rich text property. Write it once in a
+plain module, `/text-theme.ts` by default, and hand the same module to both
+sides:
+
+```ts
+// text-theme.ts
+import { defineTextTheme } from '@plakboek/render';
+
+export default defineTextTheme({
+  colors: [{ label: 'Accent', token: 'accent' }],
+});
+```
+
+```ts
+// plakboek.config.ts
+import textTheme from './text-theme';
+
+export default defineConfig({ /* ... */ textTheme });
+```
+
+`plakboek.config.ts` is the server's copy: `defineConfig` registers the theme
+before the blocks are defined, so every rich text validation reads it, and
+returns it as `config.textTheme`. The `plakboek()` Vite plugin hands the same
+module to the editor's own chunk through `virtual:plakboek/text-theme`. Its
+`textTheme` option takes another glob or a list of globs, root-relative; the
+first match wins, and with no file the editor uses the default renderers.
+Without a `textTheme` in the config the lean default theme applies. Because
+the module loads in the editor chunk, it may import only `react` and the
+`@plakboek/render` root. A value that is not the result of `defineTextTheme`
+fails the config with `INVALID_TEXT_THEME`.
+
+A rich text property can narrow the theme through its `narrow` option, never
+widen it. A `narrow` that names a mark, node, heading level or call-to-action
+variant the theme lacks, or switches on colours, sizes, alignment or custom
+values the theme does not allow, fails the config with
+`TEXT_THEME_NARROWING_WIDENS`, naming the block, property (a repeater's
+rich text sub-field as `fields.<key>`) and the offending entries.
+
+`defineConfig` also registers the CMS `link` field type, so a block can declare
+`{ fieldType: 'link' }`; a host field type with the key `link` replaces it.
+
 ### Sections and columns
 
 The CMS owns one block, the column, and registers it for every installation
@@ -243,6 +286,17 @@ const Quote: BlockComponent<{ text: string }> = ({ props, edit, layout }) => (
 );
 ```
 
+**Text in blocks.** A `rich_text` property holds formatted text and follows
+the global text theme (see "The text theme" above). Mark the element that shows
+it with `{...edit.field('body')}` and render the value with
+`<RichText value={props.body} />` from `@plakboek/render`, which adds no wrapper
+of its own, so the editor edits it in place. A `short_text` property is marked
+the same way and shows a plain string. A property can narrow the theme with
+`options: { narrow: { marks: ['bold', 'italic', 'link'] } }` and never widen
+it. A button is a `link` property with `options: { labelProperty, variantProperty }`
+naming its sibling label and variant properties, rendered with `CtaButton`. The
+`@plakboek/render` README's "Rich text" section covers the renderers.
+
 **Declare what fills and what starts inside.** `layout: { fill: true }` marks a
 block that can stretch to its column's full height; it applies its own style
 when `layout.fill` is true. `starterChildren` is the content an editor gets
@@ -385,10 +439,10 @@ Server side only.
 
 ### Vite entry: `@plakboek/core/vite`
 
-| Name                    | Kind     | Purpose                                                                 |
-| ----------------------- | -------- | ----------------------------------------------------------------------- |
-| `plakboek`              | function | The Vite plugin that wires the host configuration to the route modules. |
-| `PlakboekPluginOptions` | type     | The plugin's options: `config`, `site` and an optional `edit`.          |
+| Name                    | Kind     | Purpose                                                                                   |
+| ----------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `plakboek`              | function | The Vite plugin that wires the host configuration to the route modules.                   |
+| `PlakboekPluginOptions` | type     | The plugin's options: `config`, `site`, and optional `edit`, `blockEdit` and `textTheme`. |
 
 ### Server entry: `@plakboek/core/server`
 

@@ -120,3 +120,31 @@ export function structureKeyAction(
   if (key === 'ArrowLeft') return { kind: 'climb' };
   return null;
 }
+
+/** Where a Tab press sends focus between the page region and the in-frame chrome. */
+export type RegionTabTarget = 'toolbar' | 'region' | 'after-stage';
+
+export type RegionTabInput = {
+  readonly key: string;
+  readonly shiftKey: boolean;
+  /** Focus is on the page region. */
+  readonly inRegion: boolean;
+  /** Focus is on a control of the in-frame chrome (its toolbar or a prompt). */
+  readonly inToolbar: boolean;
+  /** The in-frame chrome has a control to enter. */
+  readonly hasToolbar: boolean;
+};
+
+/**
+ * The frame leaves the tab order while Edit mode holds its clicks, and the
+ * chrome inside it is not reached by the shell's own Tab walk, so Tab is routed
+ * by hand (UI-SPEC S9): from the page region into the in-frame chrome, back
+ * from it to the region with Shift+Tab, and on out of it to the shell control
+ * that follows the stage with Tab. Null leaves the key to the browser.
+ */
+export function regionTabTarget(input: RegionTabInput): RegionTabTarget | null {
+  if (input.key !== 'Tab') return null;
+  if (input.inRegion && !input.shiftKey && input.hasToolbar) return 'toolbar';
+  if (input.inToolbar) return input.shiftKey ? 'region' : 'after-stage';
+  return null;
+}

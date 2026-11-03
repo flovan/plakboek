@@ -3,9 +3,11 @@
  * editing, clicks claim the framed site's events and select by the scope
  * rules, and the Edit and Interact toggle hands the site back.
  */
-import { expect, test, type Frame, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
+  chrome,
   expectSelectedOver,
+  frameBoxOf,
   framedSite,
   FRAME,
   HOST,
@@ -14,6 +16,7 @@ import {
   openEditor,
   SCOPE,
   SELECTED,
+  selectItem,
   waitForShell,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -31,6 +34,7 @@ const SECTION_A = 'section.section >> nth=0';
 const SECTION_B = 'section.section >> nth=1';
 const COLUMN_A = '[data-pk-kind="column"] >> nth=0';
 const HEADING_A = `${SECTION_A} >> h2`;
+const HEADING_B = `${SECTION_B} >> h2`;
 const ACCORDION = '[data-accordion]';
 const TRIGGER = `${ACCORDION} button`;
 
@@ -52,13 +56,6 @@ async function twoSections(): Promise<EditablePage> {
   });
 }
 
-/** A double-click on the element, twice: section to column, column to block. */
-async function drillTwice(frame: Frame, selector: string): Promise<void> {
-  const target = frame.locator(selector).first();
-  await target.dblclick();
-  await target.dblclick();
-}
-
 function mode(page: Page) {
   return page.locator(`${MODE_GROUP} [role="radio"][aria-checked="true"]`);
 }
@@ -68,7 +65,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe('opening a page for editing', () => {
-  test('a click on the framed site selects the section under the pointer', async ({
+  test('a click on the framed site selects the deepest item under the pointer', async ({
     page,
   }) => {
     const created = await twoSections();
@@ -77,47 +74,114 @@ test.describe('opening a page for editing', () => {
 
     await frame.getByRole('heading', { name: 'Beta heading' }).click();
 
-    await expectSelectedOver(page, frame, SECTION_B);
+    await expectSelectedOver(page, frame, HEADING_B);
+    // the click on a heading's text also starts typing in it, and the
+    // announcement says so
     await expect(page.locator(LIVE_REGION)).toHaveText(
-      'Selected Section, section 2 of 2.',
+      'Editing Text. Press Escape to stop editing.',
     );
   });
 });
 
 test.describe('scoped selection', () => {
-  test('double-click drills from the section to its column to the block, a click in the other section climbs, and an empty area clears', async ({
+  test('a click selects the deepest item, empty column space the column, empty section space the section, and an empty area clears', async ({
     page,
   }) => {
-    const created = await twoSections();
+    const created = await createEditablePage({
+      blocks: [
+        {
+          type: 'section',
+          props: { variant: 'plain' },
+          children: [
+            { type: 'column', children: [heading('Short column')] },
+            {
+              type: 'column',
+              children: [
+                heading('Tall column'),
+                paragraph('Text that makes this column taller.'),
+                paragraph('And more text below it.'),
+              ],
+            },
+          ],
+        },
+        section(heading('Other section')),
+      ],
+    });
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    const headingA = frame.getByRole('heading', { name: 'Alpha heading' });
+    const shortColumn = '[data-plakboek-columns] > [data-pk-block] >> nth=0';
 
-    // a section with one column selects that column, and the section around
-    // it becomes the scope, drawn dashed
-    await headingA.dblclick();
-    await expectSelectedOver(page, frame, COLUMN_A);
-    await expect(page.locator(SCOPE)).toHaveCount(1);
-    const scope = await page.locator(SCOPE).boundingBox();
-    const sectionBox = await frame.locator(SECTION_A).boundingBox();
-    expect(Math.abs((scope?.x ?? 0) - (sectionBox?.x ?? 0))).toBeLessThan(2);
+    // a heading inside a column inside a section is one click away, and the
+    // column around it becomes the scope, drawn dashed
+    await frame.getByRole('heading', { name: 'Short column' }).click();
+    await expectSelectedOver(page, frame, `${SECTION_A} >> h2 >> nth=0`);
+    await expect(chrome(page).locator(SCOPE)).toHaveCount(1);
+    const scope = await chrome(page).locator(SCOPE).boundingBox();
+    const columnBox = await frame.locator(shortColumn).boundingBox();
+    expect(Math.abs((scope?.x ?? 0) - (columnBox?.x ?? 0))).toBeLessThan(2);
     expect(
-      Math.abs((scope?.width ?? 0) - (sectionBox?.width ?? 0)),
+      Math.abs((scope?.width ?? 0) - (columnBox?.width ?? 0)),
     ).toBeLessThan(2);
 
-    await headingA.dblclick();
-    await expectSelectedOver(page, frame, HEADING_A);
+    // below the short column's heading the column itself is under the pointer
+    await frame
+      .locator(shortColumn)
+      .click({ position: { x: 8, y: (columnBox?.height ?? 0) - 8 } });
+    await expectSelectedOver(page, frame, shortColumn);
 
-    // a click outside the scope climbs and selects in the other section
-    await frame.getByRole('heading', { name: 'Beta heading' }).click();
-    await expectSelectedOver(page, frame, SECTION_B);
-    await expect(page.locator(SCOPE)).toHaveCount(0);
+    // the section's own padding holds no column (12px down is below the band
+    // of the insert point above the first section; three quarters across is
+    // clear of the selected column's toolbar and of the line between columns)
+    const sectionBox = await frameBoxOf(frame, SECTION_A);
+    await page.mouse.click(
+      sectionBox.x + sectionBox.width * 0.75,
+      sectionBox.y + 12,
+    );
+    await expectSelectedOver(page, frame, SECTION_A);
+
+    // a click in another section selects its heading directly
+    await frame.getByRole('heading', { name: 'Other section' }).click();
+    await expectSelectedOver(page, frame, `${SECTION_B} >> h2`);
 
     // empty page area (the site's header holds no block) clears the selection
     await frame
       .locator('header.site-header')
       .click({ position: { x: 2, y: 2 } });
-    await expect(page.locator(SELECTED)).toHaveCount(0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
+  });
+
+  test('a click on the selected block outside its text keeps it selected', async ({
+    page,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    // the heading is a text box while it is typed in, so it is found by place
+    const headingA = frame.locator(HEADING_A);
+    await headingA.click();
+    await expectSelectedOver(page, frame, HEADING_A);
+
+    // the far end of the heading's box holds no text
+    const box = await headingA.boundingBox();
+    await headingA.click({
+      position: { x: (box?.width ?? 0) - 8, y: (box?.height ?? 0) / 2 },
+    });
+    await expectSelectedOver(page, frame, HEADING_A);
+  });
+
+  test('a double-click opens nothing, not even on a heading', async ({
+    page,
+  }) => {
+    const created = await twoSections();
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+
+    await frame.getByRole('heading', { name: 'Alpha heading' }).dblclick();
+
+    await expectSelectedOver(page, frame, HEADING_A);
+    await expect(
+      page.locator(`${HOST} [data-properties-sheet][data-open]`),
+    ).toHaveCount(0);
   });
 
   test('Escape climbs one level at a time and clears at a top-level section', async ({
@@ -126,7 +190,7 @@ test.describe('scoped selection', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTwice(frame, HEADING_A);
+    await selectItem(page, frame.locator(HEADING_A).first());
     await expectSelectedOver(page, frame, HEADING_A);
 
     await page.keyboard.press('Escape');
@@ -134,7 +198,7 @@ test.describe('scoped selection', () => {
     await page.keyboard.press('Escape');
     await expectSelectedOver(page, frame, SECTION_A);
     await page.keyboard.press('Escape');
-    await expect(page.locator(SELECTED)).toHaveCount(0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
   });
 });
 
@@ -153,31 +217,31 @@ test.describe('Edit mode claims the site', () => {
       expanded: await frame.locator(TRIGGER).getAttribute('aria-expanded'),
     });
 
-    // the accordion's button selects its section instead of opening
+    // the accordion's button selects the accordion instead of opening
     await frame.locator(TRIGGER).click();
-    await expectSelectedOver(page, frame, SECTION_B);
+    await expectSelectedOver(page, frame, ACCORDION);
     expect(await state()).toMatchObject({ expanded: 'false' });
 
     // a link of the site's header clears the selection (the claim took the
     // click and read it as one on empty page) and does nothing else
-    // The second section is selected, because the first sits right under the
-    // header and its toolbar would cover the links being clicked.
+    // The second section's heading is selected, because the first sits right
+    // under the header and its toolbar would cover the links being clicked.
     for (const control of ['#handled-link', '#hash-link']) {
       await frame.getByRole('heading', { name: 'Beta heading' }).click();
-      await expectSelectedOver(page, frame, SECTION_B);
+      await expectSelectedOver(page, frame, HEADING_B);
       const scrolled = await frame.evaluate(() => window.scrollY);
       await frame.locator(control).click();
-      await expect(page.locator(SELECTED)).toHaveCount(0);
+      await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
       // the hash link would have scrolled the long page to the footer
       expect(await frame.evaluate(() => window.scrollY)).toBe(scrolled);
     }
 
-    // the submit button of a form in the other section selects that section
-    // and the form does not submit
+    // the submit button of a form in the other section selects the form and
+    // the form does not submit
     await frame.getByRole('heading', { name: 'Alpha heading' }).click();
-    await expectSelectedOver(page, frame, SECTION_A);
+    await expectSelectedOver(page, frame, HEADING_A);
     await frame.locator('#site-form-submit').click();
-    await expectSelectedOver(page, frame, SECTION_B);
+    await expectSelectedOver(page, frame, '#site-form');
 
     expect(await state()).toEqual({
       handled: undefined,
@@ -196,14 +260,14 @@ test.describe('Edit and Interact', () => {
     await openEditor(page, created.path);
     const frame = await framedSite(page);
     await expect(mode(page)).toHaveText('Edit');
-    await frame.getByRole('heading', { name: 'Beta heading' }).click();
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await selectItem(page, frame.locator(HEADING_B));
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
 
     // I switches to Interact: nothing is selected, the iframe is in the tab
     // order again and the site behaves as it does for a visitor
     await page.keyboard.press('i');
     await expect(mode(page)).toHaveText('Interact');
-    await expect(page.locator(SELECTED)).toHaveCount(0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
     await expect(page.locator(FRAME)).not.toHaveAttribute('tabindex');
     await expect(page.locator(LIVE_REGION)).toHaveText('Interact mode.');
     await expect(page.locator(`${HOST} [data-tools] p`)).toContainText(
@@ -226,8 +290,7 @@ test.describe('Edit and Interact', () => {
     );
     const panel = frame.getByText('The hidden panel text.');
     await expect(panel).toBeVisible();
-    await panel.dblclick();
-    await panel.dblclick();
+    await selectItem(page, panel);
     await expectSelectedOver(page, frame, ACCORDION);
   });
 
@@ -286,7 +349,7 @@ test.describe('a user who cannot edit', () => {
       'aria-expanded',
       'true',
     );
-    await expect(page.locator(SELECTED)).toHaveCount(0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
   });
 });
 

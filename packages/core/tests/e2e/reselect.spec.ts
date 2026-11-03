@@ -1,18 +1,21 @@
 /**
  * Reaching a block that renders at no size again, in a real browser: an
  * inserted Text with no text is a zero-height paragraph, and the pointer must
- * find it through the box the overlay draws it from, by drilling, by a click
- * at its column's scope, by hover and by its "Needs input" badge.
+ * find it through the box the overlay draws it from, by a click from nothing selected, by a click
+ * beside a selected block, by hover and by its "Needs input" badge.
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
-  boxOf,
+  chrome,
+  chromeBoxOf,
   frameBoxOf,
   framedSite,
   HOST,
   LIVE_REGION,
   openEditor,
   SELECTED,
+  selectedId,
+  selectItem,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
 import {
@@ -24,7 +27,6 @@ import {
 import { signIn } from './helpers/session.ts';
 
 const EMPTY = 'p[data-pk-type="text"]';
-const SELECTED_EMPTY = 'Selected Text, 2 of 3 in Column 1. Needs input.';
 
 /** H1, an empty Text and H2 in one column. */
 async function pageWithEmptyText(): Promise<EditablePage> {
@@ -51,16 +53,30 @@ async function expectGhostBox(
   const paragraph = await frameBoxOf(frame, EMPTY);
   await expect
     .poll(async () => {
-      const outline = await boxOf(page, selector);
+      const outline = await chromeBoxOf(page, selector);
       return [Math.round(outline.y - paragraph.y), Math.round(outline.height)];
     })
     .toEqual([0, 24]);
 }
 
-async function drillTwice(frame: Frame, name: string): Promise<void> {
-  const target = frame.getByRole('heading', { name });
-  await target.dblclick();
-  await target.dblclick();
+async function emptyId(frame: Frame): Promise<string | null> {
+  return await frame.locator(EMPTY).getAttribute('data-pk-block');
+}
+
+/** One click on the empty paragraph also starts typing in it. */
+async function expectTypingInEmpty(page: Page): Promise<void> {
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+  await expect(page.locator(LIVE_REGION)).toHaveText(
+    'Editing Text. Press Escape to stop editing.',
+  );
+}
+
+async function selectHeading(
+  page: Page,
+  frame: Frame,
+  name: string,
+): Promise<void> {
+  await selectItem(page, frame.getByRole('heading', { name }));
 }
 
 test.beforeEach(async ({ page }) => {
@@ -74,25 +90,28 @@ async function open(page: Page): Promise<Frame> {
 }
 
 test.describe('an empty block can be selected again', () => {
-  test('by double-click drilling from nothing selected', async ({ page }) => {
+  test('by one click from nothing selected', async ({ page }) => {
     const frame = await open(page);
     const { x, y } = await ghostPoint(frame);
 
-    await page.mouse.dblclick(x, y);
-    await page.mouse.dblclick(x, y);
+    await page.mouse.click(x, y);
 
-    await expect(page.locator(LIVE_REGION)).toHaveText(SELECTED_EMPTY);
+    await expectTypingInEmpty(page);
+    await page.keyboard.press('Escape');
+    await expect.poll(() => selectedId(page)).toBe(await emptyId(frame));
     await expectGhostBox(page, frame, SELECTED);
   });
 
-  test('by a click when its column is the scope', async ({ page }) => {
+  test('by a click while a block beside it is selected', async ({ page }) => {
     const frame = await open(page);
     const { x, y } = await ghostPoint(frame);
 
-    await drillTwice(frame, 'H1');
+    await selectHeading(page, frame, 'H1');
     await page.mouse.click(x, y);
 
-    await expect(page.locator(LIVE_REGION)).toHaveText(SELECTED_EMPTY);
+    await expectTypingInEmpty(page);
+    await page.keyboard.press('Escape');
+    await expect.poll(() => selectedId(page)).toBe(await emptyId(frame));
   });
 
   test('hover outlines it at its ghost box', async ({ page }) => {
@@ -100,29 +119,29 @@ test.describe('an empty block can be selected again', () => {
     const { x, y } = await ghostPoint(frame);
     const id = await frame.locator(EMPTY).getAttribute('data-pk-block');
 
-    await drillTwice(frame, 'H1');
+    await selectHeading(page, frame, 'H1');
     await page.mouse.move(x, y);
 
     await expectGhostBox(
       page,
       frame,
-      `${HOST} [data-overlay-target="${id}"] [data-overlay-outline]`,
+      `[data-overlay-target="${id}"] [data-overlay-outline]`,
     );
   });
 
-  test('by its Needs input badge, which opens its Properties on the empty control', async ({
+  test('by its Needs input badge, which starts typing in its empty text', async ({
     page,
   }) => {
     const frame = await open(page);
-    const marker = page.locator(`${HOST} [data-marker]`);
+    const marker = chrome(page).locator('[data-marker]');
 
-    await drillTwice(frame, 'H2');
+    await selectHeading(page, frame, 'H2');
     await marker.click();
 
-    await expect(page.locator(LIVE_REGION)).toHaveText(SELECTED_EMPTY);
-    const field = page.getByRole('textbox', { name: 'Text' });
-    await expect(field).toBeFocused();
-    await field.fill('Filled');
+    await expect(page.locator(LIVE_REGION)).toHaveText(
+      'Editing Text. Press Escape to stop editing.',
+    );
+    await page.keyboard.type('Filled');
     await expect(frame.locator(EMPTY)).toHaveText('Filled');
     await expect(marker).toHaveCount(0);
   });

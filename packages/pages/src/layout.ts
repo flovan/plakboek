@@ -298,6 +298,9 @@ export function previewBlockValues(
     readonly blockType: string;
     readonly props: unknown;
     readonly layout: unknown;
+    /** The block's stored props, so an unchanged value gets the same
+     * tolerance a write gives it. */
+    readonly storedProps?: unknown;
   },
 ): PreviewBlockValuesResult {
   let definition: BlockDefinition;
@@ -315,6 +318,7 @@ export function previewBlockValues(
   try {
     props = validateBlockProps(definition, input.props ?? {}, {
       allowMissingRequired: true,
+      storedProps: input.storedProps,
     });
   } catch (error) {
     if (!(error instanceof BlockPropsValidationError)) throw error;

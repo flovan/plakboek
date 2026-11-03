@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isEditableTarget,
   keyAction,
+  regionTabTarget,
   structureKeyAction,
 } from '../../src/client/shell/keys.js';
 
@@ -176,5 +177,72 @@ describe('structureKeyAction', () => {
       ),
     ).toBeNull();
     expect(structureKeyAction(key('ArrowDown'), {}, elsewhere)).toBeNull();
+  });
+});
+
+describe('regionTabTarget', () => {
+  const where = {
+    inRegion: false,
+    inToolbar: false,
+    hasToolbar: true,
+  };
+
+  it('sends Tab from the page region into the chrome when it has a control', () => {
+    expect(
+      regionTabTarget({
+        key: 'Tab',
+        shiftKey: false,
+        ...where,
+        inRegion: true,
+      }),
+    ).toBe('toolbar');
+    expect(
+      regionTabTarget({
+        key: 'Tab',
+        shiftKey: false,
+        ...where,
+        inRegion: true,
+        hasToolbar: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('leaves Shift+Tab on the region to the browser', () => {
+    expect(
+      regionTabTarget({ key: 'Tab', shiftKey: true, ...where, inRegion: true }),
+    ).toBeNull();
+  });
+
+  it('sends Shift+Tab from the toolbar back to the region and Tab on past the stage', () => {
+    expect(
+      regionTabTarget({
+        key: 'Tab',
+        shiftKey: true,
+        ...where,
+        inToolbar: true,
+      }),
+    ).toBe('region');
+    expect(
+      regionTabTarget({
+        key: 'Tab',
+        shiftKey: false,
+        ...where,
+        inToolbar: true,
+      }),
+    ).toBe('after-stage');
+  });
+
+  it('ignores other keys and focus elsewhere', () => {
+    expect(
+      regionTabTarget({
+        key: 'Enter',
+        shiftKey: false,
+        ...where,
+        inRegion: true,
+      }),
+    ).toBeNull();
+    expect(
+      regionTabTarget({ key: 'Tab', shiftKey: false, ...where }),
+    ).toBeNull();
   });
 });

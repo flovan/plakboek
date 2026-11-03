@@ -195,6 +195,70 @@ describe('hitChain with ghost boxes', () => {
     expect(hitChain(doc(cover), 40, 108)).toEqual(['cover']);
   });
 
+  // A section with padding holds a column that ends where the empty block
+  // starts: the block has no size, so it adds nothing to the column and its
+  // ghost box lies in the section's padding below the column.
+  function endOfColumn(): {
+    section: FakeElement;
+    all: FakeElement[];
+    empty: FakeElement;
+  } {
+    const section = element({ id: 'section', height: 400 });
+    const column = element({ id: 'column', parent: section, height: 100 });
+    const heading = element({ id: 'heading', parent: column });
+    const empty = element({
+      id: 'empty',
+      parent: column,
+      left: 10,
+      top: 100,
+      height: 0,
+    });
+    return { section, all: [section, column, heading, empty], empty };
+  }
+
+  it('hits a zero-size block that ends its column from the section padding below it', () => {
+    const { section, all } = endOfColumn();
+    expect(hitChain(documentAt(section, all), 40, 108)).toEqual([
+      'empty',
+      'column',
+      'section',
+    ]);
+  });
+
+  it('hits a zero-size block alone in a zero-size column of a sized section', () => {
+    const section = element({ id: 'section', height: 400 });
+    const column = element({
+      id: 'column',
+      parent: section,
+      left: 10,
+      top: 100,
+      height: 0,
+    });
+    const empty = element({
+      id: 'empty',
+      parent: column,
+      left: 10,
+      top: 100,
+      height: 0,
+    });
+    expect(
+      hitChain(documentAt(section, [section, column, empty]), 40, 108),
+    ).toEqual(['empty', 'column', 'section']);
+  });
+
+  it('ignores a ghost under a sized block that is not its ancestor', () => {
+    const { all } = endOfColumn();
+    const cover = element({ id: 'cover', height: 500 });
+    expect(hitChain(documentAt(cover, all), 40, 108)).toEqual(['cover']);
+  });
+
+  it('ignores a ghost with a block ancestor when nothing is hit strictly, and hits a top-level one', () => {
+    const { all } = endOfColumn();
+    expect(hitChain(documentAt(null, all), 40, 108)).toEqual([]);
+    const top = element({ id: 'top', left: 10, top: 100, height: 0 });
+    expect(hitChain(documentAt(null, [top]), 40, 108)).toEqual(['top']);
+  });
+
   it('picks the deeper ghost, and the later one on a tie', () => {
     const section = element({ id: 'section', height: 400 });
     const column = element({ id: 'column', parent: section, height: 300 });

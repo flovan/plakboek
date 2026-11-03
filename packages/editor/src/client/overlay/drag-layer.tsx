@@ -5,7 +5,8 @@ import {
 } from 'react';
 import type { DragFeedState } from '../drag/feed.js';
 import { useEditorStore, type EditorStore } from '../session/store.js';
-import { outlineRect, type Box } from './geometry.js';
+import { documentBox } from '../chrome-host/coordinates.js';
+import type { Box } from './geometry.js';
 
 function boxStyle(box: Box): CSSProperties {
   return {
@@ -15,6 +16,12 @@ function boxStyle(box: Box): CSSProperties {
     height: box.height,
   };
 }
+
+/** Where a window is scrolled to. */
+type ScrollOffsetSource = {
+  readonly scrollX: number;
+  readonly scrollY: number;
+};
 
 /** What the pointer and the line are now; read by the drag visuals only. */
 function useDragFeed(store: EditorStore): DragFeedState {
@@ -26,25 +33,24 @@ function useDragFeed(store: EditorStore): DragFeedState {
 }
 
 /**
- * What a drag draws in the decoration plane: the dim over the item being moved
- * and the insertion line at the slot the drop would use. Both are in the
- * shell's coordinates; the line comes in the frame's.
+ * What a drag draws in the decoration plane inside the frame document: the dim
+ * over the item being moved and the insertion line at the slot the drop would
+ * use. Both are in the document's coordinates; the line comes in the frame
+ * viewport's and is moved by how far the frame is scrolled.
  */
 export function DragDecoration(props: {
   readonly store: EditorStore;
-  /** The frame's content box in the shell's coordinates. */
-  readonly frame: Box;
-  /** The dragged item's box in the shell's coordinates, none for a new block. */
+  /** The frame's window, for its scroll offset. */
+  readonly view: ScrollOffsetSource | null;
+  /** The dragged item's box in the document's coordinates, none for a new block. */
   readonly source: Box | null;
 }): ReactElement | null {
-  const { store, frame, source } = props;
+  const { store, view, source } = props;
   const dragging = useEditorStore(store, (state) => state.drag !== null);
   const feed = useDragFeed(store);
   if (!dragging) return null;
   const line =
-    feed.line === null
-      ? null
-      : outlineRect(feed.line, { x: frame.left, y: frame.top });
+    feed.line === null || view === null ? null : documentBox(feed.line, view);
   return (
     <>
       {source === null ? null : (
@@ -69,7 +75,8 @@ export function DragDecoration(props: {
 /**
  * The transparent surface over the frame while a pointer drag runs, so every
  * pointer event is the shell's and none depends on the frame boundary. Its
- * cursor says whether a drop here would do anything.
+ * cursor says whether a drop here would do anything. `frame` is the frame's
+ * content box in the shell's coordinates.
  */
 export function DragSurface(props: {
   readonly store: EditorStore;

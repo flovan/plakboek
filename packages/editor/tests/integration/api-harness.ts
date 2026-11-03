@@ -40,6 +40,8 @@ import {
 import {
   ColumnBlock,
   Columns,
+  defineTextTheme,
+  RichText,
   type BlockComponentProps,
 } from '@plakboek/render';
 import { createComponentMap } from '@plakboek/render/server';
@@ -80,6 +82,26 @@ function TextBlock({ edit, props }: BlockComponentProps): ReactElement {
 function QuoteBlock({ edit, props }: BlockComponentProps): ReactElement {
   return createElement('blockquote', { ...edit }, text(props.body));
 }
+
+function ProseBlock({ edit, props }: BlockComponentProps): ReactElement {
+  return createElement(
+    'div',
+    { ...edit },
+    createElement(
+      'div',
+      { ...edit.field('body') },
+      createElement(RichText, { value: props.body }),
+    ),
+  );
+}
+
+/** A host theme whose heading renderer is recognisable in markup. */
+export const apiTextTheme = defineTextTheme({
+  renderers: {
+    heading: ({ level, children }) =>
+      createElement(`h${level}`, { className: `h-${level}` }, children),
+  },
+});
 
 export const apiConfig = definePagesConfig({
   content: defineContentConfig({
@@ -134,6 +156,15 @@ export const apiConfig = definePagesConfig({
           label: 'Body',
           options: { maxLength: 400 },
         },
+      },
+    },
+    {
+      key: 'prose',
+      editor: { label: 'Prose' },
+      schemaVersion: 1,
+      component: ProseBlock,
+      properties: {
+        body: { fieldType: 'rich_text', label: 'Body' },
       },
     },
     {
@@ -373,6 +404,62 @@ export async function createColumnPage(
     sectionId: section.id,
     columnId: column.id,
     headingId: heading.id,
+  };
+}
+
+/** A rich text document holding one level-3 heading. */
+export function headingDoc(text: string): unknown {
+  return {
+    type: 'doc',
+    content: [
+      {
+        type: 'heading',
+        attrs: { level: 3, textAlign: null },
+        content: [{ type: 'text', text }],
+      },
+    ],
+  };
+}
+
+/** Creates a page holding section > column > prose, with an empty body. */
+export async function createProsePage(
+  harness: ApiHarness,
+  input: { readonly title: string },
+): Promise<SeededPage & { readonly proseId: string }> {
+  const { pagesDeps, actor } = harness;
+  const page = await createPage(pagesDeps, actor, {
+    locale: 'en',
+    title: input.title,
+  });
+  const owner = {
+    ownerType: 'page' as const,
+    ownerId: page.id,
+    locale: page.locale,
+  };
+  const section = await insertBlock(pagesDeps, actor, {
+    owner,
+    blockType: 'section',
+    parentBlockId: null,
+    basePageVersion: page.version,
+  });
+  const column = await insertBlock(pagesDeps, actor, {
+    owner,
+    blockType: 'column',
+    parentBlockId: section.id,
+    basePageVersion: page.version + 1,
+  });
+  const prose = await insertBlock(pagesDeps, actor, {
+    owner,
+    blockType: 'prose',
+    parentBlockId: column.id,
+    basePageVersion: page.version + 2,
+  });
+  return {
+    pageId: page.id,
+    sectionId: section.id,
+    columnId: column.id,
+    headingId: prose.id,
+    proseId: prose.id,
   };
 }
 

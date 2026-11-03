@@ -19,7 +19,11 @@ import {
   type AuditRecorder,
 } from '@plakboek/auth';
 import type { CacheInvalidator } from '@plakboek/cache';
-import { defineContentConfig } from '@plakboek/content';
+import {
+  defineContentConfig,
+  LINK_FIELD_TYPE,
+  registerHostFieldType,
+} from '@plakboek/content';
 import { createDb, runMigrations, type Db } from '@plakboek/db';
 import {
   createPermissionResolver,
@@ -37,7 +41,7 @@ import {
   type PagesDeps,
 } from '@plakboek/pages';
 import { createElement } from 'react';
-import type { BlockComponent } from '../../src/index.js';
+import { CtaButton, RichText, type BlockComponent } from '../../src/index.js';
 import type { VisitorHandler } from '../../src/server.js';
 import { createTestDatabase, type TestDatabase } from './test-database.js';
 
@@ -56,9 +60,33 @@ const HeadingBlock: BlockComponent = ({ edit, props }) => {
   return createElement('h2', { ...edit.field('text') }, String(props.text));
 };
 
+const ProseBlock: BlockComponent = ({ edit, props }) =>
+  createElement(
+    'div',
+    { ...edit },
+    createElement('div', { ...edit.field('body') }, [
+      createElement(RichText, { key: 'text', value: props.body }),
+    ]),
+  );
+
+const ButtonBlock: BlockComponent = ({ edit, props }) =>
+  createElement(
+    'div',
+    { ...edit },
+    createElement(CtaButton, {
+      label: props.label,
+      link: props.link,
+      variant: props.variant,
+    }),
+  );
+
 const BoomBlock: BlockComponent = () => {
   throw new Error('boom block failed to render');
 };
+
+// The CMS `link` field type is registered by the core runtime before blocks
+// are declared; do the same here, since `defineBlocks` resolves it eagerly.
+registerHostFieldType([LINK_FIELD_TYPE]);
 
 export const fixtureConfig = definePagesConfig({
   content: defineContentConfig({
@@ -100,6 +128,38 @@ export const fixtureConfig = definePagesConfig({
           label: 'Text',
           required: true,
           options: { maxLength: 120 },
+        },
+      },
+    },
+    {
+      key: 'prose',
+      editor: { label: 'Prose' },
+      schemaVersion: 1,
+      component: ProseBlock,
+      properties: {
+        body: { fieldType: 'rich_text', label: 'Body' },
+      },
+    },
+    {
+      key: 'button',
+      editor: { label: 'Button' },
+      schemaVersion: 1,
+      component: ButtonBlock,
+      properties: {
+        label: {
+          fieldType: 'short_text',
+          label: 'Label',
+          options: { maxLength: 80 },
+        },
+        link: { fieldType: 'link', label: 'Link' },
+        variant: {
+          fieldType: 'select',
+          label: 'Variant',
+          options: {
+            choices: [
+              { value: 'primary', labels: { en: 'Primary', nl: 'Primair' } },
+            ],
+          },
         },
       },
     },
@@ -264,6 +324,74 @@ export async function publishHeadingPage(
     pageVersion: afterPublish?.version ?? -1,
     headingVersion: heading.version,
   };
+}
+
+/** A paragraph of stored rich text whose text runs link to pages by id. */
+export function linkingDoc(
+  links: readonly { readonly text: string; readonly pageId: string }[],
+): unknown {
+  return {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: links.flatMap((link) => [
+          {
+            type: 'text',
+            text: link.text,
+            marks: [
+              {
+                type: 'link',
+                attrs: { href: null, pageId: link.pageId, target: null },
+              },
+            ],
+          },
+          { type: 'text', text: ' ' },
+        ]),
+      },
+    ],
+  };
+}
+
+/** Creates a page holding one block of the given type, then publishes it. */
+export async function publishPageWithBlock(
+  deps: PagesDeps,
+  actor: AuditActor,
+  input: {
+    readonly locale: string;
+    readonly title: string;
+    readonly blockType: string;
+    readonly props: Readonly<Record<string, unknown>>;
+  },
+): Promise<{ readonly pageId: string }> {
+  const page = await createPage(deps, actor, {
+    locale: input.locale,
+    title: input.title,
+  });
+  const owner = {
+    ownerType: 'page' as const,
+    ownerId: page.id,
+    locale: page.locale,
+  };
+  const section = await insertBlock(deps, actor, {
+    owner,
+    blockType: 'section',
+    parentBlockId: null,
+    basePageVersion: page.version,
+  });
+  await insertBlock(deps, actor, {
+    owner,
+    blockType: input.blockType,
+    parentBlockId: section.id,
+    props: input.props,
+    basePageVersion: page.version + 1,
+  });
+  const beforePublish = await getPage(deps.db, page.id);
+  await publishPage(deps, actor, {
+    pageId: page.id,
+    baseVersion: beforePublish?.version ?? -1,
+  });
+  return { pageId: page.id };
 }
 
 /** Sends a request through a visitor handler. */

@@ -1,9 +1,13 @@
 import type { ReactElement } from 'react';
+import { createPortal } from 'react-dom';
 import type { CatalogueEntry } from '../api-types.js';
+import type { ChromeHost } from '../client/chrome-host/host.js';
 import type { Point } from '../client/overlay/geometry.js';
 import { OverlayLayer } from '../client/overlay/overlay-layer.js';
+import { ShellDragLayer } from '../client/overlay/shell-drag-layer.js';
 import type { InsertSlot } from '../client/session/insertion.js';
 import type { MoveDirection } from '../client/session/move-targets.js';
+import type { TextController } from '../client/text/controller.js';
 import {
   NO_STORE,
   useEditorStore,
@@ -21,7 +25,8 @@ import { NoticeSlot } from './editing/notices.js';
 import { PropertiesSheet, SidePanel } from './editing/panel.js';
 import { RailTools } from './editing/rail-tools.js';
 import type { PropertiesPanelProps } from './editing/properties/properties-panel.js';
-import { UndoToast } from './editing/toast.js';
+import type { PageSearch } from './editing/text/page-picker.js';
+import { MessageToast, UndoToast } from './editing/toast.js';
 import { SaveStatusRow, ToolGroup } from './editing/tool-group.js';
 import type { ShellIsland } from './island.js';
 import { Sidebar, type SidebarLayout, type SidebarSlots } from './sidebar.js';
@@ -44,6 +49,10 @@ export type ShellAppProps = {
   readonly layout?: SidebarLayout;
   /** Called by the Full width toggle. */
   readonly onToggleLayout?: () => void;
+  /** The in-frame chrome host the page-anchored overlay is rendered into; none outside Edit mode. */
+  readonly chromeHost?: ChromeHost | null;
+  /** The stage's iframe, which the pointer-anchored parts of a drag measure. */
+  readonly frameElement?: HTMLIFrameElement | null;
   /** The frame holds the render-failure page: the stage shows its panel. */
   readonly frameFailed?: boolean;
   /** Called by the failure panel's Reload page button. */
@@ -94,6 +103,17 @@ export type ShellAppProps = {
     readonly onDragStart?: (id: string, origin: Point) => void;
     /** Called when Space or Enter on the drag handle lifts the item. */
     readonly onLiftDrag?: (id: string) => void;
+    /** Called by the unsupported-formatting notice's buttons. */
+    readonly onKeepUnsupported?: () => void;
+    readonly onRemoveUnsupported?: () => Promise<unknown>;
+    /** Called by Done on a short text field's bar. */
+    readonly onFieldDone?: () => void;
+    /** The text session: the rich text toolbar runs its commands through it. */
+    readonly textController?: TextController;
+    /** Finds pages for the link popover's picker. */
+    readonly onSearchPages?: PageSearch;
+    /** The text session the Properties panel hands over to when a control of the property typed on the page takes focus. */
+    readonly textSession?: PropertiesPanelProps['textSession'];
     /** Called when a Properties control changes a value: render it and queue the save. */
     readonly onPropertiesChange?: PropertiesPanelProps['onPropertiesChange'];
     /** Called when a Properties control loses focus: save the block's edit now. */
@@ -112,9 +132,11 @@ export type ShellAppProps = {
 /**
  * The edit shell: the sidebar and the stage that holds the framed site. It is
  * rendered to markup on the server and hydrated on the client from the same
- * island, so the first client render matches the server's. The hover overlay
- * is mounted only for a user who can edit, and only once the client has
- * hydrated: it reads the frame, which the server cannot.
+ * island, so the first client render matches the server's. The overlay is
+ * rendered, through a portal, into the chrome host inside the framed
+ * document, and only once the client has hydrated and the host exists: it
+ * reads the frame, which the server cannot. What is anchored to the pointer
+ * during a drag stays in the shell.
  */
 export function ShellApp(props: ShellAppProps): ReactElement {
   const {
@@ -123,6 +145,8 @@ export function ShellApp(props: ShellAppProps): ReactElement {
     hydrated,
     layout = 'framed',
     onToggleLayout,
+    chromeHost = null,
+    frameElement = null,
     frameFailed,
     onReload,
     editor,
@@ -176,13 +200,16 @@ export function ShellApp(props: ShellAppProps): ReactElement {
           sheet: (
             <PropertiesSheet
               store={editor.store}
+              chromeHost={chromeHost}
               onPropertiesChange={editor.onPropertiesChange}
               onPropertiesBlur={editor.onPropertiesBlur}
+              textSession={editor.textSession}
               onLayoutChange={editor.onLayoutChange}
               columnAxis={editor.columnAxis}
               onAddColumn={editor.onAddColumn}
               onMoveColumn={editor.onMoveColumn}
               onRemoveColumn={editor.onRemoveColumn}
+              onSearchPages={editor.onSearchPages}
               top={
                 sheetOpen ? (
                   <>
@@ -256,26 +283,40 @@ export function ShellApp(props: ShellAppProps): ReactElement {
         onReload={onReload}
         toast={
           hydrated && editor !== undefined ? (
-            <UndoToast
-              store={editor.store}
-              onUndo={editor.onToastUndo ?? editor.onUndo ?? noop}
-            />
+            <>
+              <UndoToast
+                store={editor.store}
+                onUndo={editor.onToastUndo ?? editor.onUndo ?? noop}
+              />
+              <MessageToast store={editor.store} />
+            </>
           ) : null
         }
       />
-      {hydrated && island.mode === 'edit' ? (
-        <OverlayLayer
-          store={editor?.store}
-          onMove={editor?.onMove}
-          onDuplicate={editor?.onDuplicate}
-          onDelete={editor?.onDelete}
-          onOpenPicker={editor?.onOpenPicker}
-          onClosePicker={editor?.onClosePicker}
-          onDismissPicker={editor?.onDismissPicker}
-          onPick={editor?.onPick}
-          onDragStart={editor?.onDragStart}
-          onLiftDrag={editor?.onLiftDrag}
-        />
+      {hydrated && island.mode === 'edit' && chromeHost !== null
+        ? createPortal(
+            <OverlayLayer
+              store={editor?.store}
+              onMove={editor?.onMove}
+              onDuplicate={editor?.onDuplicate}
+              onDelete={editor?.onDelete}
+              onOpenPicker={editor?.onOpenPicker}
+              onClosePicker={editor?.onClosePicker}
+              onDismissPicker={editor?.onDismissPicker}
+              onPick={editor?.onPick}
+              onDragStart={editor?.onDragStart}
+              onLiftDrag={editor?.onLiftDrag}
+              onKeepUnsupported={editor?.onKeepUnsupported}
+              onRemoveUnsupported={editor?.onRemoveUnsupported}
+              onFieldDone={editor?.onFieldDone}
+              textController={editor?.textController}
+              onSearchPages={editor?.onSearchPages}
+            />,
+            chromeHost.root,
+          )
+        : null}
+      {hydrated && island.mode === 'edit' && editor !== undefined ? (
+        <ShellDragLayer store={editor.store} frame={frameElement} />
       ) : null}
       {hydrated && editor !== undefined ? (
         <>

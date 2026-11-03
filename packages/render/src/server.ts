@@ -22,6 +22,7 @@ export type {
   MissingComponentEvent,
   RenderErrorEvent,
   RenderHooks,
+  RichTextIssueEvent,
   UnknownBlockEvent,
 } from './hooks.js';
 
@@ -51,6 +52,9 @@ export type {
   RenderedFragment,
   RenderedFragments,
 } from './render-fragment.js';
+
+// text-links
+export { collectPageLinkIds } from './text-links.js';
 
 // path
 export { normalizeVisitorPath } from './path.js';

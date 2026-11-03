@@ -21,7 +21,9 @@ import {
 } from '../../../client/session/control-map.js';
 import { formatString, STRINGS } from '../../strings.js';
 import { Field, type FieldLayout } from './field.js';
+import { LinkControl } from './link-control.js';
 import { RepeaterControl } from './repeater-control.js';
+import { RichTextRow } from './rich-text-row.js';
 
 /** Called with the new value (undefined clears it) and whether it applies at once or after a pause. */
 export type ChangeHandler = (value: unknown, immediate: boolean) => void;
@@ -75,7 +77,14 @@ function aria(props: LeafProps): {
 function TextControl(props: LeafProps): ReactElement {
   const { id, fieldKey, descriptor, value, disabled, onChange, onBlur } = props;
   const kind = descriptor.kind;
-  return (
+  const { maxLength } = descriptor.hints;
+  // A short text with a limit says how much of it is used.
+  const counted = kind === 'text' && maxLength !== undefined;
+  const counterId = `${id}-counter`;
+  const describedBy = [props.describedBy, counted ? counterId : undefined]
+    .filter((entry) => entry !== undefined)
+    .join(' ');
+  const input = (
     <input
       id={id}
       data-control={fieldKey}
@@ -83,10 +92,11 @@ function TextControl(props: LeafProps): ReactElement {
       autoComplete="off"
       spellCheck={false}
       value={stringOf(value)}
-      maxLength={descriptor.hints.maxLength}
+      maxLength={maxLength}
       disabled={disabled}
       className={`${INPUT} ${border(props)}`}
       {...aria(props)}
+      aria-describedby={describedBy === '' ? undefined : describedBy}
       onChange={(event) => {
         onChange(
           event.target.value === '' ? undefined : event.target.value,
@@ -95,6 +105,22 @@ function TextControl(props: LeafProps): ReactElement {
       }}
       onBlur={onBlur}
     />
+  );
+  if (!counted) return input;
+  return (
+    <>
+      {input}
+      <p
+        id={counterId}
+        data-text-counter=""
+        className="m-0 mt-1 text-body text-text-muted"
+      >
+        {formatString('text.counter', {
+          count: String(stringOf(value).length),
+          max: String(maxLength),
+        })}
+      </p>
+    </>
   );
 }
 
@@ -467,18 +493,16 @@ function JsonControl(
 /** A property the editor cannot change yet: what it holds and where it will be edited. */
 function NoteControl(props: {
   readonly id: string;
-  readonly kind: 'note-rich-text' | 'note-media' | 'note-entry';
+  readonly kind: 'note-media' | 'note-entry';
   readonly value: unknown;
   readonly attention: boolean;
   readonly describedBy: string | undefined;
 }): ReactElement {
   const { kind } = props;
   const note =
-    kind === 'note-rich-text'
-      ? STRINGS['panel.richTextNote']
-      : kind === 'note-media'
-        ? STRINGS['panel.mediaNote']
-        : STRINGS['panel.entryNote'];
+    kind === 'note-media'
+      ? STRINGS['panel.mediaNote']
+      : STRINGS['panel.entryNote'];
   return (
     <div
       id={props.id}
@@ -488,14 +512,12 @@ function NoteControl(props: {
         props.attention ? 'border-attention' : 'border-border'
       }`}
     >
-      {kind === 'note-rich-text' ? null : (
-        <span
-          data-note-value=""
-          className="font-semibold text-text wrap-anywhere"
-        >
-          {valueSummary(props.value, STRINGS['panel.none'])}
-        </span>
-      )}
+      <span
+        data-note-value=""
+        className="font-semibold text-text wrap-anywhere"
+      >
+        {valueSummary(props.value, STRINGS['panel.none'])}
+      </span>
       <span className="text-text-muted wrap-anywhere">{note}</span>
     </div>
   );
@@ -608,7 +630,11 @@ export function PropertyField(props: PropertyFieldProps): ReactElement {
     onBlur: props.onBlur,
   };
   const group =
-    kind === 'radio' || kind === 'checkbox-group' || kind === 'repeater';
+    kind === 'radio' ||
+    kind === 'checkbox-group' ||
+    kind === 'repeater' ||
+    kind === 'link-target' ||
+    kind === 'rich-text-row';
 
   let control: ReactElement;
   switch (kind) {
@@ -679,7 +705,36 @@ export function PropertyField(props: PropertyFieldProps): ReactElement {
         />
       );
       break;
-    case 'note-rich-text':
+    case 'link-target':
+      control = (
+        <LinkControl
+          id={ids.control}
+          labelId={ids.label}
+          fieldKey={fieldKey}
+          value={value}
+          disabled={disabled}
+          invalid={error !== null}
+          required={required}
+          attention={needsInput}
+          describedBy={describedBy}
+          onChange={props.onChange}
+          onBlur={props.onBlur}
+        />
+      );
+      break;
+    case 'rich-text-row':
+      control = (
+        <RichTextRow
+          id={ids.control}
+          fieldKey={fieldKey}
+          label={label}
+          labelId={ids.label}
+          value={value}
+          attention={needsInput}
+          describedBy={describedBy}
+        />
+      );
+      break;
     case 'note-media':
     case 'note-entry':
       control = (

@@ -1,16 +1,17 @@
 /**
- * The focused Properties mode in a real browser: a double-click on a heading
- * opens its Properties in a sheet over the sidebar, editing updates the page,
+ * The focused Properties mode in a real browser: asking for a heading's
+ * Properties opens them in a sheet over the sidebar, editing updates the page,
  * and Close brings the sidebar back.
  */
 import { expect, test, type Page } from '@playwright/test';
 import {
+  chrome,
   FRAME,
   framedSite,
   HOST,
   MODE_GROUP,
   openEditor,
-  regionFocused,
+  openProperties,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
 import {
@@ -23,13 +24,10 @@ import { signIn } from './helpers/session.ts';
 
 const SHEET = `${HOST} [data-properties-sheet]`;
 
-/** Three double-clicks reach a leaf and ask for its Properties. */
+/** Selects the first heading and opens its Properties. */
 async function openPropertiesOfHeading(page: Page): Promise<void> {
   const frame = await framedSite(page);
-  const target = frame.locator('section.section h2').first();
-  await target.dblclick();
-  await target.dblclick();
-  await target.dblclick();
+  await openProperties(page, frame.locator('section.section h2').first());
 }
 
 async function openPageWithHeading(page: Page): Promise<void> {
@@ -66,7 +64,10 @@ test.describe('the Properties sheet in the framed layout', () => {
     await page.getByRole('button', { name: 'Close properties' }).click();
     await expect(page.locator(SHEET)).not.toHaveAttribute('data-open', '');
     await expect(page.locator(MODE_GROUP)).toBeVisible();
-    await expect.poll(() => regionFocused(page)).toBe(true);
+    // focus goes back to what asked for the sheet: the toolbar's Properties button
+    await expect(
+      chrome(page).getByRole('button', { name: /^Properties of / }),
+    ).toBeFocused();
   });
 });
 
@@ -100,6 +101,11 @@ test.describe('the Properties sheet in the full-width layout', () => {
     await page.keyboard.press('Escape');
     await expect(page.locator(SHEET)).not.toHaveAttribute('data-open', '');
     await expect(drawer).toBeVisible();
+    // focus goes back to the toolbar's Properties button once the sheet is gone;
+    // the next step moves it, so it waits for that to land
+    await expect(
+      chrome(page).getByRole('button', { name: /^Properties of / }),
+    ).toBeFocused();
 
     // Escape inside the drawer closes it once the sheet is out of the way
     await drawer.getByRole('treeitem').first().focus();

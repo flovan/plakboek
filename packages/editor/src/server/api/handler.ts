@@ -14,12 +14,14 @@
 import { needsTwoFactorEnrolment, type Auth } from '@plakboek/auth';
 import { PageLockedError, type PagesDeps } from '@plakboek/pages';
 import type { PermissionResolver } from '@plakboek/permissions';
+import type { TextThemeDefinition } from '@plakboek/render';
 import type { ComponentMap, RenderHooks } from '@plakboek/render/server';
 import { EDITOR_API_BASE, type LockView } from '../../api-types.js';
 import { buildCatalogue } from '../catalogue.js';
 import { buildBlockMeta } from '../frame-document.js';
 import { readEditorIdentity } from '../identity.js';
 import { editPage } from './edit.js';
+import { searchPagesRoute } from './pages-search.js';
 import { previewPage } from './preview.js';
 import {
   apiErrorFor,
@@ -33,6 +35,7 @@ import {
   emptyBody,
   openBody,
   pageIdParam,
+  pageSearchQuery,
   parseWith,
   previewBody,
 } from './schemas.js';
@@ -59,6 +62,9 @@ export type EditorApiDeps = {
    * site. */
   readonly components: ComponentMap;
   readonly hooks?: RenderHooks;
+  /** The host's text theme (`defineTextTheme`): the renderers rich text and
+   * calls to action use in rendered fragments. Defaults to the stock theme. */
+  readonly textTheme?: TextThemeDefinition;
   /** This site's origin; a state-changing request must come from it or from
    * the request's own origin. */
   readonly siteOrigin: string;
@@ -71,10 +77,14 @@ export type EditorApi = {
 
 type Route = {
   readonly method: 'GET' | 'POST';
-  readonly run: (context: ApiContext, body: unknown) => Promise<unknown>;
+  readonly run: (
+    context: ApiContext,
+    body: unknown,
+    query: URLSearchParams,
+  ) => Promise<unknown>;
 };
 
-/** `/pages/<id>/{tree,edit,preview}` and `/pages/<id>/lock[/<action>]`. */
+/** `/pages/search`, `/pages/<id>/{tree,edit,preview}` and `/pages/<id>/lock[/<action>]`. */
 const PAGE_ROUTE =
   /^\/pages\/([^/]+)\/(tree|edit|preview|lock|lock\/acquire|lock\/renew|lock\/release|lock\/take-over)$/;
 
@@ -131,6 +141,16 @@ function routeFor(rest: string): Route | null {
       method: 'POST',
       run: async (context, body) =>
         await openPage(context, parseWith(openBody, body).path),
+    };
+  }
+  if (rest === '/pages/search') {
+    return {
+      method: 'GET',
+      run: async (context, _body, query) =>
+        await searchPagesRoute(
+          context,
+          parseWith(pageSearchQuery, Object.fromEntries(query)),
+        ),
     };
   }
   const match = PAGE_ROUTE.exec(rest);
@@ -199,7 +219,8 @@ export function createEditorApi(deps: EditorApiDeps): EditorApi {
 
         const body =
           route.method === 'POST' ? await readJsonBody(request) : undefined;
-        return jsonResponse(200, await route.run(context, body));
+        const query = new URL(request.url).searchParams;
+        return jsonResponse(200, await route.run(context, body, query));
       } catch (error) {
         let lock: LockView | undefined;
         if (error instanceof PageLockedError && context !== undefined) {

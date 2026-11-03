@@ -16,7 +16,11 @@ import type {
   ContentConfig,
 } from '@plakboek/content';
 import type { DefinedRoles, RoleConfig } from '@plakboek/permissions';
-import type { BlockComponent, DocumentInput } from '@plakboek/render';
+import type {
+  BlockComponent,
+  DocumentInput,
+  TextThemeDefinition,
+} from '@plakboek/render';
 import type { EditorAssets } from '@plakboek/editor/server';
 import type { EditEntrypoint } from '@plakboek/render/server';
 
@@ -90,6 +94,11 @@ export type PlakboekConfigInput = {
   readonly columnPresets?: ColumnPresetsInput;
   readonly seed?: SeedPage | (() => SeedPage);
   readonly hooks?: PagesHooks;
+  /**
+   * The one global text theme, the result of `defineTextTheme(...)`. Without
+   * it the lean default theme and the default renderers apply.
+   */
+  readonly textTheme?: TextThemeDefinition;
 };
 
 /** The frozen, validated configuration `defineConfig` returns. */
@@ -99,6 +108,8 @@ export type PlakboekConfig = {
   readonly pages: PagesConfig;
   readonly roles: DefinedRoles;
   readonly menus: MenuDefinitions;
+  /** The global text theme, resolved and frozen. */
+  readonly textTheme: TextThemeDefinition;
   /** Module names, in the order they were merged. */
   readonly modules: readonly string[];
   readonly seed: SeedPage | null;

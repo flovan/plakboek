@@ -51,6 +51,13 @@ const PUBLIC_VALUES: Readonly<Record<string, ValueKind>> = Object.freeze({
   // field-types/rich-text
   RICH_TEXT_MAX_BYTES: 'constant',
   RICH_TEXT_MAX_DEPTH: 'constant',
+  // field-types/text-theme-registry
+  registerTextTheme: 'function',
+  getTextTheme: 'function',
+  effectiveTextTheme: 'function',
+  // field-types/link
+  LINK_FIELD_TYPE: 'constant',
+  LINK_FIELD_TYPE_KEY: 'constant',
   // field-types/url
   URL_MAX_LENGTH: 'constant',
   // field-types/json
@@ -552,8 +559,12 @@ function documentedExports(): Documented[] {
   const start = lines.findIndex((line) => line.trim() === '## Public API');
   if (start === -1) return [];
   const rest = lines.slice(start + 1);
+  // The rich-text subpath documents its own exports in a subsection of its
+  // own; they are not exports of the entry point.
   const end = rest.findIndex(
-    (line) => line.startsWith('## ') && !line.startsWith('### '),
+    (line) =>
+      (line.startsWith('## ') && !line.startsWith('### ')) ||
+      line.startsWith('### Rich text entry'),
   );
   const section = end === -1 ? rest : rest.slice(0, end);
   return section.flatMap((line) => {

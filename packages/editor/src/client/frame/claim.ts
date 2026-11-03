@@ -16,6 +16,9 @@
  *
  * The shell's link-follow listener runs in the bubble phase and never sees a
  * claimed click, so a link in Edit mode selects its block and goes nowhere.
+ * A double-click is claimed too and does nothing: Properties open from the
+ * toolbar, the Page structure or the needs-input marker, never from the frame.
+ *
  * Detaching removes every listener with the options it was added with, which
  * gives the site its own behaviour back exactly.
  */
@@ -39,8 +42,6 @@ export const CLAIMED_EVENTS = [
 export type ClaimHandlers = {
   /** A click, in the frame's own coordinates. */
   readonly onClick: (x: number, y: number) => void;
-  /** A double-click, in the frame's own coordinates. */
-  readonly onDoubleClick: (x: number, y: number) => void;
 };
 
 /** Duck-typed so an event from the frame's realm needs no `instanceof`. */
@@ -53,23 +54,32 @@ function pointerPosition(event: Event): { x: number; y: number } {
   };
 }
 
+export type ClaimOptions = {
+  /**
+   * Events the claim leaves alone: no default cancelled, no propagation
+   * stopped, no handler called. Chrome drawn inside the frame document takes
+   * its own clicks and keys; its closed shadow root retargets an event to the
+   * host element at the window, so the check is `event.target === host`.
+   */
+  readonly isExempt?: (event: Event) => boolean;
+};
+
 /**
  * Claims the events on `frameWindow`. Returns the function that releases them.
  */
 export function attachClaim(
   frameWindow: Window,
   handlers: ClaimHandlers,
+  options: ClaimOptions = {},
 ): () => void {
   const listener = (event: Event): void => {
+    if (options.isExempt?.(event) === true) return;
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
     if (event.type === 'click') {
       const { x, y } = pointerPosition(event);
       handlers.onClick(x, y);
-    } else if (event.type === 'dblclick') {
-      const { x, y } = pointerPosition(event);
-      handlers.onDoubleClick(x, y);
     }
   };
   for (const type of CLAIMED_EVENTS) {

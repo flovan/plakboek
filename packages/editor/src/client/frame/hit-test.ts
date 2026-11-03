@@ -9,8 +9,10 @@
  * A block that renders at no size (a new Text with no text) is outlined and
  * flagged from a ghost box, so it is pointed at through that same box: the
  * 24px square from its own top-left corner, each zero dimension widened. It
- * is only hit where the strict chain holds its parent block, so a sized block
- * painted over the spot keeps the click.
+ * is only hit where the innermost strictly hit block is one of its ancestors
+ * (a block that ends its column sits in the padding below the column, so its
+ * parent is not hit strictly), so a sized block painted over the spot keeps
+ * the click.
  */
 import { EDIT_ATTRIBUTE } from '@plakboek/render';
 import { GHOST_SIZE } from '../overlay/boxes.js';
@@ -92,7 +94,17 @@ function inGhostBox(rect: DOMRect, x: number, y: number): boolean {
   );
 }
 
-/** The deepest zero-size block whose ghost box holds the point and whose parent block is hit strictly. */
+/** Whether `ancestor` is one of the blocks above `element`. */
+function isBlockAncestor(element: Element, ancestor: Element): boolean {
+  let current = parentBlockOf(element);
+  while (current !== null) {
+    if (current === ancestor) return true;
+    current = parentBlockOf(current);
+  }
+  return false;
+}
+
+/** The deepest zero-size block whose ghost box holds the point and whose block ancestors include the innermost block hit strictly. */
 function ghostAt(
   frameDocument: Document,
   strict: readonly Element[],
@@ -108,9 +120,11 @@ function ghostAt(
     if (!inGhostBox(rect, x, y)) continue;
     if (element.getClientRects().length === 0) continue;
     if (displayOf(element, frameDocument) === 'contents') continue;
-    const parent = parentBlockOf(element);
+    const innermost = strict[0];
     const held =
-      parent === null ? strict.length === 0 : strict.includes(parent);
+      innermost === undefined
+        ? parentBlockOf(element) === null
+        : isBlockAncestor(element, innermost);
     if (!held) continue;
     const depth = depthOf(element);
     if (depth >= bestDepth) {

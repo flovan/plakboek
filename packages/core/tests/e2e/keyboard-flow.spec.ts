@@ -8,6 +8,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import {
+  chrome,
   framedSite,
   HOST,
   LIVE_REGION,
@@ -17,16 +18,20 @@ import {
   tabToRegion,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
-import { createEditablePage } from './helpers/pages.ts';
+import {
+  createEditablePage,
+  readBlockProps,
+  section,
+} from './helpers/pages.ts';
 import { signIn } from './helpers/session.ts';
 
 const SAVED = 'All changes saved';
-const HANDLE = `${HOST} [data-drag-handle]`;
+const HANDLE = '[data-drag-handle]';
 
-/** Presses Tab until `selector` (in the shell) holds focus. */
+/** Presses Tab until `selector` (in the chrome) holds focus. */
 async function tabUntilFocused(page: Page, selector: string): Promise<void> {
   const focused = () =>
-    page
+    chrome(page)
       .locator(selector)
       .first()
       .evaluate(
@@ -57,26 +62,25 @@ test('the whole structure flow is done with the keyboard alone, and the page tha
             `${element.tagName.toLowerCase()}:${element.textContent}`,
         ),
       );
-  const picker = page.getByRole('dialog', { name: 'Add a block' });
+  const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
 
   // a section, from the empty page's own prompt
-  await tabUntilFocused(page, `${HOST} [data-empty-page] button`);
+  await tabUntilFocused(page, '[data-empty-page] button');
   await page.keyboard.press('Enter');
   await expect(frame.locator('section.section')).toHaveCount(1);
 
   // its column is empty and offers a prompt, which opens the picker
-  await tabUntilFocused(page, `${HOST} [data-empty-add]`);
+  await tabUntilFocused(page, '[data-empty-add]');
   await page.keyboard.press('Enter');
   await expect(picker).toBeVisible();
   await page.keyboard.type('head');
   await page.keyboard.press('Enter');
   await expect(frame.locator('section.section h2')).toHaveCount(1);
 
-  // the new heading needs its text: Properties opens on it
-  const control = page.getByRole('textbox', { name: 'Text' });
-  await expect(control).toBeFocused();
+  // the new heading needs its text: it is typed on the page at once, and Escape ends it
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
   await page.keyboard.type('Keyboard title');
-  await page.keyboard.press('Tab');
+  await page.keyboard.press('Escape');
   await expect(frame.locator('section.section h2')).toHaveText(
     'Keyboard title',
   );
@@ -88,9 +92,9 @@ test('the whole structure flow is done with the keyboard alone, and the page tha
   await expect(picker).toBeVisible();
   await page.keyboard.type('tex');
   await page.keyboard.press('Enter');
-  await expect(control).toBeFocused();
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
   await page.keyboard.type('Keyboard body');
-  await page.keyboard.press('Tab');
+  await page.keyboard.press('Escape');
   await expect.poll(order).toEqual(['h2:Keyboard title', 'p:Keyboard body']);
 
   // Alt+ArrowUp lifts the text over the heading
@@ -109,10 +113,20 @@ test('the whole structure flow is done with the keyboard alone, and the page tha
   // climb to the column, drill back in to the heading, step on to the text
   await tabToRegion(page);
   await page.keyboard.press('ArrowLeft');
-  await expect(page.locator(SELECTED)).toHaveCount(1);
+  await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowDown');
   await expect(page.locator(LIVE_REGION)).toContainText('Selected Text');
+
+  // Tab leaves the page region for the toolbar in the frame, Shift+Tab returns
+  expect(await regionFocused(page)).toBe(true);
+  await page.keyboard.press('Tab');
+  expect(await regionFocused(page)).toBe(false);
+  await expect(
+    chrome(page).locator('[data-toolbar] [tabindex="0"]'),
+  ).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  expect(await regionFocused(page)).toBe(true);
 
   // a copy, then its removal, undone and redone
   await page.keyboard.press('ControlOrMeta+D');
@@ -131,4 +145,69 @@ test('the whole structure flow is done with the keyboard alone, and the page tha
   await expect(
     reloaded.locator('section.section h2, section.section p'),
   ).toHaveText(['Keyboard title', 'Keyboard body']);
+});
+
+test('formatting text is done with the keyboard alone: into the field, to the toolbar, Bold, back to the field and to the block, and it is saved bold', async ({
+  page,
+}) => {
+  await signIn(page, e2eUsers().editor);
+  const created = await createEditablePage({
+    blocks: [
+      section({
+        type: 'prose',
+        props: {
+          body: {
+            type: 'doc',
+            content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'Words' }] },
+            ],
+          },
+        },
+      }),
+    ],
+  });
+  await openEditor(page, created.path);
+  const frame = await framedSite(page);
+  const field = frame.locator('.prose-flow').first();
+
+  // arrows select the section, its column and the block; Enter goes into the text
+  await tabToRegion(page);
+  for (let drills = 0; drills < 3; drills += 1) {
+    await page.keyboard.press('ArrowRight');
+  }
+  await expect(page.locator(LIVE_REGION)).toContainText('Selected Prose');
+  await page.keyboard.press('Enter');
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+  await expect(field).toBeFocused();
+  await page.keyboard.type(' more');
+  await page.keyboard.press('ControlOrMeta+a');
+
+  // Alt+F10 reaches the toolbar; the arrows move to Bold and Enter applies it
+  const toolbar = chrome(page).locator('[data-toolbar]');
+  await page.keyboard.press('Alt+F10');
+  await expect(
+    toolbar.getByRole('button', { name: /^Text style, / }),
+  ).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  const bold = toolbar.getByRole('button', { name: 'Bold' });
+  await expect(bold).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(bold).toHaveAttribute('aria-pressed', 'true');
+
+  // Escape returns to the field, Escape again to the block
+  await page.keyboard.press('Escape');
+  await expect(field).toBeFocused();
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+  await page.keyboard.press('Escape');
+  await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+  await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
+  await expect
+    .poll(async () =>
+      JSON.stringify((await readBlockProps(created.pageId, 'prose'))['body']),
+    )
+    .toContain('"bold"');
+
+  await page.reload();
+  const reloaded = await framedSite(page);
+  await expect(reloaded.locator('.prose-flow strong')).toHaveText('Words more');
 });

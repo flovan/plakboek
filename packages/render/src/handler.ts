@@ -12,9 +12,10 @@
  * Without a cache nothing is stored (D-17).
  */
 import { createHash } from 'node:crypto';
-import type { CacheBackend, CacheEntry } from '@plakboek/cache';
+import { pageTag, type CacheBackend, type CacheEntry } from '@plakboek/cache';
 import {
   DEFAULT_HOME_SLUG,
+  resolvePageLinkPaths,
   resolveVisitorPage,
   type PagesConfig,
   type PagesDeps,
@@ -36,7 +37,13 @@ import { reportRenderEvent, type RenderHooks } from './hooks.js';
 import { MAX_VISITOR_PATH_LENGTH, normalizeVisitorPath } from './path.js';
 import { renderPageSnapshot } from './render-snapshot.js';
 import type { BlockMeta } from './render-tree.js';
+import type { TextThemeDefinition } from './rich-text/define-text-theme.js';
+import {
+  createTextEnvironment,
+  type TextEnvironment,
+} from './rich-text/environment.js';
 import { createSingleFlight } from './single-flight.js';
+import { collectPageLinkIds } from './text-links.js';
 
 export type VisitorHandler = (request: Request) => Promise<Response>;
 
@@ -53,6 +60,12 @@ export type VisitorHandlerDeps = {
   /** The installation's absolute origin, used for canonical URLs. */
   readonly siteUrl?: string;
   readonly resolveAssetUrl?: (assetId: string) => string | null;
+  /**
+   * The installation's text theme (`defineTextTheme`): the renderers every
+   * block's rich text and call to action use on a visitor page. Defaults to
+   * the stock theme.
+   */
+  readonly textTheme?: TextThemeDefinition;
   /**
    * The not-found page. Its body and headers are served, but the status is
    * forced to 404 and `Cache-Control` to `no-store`, so a host page can never
@@ -351,6 +364,9 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
   const renderDocument = deps.renderDocument ?? renderDefaultDocument;
   const homeSlug = deps.homeSlug ?? DEFAULT_HOME_SLUG;
   const components = createComponentMap(config.blocks, hooks);
+  const blockDefinitions = new Map(
+    config.blocks.map((block) => [block.key, block] as const),
+  );
   const blockMeta =
     deps.devBlockMarkers === true &&
     cache === undefined &&
@@ -376,6 +392,39 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
       });
       return undefined;
     }
+  }
+
+  /**
+   * The text environment of one visitor render. Every page id a block holds
+   * is resolved in one batch before the synchronous render, and only when
+   * there is one; a page that is not live resolves to nothing, so its link
+   * renders as plain text instead of exposing an unpublished address. The
+   * page ids come back too: the cached page depends on each of them, so a
+   * change to a linked page has to purge it.
+   */
+  async function visitorTextEnvironment(
+    blocks: Parameters<typeof collectPageLinkIds>[0],
+  ): Promise<{
+    readonly environment: TextEnvironment;
+    readonly pageIds: readonly string[];
+  }> {
+    const pageIds = collectPageLinkIds(blocks, blockDefinitions);
+    const paths =
+      pageIds.length === 0
+        ? new Map<string, string>()
+        : await resolvePageLinkPaths(db, {
+            pageIds,
+            defaultLocale: config.content.defaultLocale,
+            homeSlug,
+            liveOnly: true,
+          });
+    const environment = createTextEnvironment({
+      ...(deps.textTheme === undefined ? {} : { definition: deps.textTheme }),
+      mode: 'visitor',
+      resolvePage: (id) => paths.get(id) ?? null,
+      hooks,
+    });
+    return { environment, pageIds };
   }
 
   /** Resolves, renders and (with a cache) stores one canonical path. */
@@ -416,6 +465,8 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
 
       const { view } = resolution;
       seen.pageId = view.page.id;
+      const { environment: text, pageIds: linkedPageIds } =
+        await visitorTextEnvironment(view.publication.snapshot.blocks);
       const rendered = renderPageSnapshot({
         view,
         publicPath: key,
@@ -423,6 +474,7 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
         hooks,
         siteUrl,
         resolveAssetUrl,
+        text,
         ...(blockMeta === undefined ? {} : { blockMeta }),
       });
       // The one script a visitor page carries is part of the cached bytes.
@@ -445,7 +497,10 @@ export function createVisitorHandler(deps: VisitorHandlerDeps): VisitorHandler {
       // fill that raced a purge refuse itself.
       if (cache !== undefined && ticket !== undefined && !rendered.degraded) {
         await guarded('set', key, () =>
-          cache.set(key, entry, { tags: rendered.tags, ticket }),
+          cache.set(key, entry, {
+            tags: [...rendered.tags, ...linkedPageIds.map(pageTag)],
+            ticket,
+          }),
         );
       }
       return pageOutcome(

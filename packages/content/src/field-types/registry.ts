@@ -56,6 +56,11 @@ export type FieldTypeDefinition<O = unknown> = {
   readonly fieldType: FieldType;
   readonly optionsSchema: z.ZodType<O>;
   buildValueSchema(options: O): z.ZodType;
+  /** The schema an unchanged stored value is held to on a working-tree
+   * write: shape and size only, never a rule that can change after the value
+   * was written (such as a narrowed text theme). Absent when the value schema
+   * is already that. */
+  buildStoredValueSchema?(options: O): z.ZodType;
   isEmptyValue(value: unknown): boolean;
   readonly widgets: readonly [string, ...string[]];
   readonly defaultWidget: string;
@@ -73,6 +78,11 @@ export type HostFieldTypeDefinition<O = unknown> = {
   readonly fieldType: string;
   readonly optionsSchema: z.ZodType<O>;
   buildValueSchema(options: O): z.ZodType;
+  /** The schema an unchanged stored value is held to on a working-tree
+   * write: shape and size only, never a rule that can change after the value
+   * was written (such as a narrowed text theme). Absent when the value schema
+   * is already that. */
+  buildStoredValueSchema?(options: O): z.ZodType;
   isEmptyValue(value: unknown): boolean;
   readonly widgets: readonly [string, ...string[]];
   readonly defaultWidget: string;

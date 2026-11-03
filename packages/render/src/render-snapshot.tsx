@@ -23,6 +23,7 @@ import { renderBlocks } from './block-host.js';
 import type { ComponentMap } from './components.js';
 import { buildPageHead, type PageHead } from './head.js';
 import type { RenderHooks } from './hooks.js';
+import type { TextEnvironment } from './rich-text/environment.js';
 import { liveEditFor, type BlockMeta } from './render-tree.js';
 
 export type RenderPageSnapshotInput = {
@@ -38,6 +39,8 @@ export type RenderPageSnapshotInput = {
    * markers. Left out, the output is the visitor markup.
    */
   readonly blockMeta?: ReadonlyMap<string, BlockMeta>;
+  /** The text environment every block's rich text renders under. */
+  readonly text?: TextEnvironment;
 };
 
 export type RenderedPage = {
@@ -70,6 +73,7 @@ export function renderPageSnapshot(
     hooks,
     pageId,
     editFor: (node) => liveProxy?.(node) ?? NOOP_EDIT,
+    ...(input.text === undefined ? {} : { text: input.text }),
   });
   return {
     head,

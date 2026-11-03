@@ -38,6 +38,7 @@ import type { EditEntrypointDeps } from './entrypoint.js';
 import { buildCmsDocument, frameHeaders } from './html-document.js';
 import type { EditorIdentity } from './identity.js';
 import { editLocation, pathOf } from './locations.js';
+import { textEnvironmentFor } from './text-environment.js';
 
 export { FRAME_ERROR_MARKER };
 
@@ -173,6 +174,13 @@ export async function renderFrameDocument(
     }
     const key = normalized.path;
     const { config, homeSlug, hooks: pagesHooks } = deps.pages;
+    const textInput = {
+      db: deps.db,
+      config,
+      homeSlug,
+      textTheme: deps.textTheme,
+      hooks: deps.hooks,
+    };
     const resolveInput = {
       publicPath: key,
       locales: config.content.locales,
@@ -213,6 +221,15 @@ export async function renderFrameDocument(
       }
       publicPath = resolution.publicPath;
       pageId = resolution.page.id;
+      // The live frame renders rich text for editing (incomplete calls to
+      // action stay visible for their markers); a drafts reader's plain
+      // markup is the visitor's, links to unpublished pages included.
+      const text = await textEnvironmentFor({
+        ...textInput,
+        blocks: resolution.blocks,
+        mode: identity.canEdit ? 'edit' : 'visitor',
+        liveOnly: false,
+      });
       rendered = renderPageTree({
         ...common,
         page: resolution.page,
@@ -220,6 +237,7 @@ export async function renderFrameDocument(
         publicPath,
         blockMeta,
         mode: identity.canEdit ? 'live' : 'plain',
+        text,
       });
     } else {
       const resolution = await resolveVisitorPage(deps.db, resolveInput);
@@ -242,10 +260,17 @@ export async function renderFrameDocument(
       }
       publicPath = resolution.publicPath;
       pageId = resolution.view.page.id;
+      const text = await textEnvironmentFor({
+        ...textInput,
+        blocks: resolution.view.publication.snapshot.blocks,
+        mode: 'visitor',
+        liveOnly: true,
+      });
       rendered = renderPageSnapshot({
         ...common,
         view: resolution.view,
         publicPath,
+        text,
       });
     }
 

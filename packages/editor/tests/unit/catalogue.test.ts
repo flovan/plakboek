@@ -3,7 +3,12 @@
  * hides never appears, what it fixes or narrows carries its constraint, and a
  * column entry has a kind and no properties.
  */
-import { defineContentConfig } from '@plakboek/content';
+import {
+  defineContentConfig,
+  getTextTheme,
+  registerTextTheme,
+} from '@plakboek/content';
+import { resolveTextTheme } from '@plakboek/content/rich-text';
 import {
   constrainBlock,
   defineBlocks,
@@ -19,6 +24,12 @@ const choices = {
     { value: 'xl', labels: { en: 'Extra large' } },
   ],
 };
+
+// The installation's theme, registered before the catalogue is built as the
+// core runtime does when it loads the host's config.
+registerTextTheme(
+  resolveTextTheme({ marks: ['bold', 'italic', 'underline', 'link'] }),
+);
 
 const config = definePagesConfig({
   content: defineContentConfig({
@@ -64,6 +75,20 @@ const config = definePagesConfig({
         size: { fieldType: 'select', label: 'Size', options: choices },
       },
     },
+    {
+      key: 'note',
+      editor: { label: 'Note' },
+      schemaVersion: 1,
+      properties: {
+        body: { fieldType: 'rich_text', label: 'Body' },
+        lean: {
+          fieldType: 'rich_text',
+          label: 'Lean',
+          options: { narrow: { marks: ['bold', 'italic', 'link'] } },
+        },
+        title: { fieldType: 'short_text', label: 'Title' },
+      },
+    },
   ]),
   constraints: [
     constrainBlock('card', {
@@ -83,6 +108,7 @@ describe('buildCatalogue', () => {
       'column',
       'section',
       'card',
+      'note',
     ]);
   });
 
@@ -143,6 +169,35 @@ describe('buildCatalogue', () => {
     const column = catalogue.find((entry) => entry.key === 'column');
     expect(column?.kind).toBe('column');
     expect(column?.properties).toEqual([]);
+  });
+
+  describe('rich text properties', () => {
+    const note = catalogue.find((entry) => entry.key === 'note');
+    const property = (key: string) =>
+      note?.properties.find((candidate) => candidate.key === key);
+
+    it('carries the registered global theme when the property does not narrow it', () => {
+      expect(property('body')?.textTheme).toBe(getTextTheme());
+      expect(property('body')?.textTheme?.marks).toEqual([
+        'bold',
+        'italic',
+        'underline',
+        'link',
+      ]);
+    });
+
+    it('carries exactly the marks a narrowing keeps', () => {
+      expect(property('lean')?.textTheme?.marks).toEqual([
+        'bold',
+        'italic',
+        'link',
+      ]);
+    });
+
+    it('carries no theme for another field type', () => {
+      expect(property('title')).toBeDefined();
+      expect(property('title')?.textTheme).toBeUndefined();
+    });
   });
 
   it('is frozen, so one instance can serve every request', () => {

@@ -13,3 +13,13 @@ declare module 'virtual:plakboek/host' {
     | undefined;
   export const devMode: boolean;
 }
+
+/**
+ * The host's text theme module, delivered to the editor chunk only: the
+ * default export of the first file the plugin's `textTheme` glob matched, or
+ * `undefined` when none matched. Checked with `isTextThemeDefinition` before
+ * use.
+ */
+declare module 'virtual:plakboek/text-theme' {
+  export const textTheme: unknown;
+}

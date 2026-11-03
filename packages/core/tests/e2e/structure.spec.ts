@@ -6,11 +6,14 @@
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
+  chrome,
   expectSelectedOver,
   framedSite,
   HOST,
   openEditor,
   regionFocused,
+  selectContainer,
+  selectItem,
   tabToRegion,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -22,7 +25,7 @@ import {
 } from './helpers/pages.ts';
 import { signIn } from './helpers/session.ts';
 
-const TOOLBAR = `${HOST} [role="toolbar"]`;
+const TOOLBAR = '[role="toolbar"]';
 const SAVED = 'All changes saved';
 
 /** Section A: a column with H1 and H2. Section B: a column with H3. */
@@ -41,19 +44,21 @@ function headingsIn(frame: Frame, sectionIndex: number): Promise<string[]> {
     .allTextContents();
 }
 
-/** Double-click twice: section to column, column to the block under the pointer. */
-async function drillTo(frame: Frame, sectionIndex: number, at: number) {
-  const target = frame
-    .locator('section.section')
-    .nth(sectionIndex)
-    .locator('h2')
-    .nth(at);
-  await target.dblclick();
-  await target.dblclick();
+/** Selects the heading at the given position in the given section. */
+async function selectHeading(
+  page: Page,
+  frame: Frame,
+  sectionIndex: number,
+  at: number,
+) {
+  await selectItem(
+    page,
+    frame.locator('section.section').nth(sectionIndex).locator('h2').nth(at),
+  );
 }
 
 function moveButton(page: Page, direction: string) {
-  return page.getByRole('button', {
+  return chrome(page).getByRole('button', {
     name: new RegExp(`^Move .* ${direction}$`),
   });
 }
@@ -73,13 +78,13 @@ test.describe('moving by the toolbar', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 0, 1);
+    await selectHeading(page, frame, 0, 1);
     await expectSelectedOver(
       page,
       frame,
       'section.section >> nth=0 >> h2 >> nth=1',
     );
-    await expect(page.locator(TOOLBAR)).toBeVisible();
+    await expect(chrome(page).locator(TOOLBAR)).toBeVisible();
 
     await moveButton(page, 'down').click();
 
@@ -116,15 +121,17 @@ test.describe('the toolbar path of a deeply nested item', () => {
     }
     await expectSelectedOver(page, frame, 'section.section h2');
 
-    const more = page.getByRole('button', { name: 'Show the hidden levels' });
+    const more = chrome(page).getByRole('button', {
+      name: 'Show the hidden levels',
+    });
     await expect(more).toBeVisible();
     await more.click();
-    const levels = page.locator(`${HOST} [data-toolbar-hidden-levels]`);
+    const levels = chrome(page).locator('[data-toolbar-hidden-levels]');
     const items = levels.getByRole('button');
     await expect(items).toHaveCount(2);
 
     // the list hangs below the toolbar, whole: the breadcrumb does not clip it
-    const toolbar = await page.locator(TOOLBAR).boundingBox();
+    const toolbar = await chrome(page).locator(TOOLBAR).boundingBox();
     const list = await levels.boundingBox();
     const last = await items.last().boundingBox();
     if (toolbar === null || list === null || last === null) {
@@ -202,12 +209,12 @@ test.describe('the toolbar buttons', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 0, 0);
+    await selectHeading(page, frame, 0, 0);
 
     const up = moveButton(page, 'up');
     await expect(up).toHaveAttribute('aria-disabled', 'true');
     await expect(
-      page.locator(`${TOOLBAR} [data-tooltip]`, {
+      chrome(page).locator(`${TOOLBAR} [data-tooltip]`, {
         hasText: 'Already at the start',
       }),
     ).toHaveCount(1);
@@ -237,8 +244,10 @@ test.describe('the toolbar buttons', () => {
     });
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    // double-click a heading: the section's column under the pointer
-    await frame.getByRole('heading', { name: 'Left' }).dblclick();
+    await selectContainer(
+      page,
+      frame.locator('[data-pk-kind="column"]').first(),
+    );
 
     await expect(moveButton(page, 'right')).toBeVisible();
     await expect(moveButton(page, 'left')).toHaveAttribute(
@@ -256,7 +265,7 @@ test.describe('undo and redo', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 0, 1);
+    await selectHeading(page, frame, 0, 1);
     await moveButton(page, 'down').click();
     await expect.poll(() => headingsIn(frame, 1)).toEqual(['H2', 'H3']);
     await expectSaved(page);
@@ -280,7 +289,7 @@ test.describe('undo and redo', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 0, 1);
+    await selectHeading(page, frame, 0, 1);
     await moveButton(page, 'down').click();
     await expect.poll(() => headingsIn(frame, 1)).toEqual(['H2', 'H3']);
     await expectSaved(page);
@@ -358,7 +367,7 @@ test.describe('what visitors see', () => {
 
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 0, 0);
+    await selectHeading(page, frame, 0, 0);
     await moveButton(page, 'down').click();
     await expect.poll(() => headingsIn(frame, 0)).toEqual(['H2', 'H1']);
     await expectSaved(page);
@@ -378,7 +387,7 @@ test.describe('a save that does not go through', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 0, 1);
+    await selectHeading(page, frame, 0, 1);
     await page.route(EDIT_ROUTE, (route) => route.abort());
 
     await moveButton(page, 'down').click();
@@ -402,7 +411,7 @@ test.describe('a save that does not go through', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 0, 1);
+    await selectHeading(page, frame, 0, 1);
     await page.route(EDIT_ROUTE, (route) =>
       route.fulfill({
         status: 422,

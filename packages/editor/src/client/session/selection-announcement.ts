@@ -4,7 +4,7 @@ import type { Selection } from './scope.js';
 import type { EditorStore } from './store.js';
 import { labelOf, type ItemLabel, type TreeModel } from './tree-model.js';
 
-function textOf(label: ItemLabel): string {
+export function textOf(label: ItemLabel): string {
   return label.kind === 'column'
     ? formatString('label.column', { n: String(label.n) })
     : label.text;

@@ -306,6 +306,19 @@ export type {
   SetPageEditLockingResult,
 } from './settings.js';
 
+// page-links.ts
+export {
+  PAGE_SEARCH_LIMIT,
+  PAGE_SEARCH_QUERY_MAX_LENGTH,
+  resolvePageLinkPaths,
+  searchPages,
+} from './page-links.js';
+export type {
+  PageSearchResult,
+  ResolvePageLinkPathsInput,
+  SearchPagesInput,
+} from './page-links.js';
+
 // page-routing.ts
 export {
   computePageResolvedPath,

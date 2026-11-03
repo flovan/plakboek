@@ -104,13 +104,13 @@ export function slotGeometry(
 
 /**
  * What the picker for a gap is anchored to: the button of its band, else the
- * middle of its (empty) parent, else the middle of the frame. A box the size
- * of the button, in the same space as `boxes`.
+ * middle of its (empty) parent, else the middle of the visible part of the
+ * document. A box the size of the button, in the same space as `boxes`.
  */
 export function slotAnchor(
   slot: InsertSlot,
   boxes: ReadonlyMap<string, Box>,
-  frame: Box,
+  visible: Box,
 ): Box {
   const geometry = slotGeometry(slot, boxes);
   const parent =
@@ -118,7 +118,10 @@ export function slotAnchor(
   const center =
     geometry?.center ??
     (parent === null
-      ? { x: frame.left + frame.width / 2, y: frame.top + frame.height / 2 }
+      ? {
+          x: visible.left + visible.width / 2,
+          y: visible.top + visible.height / 2,
+        }
       : {
           x: parent.left + parent.width / 2,
           y: parent.top + parent.height / 2,
@@ -131,7 +134,7 @@ export function slotAnchor(
   };
 }
 
-/** Where the picker goes: 320px wide, kept 8px inside the frame, below the anchor or above it where there is more room. */
+/** Where the picker goes: 320px wide, kept 8px inside the visible part of the document, below the anchor or above it where there is more room. */
 export type PickerPlacement = {
   readonly left: number;
   readonly top: number;
@@ -144,33 +147,61 @@ const PICKER_MAX_HEIGHT = 360;
 const PICKER_GAP = 8;
 const PICKER_MIN_HEIGHT = 160;
 
-export function pickerPlacement(anchor: Box, frame: Box): PickerPlacement {
+export function pickerPlacement(
+  anchor: Box,
+  visible: Box,
+  tallest: number = PICKER_MAX_HEIGHT,
+): PickerPlacement {
   const cap = Math.max(
     PICKER_MIN_HEIGHT,
-    Math.min(PICKER_MAX_HEIGHT, frame.height - 16),
+    Math.min(tallest, visible.height - 16),
   );
   const below =
-    frame.top + frame.height - (anchor.top + anchor.height) - PICKER_GAP * 2;
-  const above = anchor.top - frame.top - PICKER_GAP * 2;
+    visible.top +
+    visible.height -
+    (anchor.top + anchor.height) -
+    PICKER_GAP * 2;
+  const above = anchor.top - visible.top - PICKER_GAP * 2;
   const side: PickerPlacement['side'] =
     below >= cap || below >= above ? 'below' : 'above';
   const room = side === 'below' ? below : above;
   const maxHeight = Math.min(cap, Math.max(room, PICKER_MIN_HEIGHT));
   const centre = anchor.left + anchor.width / 2;
   const left = Math.max(
-    frame.left + PICKER_GAP,
+    visible.left + PICKER_GAP,
     Math.min(
       centre - PICKER_WIDTH / 2,
-      frame.left + frame.width - PICKER_GAP - PICKER_WIDTH,
+      visible.left + visible.width - PICKER_GAP - PICKER_WIDTH,
     ),
   );
-  // With too little room on either side the picker overlaps its anchor rather than leave the frame.
+  // With too little room on either side the picker overlaps its anchor rather than leave the visible part.
   const top =
     side === 'below'
       ? Math.min(
           anchor.top + anchor.height + PICKER_GAP,
-          frame.top + frame.height - PICKER_GAP - maxHeight,
+          visible.top + visible.height - PICKER_GAP - maxHeight,
         )
-      : Math.max(anchor.top - PICKER_GAP, frame.top + PICKER_GAP + maxHeight);
+      : Math.max(anchor.top - PICKER_GAP, visible.top + PICKER_GAP + maxHeight);
   return { left, top, maxHeight, side };
+}
+
+/**
+ * Where the '/' menu goes: the picker's width and room rules, but its left edge
+ * follows the typed `/query` (kept 8px inside the visible part) instead of
+ * centring on the anchor, so the menu hangs from the caret.
+ */
+export function slashPlacement(
+  anchor: Box,
+  visible: Box,
+  tallest?: number,
+): PickerPlacement {
+  const placed = pickerPlacement(anchor, visible, tallest);
+  const left = Math.max(
+    visible.left + PICKER_GAP,
+    Math.min(
+      anchor.left,
+      visible.left + visible.width - PICKER_GAP - PICKER_WIDTH,
+    ),
+  );
+  return { ...placed, left };
 }

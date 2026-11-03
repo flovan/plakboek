@@ -154,6 +154,7 @@ function composeEditor(
       db: db.db,
       pages: { config: config.pages, homeSlug: config.homeSlug },
       components: createComponentMap(config.pages.blocks),
+      textTheme: config.textTheme,
       renderDocument: siteHooks?.renderDocument ?? renderDefaultDocument,
       ...(siteHooks?.notFound === undefined
         ? {}
@@ -205,6 +206,7 @@ function composeEditorApi(
       pages,
       homeSlug: config.homeSlug,
       components: createComponentMap(config.pages.blocks),
+      textTheme: config.textTheme,
       siteOrigin: new URL(env.siteUrl).origin,
     });
   });
@@ -251,6 +253,7 @@ export function createRuntime(host: HostModule, env: RuntimeEnv): Runtime {
     config: config.pages,
     homeSlug: config.homeSlug,
     siteUrl: env.siteUrl,
+    textTheme: config.textTheme,
     ...(cache === undefined ? {} : { cache }),
     ...(env.buildId === undefined ? {} : { buildId: env.buildId }),
     ...siteHooks,

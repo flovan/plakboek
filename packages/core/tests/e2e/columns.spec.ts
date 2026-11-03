@@ -7,9 +7,11 @@
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
+  chrome,
   framedSite,
   HOST,
   openEditor,
+  openProperties,
   waitForShell,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -24,7 +26,7 @@ import { signIn } from './helpers/session.ts';
 
 const SAVED = 'All changes saved';
 const TOAST = `${HOST} [data-toast]`;
-const TOOLBAR = `${HOST} [role="toolbar"]`;
+const TOOLBAR = '[role="toolbar"]';
 
 /** A section whose columns hold the given blocks, one list per column. */
 function columnsSection(...columns: readonly FactoryBlock[][]): FactoryBlock {
@@ -76,11 +78,6 @@ async function widthsOf(frame: Frame, sectionIndex = 0): Promise<number[]> {
   );
 }
 
-/** The floating toolbar's Properties button, which opens the sheet. */
-function propertiesButton(page: Page) {
-  return page.getByRole('button', { name: /^Properties of / });
-}
-
 /** Waits until the sheet has slid in, so a press on its controls lands where they are. */
 async function sheetSettled(page: Page): Promise<void> {
   await expect
@@ -101,19 +98,16 @@ async function expectSaved(page: Page): Promise<void> {
   await expect(page.getByText(SAVED)).toBeVisible();
 }
 
-/** Selects the first section by clicking inside it, and opens its Properties. */
+/** Selects a section and opens its Properties. */
 async function selectSection(
   page: Page,
   frame: Frame,
   sectionIndex = 0,
 ): Promise<void> {
-  await frame
-    .locator('section.section')
-    .nth(sectionIndex)
-    .locator('h2')
-    .first()
-    .click();
-  await propertiesButton(page).click();
+  await openProperties(
+    page,
+    frame.locator('section.section').nth(sectionIndex),
+  );
   await expect(group(page, 'columns')).toBeVisible();
   await sheetSettled(page);
 }
@@ -403,10 +397,7 @@ test.describe('a block that fills its column', () => {
       column: (await cell.boundingBox())?.height ?? 0,
     });
 
-    // section, then its column, then the quote
-    await quote.dblclick();
-    await quote.dblclick();
-    await propertiesButton(page).click();
+    await openProperties(page, quote);
     await sheetSettled(page);
     const placement = group(page, 'placement');
     const fill = placement.getByRole('switch', { name: 'Fill column height' });
@@ -435,9 +426,7 @@ test.describe('a block that fills its column', () => {
     };
     expect(Math.abs(after.quote - after.column)).toBeLessThanOrEqual(1);
 
-    await reloaded.locator('blockquote.quote').dblclick();
-    await reloaded.locator('blockquote.quote').dblclick();
-    await propertiesButton(page).click();
+    await openProperties(page, reloaded.locator('blockquote.quote'));
     await sheetSettled(page);
     await page.getByRole('switch', { name: 'Fill column height' }).click();
     await expect
@@ -458,10 +447,7 @@ test.describe('a block that fills its column', () => {
   }) => {
     await openOneColumnSection(page);
     const frame = await framedSite(page);
-    const target = frame.locator('section.section h2').first();
-    await target.dblclick();
-    await target.dblclick();
-    await propertiesButton(page).click();
+    await openProperties(page, frame.locator('section.section h2').first());
     await sheetSettled(page);
     await expect(page.locator(`${HOST} [data-properties-panel]`)).toBeVisible();
     await expect(group(page, 'placement')).toHaveCount(0);
@@ -479,13 +465,16 @@ test.describe('adding a column from the page', () => {
     const frame = await framedSite(page);
     await selectSection(page, frame);
 
-    const lines = page.locator(`${HOST} [data-insert][data-always]`);
+    const lines = chrome(page).locator('[data-insert][data-always]');
     // between the two and after the last, both running top to bottom
     await expect(lines).toHaveCount(2);
     await expect(lines.first()).toHaveAttribute('data-line', 'down');
     await expect(lines.first()).toHaveCSS('opacity', '1');
 
-    await page.getByRole('button', { name: 'Add column here' }).first().click();
+    await chrome(page)
+      .getByRole('button', { name: 'Add column here' })
+      .first()
+      .click();
     await expect(columnsIn(frame)).toHaveCount(3);
     expect(await headingsByColumn(frame)).toEqual([['A'], [], ['B']]);
     await expectSaved(page);
@@ -506,7 +495,7 @@ test.describe('adding a column from the page', () => {
     await group(page, 'columns')
       .getByRole('button', { name: 'Column 1', exact: true })
       .click();
-    await page
+    await chrome(page)
       .locator(TOOLBAR)
       .getByRole('button', { name: 'Add after Column 1' })
       .click();
@@ -548,7 +537,7 @@ test.describe('copying and removing a column from the toolbar and the keyboard',
     await group(page, 'columns')
       .getByRole('button', { name: 'Column 2', exact: true })
       .click();
-    await page
+    await chrome(page)
       .locator(TOOLBAR)
       .getByRole('button', { name: 'Duplicate Column 2' })
       .click();

@@ -8,6 +8,13 @@ import {
   BlockIdConflictError,
   BlockOwnershipError,
   normaliseSnapshotColumns,
+  PAGE_SEARCH_LIMIT,
+  PAGE_SEARCH_QUERY_MAX_LENGTH,
+  type PageSearchResult,
+  type ResolvePageLinkPathsInput,
+  resolvePageLinkPaths,
+  type SearchPagesInput,
+  searchPages,
   readPageLockView,
   SectionColumnRequiredError,
   upgradeAllSectionColumns,
@@ -291,6 +298,8 @@ import * as pages from '@plakboek/pages';
 // migration: the only calls made are the pure ones exercised further down.
 
 const functions: Record<string, unknown> = {
+  searchPages,
+  resolvePageLinkPaths,
   acquirePageLock,
   applyBlockEdit,
   normaliseSnapshotColumns,
@@ -434,6 +443,8 @@ const numbers: Record<string, unknown> = {
   DEFAULT_SECTION_NESTING_DEPTH,
   PAGE_EDIT_LOCK_HEARTBEAT_SECONDS,
   PAGE_EDIT_LOCK_TTL_SECONDS,
+  PAGE_SEARCH_LIMIT,
+  PAGE_SEARCH_QUERY_MAX_LENGTH,
   PAGE_SLUG_LOCK_NAMESPACE,
   PAGE_URL_PATTERN_MAX_LENGTH,
   SORT_ORDER_STEP,
@@ -490,6 +501,10 @@ for (const [name, value] of Object.entries(numbers)) {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
     fail(`${name} is not a positive integer`);
   }
+}
+
+if (PAGE_SEARCH_LIMIT !== 20) {
+  fail('PAGE_SEARCH_LIMIT is not 20');
 }
 
 for (const [name, value] of Object.entries(regexPatterns)) {
@@ -1271,6 +1286,25 @@ const matchPublicPagePathInput: MatchPublicPagePathInput = {
   defaultLocale: 'en',
   homeSlug: DEFAULT_HOME_SLUG,
 };
+const pageSearchResult: PageSearchResult = {
+  id: 'page-id',
+  title: 'About',
+  path: 'about',
+  publicPath: '/about',
+  live: true,
+};
+const searchPagesInput: SearchPagesInput = {
+  locale: 'en',
+  query: 'about',
+  defaultLocale: 'en',
+  homeSlug: DEFAULT_HOME_SLUG,
+};
+const resolvePageLinkPathsInput: ResolvePageLinkPathsInput = {
+  pageIds: ['page-id'],
+  defaultLocale: 'en',
+  homeSlug: DEFAULT_HOME_SLUG,
+  liveOnly: true,
+};
 const toPublicPagePathInput: ToPublicPagePathInput = {
   locale: 'en',
   path: 'home',
@@ -1453,6 +1487,9 @@ const typeProofs: unknown[] = [
   releasePageLockInput,
   renewPageLockInput,
   takeOverPageLockInput,
+  pageSearchResult,
+  searchPagesInput,
+  resolvePageLinkPathsInput,
   matchPublicPagePathInput,
   toPublicPagePathInput,
   publishedPageSeo,

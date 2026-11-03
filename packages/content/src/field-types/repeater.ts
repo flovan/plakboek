@@ -167,7 +167,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function buildRepeaterValueSchema(options: RepeaterOptions): z.ZodType {
+/**
+ * The repeater's schema. With `stored`, each sub-field is held to its own
+ * stored-value schema where it has one (shape and size only), so a rich text
+ * inside an item that a narrowed theme no longer allows does not make the
+ * unchanged repeater unwritable.
+ */
+function buildRepeaterSchema(
+  options: RepeaterOptions,
+  stored: boolean,
+): z.ZodType {
   const subFields = resolveSubFields(options.fields);
   const knownKeys = new Set(subFields.map((subField) => subField.key));
 
@@ -213,9 +222,11 @@ function buildRepeaterValueSchema(options: RepeaterOptions): z.ZodType {
           }
           continue;
         }
-        const parsed = subField.definition
-          .buildValueSchema(subField.options)
-          .safeParse(value);
+        const parsed = (
+          stored && subField.definition.buildStoredValueSchema !== undefined
+            ? subField.definition.buildStoredValueSchema(subField.options)
+            : subField.definition.buildValueSchema(subField.options)
+        ).safeParse(value);
         if (!parsed.success) {
           for (const issue of parsed.error.issues) {
             ctx.addIssue({
@@ -233,6 +244,14 @@ function buildRepeaterValueSchema(options: RepeaterOptions): z.ZodType {
   );
 }
 
+function buildRepeaterValueSchema(options: RepeaterOptions): z.ZodType {
+  return buildRepeaterSchema(options, false);
+}
+
+function buildRepeaterStoredValueSchema(options: RepeaterOptions): z.ZodType {
+  return buildRepeaterSchema(options, true);
+}
+
 function isEmptyRepeaterValue(value: unknown): boolean {
   return (
     value === undefined ||
@@ -245,6 +264,7 @@ export const repeaterFieldType = {
   fieldType: 'repeater',
   optionsSchema: repeaterOptionsSchema,
   buildValueSchema: buildRepeaterValueSchema,
+  buildStoredValueSchema: buildRepeaterStoredValueSchema,
   isEmptyValue: isEmptyRepeaterValue,
   widgets: ['repeater-list'] as const,
   defaultWidget: 'repeater-list',

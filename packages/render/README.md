@@ -321,6 +321,11 @@ property rendering and structural patches.
 - **Input.** The page's whole live forest, the ids to render and the same
   component and block metadata maps; fragments come back in the order the ids
   were requested.
+- **Text environment.** `renderPageSnapshot`, `renderPageTree` and
+  `renderBlockFragments` all take an optional `text` input (a
+  `TextEnvironment`). Each block's markup renders inside it, so a fragment is
+  still byte-identical to that block's markup in the frame when both are given
+  the same environment. Left out, rich text uses the default theme.
 - **Unknown ids.** An id that is not in the tree is listed in `missing`, never
   thrown. A block that throws becomes the same inert `data-pk-unavailable`
   placeholder the frame shows and sets `degraded`.
@@ -366,6 +371,74 @@ host section only draws the grid around them (D-06).
   is used only when it is digits joined by colons; anything else yields equal
   tracks, so a stored value can never inject CSS.
 
+## Rich text
+
+Stored rich text renders through one renderer map, so the visitor page, the
+editor frame and the editor's node views all look the same. `defineTextTheme`
+declares the theme data and overrides single renderers; `RichText` renders a
+stored document; `CtaButton` renders the standalone Button block exactly like a
+call to action inside text.
+
+```tsx
+import { RichText, defineTextTheme } from '@plakboek/render';
+
+export const textTheme = defineTextTheme({
+  colors: [{ label: 'Accent', token: 'accent' }],
+  renderers: {
+    heading: ({ level, children }) => {
+      const Tag = level === 3 ? 'h3' : level === 4 ? 'h4' : 'h2';
+      return <Tag className={`heading-${level}`}>{children}</Tag>;
+    },
+  },
+});
+
+// In a block: the host's own element carries the edit attributes, and
+// <RichText> is its only child.
+<div {...edit.field('body')}>
+  <RichText value={props.body} />
+</div>;
+```
+
+- **The field element is yours.** `RichText` adds no wrapper: the element that
+  carries `{...edit.field('prop')}` is the root the editor mounts on, and the
+  document's top-level nodes are its children.
+- **A renderer renders `children` inside one element.** The editor derives the
+  node's shell from that element, so add any wrapper around it, never beside
+  it. A heading renders as `h2`, `h3` or `h4`; a stored level outside 2 to 4
+  renders as `h2` and is reported, never as `h1`.
+- **Environment.** Provide `createTextEnvironment({ definition, mode,
+resolvePage, hooks })` with `TextEnvironmentProvider`, once per render.
+  `resolvePage` turns a page id into a public path (or `null`); a link whose
+  page is gone, or whose address the shared href policy refuses, renders as
+  plain text. Without a provider every field renders with the default theme in
+  visitor mode.
+- **On a visitor page.** `createVisitorHandler` takes the installation's
+  `textTheme` and builds the environment itself: each block's markup renders
+  inside the provider (a block is rendered by its own static-markup call, so a
+  provider outside the recursion would never reach it). Every page id held by a
+  `rich_text` value, a call to action, a `link` field or a repeater sub-field is
+  found by `collectPageLinkIds` and resolved in one batch before the
+  synchronous render, and only when there is one, so a page with no page links
+  issues no extra statement. A page that is not live resolves to nothing: its
+  link renders as plain text. The resolved path is what the cached HTML holds.
+- **Tokens render as variables.** A colour or size token renders as
+  `var(--color-<token>)` or `var(--text-<token>)`, so changing the theme
+  re-colours stored text. A Tailwind v4 host declares its tokens with
+  `@theme static` so the variables exist even when no utility class uses them.
+- **Custom values are inline styles.** Custom colour and size literals and
+  paragraph alignment render as inline `style` attributes. A host with a strict
+  `style-src` sets `allowCustomValues: false`, leaves `align` off, and
+  overrides the colour, size and paragraph renderers to render classes.
+- **New tabs.** The default `link` and `cta` renderers add
+  `rel="noopener noreferrer"` whenever the target is `_blank`; an overriding
+  renderer must keep it.
+- **Unfinished CTAs.** A call to action with no label or no usable target is not
+  shown to visitors and its data is kept. In edit mode it renders through the
+  `cta` renderer with `href: null`, so the editor can mark it.
+- **Keep data, flag, never crash.** An unknown node renders its text only and
+  an unknown mark is dropped. Each is reported once per environment, by type
+  name only, through `RenderHooks.onRichTextIssue`.
+
 ## Root versus server entry
 
 The package publishes two subpaths.
@@ -386,37 +459,74 @@ updating them.
 
 ### Root entry: `@plakboek/render`
 
-| Export                  | Kind     | Purpose                                                                          |
-| ----------------------- | -------- | -------------------------------------------------------------------------------- |
-| `CMS_LOGIN_PATH`        | constant | `/cms`: where the Edit pill sends a browser; the server decides there            |
-| `EDIT_PARAM`            | constant | `_edit`: the query parameter that asks for the editor entry                      |
-| `EDITOR_FLAG_KEY`       | constant | The localStorage key marking a signed-in editor                                  |
-| `NEXT_PARAM`            | constant | `next`: the query parameter carrying the page to return to after login           |
-| `TOOLBAR_DISMISSED_KEY` | constant | The localStorage key marking a dismissed toolbar                                 |
-| `NOOP_EDIT`             | constant | The visitor-side edit proxy: spreads to nothing, costs nothing                   |
-| `EDIT_ATTRIBUTE`        | constant | The `data-pk-*` attribute names the renderer writes and the overlay reads        |
-| `isLiveEdit`            | function | Whether an edit proxy is a live one rather than `NOOP_EDIT`                      |
-| `Columns`               | function | The CSS grid a host section renders around its children                          |
-| `ColumnBlock`           | function | The core column cell component                                                   |
-| `defineBlockEdit`       | function | Declares a block's editor lifecycle hooks; returns its argument unchanged        |
-| `columnTracks`          | function | The `grid-template-columns` value for a ratio and a live column count            |
-| `BlockIdentity`         | type     | `id`, `blockType` and `schemaVersion` of a rendered block                        |
-| `BlockComponentProps`   | type     | What the renderer passes a block: `block`, `props`, `layout`, `children`, `edit` |
-| `BlockComponent`        | type     | A block's render function: a plain function of `BlockComponentProps`             |
-| `BlockLayout`           | type     | A node's stored layout: `columns`, `align` and `fill`                            |
-| `ColumnAlign`           | type     | `'stretch' \| 'start' \| 'center' \| 'end'`: cross-axis column alignment         |
-| `ColumnsProps`          | type     | `{ layout, children, className? }`: what `Columns` receives                      |
-| `BlockEditHooks`        | type     | The hooks a block can declare: enter, leave, select, deselect, reveal, rendered  |
-| `BlockEditContext`      | type     | What a hook receives: id, type, element, frame document and window, props, mode  |
-| `BlockRevealContext`    | type     | `BlockEditContext` plus the `targetId` being revealed                            |
-| `BlockEditModule`       | type     | `{ blockType, hooks }`: what `defineBlockEdit` takes and returns                 |
-| `BlockEditMode`         | type     | `'edit' \| 'interact'`: which editor mode is active                              |
-| `EditAttributes`        | type     | `data-` attributes the editor binds to                                           |
-| `EditProxy`             | type     | Root attributes plus `field(property)` for per-property attributes               |
-| `PageHead`              | type     | What a document composer needs to write a page's `<head>`                        |
-| `DocumentInput`         | type     | `{ head, body, publicPath, mode }`: what a document composer receives            |
-| `DocumentMode`          | type     | `'visitor' \| 'edit'`: which rendering a document composer is producing          |
-| `RenderDocument`        | type     | A host's document composer: `(input) => string \| Promise<string>`               |
+| Export                        | Kind     | Purpose                                                                          |
+| ----------------------------- | -------- | -------------------------------------------------------------------------------- |
+| `CMS_LOGIN_PATH`              | constant | `/cms`: where the Edit pill sends a browser; the server decides there            |
+| `EDIT_PARAM`                  | constant | `_edit`: the query parameter that asks for the editor entry                      |
+| `EDITOR_FLAG_KEY`             | constant | The localStorage key marking a signed-in editor                                  |
+| `NEXT_PARAM`                  | constant | `next`: the query parameter carrying the page to return to after login           |
+| `TOOLBAR_DISMISSED_KEY`       | constant | The localStorage key marking a dismissed toolbar                                 |
+| `NOOP_EDIT`                   | constant | The visitor-side edit proxy: spreads to nothing, costs nothing                   |
+| `EDIT_ATTRIBUTE`              | constant | The `data-pk-*` attribute names the renderer writes and the overlay reads        |
+| `isLiveEdit`                  | function | Whether an edit proxy is a live one rather than `NOOP_EDIT`                      |
+| `Columns`                     | function | The CSS grid a host section renders around its children                          |
+| `ColumnBlock`                 | function | The core column cell component                                                   |
+| `defineBlockEdit`             | function | Declares a block's editor lifecycle hooks; returns its argument unchanged        |
+| `columnTracks`                | function | The `grid-template-columns` value for a ratio and a live column count            |
+| `BlockIdentity`               | type     | `id`, `blockType` and `schemaVersion` of a rendered block                        |
+| `BlockComponentProps`         | type     | What the renderer passes a block: `block`, `props`, `layout`, `children`, `edit` |
+| `BlockComponent`              | type     | A block's render function: a plain function of `BlockComponentProps`             |
+| `BlockLayout`                 | type     | A node's stored layout: `columns`, `align` and `fill`                            |
+| `ColumnAlign`                 | type     | `'stretch' \| 'start' \| 'center' \| 'end'`: cross-axis column alignment         |
+| `ColumnsProps`                | type     | `{ layout, children, className? }`: what `Columns` receives                      |
+| `BlockEditHooks`              | type     | The hooks a block can declare: enter, leave, select, deselect, reveal, rendered  |
+| `BlockEditContext`            | type     | What a hook receives: id, type, element, frame document and window, props, mode  |
+| `BlockRevealContext`          | type     | `BlockEditContext` plus the `targetId` being revealed                            |
+| `BlockEditModule`             | type     | `{ blockType, hooks }`: what `defineBlockEdit` takes and returns                 |
+| `BlockEditMode`               | type     | `'edit' \| 'interact'`: which editor mode is active                              |
+| `EditAttributes`              | type     | `data-` attributes the editor binds to                                           |
+| `EditProxy`                   | type     | Root attributes plus `field(property)` for per-property attributes               |
+| `PageHead`                    | type     | What a document composer needs to write a page's `<head>`                        |
+| `DocumentInput`               | type     | `{ head, body, publicPath, mode }`: what a document composer receives            |
+| `DocumentMode`                | type     | `'visitor' \| 'edit'`: which rendering a document composer is producing          |
+| `RenderDocument`              | type     | A host's document composer: `(input) => string \| Promise<string>`               |
+| `DEFAULT_TEXT_RENDERERS`      | constant | The default renderer map: plain semantic elements, no classes                    |
+| `defineTextTheme`             | function | Resolves the text theme data and merges renderer overrides over the defaults     |
+| `isTextThemeDefinition`       | function | Whether a value is a `defineTextTheme` result                                    |
+| `createTextEnvironment`       | function | Builds the render environment: definition, mode, page resolution, hooks          |
+| `TextEnvironmentProvider`     | function | Provides a text environment to every `RichText` below it                         |
+| `useTextEnvironment`          | function | The provided environment, or a default visitor one                               |
+| `RichText`                    | function | Renders a stored rich-text document with no wrapper element                      |
+| `CtaButton`                   | function | A standalone call-to-action button, rendered like an in-text CTA                 |
+| `TextRenderers`               | type     | One renderer per node and mark, plus the CTA and the CTA row                     |
+| `ParagraphRendererProps`      | type     | `children` and `textAlign`                                                       |
+| `HeadingRendererProps`        | type     | `level` (2 to 4), `textAlign` and `children`                                     |
+| `BulletListRendererProps`     | type     | `children`                                                                       |
+| `OrderedListRendererProps`    | type     | `start` and `children`                                                           |
+| `ListItemRendererProps`       | type     | `children`                                                                       |
+| `BlockquoteRendererProps`     | type     | `children`                                                                       |
+| `HorizontalRuleRendererProps` | type     | No props                                                                         |
+| `HardBreakRendererProps`      | type     | No props                                                                         |
+| `BoldRendererProps`           | type     | `children`                                                                       |
+| `ItalicRendererProps`         | type     | `children`                                                                       |
+| `UnderlineRendererProps`      | type     | `children`                                                                       |
+| `StrikeRendererProps`         | type     | `children`                                                                       |
+| `LinkRendererProps`           | type     | `href`, `target` and `children`                                                  |
+| `TextColorRendererProps`      | type     | `token` or `value`, and `children`                                               |
+| `TextSizeRendererProps`       | type     | `token` or `value`, and `children`                                               |
+| `CtaRendererProps`            | type     | `label`, `href` (null when unresolved), `target` and `variant`                   |
+| `CtaRowRendererProps`         | type     | `children`                                                                       |
+| `TextThemeDefinitionInput`    | type     | Theme data plus optional `renderers` overrides                                   |
+| `TextThemeDefinition`         | type     | The frozen `{ theme, renderers }` pair `defineTextTheme` returns                 |
+| `TextThemeInput`              | type     | The theme data a host declares (from `@plakboek/content`)                        |
+| `TextTheme`                   | type     | The resolved theme data                                                          |
+| `TextThemeNarrowing`          | type     | What a property may take away from the theme                                     |
+| `LinkTarget`                  | type     | A link or CTA target: an `href` or a `pageId`, plus `target`                     |
+| `TextEnvironmentInput`        | type     | Input to `createTextEnvironment`                                                 |
+| `TextEnvironment`             | type     | Theme, renderers, mode, page resolution and reporting                            |
+| `TextEnvironmentMode`         | type     | `'visitor' \| 'edit'`: whether an unfinished CTA is rendered                     |
+| `RichTextProps`               | type     | `{ value }`: what `RichText` receives                                            |
+| `CtaButtonProps`              | type     | `{ label, link, variant }`: what `CtaButton` receives                            |
 
 ### Server entry: `@plakboek/render/server`
 
@@ -432,6 +542,7 @@ updating them.
 | `createLiveEdit`             | function | One block's live edit proxy: the `data-pk-*` identity attributes         |
 | `renderPageTree`             | function | Renders a live working tree for the editor, in `live` or `plain` mode    |
 | `renderBlockFragments`       | function | Renders chosen blocks of a live tree, subtree included, as frame markup  |
+| `collectPageLinkIds`         | function | Lists the page ids a block forest links to, by property field type       |
 | `normalizeVisitorPath`       | function | Canonicalises a request path exactly like the visitor handler            |
 | `PageHeadInput`              | type     | Input to `buildPageHead`                                                 |
 | `PageSeoInput`               | type     | The stored SEO set as a structural type                                  |
@@ -459,3 +570,4 @@ updating them.
 | `BlockRenderErrorEvent`      | type     | What `onBlockRenderError` receives                                       |
 | `RenderErrorEvent`           | type     | What `onRenderError` receives                                            |
 | `CacheErrorEvent`            | type     | What `onCacheError` receives                                             |
+| `RichTextIssueEvent`         | type     | What `onRichTextIssue` receives: an unknown node or mark, by name        |

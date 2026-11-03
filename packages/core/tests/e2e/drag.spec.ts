@@ -7,11 +7,14 @@
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
+  chrome,
   framedSite,
   frameBoxOf,
   HOST,
   openEditor,
   SELECTED,
+  selectContainer,
+  selectItem,
   type Rect,
 } from './helpers/editing.ts';
 import { e2eUsers } from './helpers/host.ts';
@@ -25,9 +28,9 @@ import {
 import { signIn } from './helpers/session.ts';
 
 const SAVED = 'All changes saved';
-const HANDLE = `${HOST} [data-drag-handle]`;
-const LINE = `${HOST} [data-drag-line]`;
-const SURFACE = `${HOST} [data-drag-surface]`;
+const HANDLE = '[data-drag-handle]';
+const LINE = '[data-drag-line]';
+const SURFACE = '[data-drag-surface]';
 
 /**
  * A first section that fills the window (the site's theme sizes it so), then
@@ -51,15 +54,17 @@ function headingsIn(frame: Frame, sectionIndex: number): Promise<string[]> {
     .allTextContents();
 }
 
-/** Double-click twice: section to column, column to the block under the pointer. */
-async function drillTo(frame: Frame, sectionIndex: number, at: number) {
-  const target = frame
-    .locator('section.section')
-    .nth(sectionIndex)
-    .locator('h2')
-    .nth(at);
-  await target.dblclick();
-  await target.dblclick();
+/** Selects the heading at the given position in a section. */
+async function selectHeading(
+  page: Page,
+  frame: Frame,
+  sectionIndex: number,
+  at: number,
+) {
+  await selectItem(
+    page,
+    frame.locator('section.section').nth(sectionIndex).locator('h2').nth(at),
+  );
 }
 
 /** The handle's box once the toolbar has stopped settling into place. */
@@ -68,7 +73,7 @@ async function settledHandle(page: Page): Promise<Rect> {
   let box: Rect | null = null;
   await expect
     .poll(async () => {
-      box = await page.locator(HANDLE).boundingBox();
+      box = await chrome(page).locator(HANDLE).boundingBox();
       const now = JSON.stringify(box);
       const settled = box !== null && now === previous;
       previous = now;
@@ -87,7 +92,7 @@ async function pickUp(page: Page): Promise<void> {
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + 10, y + 10, { steps: 3 });
-  await expect(page.locator(SURFACE)).toBeVisible();
+  await expect(page.locator(HOST).locator(SURFACE)).toBeVisible();
 }
 
 /** The centre of a frame element, a few pixels below its bottom edge: the gap after it. */
@@ -112,8 +117,8 @@ test.describe('dragging by the handle', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 1, 0);
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await selectHeading(page, frame, 1, 0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
 
     await pickUp(page);
     const third = await frameBoxOf(
@@ -127,16 +132,16 @@ test.describe('dragging by the handle', () => {
         steps: 8,
       },
     );
-    await expect(page.locator(LINE)).toBeVisible();
+    await expect(chrome(page).locator(LINE)).toBeVisible();
     // The page does not reflow while the item is carried.
     expect(await headingsIn(frame, 1)).toEqual(['H1', 'H2']);
     await page.mouse.up();
 
-    await expect(page.locator(SURFACE)).toHaveCount(0);
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveCount(0);
     await expect.poll(() => headingsIn(frame, 2)).toEqual(['H3', 'H1', 'H4']);
     expect(await headingsIn(frame, 1)).toEqual(['H2']);
     await expect(page.getByText(SAVED)).toBeVisible();
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
 
     await page.reload();
     const reloaded = await framedSite(page);
@@ -154,21 +159,27 @@ test.describe('where a line shows', () => {
     await openEditor(page, created.path);
     const frame = await framedSite(page);
     await frame.evaluate(() => window.scrollTo(0, 0));
-    await drillTo(frame, 1, 0);
+    await selectHeading(page, frame, 1, 0);
     await pickUp(page);
 
     const header = await frameBoxOf(frame, '.site-header');
     await page.mouse.move(header.x + 200, header.y + header.height / 2, {
       steps: 8,
     });
-    await expect(page.locator(SURFACE)).toHaveAttribute('data-legal', 'false');
-    await expect(page.locator(LINE)).toHaveCount(0);
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveAttribute(
+      'data-legal',
+      'false',
+    );
+    await expect(chrome(page).locator(LINE)).toHaveCount(0);
 
     // Back over a column the same drag shows a line again.
     const target = await gapAfter(frame, H3);
     await page.mouse.move(target.x, target.y, { steps: 8 });
-    await expect(page.locator(SURFACE)).toHaveAttribute('data-legal', 'true');
-    await expect(page.locator(LINE)).toBeVisible();
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveAttribute(
+      'data-legal',
+      'true',
+    );
+    await expect(chrome(page).locator(LINE)).toBeVisible();
     await page.keyboard.press('Escape');
   });
 
@@ -180,8 +191,8 @@ test.describe('where a line shows', () => {
     const frame = await framedSite(page);
     // The first section fills the window: its blank lower part is outside any column.
     await frame.evaluate(() => window.scrollTo(0, 0));
-    await frame.locator('section.section').nth(2).click();
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await selectContainer(page, frame.locator('section.section').nth(2));
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
 
     await pickUp(page);
     const first = await frameBoxOf(frame, 'section.section >> nth=0');
@@ -192,9 +203,12 @@ test.describe('where a line shows', () => {
         steps: 8,
       },
     );
-    await expect(page.locator(LINE)).toBeVisible();
+    await expect(chrome(page).locator(LINE)).toBeVisible();
     // Between sections the line runs across the page, not between items of a column.
-    await expect(page.locator(LINE)).toHaveAttribute('data-axis', 'horizontal');
+    await expect(chrome(page).locator(LINE)).toHaveAttribute(
+      'data-axis',
+      'horizontal',
+    );
     await page.mouse.up();
 
     await expect
@@ -217,15 +231,15 @@ test.describe('ending a drag without a change', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 1, 0);
+    await selectHeading(page, frame, 1, 0);
     await pickUp(page);
     const target = await gapAfter(frame, H3);
     await page.mouse.move(target.x, target.y, { steps: 8 });
-    await expect(page.locator(LINE)).toBeVisible();
+    await expect(chrome(page).locator(LINE)).toBeVisible();
 
     await page.keyboard.press('Escape');
-    await expect(page.locator(SURFACE)).toHaveCount(0);
-    await expect(page.locator(LINE)).toHaveCount(0);
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveCount(0);
+    await expect(chrome(page).locator(LINE)).toHaveCount(0);
     await page.mouse.up();
     expect(await headingsIn(frame, 1)).toEqual(['H1', 'H2']);
     expect(await headingsIn(frame, 2)).toEqual(['H3', 'H4']);
@@ -236,15 +250,15 @@ test.describe('ending a drag without a change', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 1, 0);
+    await selectHeading(page, frame, 1, 0);
     await pickUp(page);
     const target = await gapAfter(frame, H3);
     await page.mouse.move(target.x, target.y, { steps: 8 });
-    await expect(page.locator(LINE)).toBeVisible();
+    await expect(chrome(page).locator(LINE)).toBeVisible();
 
     await page.mouse.move(60, 400, { steps: 8 });
     await page.mouse.up();
-    await expect(page.locator(SURFACE)).toHaveCount(0);
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveCount(0);
     expect(await headingsIn(frame, 1)).toEqual(['H1', 'H2']);
     await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
   });
@@ -263,7 +277,7 @@ test.describe('near the frame edge', () => {
     await openEditor(page, created.path);
     const frame = await framedSite(page);
     await frame.evaluate(() => window.scrollTo(0, 0));
-    await drillTo(frame, 0, 0);
+    await selectHeading(page, frame, 0, 0);
     await pickUp(page);
 
     const view = await page.locator(`${HOST} iframe`).boundingBox();
@@ -279,6 +293,71 @@ test.describe('near the frame edge', () => {
   });
 });
 
+test.describe('after the frame scrolled during a drag', () => {
+  test('the line sits on its slot in the scrolled page and the drop lands there', async ({
+    page,
+  }) => {
+    const created = await createEditablePage({
+      blocks: [
+        section(heading('Top'), paragraph('One')),
+        section(heading('Below')),
+      ],
+    });
+    await openEditor(page, created.path);
+    const frame = await framedSite(page);
+    await frame.evaluate(() => window.scrollTo(0, 0));
+    await selectHeading(page, frame, 0, 0);
+    await pickUp(page);
+
+    const view = await page.locator(`${HOST} iframe`).boundingBox();
+    if (view === null) throw new Error('The frame has no box');
+    await page.mouse.move(view.x + view.width / 2, view.y + view.height - 10, {
+      steps: 6,
+    });
+    await expect
+      .poll(() => frame.evaluate(() => window.scrollY))
+      .toBeGreaterThan(100);
+
+    // out of the edge zone, so the scrolling stops, and wait for the page to rest
+    await page.mouse.move(view.x + view.width / 2, view.y + view.height / 2, {
+      steps: 4,
+    });
+    let seen = -1;
+    await expect
+      .poll(async () => {
+        const now = await frame.evaluate(() => window.scrollY);
+        const rested = now === seen;
+        seen = now;
+        return rested;
+      })
+      .toBe(true);
+
+    const below = 'section.section >> nth=1 >> h2';
+    const target = await gapAfter(frame, below);
+    await page.mouse.move(target.x, target.y, { steps: 8 });
+    const line = chrome(page).locator(LINE);
+    await expect(line).toBeVisible();
+    const slot = await frameBoxOf(frame, below);
+    const drawn = await line.boundingBox();
+    if (drawn === null) throw new Error('The line has no box');
+    expect(Math.abs(drawn.y - (slot.y + slot.height))).toBeLessThan(24);
+    await page.mouse.up();
+
+    await expect
+      .poll(() =>
+        frame
+          .locator('section.section')
+          .evaluateAll((sections) =>
+            sections.map((element) =>
+              [...element.querySelectorAll('h2')].map((h) => h.textContent),
+            ),
+          ),
+      )
+      .toEqual([[], ['Below', 'Top']]);
+    await expect(page.getByText(SAVED)).toBeVisible();
+  });
+});
+
 test.describe('a drop that is not saved', () => {
   test('an aborted write shows the failed status and the frame keeps the order it had', async ({
     page,
@@ -288,7 +367,7 @@ test.describe('a drop that is not saved', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 1, 0);
+    await selectHeading(page, frame, 1, 0);
     await page.route('**/cms/api/pages/*/edit', (route) => route.abort());
 
     await pickUp(page);
@@ -337,14 +416,14 @@ test.describe('dragging by the keyboard', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 1, 0);
-    await expect(page.locator(SELECTED)).toHaveCount(1);
+    await selectHeading(page, frame, 1, 0);
+    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
     await settledHandle(page);
     const announced = await recordAnnouncements(page);
 
-    await page.locator(HANDLE).focus();
+    await chrome(page).locator(HANDLE).focus();
     await page.keyboard.press('Space');
-    await expect(page.locator(LINE)).toBeVisible();
+    await expect(chrome(page).locator(LINE)).toBeVisible();
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Space');
@@ -352,8 +431,8 @@ test.describe('dragging by the keyboard', () => {
     await expect.poll(() => headingsIn(frame, 2)).toEqual(['H1', 'H3', 'H4']);
     expect(await headingsIn(frame, 1)).toEqual(['H2']);
     await expect(page.getByText(SAVED)).toBeVisible();
-    await expect(page.locator(SURFACE)).toHaveCount(0);
-    await expect(page.locator(LINE)).toHaveCount(0);
+    await expect(page.locator(HOST).locator(SURFACE)).toHaveCount(0);
+    await expect(chrome(page).locator(LINE)).toHaveCount(0);
     expect(await announced()).toEqual(
       expect.arrayContaining([
         'Picked up Heading. Use the arrow keys to choose a position, Space to drop, Escape to cancel.',
@@ -376,18 +455,18 @@ test.describe('dragging by the keyboard', () => {
     const created = await twoSections();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await drillTo(frame, 1, 0);
+    await selectHeading(page, frame, 1, 0);
     await settledHandle(page);
     const announced = await recordAnnouncements(page);
 
-    await page.locator(HANDLE).focus();
+    await chrome(page).locator(HANDLE).focus();
     await page.keyboard.press('Enter');
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Escape');
 
-    await expect(page.locator(LINE)).toHaveCount(0);
-    await expect(page.locator(HANDLE)).toBeFocused();
+    await expect(chrome(page).locator(LINE)).toHaveCount(0);
+    await expect(chrome(page).locator(HANDLE)).toBeFocused();
     expect(await headingsIn(frame, 1)).toEqual(['H1', 'H2']);
     expect(await headingsIn(frame, 2)).toEqual(['H3', 'H4']);
     expect(await announced()).toContain('Move cancelled.');
@@ -401,11 +480,10 @@ test.describe('dragging by the keyboard', () => {
     await openEditor(page, created.path);
     const frame = await framedSite(page);
     await frame.evaluate(() => window.scrollTo(0, 0));
-    await frame.locator('section.section').nth(0).locator('h2').dblclick();
-    await frame.locator('section.section').nth(0).locator('h2').dblclick();
+    await selectHeading(page, frame, 0, 0);
     await settledHandle(page);
 
-    await page.locator(HANDLE).focus();
+    await chrome(page).locator(HANDLE).focus();
     await page.keyboard.press('Space');
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowDown');
@@ -415,7 +493,7 @@ test.describe('dragging by the keyboard', () => {
       .toBeGreaterThan(0);
     await expect
       .poll(async () => {
-        const line = await page.locator(LINE).boundingBox();
+        const line = await chrome(page).locator(LINE).boundingBox();
         const view = await page.locator(`${HOST} iframe`).boundingBox();
         if (line === null || view === null) return false;
         return line.y >= view.y && line.y + line.height <= view.y + view.height;

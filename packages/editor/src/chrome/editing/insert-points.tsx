@@ -28,7 +28,7 @@ function boxStyle(box: Box): CSSProperties {
 
 export type InsertPointsProps = {
   readonly store: EditorStore;
-  /** The boxes of the siblings and their parent, in the shell's coordinates. */
+  /** The boxes of the siblings and their parent, in the framed document's coordinates. */
   readonly boxes: ReadonlyMap<string, Box>;
   /** Called with the gap whose button was pressed. */
   readonly onOpen: (slot: InsertSlot) => void;

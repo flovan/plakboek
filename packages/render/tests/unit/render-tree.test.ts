@@ -3,7 +3,11 @@ import { createElement } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { BlockComponent } from '../../src/block-component.js';
 import type { ComponentMap } from '../../src/components.js';
+import { renderBlockFragments } from '../../src/render-fragment.js';
 import { renderPageTree, type BlockMeta } from '../../src/render-tree.js';
+import { defineTextTheme } from '../../src/rich-text/define-text-theme.js';
+import { createTextEnvironment } from '../../src/rich-text/environment.js';
+import { RichText } from '../../src/rich-text/rich-text.js';
 
 const PAGE_ID = 'page-1';
 const NOW = new Date('2026-10-10T09:00:00.000Z');
@@ -379,5 +383,118 @@ describe('a block rendered without its identity', () => {
     expect(consoleWarn).not.toHaveBeenCalled();
     consoleWarn.mockRestore();
     vi.unstubAllEnvs();
+  });
+});
+
+describe('text environment', () => {
+  const headingDoc = {
+    type: 'doc',
+    content: [
+      {
+        type: 'heading',
+        attrs: { level: 2 },
+        content: [{ type: 'text', text: 'Hello' }],
+      },
+    ],
+  };
+  const Column: BlockComponent = ({ children, edit }) =>
+    createElement('div', { ...edit }, children);
+  const Prose: BlockComponent = ({ props, edit }) =>
+    createElement(
+      'div',
+      { ...edit },
+      createElement(RichText, { value: props.body }),
+    );
+  const proseComponents: ComponentMap = new Map<string, BlockComponent>([
+    ['section', Section],
+    ['column', Column],
+    ['prose', Prose],
+  ]);
+  const tree = [
+    node('s1', 'section', {}, [
+      node('c1', 'column', {}, [node('p1', 'prose', { body: headingDoc })]),
+    ]),
+  ];
+  const text = createTextEnvironment({
+    definition: defineTextTheme({
+      renderers: {
+        heading: ({ children }) =>
+          createElement('h2', { className: 'host-heading' }, children),
+      },
+    }),
+  });
+
+  it('applies the host renderers to a nested block of the page render', () => {
+    const { body } = renderPageTree({
+      page: {
+        id: PAGE_ID,
+        locale: 'en',
+        title: 'Test page',
+        seo: {
+          title: null,
+          description: null,
+          imageAssetId: null,
+          canonicalUrl: null,
+          noindex: false,
+          nofollow: false,
+        },
+      },
+      blocks: tree,
+      publicPath: '/test',
+      components: proseComponents,
+      blockMeta,
+      mode: 'live',
+      text,
+    });
+    expect(body).toContain('<h2 class="host-heading">Hello</h2>');
+  });
+
+  it('renders a fragment equal to that block inside the page render, override included', () => {
+    const page = renderPageTree({
+      page: {
+        id: PAGE_ID,
+        locale: 'en',
+        title: 'Test page',
+        seo: {
+          title: null,
+          description: null,
+          imageAssetId: null,
+          canonicalUrl: null,
+          noindex: false,
+          nofollow: false,
+        },
+      },
+      blocks: tree,
+      publicPath: '/test',
+      components: proseComponents,
+      blockMeta,
+      mode: 'live',
+      text,
+    });
+    const { fragments, missing } = renderBlockFragments({
+      blocks: tree,
+      targets: ['p1', 'c1'],
+      components: proseComponents,
+      blockMeta,
+      pageId: PAGE_ID,
+      text,
+    });
+    expect(missing).toEqual([]);
+    const [prose, column] = fragments;
+    expect(prose?.html).toContain('<h2 class="host-heading">Hello</h2>');
+    expect(page.body).toContain(prose?.html ?? '');
+    expect(page.body).toContain(column?.html ?? '');
+  });
+
+  it('falls back to the default theme without an environment', () => {
+    const { fragments } = renderBlockFragments({
+      blocks: tree,
+      targets: ['p1'],
+      components: proseComponents,
+      blockMeta,
+      pageId: PAGE_ID,
+    });
+    expect(fragments[0]?.html).not.toContain('host-heading');
+    expect(fragments[0]?.html).toContain('>Hello</h2>');
   });
 });

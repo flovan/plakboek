@@ -5,6 +5,8 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
+import type { ChromeHost } from '../../client/chrome-host/host.js';
+import { isFocusable } from '../../client/chrome-host/shape.js';
 import {
   useEditorStore,
   type EditorStore,
@@ -25,8 +27,8 @@ export type SidePanelProps = {
 /**
  * Moves focus to the first control of the open Properties panel that still
  * needs input, else to its first control. Only an explicit ask does this
- * (a double-click or Enter on a leaf, the toolbar's Properties button, an
- * insert that needs input); selecting never does.
+ * (the toolbar's Properties button, Enter or a double-click in the Page
+ * structure, the needs-input marker); selecting never does.
  */
 function focusFirstControl(root: HTMLElement | null): void {
   const panel = root?.querySelector('[data-properties-panel]') ?? null;
@@ -87,6 +89,8 @@ export type PropertiesSheetProps = PropertiesPanelProps & {
   readonly top?: ReactNode;
   /** Pinned under the content behind a 1px line: the save status. */
   readonly footer?: ReactNode;
+  /** The in-frame chrome, where the toolbar's Properties button (which opens the sheet) has focus. */
+  readonly chromeHost?: ChromeHost | null;
 };
 
 /**
@@ -99,7 +103,7 @@ export type PropertiesSheetProps = PropertiesPanelProps & {
 export function PropertiesSheet(
   props: PropertiesSheetProps,
 ): ReactElement | null {
-  const { top, footer, ...panelProps } = props;
+  const { top, footer, chromeHost = null, ...panelProps } = props;
   const { store } = panelProps;
   const editing = useEditorStore(store, (state) => state.status === 'editing');
   const open = useEditorStore(store, (state) => state.propertiesOpen);
@@ -109,15 +113,22 @@ export function PropertiesSheet(
   const handled = useRef(request?.token ?? 0);
   // Where focus was when the sheet opened, so closing can give it back.
   const returnTo = useRef<HTMLElement | null>(null);
+  // Read when the sheet opens, so a new host never reopens or moves it.
+  const chromeHostRef = useRef(chromeHost);
+  useEffect(() => {
+    chromeHostRef.current = chromeHost;
+  }, [chromeHost]);
 
   useEffect(() => {
     if (!open) return;
     const shadow = root.current?.getRootNode();
-    const active = shadow instanceof ShadowRoot ? shadow.activeElement : null;
+    // Focus in the frame's chrome shows as the iframe in the shell's root, so
+    // the control itself is read from the chrome host's own root.
+    const active =
+      chromeHostRef.current?.root.activeElement ??
+      (shadow instanceof ShadowRoot ? shadow.activeElement : null);
     returnTo.current =
-      active instanceof HTMLElement && !root.current?.contains(active)
-        ? active
-        : null;
+      isFocusable(active) && !root.current?.contains(active) ? active : null;
   }, [open]);
 
   useEffect(() => {

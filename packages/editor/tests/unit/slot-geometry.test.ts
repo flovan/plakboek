@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Box } from '../../src/client/overlay/geometry.js';
 import {
   pickerPlacement,
+  slashPlacement,
   slotGeometry,
 } from '../../src/client/overlay/slot-geometry.js';
 import type { InsertSlot } from '../../src/client/session/insertion.js';
@@ -37,25 +38,60 @@ describe('the band over a gap', () => {
 });
 
 describe('the picker placement', () => {
-  const frame: Box = { left: 0, top: 0, width: 800, height: 600 };
+  // The frame is scrolled down by 1200: boxes are in the document's coordinates.
+  const visible: Box = { left: 0, top: 1200, width: 800, height: 600 };
 
-  it('hangs below its anchor when there is room, kept inside the frame', () => {
+  it('hangs below its anchor when there is room, kept inside the visible part', () => {
     const placed = pickerPlacement(
-      { left: 10, top: 100, width: 24, height: 24 },
-      frame,
+      { left: 10, top: 1300, width: 24, height: 24 },
+      visible,
     );
     expect(placed.side).toBe('below');
     expect(placed.left).toBe(8);
-    expect(placed.top).toBe(132);
+    expect(placed.top).toBe(1332);
     expect(placed.maxHeight).toBe(360);
   });
 
-  it('flips above its anchor near the bottom of the frame and never outgrows the frame', () => {
+  it('flips above its anchor near the bottom of the visible part and never outgrows it', () => {
     const placed = pickerPlacement(
-      { left: 400, top: 340, width: 24, height: 24 },
-      { ...frame, height: 400 },
+      { left: 400, top: 1540, width: 24, height: 24 },
+      { ...visible, height: 400 },
     );
     expect(placed.side).toBe('above');
     expect(placed.maxHeight).toBe(324);
+  });
+});
+
+describe("the '/' menu placement", () => {
+  const visible: Box = { left: 0, top: 1200, width: 800, height: 600 };
+
+  it('hangs from the left edge of the typed text, below it', () => {
+    const placed = slashPlacement(
+      { left: 300, top: 1300, width: 24, height: 22 },
+      visible,
+    );
+    expect(placed.left).toBe(300);
+    expect(placed.side).toBe('below');
+    expect(placed.top).toBe(1330);
+  });
+
+  it('stays 8px inside the visible part on either side', () => {
+    expect(
+      slashPlacement({ left: 2, top: 1300, width: 24, height: 22 }, visible)
+        .left,
+    ).toBe(8);
+    expect(
+      slashPlacement({ left: 790, top: 1300, width: 24, height: 22 }, visible)
+        .left,
+    ).toBe(472);
+  });
+
+  it('flips above near the bottom and never outgrows the room', () => {
+    const placed = slashPlacement(
+      { left: 300, top: 1540, width: 24, height: 22 },
+      { ...visible, height: 400 },
+    );
+    expect(placed.side).toBe('above');
+    expect(placed.maxHeight).toBeLessThanOrEqual(360);
   });
 });

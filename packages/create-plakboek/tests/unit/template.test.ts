@@ -269,8 +269,11 @@ describe('starter template host code', () => {
     for (const file of [
       'plakboek.config.ts',
       'seed.ts',
+      'text-theme.tsx',
       'blocks/section.tsx',
       'blocks/heading.tsx',
+      'blocks/text.tsx',
+      'blocks/button.tsx',
       'app/routes.ts',
       'app/root.tsx',
       'app/site/index.ts',
@@ -303,16 +306,21 @@ describe('starter template host code', () => {
       (m) => m[1] ?? '',
     );
     expect(imports.sort()).toEqual([
+      './blocks/button.tsx',
       './blocks/heading.tsx',
       './blocks/section.tsx',
+      './blocks/text.tsx',
       './seed.ts',
+      './text-theme.tsx',
       '@plakboek/core/config',
     ]);
   });
 
-  it('registers both blocks explicitly and composes the default roles and menu', async () => {
+  it('registers every block explicitly, passes the text theme and composes the default roles and menu', async () => {
     const text = await read('plakboek.config.ts');
-    expect(text).toContain('blocks: [section, heading]');
+    expect(text).toContain('blocks: [section, heading, text, button]');
+    expect(text).toMatch(/^ {2}textTheme,$/m);
+    expect(text).toContain("import textTheme from './text-theme.tsx'");
     expect(text).toContain('roles: { ...defaultRoles }');
     expect(text).toContain("menus: { main: [{ label: 'Home', href: '/' }] }");
     expect(text).toContain('constraints: []');
@@ -320,7 +328,7 @@ describe('starter template host code', () => {
     expect(text).toMatch(/^ {2}seed,$/m);
   });
 
-  it('seeds one section holding one level 1 heading, as host code', async () => {
+  it('seeds one section holding one level 2 heading (the title), as host code', async () => {
     const text = await read('seed.ts');
     expect(text).toContain("import type { SeedPage } from '@plakboek/core'");
     expect(text).toMatch(/export const seed: SeedPage/);
@@ -330,7 +338,7 @@ describe('starter template host code', () => {
     expect(text).toContain("spacing: 'lg'");
     expect(text).toContain("type: 'heading'");
     expect(text).toContain("text: 'Hello world'");
-    expect(text).toContain("level: '1'");
+    expect(text).toContain("level: '2'");
     expect(text.match(/type: '/g)).toHaveLength(2);
   });
 
@@ -338,7 +346,7 @@ describe('starter template host code', () => {
     const blockFiles = (await listFiles(TEMPLATE)).filter((file) =>
       /^blocks\/[^/]+\.tsx$/.test(file),
     );
-    expect(blockFiles.length).toBeGreaterThanOrEqual(2);
+    expect(blockFiles.length).toBeGreaterThanOrEqual(4);
     for (const file of blockFiles) {
       const text = await read(file);
       expect(text.match(/defineBlock\(/g)).toHaveLength(1);
@@ -375,26 +383,127 @@ describe('starter template host code', () => {
     expect(text).toContain('<Columns layout={layout}>{children}</Columns>');
   });
 
-  it('declares heading with a required text and a level of 1 to 3', async () => {
+  it('declares heading with a required text and the levels title, heading and subheading (2 to 4), never h1', async () => {
     const text = await read('blocks/heading.tsx');
     expect(text).toContain("key: 'heading'");
     expect(text).not.toContain("kind: 'section'");
     expect(text).toMatch(/text: \{[^}]*fieldType: 'short_text'/s);
     expect(text).toContain('required: true');
-    for (const value of ['1', '2', '3']) {
+    for (const value of ['2', '3', '4']) {
       expect(text).toContain(`value: '${value}'`);
     }
+    expect(text).not.toContain("value: '1'");
+    expect(text).toContain("labels: { en: 'Title', nl: 'Titel' }");
+    expect(text).toContain("labels: { en: 'Heading', nl: 'Kop' }");
+    expect(text).toContain("labels: { en: 'Subheading', nl: 'Subkop' }");
     expect(text).toContain("defaultValue: '2'");
-    expect(text).toContain('text-3xl font-semibold');
-    expect(text).toContain('text-xl font-semibold');
-    expect(text).toContain('text-sm font-semibold');
-    const roots = [...text.matchAll(/<h([1-3])\b[^>]*>/g)];
+    expect(text).toContain("from '../text-theme.tsx'");
+    const roots = [...text.matchAll(/<h([1-6])\b[^>]*>/g)];
     expect(
       roots.map((m) => m[1]).toSorted((a, b) => Number(a) - Number(b)),
-    ).toEqual(['1', '2', '3']);
+    ).toEqual(['2', '3', '4']);
     for (const [tag] of roots) {
       expect(tag).toContain('{...edit}');
       expect(tag).toContain("{...edit.field('text')}");
+    }
+  });
+
+  it('declares text with a rich_text body marked on its root and rendered without a wrapper', async () => {
+    const text = await read('blocks/text.tsx');
+    expect(text).toContain("key: 'text'");
+    expect(text).toMatch(/body: \{[^}]*fieldType: 'rich_text'/s);
+    expect(text).toContain("<div {...edit} {...edit.field('body')}");
+    expect(text).toMatch(
+      /<div \{\.\.\.edit\} \{\.\.\.edit\.field\('body'\)\} className="[^"]*\bmin-h-6\b/,
+    );
+    expect(text).toMatch(/body: \{[^}]*required: true/s);
+    expect(text).toContain('<RichText value={props.body} />');
+    expect(text).toContain("from '@plakboek/render'");
+  });
+
+  it('declares button with a label, a link naming its siblings and a variant from the theme', async () => {
+    const text = await read('blocks/button.tsx');
+    expect(text).toContain("key: 'button'");
+    expect(text).toMatch(/label: \{[^}]*fieldType: 'short_text'/s);
+    expect(text).toMatch(/link: \{[^}]*fieldType: 'link'/s);
+    expect(text).toContain("labelProperty: 'label'");
+    expect(text).toContain("variantProperty: 'variant'");
+    expect(text).toContain('textTheme.theme.ctaVariants');
+    expect(text).toContain("defaultValue: 'primary'");
+    expect(text).toContain('<CtaButton');
+    expect(text).toContain("{...edit.field('link')}");
+  });
+
+  it('declares one text theme with the starter palettes, variants and custom values', async () => {
+    const text = await read('text-theme.tsx');
+    expect(text).toContain(
+      "import { defineTextTheme } from '@plakboek/render'",
+    );
+    expect(text.match(/export default defineTextTheme\(/g)).toHaveLength(1);
+    expect(text).toContain('export const HEADING_CLASS');
+    for (const entry of [
+      "{ label: 'Text', token: 'text' }",
+      "{ label: 'Muted', token: 'text-muted' }",
+      "{ label: 'Accent', token: 'accent' }",
+      "{ label: 'Small', token: 'sm', value: '14px' }",
+      "{ label: 'Large', token: 'xl', value: '20px' }",
+      "{ label: 'Extra large', token: 'display', value: '28px' }",
+      "{ label: 'Primary', value: 'primary' }",
+      "{ label: 'Secondary', value: 'secondary' }",
+    ]) {
+      expect(text).toContain(entry);
+    }
+    // A token starts with a letter, so 28px is `display`, read from --text-3xl.
+    expect(text).toContain("display: '--text-3xl'");
+    expect(text).toContain('align: true');
+    expect(text).toContain('allowCustomValues: true');
+    // Heading levels are never listed: the theme default (2 to 4) applies.
+    expect(text).not.toMatch(/headingLevels/);
+  });
+
+  it('gives the text theme the contract classes and keeps rel on new-tab links', async () => {
+    const text = await read('text-theme.tsx');
+    for (const needle of [
+      'text-base text-text',
+      'text-3xl font-semibold',
+      'text-xl font-semibold',
+      'text-base font-semibold',
+      'mt-6 first:mt-0 mb-2',
+      'text-accent underline underline-offset-2',
+      'list-disc space-y-1 pl-6',
+      'list-decimal space-y-1 pl-6',
+      'my-6 border-l-4 border-border pl-4 text-text-muted',
+      'my-6 border-border',
+      'min-h-11',
+      'rounded-lg',
+      'px-6',
+      'font-semibold',
+      'wrap-anywhere',
+      'focus-visible:outline-accent',
+      'flex flex-wrap gap-4',
+    ]) {
+      expect(text).toContain(needle);
+    }
+    expect(text).toContain('bg-accent text-surface');
+    expect(text).toContain('border-text');
+    expect(text).toContain('hover:bg-surface-muted');
+    expect(text).toContain('color-mix(in_srgb,var(--color-accent)_85%,black)');
+    // T-09-73: a link or CTA opening a new tab never exposes the opener.
+    expect(
+      text.match(/rel=\{target === '_blank' \? 'noopener noreferrer'/g),
+    ).toHaveLength(2);
+  });
+
+  it('offers no h1 in any block or theme file', async () => {
+    for (const file of [
+      'text-theme.tsx',
+      ...(await listFiles(TEMPLATE)).filter((f) =>
+        /^blocks\/[^/]+\.tsx$/.test(f),
+      ),
+    ]) {
+      const text = await read(file);
+      expect(text).not.toMatch(/<h1\b/);
+      expect(text).not.toMatch(/Heading 1|Kop 1|value: '1'/);
     }
   });
 
@@ -433,7 +542,7 @@ describe('starter theme and root template', () => {
   /** The declarations of the single `@theme { ... }` block. */
   async function themeBlock(): Promise<string> {
     const css = await read('app/app.css');
-    const match = /@theme\s*\{([^}]*)\}/.exec(css);
+    const match = /@theme static\s*\{([^}]*)\}/.exec(css);
     expect(match?.[1]).toBeDefined();
     return match?.[1] ?? '';
   }
@@ -442,6 +551,12 @@ describe('starter theme and root template', () => {
     const css = await read('app/app.css');
     expect(css.trimStart().startsWith("@import 'tailwindcss';")).toBe(true);
     expect(css.match(/@theme/g)).toHaveLength(1);
+  });
+
+  it('declares the tokens in a static theme block so every variable is built', async () => {
+    const css = await read('app/app.css');
+    expect(css.match(/@theme static \{/g)).toHaveLength(1);
+    expect(css).not.toMatch(/@theme \{/);
   });
 
   it('sets the column gap token and stacks columns in a narrow container', async () => {
@@ -698,6 +813,11 @@ describe('starter chrome and error pages', () => {
     expect(text).toContain('export function Header(');
     expect(text).toContain('href="/"');
     expect(text).toContain('{siteName}');
+    // The site name is the page's single h1, placed by the host.
+    expect(text.match(/<h1\b/g)).toHaveLength(1);
+    expect(text).toMatch(
+      /<h1 className="[^"]*text-xl font-semibold[^"]*">\s*<a\s+href="\/"/,
+    );
     expect(text).toContain('aria-label="Main"');
     expect(text).toMatch(/items\.length === 0\s*\?\s*null/);
     expect(text).toContain('text-xl font-semibold');
@@ -831,6 +951,7 @@ describe('starter README', () => {
     for (const title of [
       'Getting started',
       'Adding a block',
+      'Text and buttons',
       'Editing the header, footer and menus',
       'Edit mode',
       'Live reload in development',
@@ -861,7 +982,26 @@ describe('starter README', () => {
       '@plakboek/render/server',
       'blocks/heading.tsx',
       'app/site/header.tsx',
+      'text-theme.tsx',
       'DEPLOY.md',
+    ]) {
+      expect(text).toContain(needle);
+    }
+  });
+
+  it('documents the text theme, static tokens, narrowing and inline styles', async () => {
+    const text = await read('README.md');
+    expect(text.match(/^## Text and buttons$/gm)).toHaveLength(1);
+    for (const needle of [
+      '`defineConfig({ textTheme })`',
+      '`@theme static`',
+      '`renderers`',
+      "narrow: { marks: ['bold', 'italic', 'link'] }",
+      '{...edit.field(',
+      '`blocks/text.tsx`',
+      '`blocks/button.tsx`',
+      'allowCustomValues: false',
+      '`style-src`',
     ]) {
       expect(text).toContain(needle);
     }

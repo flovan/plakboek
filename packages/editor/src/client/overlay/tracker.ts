@@ -13,12 +13,18 @@
  * - the observers are built from the frame window's own constructors, which
  *   is what the frame's elements belong to.
  *
- * Measuring is coalesced: any number of scrolls, resizes, mutations and
- * pointer moves in one frame cause one measurement in the next animation
- * frame, and a state that has not changed is not reported again. A scroll or
- * a resize moves the content under a pointer that did not move, and the
- * browser sends no pointer event for that, so once the page has been quiet
- * for 100ms the last pointer position is looked up again.
+ * Boxes are in the framed document's own coordinates (the viewport rectangle
+ * moved by the scroll offset), because the overlay is drawn inside that
+ * document and scrolls with it: a scroll changes no box, so it asks for no
+ * measurement of its own.
+ *
+ * Measuring is coalesced: any number of resizes, mutations and pointer moves
+ * in one frame cause one measurement in the next animation frame, and a state
+ * that has not changed is not reported again. A scroll or a resize moves the
+ * content under a pointer that did not move, and the browser sends no pointer
+ * event for that, so once the page has been quiet for 100ms the last pointer
+ * position is looked up again and the visible part of the document is read
+ * again, which is what the placement rules decide against.
  *
  * Two optional inputs make it the editor's tracker. A `resolve` function
  * decides which of the blocks under the pointer is the hover target (the one a
@@ -27,12 +33,14 @@
  * through their own callback.
  */
 import { EDIT_ATTRIBUTE } from '@plakboek/render';
+import { documentBox, visibleDocumentBox } from '../chrome-host/coordinates.js';
+import { CHROME_HOST_TAG } from '../chrome-host/host.js';
 import { blocksAt } from '../frame/hit-test.js';
-import { measureLoose } from './boxes.js';
+import { followsViewport, measureLooseInDocument } from './boxes.js';
 import { isMeasurable, sameBox, type Box, type Point } from './geometry.js';
 
-/** What the overlay draws. Element boxes are in the frame's own coordinates,
- * `frame` is the frame's content box in the shell's. */
+/** What the overlay draws. Every box is in the framed document's own
+ * coordinates; `visible` is the part of the document the frame shows. */
 export type HoverState = {
   readonly blockId: string;
   /** The editor label, or the type key when there is none. */
@@ -43,16 +51,16 @@ export type HoverState = {
   readonly element: Box;
   /** The nearest section above the element, when there is one. */
   readonly section: Box | null;
-  readonly frame: Box;
+  readonly visible: Box;
 };
 
 /** The selected item and the scope container, measured in the same pass. */
 export type SelectionState = {
-  /** The selected item's box in the frame's own coordinates. */
+  /** The selected item's box in the framed document's coordinates. */
   readonly selected: Box | null;
   /** The scope container's box, when the scope is not the page. */
   readonly scope: Box | null;
-  readonly frame: Box;
+  readonly visible: Box;
 };
 
 /** Which items the editor has selected, read afresh on every measurement. */
@@ -102,11 +110,11 @@ function boxOf(rect: DOMRect): Box {
   };
 }
 
-/** The element's box, or null when it cannot be outlined. */
+/** The element's box in the document's coordinates, or null when it cannot be outlined. */
 function measure(element: Element, view: Window): Box | null {
   const rect = element.getBoundingClientRect();
   return isMeasurable(rect, view.getComputedStyle(element).display)
-    ? boxOf(rect)
+    ? documentBox(boxOf(rect), view)
     : null;
 }
 
@@ -165,7 +173,7 @@ function sameState(a: HoverState | null, b: HoverState | null): boolean {
     a.unavailable === b.unavailable &&
     sameBox(a.element, b.element) &&
     sameBox(a.section, b.section) &&
-    sameBox(a.frame, b.frame)
+    sameBox(a.visible, b.visible)
   );
 }
 
@@ -177,7 +185,7 @@ function sameSelection(
   return (
     sameBox(a.selected, b.selected) &&
     sameBox(a.scope, b.scope) &&
-    sameBox(a.frame, b.frame)
+    sameBox(a.visible, b.visible)
   );
 }
 
@@ -226,6 +234,8 @@ function track(
   let scopeElement: Element | null = null;
   let animationFrame = 0;
   let settleTimer: number | null = null;
+  /** Whether a followed item sits in a fixed or sticky box and moves with the scroll. */
+  let followsScroll = false;
 
   /** Where the frame's content box starts in the shell. */
   function contentBox(): Box {
@@ -261,7 +271,7 @@ function track(
     }
   }
 
-  function hoverState(current: Attached, frameBox: Box): HoverState | null {
+  function hoverState(current: Attached, visible: Box): HoverState | null {
     const hovered = target;
     if (hovered === null || !hovered.isConnected) {
       if (hovered !== null) setTarget(null);
@@ -270,7 +280,8 @@ function track(
     // A target that renders at no size is outlined at the ghost box a click on
     // it would hit.
     const element =
-      measure(hovered, current.view) ?? measureLoose(hovered, current.view);
+      measure(hovered, current.view) ??
+      measureLooseInDocument(hovered, current.view);
     if (element === null) return null;
     const container = section;
     const sectionBox =
@@ -291,13 +302,13 @@ function track(
       unavailable: hovered.hasAttribute(EDIT_ATTRIBUTE.unavailable),
       element,
       section: sectionBox,
-      frame: frameBox,
+      visible,
     };
   }
 
   function selectionState(
     current: Attached,
-    frameBox: Box,
+    visible: Box,
   ): SelectionState | null {
     const reader = options.selection;
     if (reader === undefined) return null;
@@ -314,10 +325,12 @@ function track(
     // A selected item that takes up no room (a new block with no text yet) is
     // still outlined, in a box big enough to see and to hang the toolbar from.
     const selected =
-      nextSelected === null ? null : measureLoose(nextSelected, current.view);
+      nextSelected === null
+        ? null
+        : measureLooseInDocument(nextSelected, current.view);
     const scope = nextScope === null ? null : measure(nextScope, current.view);
     if (selected === null && scope === null) return null;
-    return { selected, scope, frame: frameBox };
+    return { selected, scope, visible };
   }
 
   function update(): void {
@@ -329,8 +342,17 @@ function track(
       emitSelection(null);
       return;
     }
-    emit(hoverState(current, frameBox));
-    emitSelection(selectionState(current, frameBox));
+    const visible = visibleDocumentBox(current.view);
+    emit(hoverState(current, visible));
+    emitSelection(selectionState(current, visible));
+    // A fixed or sticky item keeps its place on the screen, so its document box
+    // moves with every scroll.
+    followsScroll = [target, selectedElement, scopeElement].some(
+      (element) =>
+        element !== null &&
+        element.isConnected &&
+        followsViewport(element, current.view),
+    );
   }
 
   /** Asks for a measurement in the next animation frame; any number of asks
@@ -357,7 +379,12 @@ function track(
   function settle(): void {
     settleTimer = null;
     const current = attached;
-    if (current === null || pointer === null) return;
+    if (current === null) return;
+    if (pointer === null) {
+      // No pointer to look up, but the visible part of the page may have moved.
+      schedule();
+      return;
+    }
     const box = contentBox();
     const x = pointer.x - box.left;
     const y = pointer.y - box.top;
@@ -401,6 +428,14 @@ function track(
 
     const onPointer = (event: PointerEvent): void => {
       if (event.pointerType === 'touch') return;
+      // The pointer over a chrome control (the host is what the site's
+      // listeners see) ends the hover, as the shell's own chrome always did.
+      if (Reflect.get(event.target ?? {}, 'localName') === CHROME_HOST_TAG) {
+        pointer = null;
+        setTarget(null);
+        schedule();
+        return;
+      }
       const box = contentBox();
       pointer = { x: event.clientX + box.left, y: event.clientY + box.top };
       setTarget(
@@ -431,7 +466,14 @@ function track(
     root.addEventListener('pointerover', onPointer, { passive: true });
     root.addEventListener('pointermove', onPointer, { passive: true });
     root.addEventListener('pointerleave', onLeave, { passive: true });
-    view.addEventListener('scroll', changed, { passive: true });
+    // A scroll moves no box (they are in document coordinates): it only asks
+    // for the settle, once the page has been quiet. A fixed or sticky item is
+    // the exception and is measured again in the next frame.
+    const onScroll = (): void => {
+      if (followsScroll) schedule();
+      scheduleSettle();
+    };
+    view.addEventListener('scroll', onScroll, { passive: true });
     view.addEventListener('resize', changed, { passive: true });
 
     attached = {
@@ -444,7 +486,7 @@ function track(
         root.removeEventListener('pointerover', onPointer);
         root.removeEventListener('pointermove', onPointer);
         root.removeEventListener('pointerleave', onLeave);
-        view.removeEventListener('scroll', changed);
+        view.removeEventListener('scroll', onScroll);
         view.removeEventListener('resize', changed);
       },
     };

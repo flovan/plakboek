@@ -4,16 +4,16 @@
  * until the editing session is running: the page opened, the lock taken and
  * the frame's clicks claimed.
  */
-import { expect, type Frame, type Page } from '@playwright/test';
+import { expect, type Frame, type Locator, type Page } from '@playwright/test';
 import { releaseAllPageLocks } from './pages.ts';
 
 export const HOST = 'plakboek-editor';
 export const FRAME = `${HOST} iframe`;
-export const SELECTED = `${HOST} [data-overlay-selected]`;
-export const SCOPE = `${HOST} [data-overlay-scope]`;
-export const OUTLINE = `${HOST} [data-overlay-outline]`;
-export const SECTION_OUTLINE = `${HOST} [data-overlay-section]`;
-export const CHIP = `${HOST} [data-overlay-chip]`;
+export const SELECTED = '[data-overlay-selected]';
+export const SCOPE = '[data-overlay-scope]';
+export const OUTLINE = '[data-overlay-outline]';
+export const SECTION_OUTLINE = '[data-overlay-section]';
+export const CHIP = '[data-overlay-chip]';
 export const MODE_GROUP = `${HOST} [role="radiogroup"]`;
 export const LIVE_REGION = `${HOST} [role="status"].sr-only`;
 
@@ -46,18 +46,276 @@ export async function waitForShell(page: Page): Promise<void> {
 }
 
 /**
+ * Lets a spec reach the chrome the editor draws inside the framed document.
+ * That chrome sits in a closed shadow root, which Playwright locators cannot
+ * enter, so this init script makes `attachShadow` create open roots, but only
+ * in documents whose address carries `_edit=frame`. The gate is read when
+ * `attachShadow` is called, not when the script is installed: the frame's
+ * first window is an `about:blank` one that the real document reuses. Product
+ * code never sees this patch, and the isolation spec runs without it.
+ */
+export async function exposeFrameChrome(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const marker = Symbol.for('plakboek.e2e.openFrameChrome');
+    const proto = Element.prototype as unknown as Record<symbol, boolean>;
+    if (proto[marker] === true) return;
+    proto[marker] = true;
+    const original = Reflect.get(Element.prototype, 'attachShadow') as (
+      this: Element,
+      init: ShadowRootInit,
+    ) => ShadowRoot;
+    Element.prototype.attachShadow = function (init: ShadowRootInit) {
+      const forced = location.search.includes('_edit=frame');
+      return original.call(this, forced ? { ...init, mode: 'open' } : init);
+    };
+  });
+}
+
+/** Where `holdFrameChrome` keeps the chrome's root on the frame's window. */
+const HELD_ROOT = 'plakboek.e2e.frameChromeRoot';
+
+/**
+ * Keeps the frame chrome's shadow root closed, as in the product, yet lets a
+ * spec find where its controls are. An init script like `exposeFrameChrome`
+ * that leaves the mode as asked: in documents whose address carries
+ * `_edit=frame` it only stores the root returned for a `plakboek-chrome`
+ * element on the frame's window. A spec reaches the chrome with
+ * `clickFrameChrome`, whose presses take the production path through the
+ * closed root; only the coordinates come from the stored reference. Open the
+ * editor with `exposeChrome: false` alongside it.
+ */
+export async function holdFrameChrome(page: Page): Promise<void> {
+  await page.addInitScript((key) => {
+    const marker = Symbol.for('plakboek.e2e.holdFrameChrome');
+    const proto = Element.prototype as unknown as Record<symbol, boolean>;
+    if (proto[marker] === true) return;
+    proto[marker] = true;
+    const original = Reflect.get(Element.prototype, 'attachShadow') as (
+      this: Element,
+      init: ShadowRootInit,
+    ) => ShadowRoot;
+    Element.prototype.attachShadow = function (init: ShadowRootInit) {
+      const root = original.call(this, init);
+      if (
+        location.search.includes('_edit=frame') &&
+        this.localName === 'plakboek-chrome'
+      ) {
+        Reflect.set(window, Symbol.for(key), root);
+      }
+      return root;
+    };
+  }, HELD_ROOT);
+}
+
+/** The first element under the held chrome root that matches, as a handle (null when none). */
+async function findFrameChrome(
+  page: Page,
+  selector: string,
+  text: string | undefined,
+) {
+  const frame = await framedSite(page);
+  const handle = await frame.evaluateHandle(
+    ({ key, selector: query, text: label }) => {
+      const root = Reflect.get(window, Symbol.for(key)) as
+        | ShadowRoot
+        | undefined;
+      if (root === undefined) return null;
+      return (
+        [...root.querySelectorAll(query)].find(
+          (element) =>
+            label === undefined || (element.textContent ?? '').trim() === label,
+        ) ?? null
+      );
+    },
+    { key: HELD_ROOT, selector, text },
+  );
+  return handle.asElement();
+}
+
+/** How many elements under the held chrome root match. */
+export async function frameChromeCount(
+  page: Page,
+  selector: string,
+): Promise<number> {
+  const frame = await framedSite(page);
+  return await frame.evaluate(
+    ({ key, selector: query }) => {
+      const root = Reflect.get(window, Symbol.for(key)) as
+        | ShadowRoot
+        | undefined;
+      return root === undefined ? 0 : root.querySelectorAll(query).length;
+    },
+    { key: HELD_ROOT, selector },
+  );
+}
+
+/** Whether the chrome host's shadow root is closed, as it is in the product. */
+export async function frameChromeIsClosed(page: Page): Promise<boolean> {
+  const frame = await framedSite(page);
+  return await frame.evaluate(
+    ({ key, tag }) => {
+      const host = document.querySelector(tag);
+      const held = Reflect.get(window, Symbol.for(key));
+      return host !== null && host.shadowRoot === null && held !== undefined;
+    },
+    { key: HELD_ROOT, tag: FRAME_CHROME },
+  );
+}
+
+/**
+ * Presses the centre of a chrome control with the real mouse, through the
+ * closed root: the control is found under the held root, only to read where it
+ * is. `text` picks the control whose trimmed text is exactly that.
+ */
+export async function clickFrameChrome(
+  page: Page,
+  selector: string,
+  text?: string,
+): Promise<void> {
+  await expect
+    .poll(async () => (await findFrameChrome(page, selector, text)) !== null, {
+      message: `${selector} ${text ?? ''} is not in the frame chrome`,
+    })
+    .toBe(true);
+  const element = await findFrameChrome(page, selector, text);
+  const box = element === null ? null : await element.boundingBox();
+  if (box === null) {
+    throw new Error(`${selector} ${text ?? ''} has no box in the frame chrome`);
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
+
+/**
  * Opens `<path>?_edit=1` and waits until the editing session runs and the
  * frame's clicks are claimed (the frame leaves the tab order only then). Locks
- * an earlier spec left on a shared page are released first.
+ * an earlier spec left on a shared page are released first. The chrome inside
+ * the frame is reachable (see `exposeFrameChrome`) unless `exposeChrome` is
+ * false.
  */
-export async function openEditor(page: Page, path: string): Promise<void> {
+export async function openEditor(
+  page: Page,
+  path: string,
+  options: { readonly exposeChrome?: boolean } = {},
+): Promise<void> {
   await releaseAllPageLocks();
+  if (options.exposeChrome !== false) await exposeFrameChrome(page);
   const separator = path.includes('?') ? '&' : '?';
   const response = await page.goto(`${path}${separator}_edit=1`);
   expect(response?.status()).toBe(200);
   await waitForShell(page);
   await expect(page.locator(HOST)).toHaveAttribute('data-session', 'editing');
   await expect(page.locator(FRAME)).toHaveAttribute('tabindex', '-1');
+}
+
+/** The tag of the in-frame chrome host. */
+export const FRAME_CHROME = 'plakboek-chrome';
+
+/**
+ * The scope of frame-anchored chrome: the outlines, chips, block toolbar,
+ * insert points, picker, needs-input markers and empty prompts. It lives in
+ * the chrome host inside the framed document, which a spec reaches because
+ * `openEditor` makes that root open (see `exposeFrameChrome`). Specs reach all
+ * of it through here. What stays in the shell (the drag capture surface and
+ * label, the toast, the sidebar and the Properties sheet) is reached with
+ * `page.locator(HOST)`.
+ */
+export function chrome(page: Page): Locator {
+  return page.frameLocator(FRAME).locator(FRAME_CHROME);
+}
+
+/** A chrome element's box in the page's coordinates. */
+export async function chromeBoxOf(page: Page, selector: string): Promise<Rect> {
+  const box = await chrome(page).locator(selector).first().boundingBox();
+  if (box === null) throw new Error(`${selector} has no box in the chrome`);
+  return box;
+}
+
+/** The id of the selected item: the selected outline's value, null when none. */
+export async function selectedId(page: Page): Promise<string | null> {
+  const outline = chrome(page).locator(SELECTED);
+  if ((await outline.count()) === 0) return null;
+  const value = await outline.first().getAttribute('data-overlay-selected');
+  return value === null || value === '' ? null : value;
+}
+
+/**
+ * Selects the item the target belongs to with one click on the target: a click
+ * selects the deepest item under the pointer, so the target should be the
+ * item's own content (its text), not a nested block inside it.
+ */
+export async function selectItem(page: Page, target: Locator): Promise<void> {
+  const id = await target.evaluate(
+    (element) =>
+      element.closest('[data-pk-block]')?.getAttribute('data-pk-block') ?? null,
+  );
+  if (id === null) throw new Error('The target is not inside a block');
+  await target.click();
+  // A click on editable text also starts a field session; it is left again
+  // (the block stays selected) so the specs that only select are not typing.
+  if ((await page.locator(HOST).getAttribute('data-text-field')) !== null) {
+    await page.keyboard.press('Escape');
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+  }
+  await expect.poll(() => selectedId(page)).toBe(id);
+}
+
+/**
+ * Clicks a text field the way an editor does (one click selects the block and
+ * puts the caret under the pointer), waits for the field session, and types.
+ * `position` is relative to the target's top-left corner.
+ */
+export async function typeInField(
+  page: Page,
+  target: Locator,
+  text: string,
+  position?: { readonly x: number; readonly y: number },
+): Promise<void> {
+  await target.click(position === undefined ? {} : { position });
+  await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
+  await page.keyboard.type(text);
+}
+
+/**
+ * Selects a section or a column. A click selects the deepest item under the
+ * pointer, so a container is reached the way an editor reaches it: click what
+ * is inside it, then Escape climbs one level at a time until it is selected.
+ * The target is the container's own element and the click lands on its centre.
+ */
+export async function selectContainer(
+  page: Page,
+  target: Locator,
+): Promise<void> {
+  const id = await target.getAttribute('data-pk-block');
+  if (id === null) throw new Error('The target is not a block');
+  await target.click();
+  // A click on editable text also starts a field session; leaving it first
+  // keeps the first Escape from being spent on the field.
+  if ((await page.locator(HOST).getAttribute('data-text-field')) !== null) {
+    await page.keyboard.press('Escape');
+    await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
+  }
+  for (let climbs = 0; climbs < 6; climbs += 1) {
+    await expect.poll(() => selectedId(page)).not.toBeNull();
+    const current = await selectedId(page);
+    if (current === id) return;
+    await page.keyboard.press('Escape');
+    await expect.poll(() => selectedId(page)).not.toBe(current);
+  }
+  await expect.poll(() => selectedId(page)).toBe(id);
+}
+
+/** Selects the item and opens its Properties sheet from the block toolbar. */
+export async function openProperties(
+  page: Page,
+  target: Locator,
+): Promise<void> {
+  await selectItem(page, target);
+  await chrome(page)
+    .getByRole('button', { name: /^Properties of / })
+    .click();
+  await expect(
+    page.locator(`${HOST} [data-properties-sheet][data-open]`),
+  ).toHaveCount(1);
 }
 
 export async function boxOf(page: Page, selector: string): Promise<Rect> {
@@ -93,10 +351,13 @@ export async function expectSelectedOver(
   frame: Frame,
   selector: string,
 ): Promise<void> {
-  await expect(page.locator(SELECTED)).toHaveCount(1);
+  await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
   await expect
     .poll(async () => {
-      const outline = await page.locator(SELECTED).first().boundingBox();
+      const outline = await chrome(page)
+        .locator(SELECTED)
+        .first()
+        .boundingBox();
       const element = await frame.locator(selector).first().boundingBox();
       if (outline === null || element === null) return Number.POSITIVE_INFINITY;
       return Math.max(

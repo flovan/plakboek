@@ -12,6 +12,7 @@ import {
 import { renderBlockFragments } from '@plakboek/render/server';
 import type { PreviewResponse } from '../../api-types.js';
 import { visibleProps } from '../model.js';
+import { textEnvironmentFor } from '../text-environment.js';
 import type { PreviewBody } from './schemas.js';
 import { notFound, readPageForest, type ApiContext } from './session.js';
 
@@ -67,18 +68,33 @@ export async function previewPage(
     blockType: node.blockType,
     props: body.props ?? stored,
     layout: body.layout === undefined ? node.layout : body.layout,
+    // The row as stored, so a document the theme no longer allows stays
+    // previewable while another property changes.
+    storedProps: node.props,
   });
   if (!checked.ok) return { ok: false, issues: checked.issues };
 
+  const candidate = withValues(blocks, body.blockId, {
+    props: checked.props,
+    layout: checked.layout,
+  });
+  const text = await textEnvironmentFor({
+    db: deps.pages.db,
+    config: deps.pages.config,
+    homeSlug: deps.homeSlug,
+    textTheme: deps.textTheme,
+    blocks: candidate,
+    mode: 'edit',
+    liveOnly: false,
+    hooks: deps.hooks,
+  });
   const rendered = renderBlockFragments({
-    blocks: withValues(blocks, body.blockId, {
-      props: checked.props,
-      layout: checked.layout,
-    }),
+    blocks: candidate,
     targets: [body.blockId],
     components: deps.components,
     blockMeta: context.blockMeta,
     pageId,
+    text,
     ...(deps.hooks === undefined ? {} : { hooks: deps.hooks }),
   });
   const fragment = rendered.fragments[0];

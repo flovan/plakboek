@@ -106,7 +106,15 @@ function isDisallowedBetterAuth(specifier: string): boolean {
   );
 }
 
+/**
+ * The exact subpaths of an otherwise server-only package the client may reach:
+ * pure data and validation, no database, no framework. The package root and
+ * every other subpath stay refused.
+ */
+const CLIENT_ALLOWED = ['@plakboek/content/rich-text'] as const;
+
 function isServerOnly(specifier: string): boolean {
+  if ((CLIENT_ALLOWED as readonly string[]).includes(specifier)) return false;
   if (specifier.startsWith('node:')) return true;
   if (isDisallowedBetterAuth(specifier)) return true;
   return SERVER_ONLY.some((entry) =>
@@ -221,6 +229,23 @@ describe('collectModuleGraph (seeded leaks prove the walker can fail)', () => {
     );
     const graph = await collectModuleGraph(path.join(dir, 'clean.js'));
     expect(serverOnlyReaches(graph)).toEqual([]);
+  });
+
+  it('allows the rich-text subpath of the content package and nothing else of it', async () => {
+    await writeFile(
+      path.join(dir, 'content.js'),
+      [
+        "import { isEmptyRichTextDocument } from '@plakboek/content/rich-text';",
+        "import { createEntry } from '@plakboek/content';",
+        "import { z } from '@plakboek/content/schema';",
+        '',
+      ].join('\n'),
+    );
+    const graph = await collectModuleGraph(path.join(dir, 'content.js'));
+    expect(serverOnlyReaches(graph).sort()).toEqual([
+      '@plakboek/content',
+      '@plakboek/content/schema',
+    ]);
   });
 
   it('reports a dynamic import whose specifier is not a string literal', async () => {

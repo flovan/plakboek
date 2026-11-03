@@ -15,12 +15,15 @@ import {
 } from 'react';
 import { hydrateRoot as hydrate, type Root } from 'react-dom/client';
 import type { SidebarLayout } from '../../chrome/controls.js';
+import type { PageSearch } from '../../chrome/editing/text/page-picker.js';
 import { ShellApp } from '../../chrome/shell.js';
 import { SHELL_ROOT_ID, type ShellIsland } from '../../chrome/island.js';
 import { STAGE_ID } from '../../chrome/stage.js';
 import { formatString, STRINGS } from '../../chrome/strings.js';
-import type { BlockEditHooks } from '@plakboek/render';
+import { isTextThemeDefinition, type BlockEditHooks } from '@plakboek/render';
 import type { BootEditorOptions } from '../boot.js';
+import { isFocusable } from '../chrome-host/shape.js';
+import { useChromeHost } from '../chrome-host/use-chrome-host.js';
 import { attachClaim } from '../frame/claim.js';
 import { loadBlockEditModules } from '../frame/block-edit-loader.js';
 import { hitChain } from '../frame/hit-test.js';
@@ -67,7 +70,6 @@ import { hasPending, type Intent } from '../session/save-queue.js';
 import { createSaveRunner, type SaveRunner } from '../session/save-runner.js';
 import {
   climb,
-  drillByDoubleClick,
   drillFirst,
   firstSibling,
   lastSibling,
@@ -92,10 +94,19 @@ import {
   type EditorState,
   type PickerOpener,
 } from '../session/store.js';
+import {
+  createTextController,
+  type TextController,
+} from '../text/controller.js';
+import {
+  findEditableField,
+  findZeroSizeFieldAt,
+} from '../text/field-target.js';
 import { createDragSession } from './drag-session.js';
 import { drawerFits, setDrawerColumn } from './drawer.js';
 import { watchFrame } from './frame-watch.js';
-import { keyAction, structureKeyAction } from './keys.js';
+import { keyAction, regionTabTarget, structureKeyAction } from './keys.js';
+import { stopAfterStage, tabStops } from './tab-stops.js';
 import { applyLayout, readLayout, writeLayout } from './layout.js';
 
 /**
@@ -176,6 +187,7 @@ function Shell(props: {
   const hooksRef = useRef<HooksRuntime | null>(null);
   const runnerRef = useRef<SaveRunner | null>(null);
   const previewRef = useRef<PreviewRunner | null>(null);
+  const textControllerRef = useRef<TextController | null>(null);
   const status = useEditorStore(store, (state) => state.status);
   const session = useEditorStore(store, (state) => state.session);
   // The first client render must match the server markup, which was rendered
@@ -193,6 +205,43 @@ function Shell(props: {
     setHydrated(true);
     host.dataset.hydrated = '';
   }, [host]);
+
+  // The in-frame chrome host exists only while an editing session is in Edit
+  // mode, once per frame document, and shows the shell's light or dark theme.
+  // The claim below lets a click on it through.
+  const mode = useEditorStore(store, (state) => state.mode);
+  const frameElement = useMemo(
+    () => (hydrated ? frameOf(host) : null),
+    [host, hydrated],
+  );
+  const [theme, setTheme] = useState<string | null>(null);
+  useEffect(() => {
+    const read = (): void => setTheme(host.getAttribute('data-theme'));
+    read();
+    const observer = new MutationObserver(read);
+    observer.observe(host, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return () => observer.disconnect();
+  }, [host]);
+  const chromeHost = useChromeHost(
+    frameElement,
+    editable && status === 'editing' && mode === 'edit',
+    theme,
+  );
+  const chromeHostRef = useRef(chromeHost);
+  useEffect(() => {
+    chromeHostRef.current = chromeHost;
+  }, [chromeHost]);
+  /** The first control of the in-frame chrome that matches, else the shell's own. */
+  const findControl = useCallback(
+    (selector: string): Element | null =>
+      chromeHostRef.current?.root.querySelector(selector) ??
+      host.shadowRoot?.querySelector(selector) ??
+      null,
+    [host],
+  );
 
   // The host's block edit modules load once, after hydration and in edit mode
   // only. The frame runtime below calls their hooks.
@@ -362,6 +411,11 @@ function Shell(props: {
       frame: () => frameOf(host),
       frameUrl: island.frameUrl,
       hooks: () => hooksRef.current,
+      // A new block opens where it is filled in: its text on the page, or a
+      // button's popover. Anything else keeps the Properties panel.
+      onAdded: (id, message) =>
+        textControllerRef.current?.enterNew(id, { announcePrefix: message }) ??
+        false,
     });
     runnerRef.current = runner;
     // The live preview of a property change renders into the same frame.
@@ -373,6 +427,10 @@ function Shell(props: {
     });
     previewRef.current = preview;
     return () => {
+      // A running text session ends first, while the runners still take its
+      // last write: effect cleanups run in declaration order and the
+      // controller is created further down.
+      void textControllerRef.current?.exit('reload');
       previewRef.current = null;
       preview.cancel();
       runnerRef.current = null;
@@ -425,6 +483,11 @@ function Shell(props: {
    * and, when the engine accepts them, queue the save as one edit that the
    * keystrokes of this field share (one undo step, sent after a pause or on
    * blur). A refusal queues nothing and leaves the frame on its last render.
+   *
+   * `persist` is for text that has nowhere else to live, the last write of an
+   * in-place text session: it is queued at once, whatever the preview says, so
+   * a failed, superseded or refused preview never drops the typed words (a
+   * refusal then shows as a failed save). The preview is only the render.
    */
   const changeProperties = useCallback(
     async (
@@ -432,6 +495,7 @@ function Shell(props: {
       values: Readonly<Record<string, unknown>>,
       changedKey: string,
       immediate: boolean,
+      persist = false,
     ): Promise<PreviewResponse | null> =>
       await trackPropertyWork(async () => {
         const state = store.getState();
@@ -444,49 +508,118 @@ function Shell(props: {
         ) {
           return null;
         }
+        const queueWrite = (): void => {
+          const latest = store.getState();
+          const { model, session } = latest;
+          const runner = runnerRef.current;
+          if (
+            latest.status !== 'editing' ||
+            model === null ||
+            model.get(blockId) === undefined ||
+            runner === null
+          ) {
+            return;
+          }
+          const type = model.get(blockId)?.type;
+          const property = session?.catalogue
+            .find((entry) => entry.key === type)
+            ?.properties.find((item) => item.key === changedKey);
+          const intent: Intent = { kind: 'update', blockId, props: values };
+          runner.perform(
+            intent,
+            buildUndoEntry(
+              intent,
+              model,
+              {
+                kind: 'changed',
+                itemId: blockId,
+                property: property?.label ?? changedKey,
+              },
+              { coalesceKey: `${blockId}:${changedKey}`, open: true },
+            ),
+          );
+        };
+        if (persist) queueWrite();
         const response = await preview.change(
           blockId,
           { props: withValues(node.props, values) },
           immediate,
+          changedKey,
         );
-        if (response?.ok !== true) return response;
-        const latest = store.getState();
-        const { model, session } = latest;
-        const runner = runnerRef.current;
-        if (
-          latest.status !== 'editing' ||
-          model === null ||
-          model.get(blockId) === undefined ||
-          runner === null
-        ) {
-          return response;
-        }
-        const type = model.get(blockId)?.type;
-        const property = session?.catalogue
-          .find((entry) => entry.key === type)
-          ?.properties.find((item) => item.key === changedKey);
-        const intent: Intent = { kind: 'update', blockId, props: values };
-        runner.perform(
-          intent,
-          buildUndoEntry(
-            intent,
-            model,
-            {
-              kind: 'changed',
-              itemId: blockId,
-              property: property?.label ?? changedKey,
-            },
-            { coalesceKey: `${blockId}:${changedKey}`, open: true },
-          ),
-        );
+        if (!persist && response?.ok === true) queueWrite();
         return response;
       }),
     [store, trackPropertyWork],
   );
 
+  // The link popover's page picker asks the same API as the rest of the shell.
+  const searchPages = useCallback<PageSearch>(
+    (locale, query, signal, id) => api.searchPages(locale, query, signal, id),
+    [api],
+  );
+
   const blurProperties = useCallback((blockId: string) => {
     runnerRef.current?.ready(blockId);
   }, []);
+
+  // The host's renderer map, when its theme module is valid: the field is
+  // edited in node views derived from it.
+  const textRenderers = isTextThemeDefinition(options.textTheme)
+    ? options.textTheme.renderers
+    : undefined;
+  // Rich text fields are edited in place on the page. The controller owns one
+  // session at a time and writes through the same preview and save path as the
+  // Properties controls; the wiring here is only what it cannot reach itself.
+  const controller = useMemo(
+    () =>
+      createTextController({
+        store,
+        changeProperties,
+        ready: blurProperties,
+        focusRegion: () => {
+          focusRegion(host);
+        },
+        announce: (text) => {
+          store.announce(text);
+        },
+        frameDocument: () => frameOf(host)?.contentDocument ?? null,
+        ...(textRenderers === undefined ? {} : { renderers: textRenderers }),
+      }),
+    [store, changeProperties, blurProperties, host, textRenderers],
+  );
+  useEffect(() => {
+    textControllerRef.current = controller;
+    return () => {
+      if (textControllerRef.current === controller) {
+        textControllerRef.current = null;
+      }
+      controller.dispose();
+    };
+  }, [controller]);
+  // The marker specs and tools wait on while a field session runs.
+  useEffect(() => {
+    const sync = (): void => {
+      const field = store.getState().textField;
+      host.toggleAttribute('data-text-field', field?.unsupported === false);
+    };
+    sync();
+    return store.subscribe(sync);
+  }, [host, store]);
+  /**
+   * Runs an action that writes to the page after the text session, if any, has
+   * flushed its pending save: the typed words are queued first, so the action
+   * (a move, a copy, a delete, an undo) sees them.
+   */
+  const afterTextSession = useCallback(
+    (reason: 'structure' | 'undo', action: () => void) => {
+      if (controller.active() === null) {
+        action();
+        return;
+      }
+      void controller.exit(reason).then(action);
+    },
+    [controller],
+  );
 
   /**
    * A layout choice (column widths, alignment, fill): render the item with it
@@ -591,28 +724,32 @@ function Shell(props: {
   /** A column's move from its section's panel: the section stays selected, so more moves can follow. */
   const moveColumnFromPanel = useCallback(
     (id: string, direction: MoveDirection) => {
-      runnerRef.current?.whenSaved(() => {
-        const state = store.getState();
-        const action = moveActionFor(state, id, direction);
-        if (action === null) return;
-        runnerRef.current?.perform(action.intent, action.entry, {
-          selectId: state.selection.selectedId,
-          flash: false,
+      afterTextSession('structure', () => {
+        runnerRef.current?.whenSaved(() => {
+          const state = store.getState();
+          const action = moveActionFor(state, id, direction);
+          if (action === null) return;
+          runnerRef.current?.perform(action.intent, action.entry, {
+            selectId: state.selection.selectedId,
+            flash: false,
+          });
         });
       });
     },
-    [store],
+    [afterTextSession, store],
   );
 
   const moveItem = useCallback(
     (id: string, direction: MoveDirection) => {
-      runnerRef.current?.whenSaved(() => {
-        const action = moveActionFor(store.getState(), id, direction);
-        if (action !== null)
-          runnerRef.current?.perform(action.intent, action.entry);
+      afterTextSession('structure', () => {
+        runnerRef.current?.whenSaved(() => {
+          const action = moveActionFor(store.getState(), id, direction);
+          if (action !== null)
+            runnerRef.current?.perform(action.intent, action.entry);
+        });
       });
     },
-    [store],
+    [afterTextSession, store],
   );
 
   /** Deletes at once and offers to undo it; the caller has settled any confirmation. */
@@ -655,9 +792,9 @@ function Shell(props: {
         return;
       }
       if (needsDeleteConfirmation(model, id)) store.askDelete(id, opener);
-      else performDelete(id, opener);
+      else afterTextSession('structure', () => performDelete(id, opener));
     },
-    [store, performDelete],
+    [store, performDelete, afterTextSession],
   );
 
   const confirmDelete = useCallback(
@@ -677,16 +814,16 @@ function Shell(props: {
     requestAnimationFrame(() => {
       const button =
         request.opener === 'toolbar'
-          ? host.shadowRoot?.querySelector('[data-roving="delete"]')
+          ? findControl('[data-roving="delete"]')
           : request.opener === 'panel'
             ? host.shadowRoot?.querySelector(
                 `[data-column-remove="${request.id}"]`,
               )
             : null;
-      if (button instanceof HTMLElement) button.focus({ preventScroll: true });
+      if (isFocusable(button)) button.focus({ preventScroll: true });
       else focusRegion(host);
     });
-  }, [host, store]);
+  }, [findControl, host, store]);
 
   const deleteFromToolbar = useCallback(
     (id: string) => {
@@ -706,22 +843,24 @@ function Shell(props: {
     (id: string) => {
       const first = store.getState();
       if (first.status !== 'editing' || first.mode !== 'edit') return;
-      runnerRef.current?.whenSaved(() => {
-        const state = store.getState();
-        if (state.status !== 'editing' || state.mode !== 'edit') return;
-        const newId = crypto.randomUUID();
-        const action = duplicateActionFor(state, id, newId);
-        if (action === null) {
-          store.announce(STRINGS['toolbar.reason.noDuplicate']);
-          return;
-        }
-        // A copied column also resets its section's ratio, so the copy is named.
-        runnerRef.current?.perform(action.intent, action.entry, {
-          selectId: newId,
+      afterTextSession('structure', () => {
+        runnerRef.current?.whenSaved(() => {
+          const state = store.getState();
+          if (state.status !== 'editing' || state.mode !== 'edit') return;
+          const newId = crypto.randomUUID();
+          const action = duplicateActionFor(state, id, newId);
+          if (action === null) {
+            store.announce(STRINGS['toolbar.reason.noDuplicate']);
+            return;
+          }
+          // A copied column also resets its section's ratio, so the copy is named.
+          runnerRef.current?.perform(action.intent, action.entry, {
+            selectId: newId,
+          });
         });
       });
     },
-    [store],
+    [afterTextSession, store],
   );
 
   /** Adds a new item of a type at a position; the runner selects it once it is saved. */
@@ -744,7 +883,8 @@ function Shell(props: {
       });
       if (moveFocus) {
         requestAnimationFrame(() => {
-          focusRegion(host);
+          // A new block's text may have taken the focus: it keeps it.
+          if (textControllerRef.current?.active() == null) focusRegion(host);
         });
       }
     },
@@ -793,7 +933,6 @@ function Shell(props: {
     store.closePicker();
     if (picker === null) return;
     requestAnimationFrame(() => {
-      const root = host.shadowRoot;
       const selector =
         picker.opener === 'insert-point'
           ? `[data-slot="${slotKey(picker.slot)}"]`
@@ -804,12 +943,11 @@ function Shell(props: {
               : picker.opener === 'empty-page'
                 ? '[data-empty-page-add]'
                 : null;
-      const trigger = selector === null ? null : root?.querySelector(selector);
-      if (trigger instanceof HTMLElement)
-        trigger.focus({ preventScroll: true });
+      const trigger = selector === null ? null : findControl(selector);
+      if (isFocusable(trigger)) trigger.focus({ preventScroll: true });
       else focusRegion(host);
     });
-  }, [host, store]);
+  }, [findControl, host, store]);
 
   const dismissPicker = useCallback(() => {
     store.closePicker();
@@ -835,14 +973,13 @@ function Shell(props: {
         onKeyboardEnd: () => {
           // The handle is still there after a cancel and usually after a drop.
           requestAnimationFrame(() => {
-            const handle = host.shadowRoot?.querySelector('[data-drag-handle]');
-            if (handle instanceof HTMLElement)
-              handle.focus({ preventScroll: true });
+            const handle = findControl('[data-drag-handle]');
+            if (isFocusable(handle)) handle.focus({ preventScroll: true });
             else focusRegion(host);
           });
         },
       }),
-    [host, store, moveTo],
+    [findControl, host, store, moveTo],
   );
   useEffect(() => {
     const unsubscribe = store.subscribe(() => {
@@ -870,17 +1007,23 @@ function Shell(props: {
   const retrySave = useCallback(() => {
     runnerRef.current?.retry();
   }, []);
+  // The sidebar's and the rail's Undo and Redo first end a text session, so
+  // the typing burst is one entry they act on.
   const undo = useCallback(() => {
-    runnerRef.current?.undo();
-  }, []);
+    afterTextSession('undo', () => {
+      runnerRef.current?.undo();
+    });
+  }, [afterTextSession]);
   /** Undo from the toast: its button is about to go, so focus goes to the page. */
   const undoFromToast = useCallback(() => {
     runnerRef.current?.undo();
     focusRegion(host);
   }, [host]);
   const redo = useCallback(() => {
-    runnerRef.current?.redo();
-  }, []);
+    afterTextSession('undo', () => {
+      runnerRef.current?.redo();
+    });
+  }, [afterTextSession]);
 
   const changeMode = useCallback(
     (next: EditorMode) => {
@@ -895,6 +1038,27 @@ function Shell(props: {
       if (next === 'edit') focusStage(host, frameOf(host));
     },
     [host, store],
+  );
+
+  /**
+   * Puts the caret at the end of the block's first text field (in the order
+   * its properties are declared). A button field is not text: it answers false,
+   * as does a block with no field.
+   */
+  const enterFirstTextField = useCallback(
+    (blockId: string): boolean => {
+      const { model, session } = store.getState();
+      const type = model?.get(blockId)?.type;
+      const entry = session?.catalogue.find((item) => item.key === type);
+      if (entry === undefined) return false;
+      for (const property of entry.properties) {
+        const target = controller.fieldFor(blockId, property.key);
+        if (target === null || target.kind === 'button') continue;
+        return controller.enterField(blockId, property.key);
+      }
+      return false;
+    },
+    [controller, store],
   );
 
   const climbSelection = useCallback(() => {
@@ -914,15 +1078,30 @@ function Shell(props: {
     let releaseClaim: (() => void) | null = null;
     let releaseKeys: (() => void) | null = null;
 
+    /** The control with focus in the in-frame chrome, for a key pressed on it. */
+    const focusedChrome = (event: KeyboardEvent): Element | null => {
+      const chrome = chromeHostRef.current;
+      if (chrome === null || event.target !== chrome.element) return null;
+      return chrome.root.activeElement;
+    };
+
     const structureKey = (event: KeyboardEvent, target: unknown): void => {
       const state = store.getState();
       const { model, selection } = state;
       if (state.mode !== 'edit' || model === null) return;
       const path = event.composedPath();
       const inRegion = path[0] instanceof Element && path[0].id === STAGE_ID;
-      const inToolbar = path.some(
-        (node) => node instanceof Element && node.hasAttribute('data-toolbar'),
-      );
+      // A key pressed on in-frame chrome reaches this window's listener with
+      // the (closed) host as its target, so the focused control is read from
+      // the host's own root.
+      const focused = focusedChrome(event);
+      const inToolbar =
+        focused === null
+          ? path.some(
+              (node) =>
+                node instanceof Element && node.hasAttribute('data-toolbar'),
+            )
+          : focused.closest('[data-toolbar]') !== null;
       const frameDocument = frame.contentDocument;
       const selected =
         selection.selectedId === null
@@ -961,6 +1140,16 @@ function Shell(props: {
           break;
         case 'drill': {
           const result = drillFirst(model, selection);
+          // Enter on a block with text to type in goes to the text; the
+          // Properties open for a block with none, and for Arrow Right.
+          if (
+            event.key === 'Enter' &&
+            result.openProperties &&
+            selected !== undefined &&
+            enterFirstTextField(selected.id)
+          ) {
+            break;
+          }
           selectAndAnnounce(store, result.selection);
           if (result.openProperties && result.selection.selectedId !== null) {
             store.requestProperties(result.selection.selectedId);
@@ -1014,13 +1203,82 @@ function Shell(props: {
       }
     };
 
+    /**
+     * Tab between the page region and the in-frame chrome, which the frame's
+     * place outside the tab order would otherwise cut off. True when handled.
+     */
+    const tabKey = (event: KeyboardEvent): boolean => {
+      const chrome = chromeHostRef.current;
+      if (
+        event.key !== 'Tab' ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        chrome === null ||
+        store.getState().mode !== 'edit'
+      ) {
+        return false;
+      }
+      const focused = focusedChrome(event);
+      const first = event.composedPath()[0];
+      const inRegion =
+        focused === null && first instanceof Element && first.id === STAGE_ID;
+      const stops = tabStops(chrome.root);
+      const index =
+        focused === null ? -1 : stops.indexOf(focused as HTMLElement);
+      const target = regionTabTarget({
+        key: event.key,
+        shiftKey: event.shiftKey,
+        inRegion,
+        inToolbar: index !== -1,
+        hasToolbar: stops.length > 0,
+      });
+      if (target === null) return false;
+      event.preventDefault();
+      const shellRoot = host.shadowRoot;
+      if (target === 'toolbar') {
+        stops[0]?.focus({ preventScroll: true });
+      } else if (target === 'region') {
+        // Shift+Tab walks back through the chrome's own stops first.
+        const previous = stops[index - 1];
+        if (previous === undefined) focusRegion(host);
+        else previous.focus({ preventScroll: true });
+      } else {
+        const next = stops[index + 1];
+        const stage = shellRoot?.getElementById(STAGE_ID) ?? null;
+        const after =
+          next ??
+          (shellRoot === null || stage === null
+            ? null
+            : stopAfterStage(shellRoot, stage));
+        if (after === null) focusRegion(host);
+        else after.focus({ preventScroll: true });
+      }
+      return true;
+    };
+
     const onKey = (event: KeyboardEvent): void => {
       // A key something already used (the Properties sheet closing on Escape)
       // does nothing more here, so that Escape does not also climb the selection.
       if (event.defaultPrevented) return;
       // The delete confirmation owns the keyboard while it is open.
       if (store.getState().deleteRequest !== null) return;
-      const target = event.composedPath()[0] ?? event.target;
+      // The Button popover of a button block ends on Escape from the moment
+      // the session starts, before the popover has taken the focus.
+      if (
+        event.key === 'Escape' &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        controller.active()?.kind === 'button'
+      ) {
+        event.preventDefault();
+        void controller.exit('escape');
+        return;
+      }
+      if (tabKey(event)) return;
+      const target =
+        focusedChrome(event) ?? event.composedPath()[0] ?? event.target;
       const action = keyAction(event, target);
       if (action === null) {
         structureKey(event, target);
@@ -1044,37 +1302,70 @@ function Shell(props: {
           if (model === null) return null;
           return { model, selection, chain: hitChain(frameDocument, x, y) };
         };
-        releaseClaim = attachClaim(claimed, {
-          onClick: (x, y) => {
-            store.closePicker();
-            const hit = read(x, y);
-            if (hit === null) return;
-            selectAndAnnounce(
-              store,
-              selectByClick(hit.model, hit.selection, hit.chain),
-            );
-            focusRegion(host);
+        releaseClaim = attachClaim(
+          claimed,
+          {
+            onClick: (x, y) => {
+              // The click that follows a drag's release is not a selection.
+              if (dragSession.justEnded()) return;
+              // Nor is the click that ends a text selection dragged out of the field.
+              if (controller.pressEndedOutside()) return;
+              store.closePicker();
+              void controller.exit('click');
+              const hit = read(x, y);
+              if (hit === null) return;
+              selectAndAnnounce(
+                store,
+                selectByClick(hit.model, hit.selection, hit.chain),
+              );
+              // One click on editable text selects its block and puts the
+              // caret at the pointer; anywhere else the region takes focus.
+              const latest = store.getState();
+              const catalogue = latest.session?.catalogue ?? [];
+              // A field that renders at no size is never under the point, so
+              // it is found through the ghost box of the selected block.
+              const field =
+                latest.model === null
+                  ? null
+                  : (findEditableField(
+                      claimed.document.elementFromPoint(x, y),
+                      latest.model,
+                      catalogue,
+                    ) ??
+                    (latest.selection.selectedId === null
+                      ? null
+                      : findZeroSizeFieldAt(
+                          claimed.document,
+                          latest.selection.selectedId,
+                          x,
+                          y,
+                          latest.model,
+                          catalogue,
+                        )));
+              if (
+                field !== null &&
+                field.blockId === latest.selection.selectedId
+              ) {
+                controller.enter(field, { x, y });
+              } else {
+                focusRegion(host);
+              }
+            },
           },
-          onDoubleClick: (x, y) => {
-            store.closePicker();
-            const hit = read(x, y);
-            if (hit === null) return;
-            const drilled = drillByDoubleClick(
-              hit.model,
-              hit.selection,
-              hit.chain,
-            );
-            selectAndAnnounce(store, drilled.selection);
-            focusRegion(host);
-            // A double-click on a leaf is the explicit ask for its Properties.
-            if (
-              drilled.openProperties &&
-              drilled.selection.selectedId !== null
-            ) {
-              store.requestProperties(drilled.selection.selectedId);
-            }
+          {
+            isExempt: (event) =>
+              event.target === chromeHostRef.current?.element ||
+              // The active text field keeps its own clicks, selections and
+              // double-clicks; the claim still owns every other site event.
+              controller.ownsEvent(event) ||
+              // The release of a pointer drag is the drag's: the frame keeps
+              // the mouse from the press on the in-frame handle until then,
+              // also when the pointer never moved far enough to start it.
+              (event.type === 'pointerup' &&
+                (store.getState().drag?.via === 'pointer' ||
+                  dragSession.pointerArmed())),
           },
-        });
+        );
       } else if (!wanted && releaseClaim !== null) {
         releaseClaim();
         releaseClaim = null;
@@ -1094,6 +1385,8 @@ function Shell(props: {
       ) {
         return;
       }
+      // A new document: the field of the old one is gone.
+      void controller.exit('reload');
       releaseClaim?.();
       releaseClaim = null;
       releaseKeys?.();
@@ -1127,9 +1420,11 @@ function Shell(props: {
     store,
     changeMode,
     climbSelection,
+    dragSession,
     deleteItem,
     duplicateItem,
     openPicker,
+    controller,
   ]);
 
   // The lock is held while editing: renewed on a heartbeat, again when the tab
@@ -1339,8 +1634,8 @@ function Shell(props: {
     [host, store, showLayout],
   );
 
-  // An explicit ask for an item's Properties (a double-click, the toolbar
-  // button) shows them: in the full layout that opens the drawer, in the same
+  // An explicit ask for an item's Properties (the toolbar button, the Page
+  // structure) shows them: in the full layout that opens the drawer, in the same
   // store update's wake so the panel's own focus move is the one that lands.
   useEffect(() => {
     let seen = store.getState().propertiesRequest?.token ?? 0;
@@ -1361,6 +1656,8 @@ function Shell(props: {
       hydrated={hydrated}
       layout={layout}
       onToggleLayout={toggleLayout}
+      chromeHost={chromeHost}
+      frameElement={frameElement}
       frameFailed={frameFailed}
       onReload={reload}
       editor={
@@ -1390,6 +1687,16 @@ function Shell(props: {
               onPick: pickEntry,
               onDragStart: startDrag,
               onLiftDrag: liftDrag,
+              onKeepUnsupported: () => {
+                controller.keepUnsupported();
+              },
+              onRemoveUnsupported: () => controller.removeUnsupported(),
+              onFieldDone: () => {
+                void controller.exit('done');
+              },
+              textSession: controller,
+              textController: controller,
+              onSearchPages: searchPages,
               onPropertiesChange: changeProperties,
               onPropertiesBlur: blurProperties,
               onLayoutChange: changeLayout,

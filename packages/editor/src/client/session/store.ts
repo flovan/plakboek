@@ -10,6 +10,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import type { EditorSession, LockView, ModelNode } from '../../api-types.js';
+import type { StringKey } from '../../chrome/strings.js';
 import { createDragFeed, type DragFeed } from '../drag/feed.js';
 import type { DragSubject } from '../drag/slots.js';
 import { createUndoStack, type UndoEntry, type UndoStack } from './inverse.js';
@@ -73,6 +74,18 @@ export type DragState = {
   readonly active: boolean;
 };
 
+/**
+ * The text field being edited in place, or one the editor refused to mount
+ * because its stored content holds formatting the theme no longer allows
+ * (`unsupported`: the field stays read-only).
+ */
+export type TextFieldState = {
+  readonly blockId: string;
+  readonly key: string;
+  readonly kind: 'rich' | 'plain' | 'button';
+  readonly unsupported: boolean;
+};
+
 export type EditorState = {
   readonly status: EditorStatus;
   readonly session: EditorSession | null;
@@ -104,8 +117,8 @@ export type EditorState = {
   /** The notice that was showing when the drawer was last open or closed, so a newer one is unread. */
   readonly noticeSeen: Notice | null;
   /**
-   * An explicit ask for an item's Properties (a double-click or Enter on a
-   * leaf, the toolbar button, an insert that needs input). It switches the
+   * An explicit ask for an item's Properties (the toolbar button, Enter or a
+   * double-click in the Page structure, the needs-input marker). It switches the
    * panel to Properties; the panel answers it by moving focus to a control.
    */
   readonly propertiesRequest: {
@@ -116,6 +129,15 @@ export type EditorState = {
   readonly toast: {
     readonly entry: UndoEntry;
     readonly label: string;
+    readonly token: number;
+  } | null;
+  /**
+   * A transient status message (no button): what the toast shows for a few
+   * seconds, such as "Some formatting was removed to match the theme." A new
+   * message replaces the one showing and restarts its time.
+   */
+  readonly message: {
+    readonly key: StringKey;
     readonly token: number;
   } | null;
   /** The open picker: the gap it adds to and what opened it, so focus can go back. */
@@ -133,6 +155,16 @@ export type EditorState = {
   } | null;
   /** Leaving while a save failed: the editor is asked whether to stay. */
   readonly leaveRequest: { readonly token: number } | null;
+  /** The text field in a session, or null. */
+  readonly textField: TextFieldState | null;
+  /**
+   * What the editor has typed on the page into short text fields and the model
+   * does not hold yet, by block and property key. The Properties panel shows
+   * it so the two never disagree; the text controller sets and clears it.
+   */
+  readonly liveValues: Readonly<
+    Record<string, Readonly<Record<string, unknown>>>
+  >;
 };
 
 /** What a successful write changes in one step, so no one reads a half-applied state. */
@@ -191,6 +223,9 @@ export type EditorStore = {
   /** Shows the undo toast for a delete, replacing any earlier one. */
   showToast(entry: UndoEntry, label: string): void;
   clearToast(): void;
+  /** Shows a transient status message, replacing any earlier one. */
+  showMessage(key: StringKey): void;
+  clearMessage(): void;
   /** Opens the delete confirmation for `id`. */
   askDelete(id: string, opener: DeleteOpener): void;
   cancelDelete(): void;
@@ -199,6 +234,12 @@ export type EditorStore = {
   closePicker(): void;
   /** A drag starts, becomes active or ends; the picker closes while one runs. */
   setDrag(drag: DragState | null): void;
+  /** A text field session starts or ends. */
+  setTextField(field: TextFieldState | null): void;
+  /** Records what is typed on the page into a property, for the Properties panel. */
+  setLiveValue(blockId: string, key: string, value: unknown): void;
+  /** Forgets everything typed on the page into a block's properties. */
+  clearLiveValues(blockId: string): void;
 };
 
 export function initialEditorState(): EditorState {
@@ -222,10 +263,13 @@ export function initialEditorState(): EditorState {
     noticeSeen: null,
     propertiesRequest: null,
     toast: null,
+    message: null,
     picker: null,
     drag: null,
     deleteRequest: null,
     leaveRequest: null,
+    textField: null,
+    liveValues: {},
   };
 }
 
@@ -262,10 +306,13 @@ export function openedState(
     queue: createQueue(),
     undo: createUndoStack(),
     toast: null,
+    message: null,
     picker: null,
     drag: null,
     deleteRequest: null,
     leaveRequest: null,
+    textField: null,
+    liveValues: {},
   };
 }
 
@@ -301,10 +348,13 @@ export function createEditorStore(
       highlight: null,
       propertiesOpen: false,
       toast: null,
+      message: null,
       picker: null,
       drag: null,
       deleteRequest: null,
       leaveRequest: null,
+      textField: null,
+      liveValues: {},
     });
   }
 
@@ -467,6 +517,14 @@ export function createEditorStore(
       if (state.toast === null) return;
       set({ ...state, toast: null });
     },
+    showMessage(key) {
+      token += 1;
+      set({ ...state, message: { key, token } });
+    },
+    clearMessage() {
+      if (state.message === null) return;
+      set({ ...state, message: null });
+    },
     askDelete(id, opener) {
       if (state.mode !== 'edit') return;
       set({ ...state, deleteRequest: { id, opener } });
@@ -487,6 +545,30 @@ export function createEditorStore(
     setDrag(drag) {
       if (drag === null && state.drag === null) return;
       set({ ...state, drag, picker: drag === null ? state.picker : null });
+    },
+    setTextField(textField) {
+      if (textField === null && state.textField === null) return;
+      set({ ...state, textField });
+    },
+    setLiveValue(blockId, key, value) {
+      const held = state.liveValues[blockId];
+      if (held !== undefined && key in held && held[key] === value) return;
+      set({
+        ...state,
+        liveValues: {
+          ...state.liveValues,
+          [blockId]: { ...held, [key]: value },
+        },
+      });
+    },
+    clearLiveValues(blockId) {
+      if (!(blockId in state.liveValues)) return;
+      set({
+        ...state,
+        liveValues: Object.fromEntries(
+          Object.entries(state.liveValues).filter(([id]) => id !== blockId),
+        ),
+      });
     },
   };
 }

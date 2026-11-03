@@ -39,7 +39,7 @@ function fakeEvent(type: string, x = 0, y = 0) {
 }
 
 function handlers() {
-  return { onClick: vi.fn(), onDoubleClick: vi.fn() };
+  return { onClick: vi.fn() };
 }
 
 function dispatch(
@@ -71,14 +71,24 @@ describe('attachClaim', () => {
     }
   });
 
-  it('routes a click and a double-click with their frame coordinates', () => {
+  it('routes a click with its frame coordinates', () => {
     const { added, frameWindow } = fakeWindow();
     const claim = handlers();
     attachClaim(frameWindow, claim);
     dispatch(added, fakeEvent('click', 12, 34));
-    dispatch(added, fakeEvent('dblclick', 56, 78));
     expect(claim.onClick).toHaveBeenCalledExactlyOnceWith(12, 34);
-    expect(claim.onDoubleClick).toHaveBeenCalledExactlyOnceWith(56, 78);
+  });
+
+  it('cancels a double-click before any site listener and routes nothing', () => {
+    const { added, frameWindow } = fakeWindow();
+    const claim = handlers();
+    attachClaim(frameWindow, claim);
+    const event = fakeEvent('dblclick', 56, 78);
+    dispatch(added, event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.stopPropagation).toHaveBeenCalledOnce();
+    expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+    expect(claim.onClick).not.toHaveBeenCalled();
   });
 
   it('claims the other events without routing them', () => {
@@ -89,7 +99,28 @@ describe('attachClaim', () => {
     dispatch(added, event);
     expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(claim.onClick).not.toHaveBeenCalled();
-    expect(claim.onDoubleClick).not.toHaveBeenCalled();
+  });
+
+  it('leaves an exempt event alone and routes nothing', () => {
+    const { added, frameWindow } = fakeWindow();
+    const claim = handlers();
+    attachClaim(frameWindow, claim, { isExempt: () => true });
+    const event = fakeEvent('click', 5, 6);
+    dispatch(added, event);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(event.stopPropagation).not.toHaveBeenCalled();
+    expect(event.stopImmediatePropagation).not.toHaveBeenCalled();
+    expect(claim.onClick).not.toHaveBeenCalled();
+  });
+
+  it('still claims an event the exemption refuses', () => {
+    const { added, frameWindow } = fakeWindow();
+    const claim = handlers();
+    attachClaim(frameWindow, claim, { isExempt: () => false });
+    const event = fakeEvent('click', 5, 6);
+    dispatch(added, event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(claim.onClick).toHaveBeenCalledExactlyOnceWith(5, 6);
   });
 
   it('detaching removes exactly what was added', () => {

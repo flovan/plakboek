@@ -23,6 +23,7 @@ import { NOOP_EDIT, type EditProxy } from './edit-proxy.js';
 import { buildPageHead, type PageHead } from './head.js';
 import type { RenderHooks } from './hooks.js';
 import { createLiveEdit, EDIT_ATTRIBUTE } from './live-edit.js';
+import type { TextEnvironment } from './rich-text/environment.js';
 import type { ReactNode } from 'react';
 
 /** What the overlay needs to know about a block type. */
@@ -47,6 +48,8 @@ export type RenderPageTreeInput = {
   readonly hooks?: RenderHooks;
   readonly siteUrl?: string;
   readonly resolveAssetUrl?: (assetId: string) => string | null;
+  /** The text environment every block's rich text renders under. */
+  readonly text?: TextEnvironment;
 };
 
 export type RenderedTree = {
@@ -124,6 +127,7 @@ export function renderPageTree(input: RenderPageTreeInput): RenderedTree {
     editFor,
     isDegraded: (node) => node.degraded,
     placeholderFor: live ? placeholderFor(blockMeta) : undefined,
+    ...(input.text === undefined ? {} : { text: input.text }),
   });
   return { head, body, degraded };
 }

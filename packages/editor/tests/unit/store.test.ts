@@ -281,7 +281,7 @@ describe('announceSelection', () => {
     const selection = selectByClick(
       model,
       { scopeId: null, selectedId: null },
-      ['h2', 'c2', 's2'],
+      ['s2'],
     );
     expect(announceSelection(model, catalogue, selection)).toBe(
       'Selected section, section 2 of 2.',

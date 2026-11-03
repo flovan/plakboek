@@ -41,14 +41,20 @@ export function hasUnsavedEdit(queue: QueueState, blockId: string): boolean {
   );
 }
 
-/** The value a field shows: its draft while it has one, else the model's. */
+/**
+ * The value a field shows: its draft while it has one, else what the editor
+ * typed on the page and the model does not hold yet (`live`), else the model's.
+ */
 export function shownValue(
   drafts: Drafts,
   node: ModelNode,
   key: string,
+  live?: Readonly<Record<string, unknown>>,
 ): unknown {
   const draft = drafts[key];
-  return draft === undefined ? node.props[key] : draft.value;
+  if (draft !== undefined) return draft.value;
+  if (live !== undefined && key in live) return live[key];
+  return node.props[key];
 }
 
 /** A change to one key: the draft takes the new value and waits for its render. */
