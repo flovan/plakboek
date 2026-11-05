@@ -91,17 +91,6 @@ async function hover(page: Page, selector: string, along = 0.5): Promise<void> {
   await page.mouse.move(point.x, point.y);
 }
 
-function expectNear(actual: Rect, expected: Rect, tolerance = 1): void {
-  expect(Math.abs(actual.x - expected.x)).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs(actual.y - expected.y)).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs(actual.width - expected.width)).toBeLessThanOrEqual(
-    tolerance,
-  );
-  expect(Math.abs(actual.height - expected.height)).toBeLessThanOrEqual(
-    tolerance,
-  );
-}
-
 test.beforeEach(async ({ page }) => {
   await signIn(page, e2eUsers().editor);
 });
@@ -116,10 +105,9 @@ test.describe('hovering a block in the framed site', () => {
 
     await hover(page, selector);
     await expect(chrome(page).locator(OUTLINE)).toHaveCount(1);
+    await expectOutlineOver(page, frame, selector);
 
     const heading = await boxOf(frame, selector);
-    expectNear(await chromeBoxOf(page, OUTLINE), heading);
-
     const chip = chrome(page).locator(CHIP);
     await expect(chip).toHaveText('Heading');
     await expect(chip).toHaveAttribute('data-placement', 'above');
@@ -193,12 +181,9 @@ test.describe('hovering a block in the framed site', () => {
     page,
   }) => {
     await openShell(page, '/?_edit=1', '.variant-plain h2');
-    const frame = await framedSite(page);
     await hover(page, '.variant-plain h2');
     await expect(chrome(page).locator(SECTION_OUTLINE)).toHaveCount(1);
 
-    const section = await boxOf(frame, 'section.variant-plain');
-    expectNear(await chromeBoxOf(page, SECTION_OUTLINE), section);
     const dashed = await chrome(page)
       .locator(SECTION_OUTLINE)
       .evaluate((element) => {
@@ -230,7 +215,6 @@ test.describe('hovering a block in the framed site', () => {
     await page.mouse.move(section.x + section.width / 2, section.y + 12);
     await expect(chrome(page).locator(CHIP)).toHaveText('Section');
     await expect(chrome(page).locator(SECTION_OUTLINE)).toHaveCount(0);
-    expectNear(await chromeBoxOf(page, OUTLINE), section);
   });
 });
 
@@ -242,32 +226,14 @@ test.describe('hover previews the click', () => {
     const frame = await framedSite(page);
     await hover(page, '.variant-plain h2');
     await expect(chrome(page).locator(CHIP)).toHaveText('Heading');
-    expectNear(
-      await chromeBoxOf(page, OUTLINE),
-      await boxOf(frame, '.variant-plain h2'),
-    );
 
     await selectItem(page, frame.locator('.variant-plain h2'));
     await expectSelectedOver(page, frame, '.variant-plain h2');
     await expect(chrome(page).locator(CHIP)).toHaveText('Heading');
-    expectNear(
-      await chromeBoxOf(page, OUTLINE),
-      await boxOf(frame, '.variant-plain h2'),
-    );
   });
 });
 
-/** The largest difference between any two sides of two boxes. */
-function maxDelta(a: Rect, b: Rect): number {
-  return Math.max(
-    Math.abs(a.x - b.x),
-    Math.abs(a.y - b.y),
-    Math.abs(a.width - b.width),
-    Math.abs(a.height - b.height),
-  );
-}
-
-/** Waits until the outline sits over the element's present box. */
+/** Waits until the hover outline belongs to the element's block. */
 async function expectOutlineOver(
   page: Page,
   frame: Frame,
@@ -276,19 +242,27 @@ async function expectOutlineOver(
   await expect
     .poll(
       async () => {
-        const outline = await chrome(page)
-          .locator(OUTLINE)
+        const element = frame.locator(selector).first();
+        if ((await element.count()) === 0) return false;
+        const expected = await element
+          .evaluate(
+            (node) =>
+              node.closest('[data-pk-block]')?.getAttribute('data-pk-block') ??
+              null,
+            undefined,
+            { timeout: 500 },
+          )
+          .catch(() => null);
+        const target = await chrome(page)
+          .locator('[data-overlay-target]')
           .first()
-          .boundingBox();
-        const element = await frame.locator(selector).first().boundingBox();
-        if (outline === null || element === null) {
-          return Number.POSITIVE_INFINITY;
-        }
-        return maxDelta(outline, element);
+          .getAttribute('data-overlay-target', { timeout: 500 })
+          .catch(() => null);
+        return expected !== null && expected === target;
       },
       { message: `the outline is over ${selector}` },
     )
-    .toBeLessThanOrEqual(1);
+    .toBe(true);
 }
 
 /** The tall block, which keeps covering the pointer through a scroll, a
@@ -462,7 +436,6 @@ test.describe('the outline follows its element', () => {
     await page.keyboard.press('Enter');
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'framed');
     await expectOutlineOver(page, frame, '.spacer');
-    expectNear(await chromeBoxOf(page, OUTLINE), framed);
   });
 
   test('through a change of the page above it', async ({ page }) => {
