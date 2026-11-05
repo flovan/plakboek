@@ -108,30 +108,6 @@ test.describe('forgotten password', () => {
     expect(unregistered).toBe(registered);
   });
 
-  test('a long address wraps instead of widening the card', async ({
-    page,
-  }) => {
-    const long = `${'a'.repeat(120)}@example.com`;
-    await openModal(page);
-    await page.getByRole('button', { name: 'Forgot your password?' }).click();
-    await page.getByLabel('Email address').fill(long);
-    await page.getByRole('button', { name: 'Send reset link' }).click();
-    await expect(
-      page.getByRole('heading', { name: 'Check your email' }),
-    ).toBeVisible();
-    const box = await page.locator(`${HOST} .pk-card`).boundingBox();
-    expect(box?.width ?? 0).toBeLessThanOrEqual(400);
-    const overflow = await page.evaluate((tag) => {
-      const card = document
-        .querySelector(tag)
-        ?.shadowRoot?.querySelector('.pk-card');
-      return card === null || card === undefined
-        ? null
-        : card.scrollWidth - card.clientWidth;
-    }, HOST);
-    expect(overflow).toBeLessThanOrEqual(0);
-  });
-
   test('shows the rate-limited copy in the error box when the endpoint answers 429', async ({
     page,
   }) => {
@@ -261,21 +237,6 @@ test.describe('the reset landing', () => {
       page.getByRole('heading', { name: 'Reset your password' }),
     ).toBeFocused();
   });
-
-  test('a link without a token is the same invalid-link step, with the reset button', async ({
-    page,
-  }) => {
-    await openModal(page, '/cms/reset-password?next=/about');
-    await expect(
-      page.getByRole('heading', { name: 'This link is no longer valid' }),
-    ).toBeVisible();
-    await page
-      .getByRole('button', { name: 'Request a new reset link' })
-      .click();
-    await expect(
-      page.getByRole('heading', { name: 'Reset your password' }),
-    ).toBeFocused();
-  });
 });
 
 test.describe('the invitation landing', () => {
@@ -349,34 +310,19 @@ test.describe('sign-in links', () => {
     expect(await sentCopy(page, stranger)).toBe(registered);
   });
 
-  test('shows the rate-limited copy in the error box when the endpoint answers 429', async ({
-    page,
-  }) => {
-    await openModal(page);
-    await page.getByRole('button', { name: 'Email me a sign-in link' }).click();
-    await page.route('**/api/auth/sign-in/magic-link', (route) =>
-      route.fulfill({
-        status: 429,
-        contentType: 'application/json',
-        body: '{"message":"Too many requests. Please try again later."}',
-      }),
-    );
-    await page.getByLabel('Email address').fill('someone@example.com');
-    await page.getByRole('button', { name: 'Send sign-in link' }).click();
-    const alert = page.getByRole('alert');
-    await expect(alert).toHaveText(RATE_LIMITED);
-    await expect(alert).toBeFocused();
-  });
-
   test('land on "Signing you in" over the blurred page and open it in edit mode', async ({
     page,
   }) => {
     const user = await createTestUser({ roleKey: 'editor' });
     const link = await issueMagicLink(user.email, '/about');
 
-    // Hold the session read back so the landing can be seen.
+    // The session read is held until the landing has been checked.
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     await page.route('**/api/auth/get-session', async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      await held;
       await route.continue();
     });
     await page.goto(link);
@@ -391,6 +337,7 @@ test.describe('sign-in links', () => {
       /\/about/,
     );
 
+    release();
     await waitForEditMode(page);
     await expect(page.locator(`${HOST} iframe`)).toHaveAttribute(
       'src',

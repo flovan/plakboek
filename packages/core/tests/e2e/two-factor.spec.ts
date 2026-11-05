@@ -237,6 +237,18 @@ test.describe('two-step sign-in', () => {
     await expect(
       page.getByRole('heading', { name: 'Use a backup code' }),
     ).toBeFocused();
+
+    // The way back to the authenticator app, and forward again.
+    await page
+      .getByRole('button', { name: 'Use your authenticator app instead' })
+      .click();
+    await expect(
+      page.getByRole('heading', { name: 'Enter your code' }),
+    ).toBeFocused();
+    await page.getByRole('button', { name: 'Use a backup code' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Use a backup code' }),
+    ).toBeFocused();
     const field = page.getByLabel('Backup code', { exact: true });
     await expect(field).toBeVisible();
 
@@ -257,20 +269,6 @@ test.describe('two-step sign-in', () => {
       (url) => url.pathname === '/about' && url.search === '?_edit=1',
     );
     await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
-  });
-
-  test('offers the way back from the backup code to the authenticator app', async ({
-    page,
-  }) => {
-    await openModal(page);
-    await signInWithPassword(page, shared.user);
-    await page.getByRole('button', { name: 'Use a backup code' }).click();
-    await page
-      .getByRole('button', { name: 'Use your authenticator app instead' })
-      .click();
-    await expect(
-      page.getByRole('heading', { name: 'Enter your code' }),
-    ).toBeFocused();
   });
 
   test('ends on the lockout step after five wrong codes, and Back to sign in starts again', async ({

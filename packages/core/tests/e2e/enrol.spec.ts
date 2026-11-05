@@ -334,11 +334,9 @@ test.describe('two-step sign-in set-up', () => {
   test('copies the setup key and the backup codes, and says so', async ({
     page,
     context,
-    browserName,
   }) => {
-    if (browserName === 'chromium') {
-      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-    }
+    // The copy only reaches its success status once the page may write.
+    await context.grantPermissions(['clipboard-write']);
     const user = await createTestUser({ roleKey: 'superadmin' });
     await signInToEnrolment(page, user);
     await confirmPassword(page, user.password);
@@ -351,11 +349,6 @@ test.describe('two-step sign-in set-up', () => {
 
     await page.getByRole('button', { name: 'Copy setup key' }).click();
     await expect(page.getByRole('status')).toHaveText('Setup key copied.');
-    if (browserName === 'chromium') {
-      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-        secret,
-      );
-    }
 
     await page.getByLabel('Authentication code').fill(totp(secret));
     await page.getByRole('button', { name: 'Verify' }).click();

@@ -4,6 +4,7 @@
  * that records instead of sending. Both engines share the throwaway database,
  * so a link issued here is one the running server accepts, once.
  */
+import { expect } from '@playwright/test';
 import { createAuth, requestPasswordLink } from '@plakboek/auth';
 import type { MailMessage, MailSender } from '@plakboek/auth';
 import { closeAllDbs, getDb } from '../../../src/runtime/db.ts';
@@ -106,8 +107,11 @@ export async function issueMagicLink(
       },
       headers: new Headers({ origin: env.siteUrl }),
     });
-    // The send is dispatched, not awaited, so give it a turn to be recorded.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The send is dispatched, not awaited, so wait until it is recorded.
+    const recorded = expect.poll(() => sent.length, {
+      message: 'the sign-in mail was never recorded',
+    });
+    await recorded.toBeGreaterThan(0);
     return onSite(linkOf(sent[0]));
   } finally {
     await closeAllDbs();
