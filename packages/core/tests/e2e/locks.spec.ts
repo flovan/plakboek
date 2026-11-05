@@ -471,15 +471,20 @@ test.describe('leaving with something unsaved', () => {
     });
     try {
       const { page } = editor;
-      // a slow save, so the control can be seen waiting for it
+      // the save is held until the waiting control has been seen
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
       await page.route(EDITS, async (route) => {
-        await new Promise((resolve) => setTimeout(resolve, 800));
+        await held;
         await route.continue();
       });
       const created = await typeIntoHeading(page);
 
       await page.getByRole('link', { name: 'Exit edit mode' }).click();
       await expect(page.getByRole('link', { name: 'Saving' })).toBeVisible();
+      release();
       await page.waitForURL(`**${created.path}`);
       expect(new URL(page.url()).search).toBe('');
 
