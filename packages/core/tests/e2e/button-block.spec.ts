@@ -186,7 +186,7 @@ test('a URL typed in the link control is stored once it is allowed, and Remove l
     .toBeUndefined();
 });
 
-test('clicking a Button block opens its popover on the page, with no caret and no Remove button: a style change renders live and a label and a page link are saved', async ({
+test('clicking a Button block opens its popover on the page, with no caret and no Remove button: a style change renders live and a label and a page link are saved, and Escape closes the popover leaving the block selected', async ({
   page,
 }) => {
   const word = tag();
@@ -257,31 +257,8 @@ test('clicking a Button block opens its popover on the page, with no caret and n
   await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
   await expect(chrome(page).locator('[data-overlay-selected]')).toHaveCount(1);
 
-  await page.reload();
-  const reloaded = (await framedSite(page)).locator('.button-block .t-cta');
-  await expect(reloaded).toHaveText('Book now');
-  await expect(reloaded).toHaveAttribute('data-variant', 'secondary');
-  await expect(reloaded).toHaveAttribute('href', target.path);
-});
-
-test('Escape closes the Button popover and leaves the block selected', async ({
-  page,
-}) => {
-  const created = await createEditablePage({
-    blocks: [
-      section(heading('Top'), {
-        type: 'button',
-        props: {
-          label: 'Go',
-          link: { href: 'https://example.com/', pageId: null, target: null },
-        },
-      }),
-    ],
-  });
-  await openEditor(page, created.path);
-  const frame = await framedSite(page);
-  await frame.locator('.button-block .t-cta').click();
-  const popover = chrome(page).locator(POPOVER);
+  // Escape closes a reopened popover too, leaving the block selected
+  await cta.click();
   await expect(popover).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(popover).toHaveCount(0);
@@ -289,6 +266,12 @@ test('Escape closes the Button popover and leaves the block selected', async ({
   await expect(page.locator(`${HOST} [role="status"].sr-only`)).toContainText(
     'Stopped editing',
   );
+
+  await page.reload();
+  const reloaded = (await framedSite(page)).locator('.button-block .t-cta');
+  await expect(reloaded).toHaveText('Book now');
+  await expect(reloaded).toHaveAttribute('data-variant', 'secondary');
+  await expect(reloaded).toHaveAttribute('href', target.path);
 });
 
 test('a Button block and a button typed into a text with the same label, link and style render the same markup, for the editor and for a visitor', async ({
