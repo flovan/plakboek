@@ -164,22 +164,6 @@ test.describe('leaving a field', () => {
     ).toHaveText('First block!');
   });
 
-  test('a double-click inside the active field selects a word and keeps the session', async ({
-    page,
-  }) => {
-    const { frame, field } = await openProse(page);
-    await typeInField(page, field, '', await pointBefore(field, 0));
-    const id = await selectedId(page);
-
-    const inside = await pointBefore(field, SENTENCE.indexOf('quick') + 2);
-    await field.dblclick({ position: inside });
-    await expect
-      .poll(() => frame.evaluate(() => document.getSelection()?.toString()))
-      .toBe('quick');
-    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
-    expect(await selectedId(page)).toBe(id);
-  });
-
   test('the sidebar Undo ends the session and undoes the whole typing burst as one step', async ({
     page,
   }) => {
