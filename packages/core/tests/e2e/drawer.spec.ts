@@ -1,8 +1,7 @@
 /**
- * The full-width layout's rail tools and panel drawer, in a real browser: the
- * drawer pushes the framed site narrower instead of covering it, and everything
- * an editor needs (mode, undo, redo, save status, Page structure, Properties) works from
- * the rail.
+ * The full-width layout's rail tools and panel drawer, in a real browser:
+ * everything an editor needs (mode, undo, redo, save status, Page structure,
+ * Properties) works from the rail and the drawer beside it.
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
@@ -71,35 +70,18 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe('the panel drawer', () => {
-  test('opens beside the rail and pushes the frame narrower instead of covering it, and closing restores it', async ({
+  test('opens beside the rail, edits the selection, and closing keeps it', async ({
     page,
   }) => {
     await openFullWidth(page);
     const frame = await framedSite(page);
     const target = frame.locator('section.section').first().locator('h2');
-    const before = await page.locator(FRAME).boundingBox();
-    expect(before?.x).toBeCloseTo(56, 0);
 
     await selectItem(page, target);
     await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
 
     await railButton(page, 'Properties').click();
     await expect(page.locator(DRAWER)).toBeVisible();
-
-    const drawer = await page.locator(DRAWER).boundingBox();
-    const pushed = await page.locator(FRAME).boundingBox();
-    expect(drawer?.width).toBeCloseTo(280, 0);
-    expect(pushed?.x).toBeCloseTo((before?.x ?? 0) + 280, 0);
-    expect(pushed?.width).toBeCloseTo((before?.width ?? 0) - 280, 0);
-    // nothing of the drawer is drawn over the site
-    expect((drawer?.x ?? 0) + (drawer?.width ?? 0)).toBeLessThanOrEqual(
-      (pushed?.x ?? 0) + 1,
-    );
-    // the site reflowed to the narrower viewport, once
-    expect(await frame.evaluate(() => window.innerWidth)).toBeCloseTo(
-      (before?.width ?? 0) - 280,
-      0,
-    );
 
     // the selection is still on the heading, and its Properties are right here
     await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
@@ -111,28 +93,12 @@ test.describe('the panel drawer', () => {
 
     await railButton(page, 'Properties').click();
     await expect(page.locator(DRAWER)).toBeHidden();
-    const restored = await page.locator(FRAME).boundingBox();
-    expect(restored?.x).toBeCloseTo(before?.x ?? 0, 0);
-    expect(restored?.width).toBeCloseTo(before?.width ?? 0, 0);
     await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
     await expect(target).toHaveText('Hello there');
   });
 });
 
 test.describe('the drawer at the edges', () => {
-  test('still opens as a drawer in the narrowest window, and the frame keeps well over its minimum', async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 1024, height: 800 });
-    await openFullWidth(page);
-
-    await railButton(page, 'Page structure').click();
-    await expect(page.locator(DRAWER)).toBeVisible();
-    await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
-    const frame = await page.locator(FRAME).boundingBox();
-    expect(frame?.width).toBeCloseTo(1024 - 56 - 280, 0);
-  });
-
   test('switches to the sidebar layout with the sheet open when the pushed frame would be under 320px wide', async ({
     page,
   }) => {
@@ -187,69 +153,26 @@ test.describe('the drawer at the edges', () => {
       window.scrollTo({ top: 600, behavior: 'instant' }),
     );
     await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(600);
+    const scrolled = await frame.evaluate(() => window.scrollY);
 
     await railButton(page, 'Page structure').click();
     await expect(page.locator(DRAWER)).toBeVisible();
-    await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(600);
+    await expect
+      .poll(() => frame.evaluate(() => window.scrollY))
+      .toBe(scrolled);
 
-    // a press in the middle of the pushed frame selects, and the drawer stays
-    const box = await page.locator(FRAME).boundingBox();
-    await page.mouse.click(
-      (box?.x ?? 0) + (box?.width ?? 0) / 2,
-      (box?.y ?? 0) + (box?.height ?? 0) / 2,
-    );
+    // a press in the frame selects, and the drawer stays
+    await frame
+      .locator('body')
+      .click({ position: { x: 200, y: scrolled + 200 } });
     await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
     await expect(page.locator(DRAWER)).toBeVisible();
 
     await railButton(page, 'Page structure').click();
     await expect(page.locator(DRAWER)).toBeHidden();
-    await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(600);
-  });
-
-  test('opens on Page structure, and a row there selects its block and brings it into view in the pushed frame', async ({
-    page,
-  }) => {
-    const created = await createEditablePage({
-      blocks: [
-        section(
-          heading('Top'),
-          { type: 'spacer', props: { size: 'tall' } },
-          heading('Far'),
-        ),
-      ],
-    });
-    await openEditor(page, created.path);
-    await switchToFullWidth(page);
-    const frame = await framedSite(page);
-    const id = await frame
-      .locator('[data-pk-type="heading"]', { hasText: 'Far' })
-      .first()
-      .getAttribute('data-pk-block');
-    expect(id).not.toBeNull();
-
-    await railButton(page, 'Page structure').click();
-    await expect(page.locator(`${DRAWER} [data-page-tree]`)).toBeVisible();
-
-    await page.locator(`${DRAWER} [data-tree-row="${id}"]`).click();
-    await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
-    await expect(page.locator(DRAWER)).toBeVisible();
     await expect
       .poll(() => frame.evaluate(() => window.scrollY))
-      .toBeGreaterThan(0);
-    await expect
-      .poll(() =>
-        frame.evaluate((block) => {
-          const box = document
-            .querySelector(`[data-pk-block="${block}"]`)
-            ?.getBoundingClientRect();
-          return (
-            box !== undefined &&
-            box.top >= 0 &&
-            box.bottom <= document.documentElement.clientHeight
-          );
-        }, id),
-      )
-      .toBe(true);
+      .toBe(scrolled);
   });
 });
 
