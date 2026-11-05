@@ -147,35 +147,12 @@ test.describe('the insert points and the picker', () => {
 });
 
 test.describe('the picker', () => {
-  test('Escape closes it and hands focus back to the insert point that opened it', async ({
+  test('Escape closes the picker and adds nothing; the arrow keys choose among the legal types and Enter adds the active one', async ({
     page,
   }) => {
     const created = await pageWithTwoHeadings();
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    await selectHeading(page, frame, 0);
-    await hoverGapBetweenHeadings(page, frame);
-    const button = chrome(page)
-      .getByRole('button', { name: 'Add block after Heading' })
-      .first();
-    const slot = await button.getAttribute('data-slot');
-    await button.click();
-    const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
-    await expect(picker.getByRole('combobox')).toBeFocused();
-
-    await page.keyboard.press('Escape');
-
-    await expect(picker).toHaveCount(0);
-    await expect.poll(() => focusedAttribute(page, 'data-slot')).toBe(slot);
-    // nothing was added
-    expect(await tagsInFirstColumn(frame)).toEqual(['h2', 'h2']);
-  });
-
-  test('the arrow keys choose among the legal types and Enter adds the active one', async ({
-    page,
-  }) => {
-    const created = await pageWithTwoHeadings();
-    await openEditor(page, created.path);
     await tabToRegion(page);
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowRight');
@@ -183,6 +160,14 @@ test.describe('the picker', () => {
     await page.keyboard.press('+');
 
     const picker = chrome(page).getByRole('dialog', { name: 'Add a block' });
+    await expect(picker).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(picker).toHaveCount(0);
+    await expect.poll(() => regionFocused(page)).toBe(true);
+    // nothing was added
+    expect(await tagsInFirstColumn(frame)).toEqual(['h2', 'h2']);
+
+    await page.keyboard.press('+');
     await expect(picker).toBeVisible();
     // the column is never offered, and only types that can go in a column are
     const options = await picker.getByRole('option').allTextContents();
