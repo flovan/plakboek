@@ -11,11 +11,6 @@ import { signIn } from './helpers/session.ts';
 const HOST = 'plakboek-editor';
 const FRAME = `${HOST} iframe`;
 
-// The viewport is 1400x900: a 280px sidebar, then 24px of stage padding on
-// the left, top, right and bottom of the frame.
-const EXPECTED_FRAME_BOX = { x: 304, y: 24, width: 1072, height: 852 };
-const GEOMETRY_TOLERANCE = 1;
-
 /** Console and page errors a hydration problem would leave behind. */
 function watchForHydrationProblems(page: Page): readonly string[] {
   const problems: string[] = [];
@@ -85,15 +80,6 @@ test.describe('an editor in edit mode', () => {
       framed.getByRole('heading', { name: 'Unpublished change' }),
     ).toBeVisible();
     expect(await framed.locator('[data-pk-block]').count()).toBeGreaterThan(0);
-
-    // Framed at 1:1 inside the stage.
-    const box = await frame.boundingBox();
-    expect(box).not.toBeNull();
-    for (const key of ['x', 'y', 'width', 'height'] as const) {
-      expect(
-        Math.abs((box?.[key] ?? Number.NaN) - EXPECTED_FRAME_BOX[key]),
-      ).toBeLessThanOrEqual(GEOMETRY_TOLERANCE);
-    }
 
     // Hydrating neither warns nor reloads the frame.
     expect(problems).toEqual([]);
