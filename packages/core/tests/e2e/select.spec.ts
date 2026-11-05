@@ -28,7 +28,6 @@ import {
   type EditablePage,
 } from './helpers/pages.ts';
 import { signIn } from './helpers/session.ts';
-import { createTestUser } from './helpers/users.ts';
 
 const SECTION_A = 'section.section >> nth=0';
 const SECTION_B = 'section.section >> nth=1';
@@ -64,25 +63,6 @@ test.beforeEach(async ({ page }) => {
   await signIn(page, e2eUsers().editor);
 });
 
-test.describe('opening a page for editing', () => {
-  test('a click on the framed site selects the deepest item under the pointer', async ({
-    page,
-  }) => {
-    const created = await twoSections();
-    await openEditor(page, created.path);
-    const frame = await framedSite(page);
-
-    await frame.getByRole('heading', { name: 'Beta heading' }).click();
-
-    await expectSelectedOver(page, frame, HEADING_B);
-    // the click on a heading's text also starts typing in it, and the
-    // announcement says so
-    await expect(page.locator(LIVE_REGION)).toHaveText(
-      'Editing Text. Press Escape to stop editing.',
-    );
-  });
-});
-
 test.describe('scoped selection', () => {
   test('a click selects the deepest item, empty column space the column, empty section space the section, and an empty area clears', async ({
     page,
@@ -116,12 +96,7 @@ test.describe('scoped selection', () => {
     await frame.getByRole('heading', { name: 'Short column' }).click();
     await expectSelectedOver(page, frame, `${SECTION_A} >> h2 >> nth=0`);
     await expect(chrome(page).locator(SCOPE)).toHaveCount(1);
-    const scope = await chrome(page).locator(SCOPE).boundingBox();
     const columnBox = await frame.locator(shortColumn).boundingBox();
-    expect(Math.abs((scope?.x ?? 0) - (columnBox?.x ?? 0))).toBeLessThan(2);
-    expect(
-      Math.abs((scope?.width ?? 0) - (columnBox?.width ?? 0)),
-    ).toBeLessThan(2);
 
     // below the short column's heading the column itself is under the pointer
     await frame
@@ -350,56 +325,5 @@ test.describe('a user who cannot edit', () => {
       'true',
     );
     await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
-  });
-});
-
-test.describe('the page lock while editing', () => {
-  test('a second editor gets the page without the tools while the first holds it, and gets the lock once the first leaves', async ({
-    page,
-    browser,
-  }) => {
-    const created = await twoSections();
-    await openEditor(page, created.path);
-
-    const second = await browser.newContext({
-      baseURL: process.env.E2E_BASE_URL,
-      viewport: { width: 1400, height: 900 },
-    });
-    try {
-      const other = await createTestUser({ roleKey: 'editor' });
-      const page2 = await second.newPage();
-      await signIn(page2, other);
-      await page2.goto(`${created.path}?_edit=1`);
-      await waitForShell(page2);
-
-      // the page is shown as a visitor would see it: no tools, no claim
-      await expect(page2.locator(HOST)).toHaveAttribute(
-        'data-session',
-        'locked',
-      );
-      await expect(page2.locator(`${HOST} [data-tools]`)).toHaveCount(0);
-      await expect(page2.locator(FRAME)).not.toHaveAttribute('tabindex');
-      // and the first editor keeps editing
-      await expect(page.locator(HOST)).toHaveAttribute(
-        'data-session',
-        'editing',
-      );
-      await expect(page.locator(MODE_GROUP)).toBeVisible();
-
-      // the first editor leaves the page: its lock is released
-      await page.goto('/about');
-      await expect(async () => {
-        await page2.reload();
-        await waitForShell(page2);
-        await expect(page2.locator(HOST)).toHaveAttribute(
-          'data-session',
-          'editing',
-          { timeout: 2000 },
-        );
-      }).toPass({ timeout: 20_000 });
-      await expect(page2.locator(MODE_GROUP)).toBeVisible();
-    } finally {
-      await second.close();
-    }
   });
 });

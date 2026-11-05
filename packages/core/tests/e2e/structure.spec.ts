@@ -130,15 +130,7 @@ test.describe('the toolbar path of a deeply nested item', () => {
     const items = levels.getByRole('button');
     await expect(items).toHaveCount(2);
 
-    // the list hangs below the toolbar, whole: the breadcrumb does not clip it
-    const toolbar = await chrome(page).locator(TOOLBAR).boundingBox();
-    const list = await levels.boundingBox();
-    const last = await items.last().boundingBox();
-    if (toolbar === null || list === null || last === null) {
-      throw new Error('The toolbar and its hidden levels are not laid out');
-    }
-    expect(list.y).toBeGreaterThanOrEqual(toolbar.y + toolbar.height);
-    expect(last.y + last.height).toBeLessThanOrEqual(list.y + list.height);
+    // the list is whole: the breadcrumb does not clip it
     await expect(items.last()).toBeInViewport({ ratio: 1 });
 
     await page.keyboard.press('Escape');

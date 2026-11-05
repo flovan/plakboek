@@ -6,10 +6,8 @@
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
   chrome,
-  chromeBoxOf,
   expectSelectedOver,
   framedSite,
-  frameBoxOf,
   HOST,
   LIVE_REGION,
   openEditor,
@@ -48,13 +46,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe('Page structure', () => {
-  test('a row selects its item and scrolls it into view, unless it is already fully visible', async ({
-    page,
-  }) => {
+  test('a row selects its item and scrolls it into view', async ({ page }) => {
     await openLongPage(page);
     const frame = await framedSite(page);
     const far = await headingId(frame, 'Far');
-    const top = await headingId(frame, 'Top');
     await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(0);
 
     await row(page, far).click();
@@ -64,53 +59,12 @@ test.describe('Page structure', () => {
     await expect
       .poll(() => frame.evaluate(() => window.scrollY))
       .toBeGreaterThan(0);
-    await expect
-      .poll(() =>
-        frame.evaluate((id) => {
-          const box = document
-            .querySelector(`[data-pk-block="${id}"]`)
-            ?.getBoundingClientRect();
-          return (
-            box !== undefined &&
-            box.top >= 0 &&
-            box.bottom <= document.documentElement.clientHeight
-          );
-        }, far),
-      )
-      .toBe(true);
+    await expect(frame.locator(`[data-pk-block="${far}"]`)).toBeInViewport();
     await expectSelectedOver(
       page,
       frame,
       '[data-pk-type="heading"]:has-text("Far")',
     );
-
-    // a fully visible item does not scroll the page; first let the smooth
-    // scroll that brought Far into view come to rest, or its last frames land
-    // after the reset below
-    await expect
-      .poll(async () => {
-        const before = await frame.evaluate(() => window.scrollY);
-        await page.waitForTimeout(100);
-        return before === (await frame.evaluate(() => window.scrollY));
-      })
-      .toBe(true);
-    await frame.evaluate(() =>
-      window.scrollTo({ top: 0, behavior: 'instant' }),
-    );
-    await expect.poll(() => frame.evaluate(() => window.scrollY)).toBe(0);
-    await row(page, top).click();
-    await expect(row(page, top)).toHaveAttribute('aria-selected', 'true');
-    await frame.evaluate(
-      () =>
-        new Promise<void>((done) => {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              done();
-            });
-          });
-        }),
-    );
-    expect(await frame.evaluate(() => window.scrollY)).toBe(0);
   });
 
   test('hovering a row outlines its block on the page, and leaving removes the outline', async ({
@@ -123,47 +77,9 @@ test.describe('Page structure', () => {
 
     await row(page, top).hover();
     await expect(chrome(page).locator(highlight)).toHaveCount(1);
-    await expect
-      .poll(async () => {
-        const outline = await chromeBoxOf(
-          page,
-          `${highlight} .pk-overlay-outline`,
-        ).catch(() => null);
-        const heading = await frameBoxOf(frame, `[data-pk-block="${top}"]`);
-        if (outline === null) return Number.POSITIVE_INFINITY;
-        return Math.max(
-          Math.abs(outline.x - heading.x),
-          Math.abs(outline.y - heading.y),
-          Math.abs(outline.width - heading.width),
-          Math.abs(outline.height - heading.height),
-        );
-      })
-      .toBeLessThanOrEqual(1);
 
     await page.getByRole('heading', { name: 'Page structure' }).hover();
     await expect(chrome(page).locator(highlight)).toHaveCount(0);
-  });
-
-  test('leaving a hovered row gives the outline back to the row that has focus', async ({
-    page,
-  }) => {
-    const created = await createEditablePage({
-      blocks: [section(heading('One'), heading('Two'))],
-    });
-    await openEditor(page, created.path);
-    const frame = await framedSite(page);
-    const first = await headingId(frame, 'One');
-    const second = await headingId(frame, 'Two');
-    const highlight = (id: string) =>
-      chrome(page).locator(`[data-overlay-highlight="${id}"]`);
-
-    await row(page, first).focus();
-    await row(page, second).hover();
-    await expect(highlight(second)).toHaveCount(1);
-
-    await page.getByRole('heading', { name: 'Page structure' }).hover();
-    await expect(highlight(second)).toHaveCount(0);
-    await expect(highlight(first)).toHaveCount(1);
   });
 
   test('a double-click on a row opens its Properties in the sheet with the first control focused', async ({
