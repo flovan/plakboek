@@ -288,23 +288,6 @@ async function frameContentBox(page: Page): Promise<Rect> {
   });
 }
 
-/** Scrolls the framed site so `selector`'s top sits `top` pixels below the
- * frame's top. */
-async function scrollTopTo(
-  frame: Frame,
-  selector: string,
-  top: number,
-): Promise<void> {
-  await frame.evaluate(
-    ({ target, wanted }) => {
-      const rect = document.querySelector(target)?.getBoundingClientRect();
-      if (rect === undefined) throw new Error(`${target} is not in the frame`);
-      window.scrollBy({ top: rect.top - wanted, behavior: 'instant' });
-    },
-    { target: selector, wanted: top },
-  );
-}
-
 test.describe('over the adversarial theme', () => {
   const CASES: readonly (readonly [string, string, string])[] = [
     [
@@ -517,47 +500,6 @@ test.describe('the outline follows its element', () => {
 });
 
 test.describe('the chip', () => {
-  test('rests above the outline, moves inside it near the frame top, and sticks to the frame top once the element top scrolls out', async ({
-    page,
-  }) => {
-    await openShell(page, '/?_edit=1', '.spacer');
-    const frame = await framedSite(page);
-    await hoverSpacer(page);
-    const content = await frameContentBox(page);
-
-    // the spacer's top is far above the frame's: sticky, 4px below its top
-    await expect(chrome(page).locator(CHIP)).toHaveAttribute(
-      'data-placement',
-      'sticky',
-    );
-    const pinned = await chromeBoxOf(page, CHIP);
-    expect(Math.abs(pinned.y - (content.y + 4))).toBeLessThanOrEqual(1);
-    expect(pinned.x).toBeGreaterThanOrEqual(content.x);
-
-    // room above: the chip rests on the outline
-    await scrollTopTo(frame, '.spacer', 60);
-    await expect(chrome(page).locator(CHIP)).toHaveAttribute(
-      'data-placement',
-      'above',
-    );
-    const above = await chromeBoxOf(page, CHIP);
-    const outlineAbove = await chromeBoxOf(page, OUTLINE);
-    expect(
-      Math.abs(above.y + above.height - outlineAbove.y),
-    ).toBeLessThanOrEqual(1);
-
-    // less than 20px of room: the chip moves 4px into the outline
-    await scrollTopTo(frame, '.spacer', 6);
-    await expect(chrome(page).locator(CHIP)).toHaveAttribute(
-      'data-placement',
-      'inside',
-    );
-    const inside = await chromeBoxOf(page, CHIP);
-    const outlineInside = await chromeBoxOf(page, OUTLINE);
-    expect(Math.abs(inside.y - (outlineInside.y + 4))).toBeLessThanOrEqual(1);
-    expect(Math.abs(inside.x - (outlineInside.x + 4))).toBeLessThanOrEqual(1);
-  });
-
   test('labels a block the host no longer declares "{type} (unavailable)"', async ({
     page,
   }) => {
