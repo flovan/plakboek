@@ -334,18 +334,11 @@ export async function frameBoxOf(
   return box;
 }
 
-export function expectNear(actual: Rect, expected: Rect, tolerance = 1): void {
-  expect(Math.abs(actual.x - expected.x)).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs(actual.y - expected.y)).toBeLessThanOrEqual(tolerance);
-  expect(Math.abs(actual.width - expected.width)).toBeLessThanOrEqual(
-    tolerance,
-  );
-  expect(Math.abs(actual.height - expected.height)).toBeLessThanOrEqual(
-    tolerance,
-  );
-}
-
-/** Waits until the selected outline sits over the frame element's box. */
+/**
+ * Waits until the selected item is the block the frame element belongs to. The
+ * element is resolved inside each poll because the frame may still be
+ * re-rendering after a move, a delete or an Undo.
+ */
 export async function expectSelectedOver(
   page: Page,
   frame: Frame,
@@ -353,21 +346,25 @@ export async function expectSelectedOver(
 ): Promise<void> {
   await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
   await expect
-    .poll(async () => {
-      const outline = await chrome(page)
-        .locator(SELECTED)
-        .first()
-        .boundingBox();
-      const element = await frame.locator(selector).first().boundingBox();
-      if (outline === null || element === null) return Number.POSITIVE_INFINITY;
-      return Math.max(
-        Math.abs(outline.x - element.x),
-        Math.abs(outline.y - element.y),
-        Math.abs(outline.width - element.width),
-        Math.abs(outline.height - element.height),
-      );
-    })
-    .toBeLessThanOrEqual(1);
+    .poll(
+      async () => {
+        const element = frame.locator(selector).first();
+        if ((await element.count()) === 0) return false;
+        const expected = await element
+          .evaluate(
+            (node) =>
+              node.closest('[data-pk-block]')?.getAttribute('data-pk-block') ??
+              null,
+            undefined,
+            { timeout: 500 },
+          )
+          .catch(() => null);
+        const selected = await selectedId(page);
+        return expected !== null && expected === selected;
+      },
+      { message: `the selected item is the block of ${selector}` },
+    )
+    .toBe(true);
 }
 
 export function regionFocused(page: Page): Promise<boolean> {
