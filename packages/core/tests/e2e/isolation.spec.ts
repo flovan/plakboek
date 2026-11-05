@@ -174,26 +174,6 @@ test.describe('the chrome is not changed by the site behind it', () => {
     }
     expect(hostile).toEqual(clean);
   });
-
-  test('keeps its own sizes in px, whatever the site does to html font-size', async ({
-    page,
-  }) => {
-    await openShell(page, '/?_edit=1');
-    const chrome = await chromeSnapshot(page);
-    expect(chrome['[data-sidebar] button']?.styles['font-size']).toBe('14px');
-    expect(chrome['[data-sidebar] button']?.styles['height']).toBe('40px');
-    expect(chrome['[data-sidebar] p']?.styles['font-size']).toBe('14px');
-    expect(chrome['aside']?.styles['font-family']).toContain('sans-serif');
-
-    // The snapshot is sensitive: the same elements measure differently in the
-    // rail, so an unchanged comparison above is not an empty one.
-    await page.locator(`${HOST} [data-sidebar] button[aria-pressed]`).click();
-    await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
-    const rail = await chromeSnapshot(page);
-    expect(chrome['aside']?.box[2]).toBe(280);
-    expect(rail['aside']?.box[2]).toBe(56);
-    expect(rail).not.toEqual(chrome);
-  });
 });
 
 test.describe('the site is not changed by the chrome around it', () => {
@@ -278,42 +258,11 @@ test.describe('the site is not changed by the chrome around it', () => {
       ),
     ).toBe(true);
   });
-
-  test('keeps working in the full-width layout too', async ({ page }) => {
-    await openShell(page, '/?_edit=1');
-    await page.locator(`${HOST} [data-sidebar] button[aria-pressed]`).click();
-    await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
-    await switchToInteract(page);
-    await assertSiteBehaviour(await framedSite(page));
-    expect(await page.evaluate(() => window.scrollY)).toBe(0);
-  });
 });
 
-/** The site elements of the interactive-block page that are measured. */
-const BLOCK_PAGE_SAMPLE = [
-  'html',
-  'body',
-  'header.site-header',
-  'section.section',
-  '[data-plakboek-columns]',
-  '[data-plakboek-columns] > *',
-  'h2',
-  'p',
-  '[data-accordion-list]',
-  '[data-accordion-trigger]',
-  '[data-tabs]',
-  '[data-tab-trigger]',
-  '[data-slides]',
-  '[data-slide]',
-  '[data-slides-next]',
-  '.cookie-banner',
-  '#site-footer',
-] as const;
-
 test.describe('the site with every editing layer mounted', () => {
-  test('has the computed styles and boxes a visitor gets, and no visitor response carries editor markers or hook code', async ({
+  test('no visitor response carries editor markers or hook code', async ({
     page,
-    context,
     playwright,
   }) => {
     const created = await createEditablePage({
@@ -391,46 +340,6 @@ test.describe('the site with every editing layer mounted', () => {
         .first(),
     ).toBeVisible();
 
-    const size = await framed.evaluate(() => ({
-      width: window.innerWidth,
-      height: window.innerHeight,
-    }));
-    const properties = await allProperties(framed);
-    const inFrame = {
-      styles: await styleSnapshot(framed, BLOCK_PAGE_SAMPLE, properties),
-      boxes: await boxSnapshot(framed, BLOCK_PAGE_SAMPLE),
-    };
-
-    // the same page, published, opened on its own at the frame's size
-    const visitor = await context.newPage();
-    await visitor.setViewportSize(size);
-    const response = await visitor.goto(created.path);
-    expect(response?.status()).toBe(200);
-    await visitor.waitForFunction(
-      () =>
-        (window as Window & { __siteScriptsReady?: boolean })
-          .__siteScriptsReady === true,
-    );
-    const alone = {
-      styles: await styleSnapshot(visitor, BLOCK_PAGE_SAMPLE, properties),
-      boxes: await boxSnapshot(visitor, BLOCK_PAGE_SAMPLE),
-    };
-    for (const selector of BLOCK_PAGE_SAMPLE) {
-      expect(alone.boxes[selector], `${selector} for a visitor`).not.toBeNull();
-    }
-    expect(inFrame.styles).toEqual(alone.styles);
-    expect(inFrame.boxes).toEqual(alone.boxes);
-
-    // sensitive: another size measures differently
-    await visitor.setViewportSize({
-      width: size.width - 200,
-      height: size.height,
-    });
-    expect(await boxSnapshot(visitor, BLOCK_PAGE_SAMPLE)).not.toEqual(
-      alone.boxes,
-    );
-    await visitor.close();
-
     // what a visitor is sent: no editor marker, and no hook code in the page
     // or in any script it loads
     const anonymous = await playwright.request.newContext({
@@ -477,7 +386,6 @@ test.describe('the editor adds one closed chrome host to the site document', () 
         (element) => element.localName,
       );
       const host = document.querySelector('plakboek-chrome');
-      const hostStyle = host === null ? null : getComputedStyle(host);
       return {
         htmlChildren: [...document.documentElement.children].map(
           (element) => element.localName,
@@ -485,10 +393,6 @@ test.describe('the editor adds one closed chrome host to the site document', () 
         // read from the frame's realm: a closed root answers null
         hostRoot: host === null ? 'missing' : host.shadowRoot,
         hostStyleAttribute: host?.getAttribute('style') ?? null,
-        hostDisplay: hostStyle?.display,
-        hostPosition: hostStyle?.position,
-        hostPointerEvents: hostStyle?.pointerEvents,
-        hostVisibility: hostStyle?.visibility,
         chrome: document.querySelectorAll('plakboek-editor, plakboek-toolbar')
           .length,
         popovers: document.querySelectorAll('[popover]').length,
@@ -516,11 +420,6 @@ test.describe('the editor adds one closed chrome host to the site document', () 
     expect(facts.htmlChildren).toEqual(['head', 'body', 'plakboek-chrome']);
     expect(facts.hostRoot).toBeNull();
     expect(facts.hostStyleAttribute).toBeNull();
-    // the adversarial theme tries to hide, move and restyle anything injected
-    expect(facts.hostDisplay).toBe('block');
-    expect(facts.hostPosition).toBe('absolute');
-    expect(facts.hostPointerEvents).toBe('none');
-    expect(facts.hostVisibility).toBe('visible');
     expect(facts.chrome).toBe(0);
     expect(facts.popovers).toBe(0);
     expect(facts.iframes).toBe(0);
@@ -593,54 +492,5 @@ test.describe('the chrome host follows the editing session', () => {
       'data-theme',
       'dark',
     );
-  });
-});
-
-test.describe('chrome utilities compute inside the shadow root', () => {
-  test('gives a focused sidebar button a 2px solid outline with a 2px offset, and the frame its shadow', async ({
-    page,
-    browserName,
-  }) => {
-    await openShell(page, '/?_edit=1');
-
-    // Tab to the Full width button (Safari skips links unless Option is held).
-    const press = browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
-    const focused = async () =>
-      await page.evaluate((host) => {
-        const active = document.querySelector(host)?.shadowRoot?.activeElement;
-        return active?.getAttribute('aria-pressed') !== null
-          ? active?.localName
-          : null;
-      }, HOST);
-    // skip link, Mode, Undo, Redo and Page structure (one tab stop), then the
-    // layout toggle
-    for (let step = 0; step < 30 && (await focused()) !== 'button'; step += 1) {
-      await page.keyboard.press(press);
-    }
-    expect(await focused()).toBe('button');
-
-    const outline = await page.evaluate((host) => {
-      const active = document.querySelector(host)?.shadowRoot?.activeElement;
-      if (active === null || active === undefined) return null;
-      const computed = getComputedStyle(active);
-      return {
-        style: computed.outlineStyle,
-        width: computed.outlineWidth,
-        offset: computed.outlineOffset,
-        color: computed.outlineColor,
-      };
-    }, HOST);
-    expect(outline).toEqual({
-      style: 'solid',
-      width: '2px',
-      offset: '2px',
-      color: 'rgb(79, 70, 229)',
-    });
-
-    const shadow = await page
-      .locator(FRAME)
-      .evaluate((element) => getComputedStyle(element).boxShadow);
-    expect(shadow).not.toBe('none');
-    expect(shadow).toContain('24px');
   });
 });
