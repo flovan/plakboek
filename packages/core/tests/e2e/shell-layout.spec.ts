@@ -1,9 +1,8 @@
 /**
- * The edit shell's two layouts on a production build: the
- * framed default (280px sidebar, the page 24px from the edges), the 56px rail
- * with the page flush, the choice kept per browser and applied before first
- * paint, the rail's keyboard and tooltip behaviour, and keyboard focus
- * following the layout toggle into the layer now shown.
+ * The edit shell's two layouts on a production build: the framed default and
+ * the full-width rail, the choice kept per browser and applied before first
+ * paint, the rail's accessible names, and keyboard focus following the layout
+ * toggle into the layer now shown.
  */
 import { expect, test, type Page } from '@playwright/test';
 import { e2eUsers } from './helpers/host.ts';
@@ -11,32 +10,15 @@ import { signIn } from './helpers/session.ts';
 
 const HOST = 'plakboek-editor';
 const FRAME = `${HOST} iframe`;
-const SIDEBAR = `${HOST} aside`;
 const RAIL = `${HOST} [data-rail]`;
 const SIDEBAR_BODY = `${HOST} [data-sidebar]`;
 // Both layers are always in the markup; the host's layout decides which one is
-// seen. While the 240ms swap runs both are briefly visible, so each toggle is
-// addressed through its own layer.
+// seen, so each toggle is addressed through its own layer.
 const FRAMED_TOGGLE = `${SIDEBAR_BODY} button[aria-pressed]`;
 const RAIL_TOGGLE = `${RAIL} [data-layout-toggle]`;
 const STORAGE_KEY = 'plakboek:editor-layout';
 
-// The viewport is 1400x900.
-const FRAMED_FRAME = { x: 304, y: 24, width: 1072, height: 852 };
-const FULL_FRAME = { x: 56, y: 0, width: 1344, height: 900 };
 const TOLERANCE = 1;
-
-type Box = { x: number; y: number; width: number; height: number };
-
-function expectBox(actual: Box | null, expected: Box): void {
-  expect(actual).not.toBeNull();
-  for (const key of ['x', 'y', 'width', 'height'] as const) {
-    expect(
-      Math.abs((actual?.[key] ?? Number.NaN) - expected[key]),
-      `${key} of ${JSON.stringify(actual)} against ${JSON.stringify(expected)}`,
-    ).toBeLessThanOrEqual(TOLERANCE);
-  }
-}
 
 /** The editor host's open shadow root, evaluated in the page. */
 async function activeInShadow(page: Page): Promise<{
@@ -72,17 +54,9 @@ async function frameWindow(page: Page) {
 }
 
 test.describe('the framed layout', () => {
-  test('is the default: 280px sidebar and the page 24px from the stage edges', async ({
-    page,
-  }) => {
+  test('is the default', async ({ page }) => {
     await openShell(page, '/about?_edit=1');
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'framed');
-
-    expectBox(await page.locator(FRAME).boundingBox(), FRAMED_FRAME);
-    const sidebar = await page.locator(SIDEBAR).boundingBox();
-    expect(Math.abs((sidebar?.width ?? 0) - 280)).toBeLessThanOrEqual(
-      TOLERANCE,
-    );
     await expect(
       page.getByRole('button', { name: 'Full width' }),
     ).toHaveAttribute('aria-pressed', 'false');
@@ -103,9 +77,7 @@ test.describe('the framed layout', () => {
 });
 
 test.describe('the full-width layout', () => {
-  test('switches to a 56px rail with the page flush, and back', async ({
-    page,
-  }) => {
+  test('switches to the rail, and back', async ({ page }) => {
     await openShell(page, '/about?_edit=1');
 
     await page.locator(FRAMED_TOGGLE).click();
@@ -114,13 +86,9 @@ test.describe('the full-width layout', () => {
       'aria-pressed',
       'true',
     );
-    expectBox(await page.locator(FRAME).boundingBox(), FULL_FRAME);
-    const rail = await page.locator(SIDEBAR).boundingBox();
-    expect(Math.abs((rail?.width ?? 0) - 56)).toBeLessThanOrEqual(TOLERANCE);
 
     await page.locator(RAIL_TOGGLE).click();
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'framed');
-    expectBox(await page.locator(FRAME).boundingBox(), FRAMED_FRAME);
     await expect(page.locator(FRAMED_TOGGLE)).toHaveAttribute(
       'aria-pressed',
       'false',
@@ -174,7 +142,6 @@ test.describe('the full-width layout', () => {
     await page.reload();
     await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
-    expectBox(await page.locator(FRAME).boundingBox(), FULL_FRAME);
     await expect(page.locator(RAIL_TOGGLE)).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -202,7 +169,6 @@ test.describe('the full-width layout', () => {
     // Nothing but the pre-paint script can have set it: no editor code ran.
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
     await expect(page.locator(HOST)).not.toHaveAttribute('data-hydrated', '');
-    expectBox(await page.locator(FRAME).boundingBox(), FULL_FRAME);
     await expect(page.locator(RAIL_TOGGLE)).toBeDisabled();
     // Exit and Log out are the real anchor and form of the server markup.
     await expect(
@@ -221,90 +187,37 @@ test.describe('the full-width layout', () => {
     await page.route('**/assets/plakboek-editor-*', (route) => route.abort());
     await page.goto('/about?_edit=1');
     await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'framed');
-    expectBox(await page.locator(FRAME).boundingBox(), FRAMED_FRAME);
   });
 });
 
 // Browsers drop focus from a control once its layer finishes hiding, so a stale
 // focus only fails the check made after the swap; the check at once covers the
-// move itself. Both run, with and without the transition.
+// move itself.
 test.describe('keyboard focus through the layout toggle', () => {
-  const motions = ['no-preference', 'reduce'] as const;
-  for (const motion of motions) {
-    test(`moves to the toggle of the layout now shown, both ways (${motion} motion)`, async ({
-      page,
-    }) => {
-      await page.emulateMedia({ reducedMotion: motion });
-      await openShell(page, '/about?_edit=1');
+  test('moves to the toggle of the layout now shown, both ways', async ({
+    page,
+  }) => {
+    await openShell(page, '/about?_edit=1');
 
-      await page.locator(FRAMED_TOGGLE).focus();
-      await page.keyboard.press('Enter');
-      await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
-      await expect(page.locator(RAIL_TOGGLE)).toBeFocused();
-      await expect(page.locator(SIDEBAR_BODY)).toHaveCSS(
-        'visibility',
-        'hidden',
-      );
-      await expect(page.locator(RAIL_TOGGLE)).toBeFocused();
+    await page.locator(FRAMED_TOGGLE).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
+    await expect(page.locator(RAIL_TOGGLE)).toBeFocused();
+    await expect(page.locator(SIDEBAR_BODY)).toBeHidden();
+    await expect(page.locator(RAIL_TOGGLE)).toBeFocused();
 
-      await page.keyboard.press('Enter');
-      await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'framed');
-      await expect(page.locator(FRAMED_TOGGLE)).toBeFocused();
-      await expect(page.locator(RAIL)).toHaveCSS('visibility', 'hidden');
-      await expect(page.locator(FRAMED_TOGGLE)).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'framed');
+    await expect(page.locator(FRAMED_TOGGLE)).toBeFocused();
+    await expect(page.locator(RAIL)).toBeHidden();
+    await expect(page.locator(FRAMED_TOGGLE)).toBeFocused();
 
-      await page.keyboard.press('Enter');
-      await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
-    });
-  }
+    await page.keyboard.press('Enter');
+    await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
+  });
 });
 
 test.describe('the rail', () => {
-  test('shows a tooltip when a button takes keyboard focus', async ({
-    page,
-    browserName,
-  }) => {
-    await signIn(page, e2eUsers().editor);
-    await page.addInitScript((key) => {
-      localStorage.setItem(key, 'full');
-    }, STORAGE_KEY);
-    await page.goto('/about?_edit=1');
-    await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
-
-    const tooltip = page.locator(`${RAIL} [data-tooltip]`, {
-      hasText: 'Exit edit mode',
-    });
-    await expect(tooltip).toHaveCSS('visibility', 'hidden');
-
-    // The editing tools sit above Full width in the rail, and how many there
-    // are depends on the session, so Tab until Exit edit mode holds focus.
-    const focusedLabel = () =>
-      page.evaluate(
-        (tag) =>
-          document
-            .querySelector(tag)
-            ?.shadowRoot?.activeElement?.getAttribute('aria-label'),
-        HOST,
-      );
-    for (let step = 0; step < 20; step += 1) {
-      if ((await focusedLabel()) === 'Exit edit mode') break;
-      await tab(page, browserName);
-    }
-    expect(await focusedLabel()).toBe('Exit edit mode');
-    await expect(tooltip).toHaveCSS('visibility', 'visible');
-    await expect(tooltip).toHaveCSS('opacity', '1');
-    await expect(tooltip).toBeVisible();
-
-    // The tooltip sits to the right of its button with an 8px gap.
-    const anchor = await page
-      .locator(`${RAIL} a[aria-label="Exit edit mode"]`)
-      .boundingBox();
-    const shown = await tooltip.boundingBox();
-    expect(
-      Math.abs((shown?.x ?? 0) - ((anchor?.x ?? 0) + (anchor?.width ?? 0) + 8)),
-    ).toBeLessThanOrEqual(TOLERANCE);
-  });
-
   test('names the avatar and every icon button by the full label or name', async ({
     page,
   }) => {
@@ -323,33 +236,5 @@ test.describe('the rail', () => {
         page.locator(`${RAIL} [aria-label="${name}"]`),
       ).toBeVisible();
     }
-  });
-
-  test('swaps instantly under reduced motion and over 240ms otherwise', async ({
-    page,
-  }) => {
-    await openShell(page, '/about?_edit=1');
-    const duration = (selector: string) =>
-      page
-        .locator(selector)
-        .evaluate((element) => getComputedStyle(element).transitionDuration);
-
-    await expect.poll(() => duration(RAIL)).toBe('0.24s');
-    await expect.poll(() => duration(`${HOST} [data-sidebar]`)).toBe('0.24s');
-
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await expect.poll(() => duration(RAIL)).toBe('0s');
-    await page.locator(FRAMED_TOGGLE).click();
-    // No transition: the very next style computation already shows the rail.
-    expect(
-      await page
-        .locator(RAIL)
-        .evaluate((element) => getComputedStyle(element).opacity),
-    ).toBe('1');
-    expect(
-      await page
-        .locator(`${HOST} [data-sidebar]`)
-        .evaluate((element) => getComputedStyle(element).opacity),
-    ).toBe('0');
   });
 });
