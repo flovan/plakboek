@@ -5,7 +5,13 @@
  * invalid value is shown and not applied, and a change is saved after a pause
  * and undone as one step.
  */
-import { expect, test, type Frame, type Page } from '@playwright/test';
+import {
+  expect,
+  test,
+  type Frame,
+  type Page,
+  type Request,
+} from '@playwright/test';
 import {
   chrome,
   FRAME,
@@ -243,9 +249,24 @@ test.describe('every widget edits its property and the block re-renders live', (
   test('a half-filled date is not sent, so it neither clears the value nor wipes what was typed', async ({
     page,
   }) => {
+    await page.clock.install();
     const frame = await openDemo(page, { title: 'Demo', day: '2026-10-14' });
     const day = page.getByLabel('Day', { exact: true });
     await expect(shown(frame, 'day')).toHaveText('2026-10-14');
+
+    const sent: Request[] = [];
+    let recording = true;
+    page.on('request', (request) => {
+      if (
+        recording &&
+        request.method() === 'POST' &&
+        /\/cms\/api\/pages\/[^/]+\/(preview|edit)$/.test(
+          new URL(request.url()).pathname,
+        )
+      ) {
+        sent.push(request);
+      }
+    });
 
     // clearing one segment leaves the entry half-filled
     await day.focus();
@@ -253,16 +274,29 @@ test.describe('every widget edits its property and the block re-renders live', (
     expect(
       await day.evaluate((el: HTMLInputElement) => el.validity.badInput),
     ).toBe(true);
-    // the preview and the save would have taken the value away by now
-    await page.waitForTimeout(400);
+    // past the preview debounce and the save's idle delay: nothing was sent
+    await page.clock.fastForward(2_000);
+    expect(sent).toEqual([]);
     await expect(shown(frame, 'day')).toHaveText('2026-10-14');
     expect(
       await day.evaluate((el: HTMLInputElement) => el.validity.badInput),
     ).toBe(true);
 
-    // a whole date goes through, and so does a deliberate clear
+    // a whole date goes through, and no request carried a cleared day
+    const preview = page.waitForRequest(
+      (request) =>
+        request.method() === 'POST' && request.url().endsWith('/preview'),
+    );
     await day.fill('2026-10-20');
+    await preview;
     await expect(shown(frame, 'day')).toHaveText('2026-10-20');
+    expect(sent.length).toBeGreaterThan(0);
+    for (const request of sent) {
+      expect(request.postData()).toContain('2026-10-20');
+    }
+
+    // and so does a deliberate clear
+    recording = false;
     await day.fill('');
     await expect(shown(frame, 'day')).toHaveCount(0);
   });
