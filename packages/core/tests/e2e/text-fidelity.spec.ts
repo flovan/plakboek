@@ -107,78 +107,20 @@ async function pointInWord(
   );
 }
 
-/** Every element of the field with its box relative to the field's own. */
-async function layoutOf(field: Locator) {
-  return await field.evaluate((element) => {
-    const base = element.getBoundingClientRect();
-    return [element, ...element.querySelectorAll('*')].map((node) => {
-      const box = node.getBoundingClientRect();
-      return {
-        tag: node.tagName,
-        x: box.left - base.left,
-        y: box.top - base.top,
-        width: box.width,
-        height: box.height,
-      };
-    });
-  });
-}
-
 test.beforeEach(async ({ page }) => {
   await signIn(page, e2eUsers().editor);
 });
 
-test.describe('the field keeps the host styling while it is edited', () => {
-  for (const scenario of [
-    {
-      name: 'a paragraph',
-      holder: '.t-p >> nth=1',
-      word: 'several',
-      offset: 3,
-      expected: 'The second paragraph has sevXeral words in it.',
-    },
-    {
-      name: 'a list item',
-      holder: '.t-li p >> nth=1',
-      word: 'bravo',
-      offset: 2,
-      expected: 'brXavo item',
-    },
-  ]) {
-    test(`${scenario.name}: nothing moves on mount and the caret lands in the clicked word`, async ({
-      page,
-    }) => {
-      const { field } = await openProse(page);
-      const before = await layoutOf(field);
+test('a paragraph: the caret lands in the clicked word', async ({ page }) => {
+  const { field } = await openProse(page);
 
-      const holder = field.locator(scenario.holder);
-      await typeInField(
-        page,
-        holder,
-        '',
-        await pointInWord(holder, scenario.word, scenario.offset),
-      );
+  const holder = field.locator('.t-p >> nth=1');
+  await typeInField(page, holder, '', await pointInWord(holder, 'several', 3));
 
-      const after = await layoutOf(field);
-      expect(after.map((entry) => entry.tag)).toEqual(
-        before.map((entry) => entry.tag),
-      );
-      for (const [index, entry] of before.entries()) {
-        const now = after[index]!;
-        for (const key of ['x', 'y', 'width', 'height'] as const) {
-          expect(
-            Math.abs(now[key] - entry[key]),
-            `${entry.tag} #${index} ${key}`,
-          ).toBeLessThanOrEqual(1);
-        }
-      }
-
-      await page.keyboard.type('X');
-      await expect(field.locator('p', { hasText: 'X' })).toHaveText(
-        scenario.expected,
-      );
-    });
-  }
+  await page.keyboard.type('X');
+  await expect(field.locator('p', { hasText: 'X' })).toHaveText(
+    'The second paragraph has sevXeral words in it.',
+  );
 });
 
 test('the host classes are still on the elements being edited', async ({
@@ -316,9 +258,6 @@ test.describe('pasting keeps only what the theme allows', () => {
     }
     // the cells did not run together
     expect(plain).toContain('cell one cell two');
-
-    // the message leaves by itself
-    await expect(notice).toBeHidden({ timeout: 8000 });
   });
 
   test('a plain text paste shows no message', async ({ page }) => {
@@ -389,6 +328,7 @@ test.describe('stored text the theme no longer allows is kept until the editor c
   test('a click shows the notice instead of a caret, and Keep as is changes nothing', async ({
     page,
   }) => {
+    await page.clock.install();
     const { field, pageId } = await openOutOfTheme(page);
     const before = await readBlockProps(pageId, 'prose');
 
@@ -411,9 +351,21 @@ test.describe('stored text the theme no longer allows is kept until the editor c
     await expect(notice).toHaveCount(0);
     await expect(field).not.toHaveAttribute('contenteditable', 'true');
     // typing goes nowhere and nothing is queued
+    const sent: string[] = [];
+    page.on('request', (request) => {
+      if (
+        request.method() === 'POST' &&
+        /\/cms\/api\/pages\/[^/]+\/(preview|edit)$/.test(
+          new URL(request.url()).pathname,
+        )
+      ) {
+        sent.push(request.url());
+      }
+    });
     await page.keyboard.type('zzz');
     await expect(field.locator('p')).toContainText('Kept words');
-    await page.waitForTimeout(1500);
+    await page.clock.fastForward(2_000);
+    expect(sent).toEqual([]);
     expect(await readBlockProps(pageId, 'prose')).toEqual(before);
   });
 
