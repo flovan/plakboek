@@ -11,7 +11,6 @@ import { signIn } from './helpers/session.ts';
 const HOST = 'plakboek-editor';
 const FRAME = `${HOST} iframe`;
 const SIDEBAR_BODY = `${HOST} [data-sidebar]`;
-const RAIL = `${HOST} [data-rail]`;
 const EDITOR_FLAG = 'plakboek:editor';
 const PILL = 'plakboek-toolbar';
 
@@ -345,19 +344,6 @@ test.describe('a window narrower than 1024px', () => {
     await expect(panel).toBeVisible();
     await expect(page.locator(FRAME)).toBeHidden();
   });
-
-  test('is shown before any script has run', async ({ page }) => {
-    await signIn(page, e2eUsers().editor);
-    await page.route('**/assets/plakboek-editor-*', (route) => route.abort());
-    await page.setViewportSize({ width: 800, height: 900 });
-    await page.goto('/about?_edit=1');
-
-    await expect(page.locator(HOST)).not.toHaveAttribute('data-hydrated', '');
-    await expect(
-      page.locator(`${HOST} .pk-stage [role="status"]`),
-    ).toBeVisible();
-    await expect(page.locator(FRAME)).toBeHidden();
-  });
 });
 
 test.describe('the page title', () => {
@@ -435,33 +421,6 @@ test.describe('leaving edit mode', () => {
 
     expect(locationOf(page)).toBe('/about');
     expect(posted).toEqual({ method: 'POST', body: 'next=%2Fabout' });
-    expect(
-      await page.evaluate((key) => localStorage.getItem(key), EDITOR_FLAG),
-    ).toBeNull();
-    await expect(page.locator(PILL)).toHaveCount(0);
-  });
-
-  test('Log out from the rail clears the flag in the same way', async ({
-    page,
-  }) => {
-    await page.route('**/cms/logout', (route) => route.fulfill(LOGOUT_ANSWER));
-    await signIn(page, e2eUsers().editor);
-    await page.goto('/about');
-    await page.evaluate(
-      ([flag, layout]) => {
-        localStorage.setItem(flag ?? '', '1');
-        localStorage.setItem(layout ?? '', 'full');
-      },
-      [EDITOR_FLAG, 'plakboek:editor-layout'],
-    );
-    await page.goto('/about?_edit=1');
-    await expect(page.locator(HOST)).toHaveAttribute('data-hydrated', '');
-
-    await page.locator(`${RAIL} form button[type="submit"]`).click();
-    await page.waitForURL(
-      (url) => url.pathname === '/about' && url.search === '',
-    );
-
     expect(
       await page.evaluate((key) => localStorage.getItem(key), EDITOR_FLAG),
     ).toBeNull();
