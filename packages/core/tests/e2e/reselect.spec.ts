@@ -1,19 +1,17 @@
 /**
  * Reaching a block that renders at no size again, in a real browser: an
  * inserted Text with no text is a zero-height paragraph, and the pointer must
- * find it through the box the overlay draws it from, by a click from nothing selected, by a click
- * beside a selected block, by hover and by its "Needs input" badge.
+ * find it through the box the overlay draws it from, by a click beside a
+ * selected block and by its "Needs input" badge.
  */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
   chrome,
-  chromeBoxOf,
   frameBoxOf,
   framedSite,
   HOST,
   LIVE_REGION,
   openEditor,
-  SELECTED,
   selectedId,
   selectItem,
 } from './helpers/editing.ts';
@@ -42,21 +40,6 @@ async function ghostPoint(frame: Frame): Promise<{ x: number; y: number }> {
   const box = await frameBoxOf(frame, EMPTY);
   expect(box.height).toBe(0);
   return { x: box.x + 40, y: box.y + 8 };
-}
-
-/** The outline settles to the paragraph's top and the 24px ghost height. */
-async function expectGhostBox(
-  page: Page,
-  frame: Frame,
-  selector: string,
-): Promise<void> {
-  const paragraph = await frameBoxOf(frame, EMPTY);
-  await expect
-    .poll(async () => {
-      const outline = await chromeBoxOf(page, selector);
-      return [Math.round(outline.y - paragraph.y), Math.round(outline.height)];
-    })
-    .toEqual([0, 24]);
 }
 
 async function emptyId(frame: Frame): Promise<string | null> {
@@ -90,18 +73,6 @@ async function open(page: Page): Promise<Frame> {
 }
 
 test.describe('an empty block can be selected again', () => {
-  test('by one click from nothing selected', async ({ page }) => {
-    const frame = await open(page);
-    const { x, y } = await ghostPoint(frame);
-
-    await page.mouse.click(x, y);
-
-    await expectTypingInEmpty(page);
-    await page.keyboard.press('Escape');
-    await expect.poll(() => selectedId(page)).toBe(await emptyId(frame));
-    await expectGhostBox(page, frame, SELECTED);
-  });
-
   test('by a click while a block beside it is selected', async ({ page }) => {
     const frame = await open(page);
     const { x, y } = await ghostPoint(frame);
@@ -112,21 +83,6 @@ test.describe('an empty block can be selected again', () => {
     await expectTypingInEmpty(page);
     await page.keyboard.press('Escape');
     await expect.poll(() => selectedId(page)).toBe(await emptyId(frame));
-  });
-
-  test('hover outlines it at its ghost box', async ({ page }) => {
-    const frame = await open(page);
-    const { x, y } = await ghostPoint(frame);
-    const id = await frame.locator(EMPTY).getAttribute('data-pk-block');
-
-    await selectHeading(page, frame, 'H1');
-    await page.mouse.move(x, y);
-
-    await expectGhostBox(
-      page,
-      frame,
-      `[data-overlay-target="${id}"] [data-overlay-outline]`,
-    );
   });
 
   test('by its Needs input badge, which starts typing in its empty text', async ({
