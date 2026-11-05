@@ -228,10 +228,22 @@ jobs:
           if [ -n "$added" ]; then
             pnpm changeset status --since=origin/main
           else
-            changed=$(git diff --name-only "$base" -- 'packages/')
+            # Test files (packages/*/tests/** and colocated *.test.ts(x) / *.spec.ts(x)) never need a
+            # changeset. Config files such as playwright.config.ts, vitest configs and tsconfig still do.
+            # An empty changeset is never the answer: on main it sets hasChangesets=true and silently
+            # skips CI and Publish.
+            all=$(git diff --name-only "$base" -- 'packages/')
+            changed=$(git diff --name-only "$base" -- 'packages/' \
+              ':(exclude,glob)packages/*/tests/**' \
+              ':(exclude,glob)packages/**/*.test.ts' \
+              ':(exclude,glob)packages/**/*.test.tsx' \
+              ':(exclude,glob)packages/**/*.spec.ts' \
+              ':(exclude,glob)packages/**/*.spec.tsx')
             if [ -n "$changed" ]; then
               echo "::error::Changes under packages/ need a changeset: run pnpm changeset"
               exit 1
+            elif [ -n "$all" ]; then
+              echo "Only test files changed under packages/ since $base; no changeset required."
             else
               echo "No changes under packages/ since $base; no changeset required."
             fi
