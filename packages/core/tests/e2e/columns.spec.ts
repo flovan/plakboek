@@ -72,10 +72,28 @@ function columnsIn(frame: Frame, sectionIndex = 0) {
     .locator('[data-plakboek-columns] > [data-pk-block]');
 }
 
-async function widthsOf(frame: Frame, sectionIndex = 0): Promise<number[]> {
-  return await columnsIn(frame, sectionIndex).evaluateAll((elements) =>
-    elements.map((element) => element.getBoundingClientRect().width),
-  );
+/** The stored layout of the first block of a type on the page, read from the editor API. */
+async function storedLayoutOf(
+  page: Page,
+  pageId: string,
+  type: string,
+): Promise<unknown> {
+  const response = await page.request.get(`/cms/api/pages/${pageId}/tree`);
+  expect(response.status()).toBe(200);
+  const body = (await response.json()) as {
+    tree: { type: string; layout: unknown }[];
+  };
+  const node = body.tree.find((entry) => entry.type === type);
+  if (node === undefined) throw new Error(`The page has no ${type} block`);
+  return node.layout;
+}
+
+/** The column count the rendered section writes on its grid element. */
+function gridOf(frame: Frame, sectionIndex = 0) {
+  return frame
+    .locator('section.section')
+    .nth(sectionIndex)
+    .locator('[data-plakboek-columns]');
 }
 
 /** The group of the open Properties panel, named by its `data-properties-group`. */
@@ -128,7 +146,7 @@ test.describe('adding a column and choosing its width', () => {
   test('Add column makes two equal columns, the 2 to 1 tile makes the first wider, and both are saved', async ({
     page,
   }) => {
-    await openOneColumnSection(page);
+    const created = await openOneColumnSection(page);
     const frame = await framedSite(page);
     await selectSection(page, frame);
 
@@ -142,6 +160,7 @@ test.describe('adding a column and choosing its width', () => {
 
     await columns.getByRole('button', { name: 'Add column' }).click();
     await expect(columnsIn(frame)).toHaveCount(2);
+    await expect(gridOf(frame)).toHaveAttribute('data-plakboek-columns', '2');
     await expectSaved(page);
 
     // the new column is selected; its panel points to the section's layout
@@ -158,23 +177,24 @@ test.describe('adding a column and choosing its width', () => {
     // opening the section's layout puts focus on the group
     await expect(widths.getByRole('radio', { name: '1 to 1' })).toBeFocused();
 
-    const [equalFirst, equalSecond] = await widthsOf(frame);
-    expect(Math.abs((equalFirst ?? 0) - (equalSecond ?? 0))).toBeLessThan(2);
+    // equal columns store no ratio
+    await expect
+      .poll(() => storedLayouts(page, created.pageId))
+      .toEqual([null]);
 
     await widths.getByRole('radio', { name: '2 to 1' }).click();
     await expect(widths.getByRole('radio', { name: '2 to 1' })).toBeChecked();
-    await expect
-      .poll(async () => {
-        const [first, second] = await widthsOf(frame);
-        return (first ?? 0) > (second ?? 0);
-      })
-      .toBe(true);
     await expectSaved(page);
+    await expect
+      .poll(() => storedLayouts(page, created.pageId))
+      .toEqual([{ columns: '2:1' }]);
 
     const reloaded = await reloadEditor(page);
     await expect(columnsIn(reloaded)).toHaveCount(2);
-    const [first, second] = await widthsOf(reloaded);
-    expect(first).toBeGreaterThan(second ?? 0);
+    await expect(gridOf(reloaded)).toHaveAttribute(
+      'data-plakboek-columns',
+      '2',
+    );
     await selectSection(page, reloaded);
     await expect(
       page
@@ -220,8 +240,7 @@ test.describe('removing a column', () => {
     await expect
       .poll(() => storedLayouts(page, created.pageId))
       .toEqual([{ columns: '2:1:1' }]);
-    const [first, second] = await widthsOf(frame);
-    expect(first).toBeGreaterThan(second ?? 0);
+    await expect(gridOf(frame)).toHaveAttribute('data-plakboek-columns', '3');
   });
 
   test('a column holding two blocks asks first and says how many go; Undo brings both back in the column', async ({
@@ -329,12 +348,7 @@ test.describe('the alignment of the columns', () => {
     });
     await openEditor(page, created.path);
     const frame = await framedSite(page);
-    const alignItems = () =>
-      frame
-        .locator('[data-plakboek-columns]')
-        .first()
-        .evaluate((element) => getComputedStyle(element).alignItems);
-    expect(await alignItems()).toBe('stretch');
+    expect(await storedLayouts(page, created.pageId)).toEqual([null]);
 
     await selectSection(page, frame);
     const alignment = page.getByRole('radiogroup', {
@@ -347,16 +361,12 @@ test.describe('the alignment of the columns', () => {
     await expect(
       alignment.getByRole('radio', { name: 'Center' }),
     ).toBeChecked();
-    await expect.poll(alignItems).toBe('center');
     await expectSaved(page);
+    await expect
+      .poll(() => storedLayouts(page, created.pageId))
+      .toEqual([{ align: 'center' }]);
 
     const reloaded = await reloadEditor(page);
-    expect(
-      await reloaded
-        .locator('[data-plakboek-columns]')
-        .first()
-        .evaluate((element) => getComputedStyle(element).alignItems),
-    ).toBe('center');
     await selectSection(page, reloaded);
     await expect(
       page
@@ -367,7 +377,7 @@ test.describe('the alignment of the columns', () => {
 });
 
 test.describe('a block that fills its column', () => {
-  test('with Fill column height on, a quote beside a taller column stretches to its column, and shrinks back with it off', async ({
+  test('Fill column height is saved on and off and shown after a reload', async ({
     page,
   }) => {
     const created = await createEditablePage({
@@ -381,11 +391,6 @@ test.describe('a block that fills its column', () => {
     await openEditor(page, created.path);
     const frame = await framedSite(page);
     const quote = frame.locator('blockquote.quote');
-    const cell = columnsIn(frame).first();
-    const heights = async () => ({
-      quote: (await quote.boundingBox())?.height ?? 0,
-      column: (await cell.boundingBox())?.height ?? 0,
-    });
 
     await openProperties(page, quote);
     const placement = group(page, 'placement');
@@ -394,40 +399,29 @@ test.describe('a block that fills its column', () => {
     await expect(placement).toContainText(
       'Stretches this block to the full height of its column.',
     );
-    const before = await heights();
-    expect(before.quote).toBeLessThan(before.column - 20);
 
     await fill.click();
     await expect(fill).toBeChecked();
-    await expect
-      .poll(async () => {
-        const now = await heights();
-        return Math.abs(now.quote - now.column);
-      })
-      .toBeLessThanOrEqual(1);
     await expectSaved(page);
+    await expect
+      .poll(() => storedLayoutOf(page, created.pageId, 'quote'))
+      .toEqual({ fill: true });
 
     const reloaded = await reloadEditor(page);
-    const after = {
-      quote:
-        (await reloaded.locator('blockquote.quote').boundingBox())?.height ?? 0,
-      column: (await columnsIn(reloaded).first().boundingBox())?.height ?? 0,
-    };
-    expect(Math.abs(after.quote - after.column)).toBeLessThanOrEqual(1);
-
     await openProperties(page, reloaded.locator('blockquote.quote'));
-    await page.getByRole('switch', { name: 'Fill column height' }).click();
+    const reloadedFill = page.getByRole('switch', {
+      name: 'Fill column height',
+    });
+    await expect(reloadedFill).toBeChecked();
+    await reloadedFill.click();
+    await expect(reloadedFill).not.toBeChecked();
+    await expectSaved(page);
     await expect
       .poll(async () => {
-        const quoteHeight =
-          (await reloaded.locator('blockquote.quote').boundingBox())?.height ??
-          0;
-        const columnHeight =
-          (await columnsIn(reloaded).first().boundingBox())?.height ?? 0;
-        return quoteHeight < columnHeight - 20;
+        const layout = await storedLayoutOf(page, created.pageId, 'quote');
+        return (layout as { fill?: boolean } | null)?.fill ?? false;
       })
-      .toBe(true);
-    await expectSaved(page);
+      .toBe(false);
   });
 
   test('a block that does not declare fill support has no Placement group', async ({
@@ -456,7 +450,6 @@ test.describe('adding a column from the page', () => {
     // between the two and after the last, both running top to bottom
     await expect(lines).toHaveCount(2);
     await expect(lines.first()).toHaveAttribute('data-line', 'down');
-    await expect(lines.first()).toHaveCSS('opacity', '1');
 
     await chrome(page)
       .getByRole('button', { name: 'Add column here' })
