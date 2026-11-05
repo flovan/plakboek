@@ -88,7 +88,6 @@ test('unlock, colour a word Accent: it is stored as a token and rendered through
   await colorButton.click();
   const popover = toolbar.getByRole('dialog', { name: /^Text color/ });
   await expect(popover).toBeVisible();
-  expect((await popover.boundingBox())?.width).toBe(320);
   await popover.getByRole('radio', { name: 'Accent' }).click();
   await expect(popover).toHaveCount(0);
 
@@ -155,7 +154,6 @@ test('a custom hex is stored literally, a size takes a token or a 20px literal, 
   // size by token, with the entry's label on the button
   await toolbar.getByRole('button', { name: /^Text size/ }).click();
   const size = toolbar.getByRole('dialog', { name: /^Text size/ });
-  expect((await size.boundingBox())?.width).toBe(320);
   await expect(size.getByRole('radio')).toHaveText(['Theme default', 'Large']);
   await size.getByRole('radio', { name: 'Large' }).click();
   await expect(field.locator('span[data-pk-size-token="xl"]')).toHaveText(

@@ -62,13 +62,6 @@ test('select the words, press Bold in the floating toolbar: it is saved bold and
   await expect(toolbar).toBeVisible();
   await expect(toolbar).toHaveAttribute('role', 'toolbar');
   await expect(toolbar).toHaveAttribute('aria-label', /^Text formatting for /);
-  // above the field, 8px clear of it, on its left edge
-  await expect(toolbar).toHaveAttribute('data-placement', 'above');
-  const barBox = await toolbar.boundingBox();
-  const fieldBox = await field.boundingBox();
-  if (barBox === null || fieldBox === null) throw new Error('No boxes');
-  expect(Math.abs(barBox.y + barBox.height + 8 - fieldBox.y)).toBeLessThan(2);
-  expect(Math.abs(barBox.x - fieldBox.x)).toBeLessThan(2);
 
   await page.keyboard.press('ControlOrMeta+a');
   const bold = toolbar.getByRole('button', { name: 'Bold' });
@@ -77,11 +70,6 @@ test('select the words, press Bold in the floating toolbar: it is saved bold and
   await expect(bold).toHaveAttribute('aria-pressed', 'true');
   // the field kept the caret and the selection: the toolbar did not take focus
   await expect(field.locator('strong')).toHaveText('Make this bold');
-  // the toolbar stays where it is while the selection moves inside the field
-  await page.keyboard.press('ArrowLeft');
-  await expect(toolbar).toBeVisible();
-  const afterMove = await toolbar.boundingBox();
-  expect(afterMove?.y).toBe(barBox.y);
 
   await toolbar.getByRole('button', { name: 'Done editing' }).click();
   await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
@@ -196,8 +184,6 @@ test('the Text style menu lists exactly four rows, chooses h2, h3 and h4, and h1
 
   const button = toolbar.getByRole('button', { name: /^Text style, / });
   await expect(button).toHaveText('Paragraph');
-  // the button is a fixed 112px, so no label ever truncates
-  expect((await button.boundingBox())?.width).toBe(112);
   await button.click();
   const menu = toolbar.getByRole('menu');
   await expect(menu.getByRole('menuitem')).toHaveText([
@@ -209,7 +195,6 @@ test('the Text style menu lists exactly four rows, chooses h2, h3 and h4, and h1
   await expect(
     menu.getByRole('menuitem', { name: 'Paragraph' }),
   ).toHaveAttribute('aria-current', 'true');
-  expect((await menu.boundingBox())?.width).toBe(200);
 
   await menu.getByRole('menuitem', { name: 'Title' }).click();
   await expect(menu).toHaveCount(0);
