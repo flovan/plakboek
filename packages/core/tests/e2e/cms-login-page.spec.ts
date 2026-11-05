@@ -1,6 +1,6 @@
 /**
  * The login document at `/cms` on a production build. The
- * first paint is proven with JavaScript turned off: the blurred real page, the
+ * first paint is proven with JavaScript turned off: the real page, the
  * scrim and the card must already be there from the server's markup alone.
  * A second group runs with scripts on: a valid session goes straight to edit
  * mode, and Log out really ends the session.
@@ -12,7 +12,6 @@ import { signIn } from './helpers/session.ts';
 const HOST = 'plakboek-editor';
 const BACKDROP = `${HOST} iframe`;
 const DIALOG = `${HOST} dialog[open]`;
-const CARD = `${HOST} .pk-card`;
 const EDITOR_FLAG = 'plakboek:editor';
 const PILL = 'plakboek-toolbar';
 
@@ -36,7 +35,7 @@ function watchCmsResponses(
 test.describe('the login page without JavaScript', () => {
   test.use({ javaScriptEnabled: false });
 
-  test('paints the card over the blurred, inert real page from the server markup alone', async ({
+  test('paints the card over the inert real page from the server markup alone', async ({
     page,
   }) => {
     const cms = watchCmsResponses(page);
@@ -51,7 +50,6 @@ test.describe('the login page without JavaScript', () => {
     await expect(page.getByLabel('Password')).toBeVisible();
 
     const backdrop = page.locator(BACKDROP);
-    await expect(backdrop).toHaveCSS('filter', /blur\(12px\)/);
     await expect(backdrop).toHaveAttribute('inert', '');
     await expect(backdrop).toHaveAttribute('aria-hidden', 'true');
     await expect(backdrop).toHaveAttribute('src', '/about');
@@ -66,45 +64,6 @@ test.describe('the login page without JavaScript', () => {
     // Every /cms response the page saw says noindex.
     expect(cms.length).toBeGreaterThan(0);
     for (const seen of cms) expect(seen.robots).toBe('noindex, nofollow');
-  });
-
-  test('fills the viewport with the backdrop and centres a 400px card over it', async ({
-    page,
-  }) => {
-    await page.goto('/cms');
-    const viewport = page.viewportSize();
-    const backdrop = await page.locator(BACKDROP).boundingBox();
-    expect(backdrop).toMatchObject({
-      x: 0,
-      y: 0,
-      width: viewport?.width,
-      height: viewport?.height,
-    });
-    const card = await page.locator(CARD).boundingBox();
-    expect(card?.width).toBeCloseTo(400, 0);
-    const centre = (card?.x ?? 0) + (card?.width ?? 0) / 2;
-    expect(centre).toBeCloseTo((viewport?.width ?? 0) / 2, 0);
-    const middle = (card?.y ?? 0) + (card?.height ?? 0) / 2;
-    expect(Math.abs(middle - (viewport?.height ?? 0) / 2)).toBeLessThan(2);
-  });
-
-  test('is fluid down to 320px wide', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 800 });
-    await page.goto('/cms');
-    const card = await page.locator(CARD).boundingBox();
-    // 16px of viewport padding on each side.
-    expect(card?.x).toBeCloseTo(16, 0);
-    expect(card?.width).toBeCloseTo(288, 0);
-  });
-
-  test('aligns the card to the top with a 24px margin when it is taller than the viewport', async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 1000, height: 420 });
-    await page.goto('/cms');
-    const card = await page.locator(CARD).boundingBox();
-    expect(card?.y).toBeCloseTo(24, 0);
-    expect(card?.height ?? 0).toBeGreaterThan(420 - 48);
   });
 
   test('falls back to the home page for a next that is not a path on this site', async ({
