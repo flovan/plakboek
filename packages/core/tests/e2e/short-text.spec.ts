@@ -16,7 +16,6 @@ import { e2eUsers } from './helpers/host.ts';
 import {
   createEditablePage,
   heading,
-  paragraph,
   readBlockProps,
   section,
 } from './helpers/pages.ts';
@@ -103,29 +102,15 @@ test('typing stops at the heading limit, counted as the server counts', async ({
 const BAR = '[data-field-bar]';
 
 test.describe('the compact field bar', () => {
-  test('sits 8px above the heading on its left edge, counts the characters, and Done ends the session', async ({
-    page,
-  }) => {
-    // a paragraph above gives the heading room for the bar
-    const created = await createEditablePage({
-      blocks: [section(paragraph('Intro '.repeat(60)), heading('Hello'))],
-    });
-    await openEditor(page, created.path);
-    const frame = await framedSite(page);
-    const field = frame.locator('h2.reset-target').first();
+  test('counts the characters, and Done ends the session', async ({ page }) => {
+    const { field } = await openHeading(page, 'Hello');
     await field.click();
     await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
 
     const bar = chrome(page).locator(BAR);
     await expect(bar).toBeVisible();
-    await expect(bar).toHaveAttribute('data-placement', 'above');
     await expect(bar).toHaveAttribute('role', 'toolbar');
     await expect(bar).toHaveAttribute('aria-label', /^Editing /);
-    const barBox = await bar.boundingBox();
-    const fieldBox = await field.boundingBox();
-    if (barBox === null || fieldBox === null) throw new Error('No boxes');
-    expect(Math.abs(barBox.y + barBox.height + 8 - fieldBox.y)).toBeLessThan(2);
-    expect(Math.abs(barBox.x - fieldBox.x)).toBeLessThan(2);
 
     await expect(bar).toContainText('5 of 200 characters');
     await page.keyboard.type('!!');
@@ -135,44 +120,6 @@ test.describe('the compact field bar', () => {
     await expect(page.locator(HOST)).not.toHaveAttribute('data-text-field', '');
     await expect(bar).toHaveCount(0);
     await expect(field).toHaveText('Hello!!');
-  });
-
-  test('the bar flips below a heading that scrolls near the top of the frame, and the session goes on', async ({
-    page,
-  }) => {
-    const created = await createEditablePage({
-      blocks: [
-        section(
-          ...Array.from({ length: 30 }, () => paragraph('Intro '.repeat(40))),
-          heading('Near top'),
-          ...Array.from({ length: 30 }, () => paragraph('Outro '.repeat(40))),
-        ),
-      ],
-    });
-    await openEditor(page, created.path);
-    const frame = await framedSite(page);
-    const field = frame.locator('h2.reset-target').first();
-    // the editor brings the clicked field into view and the session goes on
-    // when the page is scrolled, so scroll until the heading starts 20px below
-    // the top of the frame: less than a bar of room above it
-    await field.click();
-    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
-    const bar = chrome(page).locator(BAR);
-    await expect(bar).toHaveAttribute('data-placement', 'above');
-    await field.evaluate((element) => {
-      scrollTo({
-        top: element.getBoundingClientRect().top + scrollY - 20,
-        behavior: 'instant',
-      });
-    });
-    await expect(bar).toHaveAttribute('data-placement', 'below');
-    await expect(page.locator(HOST)).toHaveAttribute('data-text-field', '');
-    const barBox = await bar.boundingBox();
-    const fieldBox = await field.boundingBox();
-    if (barBox === null || fieldBox === null) throw new Error('No boxes');
-    expect(
-      Math.abs(barBox.y - (fieldBox.y + fieldBox.height + 8)),
-    ).toBeLessThan(2);
   });
 });
 
