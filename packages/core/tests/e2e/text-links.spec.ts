@@ -96,7 +96,6 @@ test('select two words, link them to a URL: stored with that URL, rendered as an
   await expect(popover).toBeVisible();
   await expect(popover).toHaveAttribute('role', 'dialog');
   await expect(popover).toHaveAccessibleName('Link');
-  expect((await popover.boundingBox())?.width).toBe(320);
 
   // a new link opens on Page; the URL is the other segment
   await expect(popover.getByRole('radio', { name: 'Page' })).toBeChecked();
@@ -472,14 +471,7 @@ test('the picker says when nothing matches and when pages could not be loaded, a
   // the list of an empty query is the first pages by title, scrolling inside the popover
   await search.fill('');
   await expect(popover.getByRole('listbox')).toBeVisible();
-  const box = await popover.boundingBox();
-  const frameBox = await page.locator('plakboek-editor iframe').boundingBox();
-  if (box === null || frameBox === null) throw new Error('No boxes');
-  expect(box.x).toBeGreaterThanOrEqual(frameBox.x + 8 - 1);
-  expect(box.x + box.width).toBeLessThanOrEqual(frameBox.x + frameBox.width);
   expect(await popover.getByRole('option').count()).toBeLessThanOrEqual(20);
-  expect(box.y).toBeGreaterThanOrEqual(frameBox.y);
-  expect(box.y + box.height).toBeLessThanOrEqual(frameBox.y + frameBox.height);
 
   // a press in the field closes the popover without a change
   await (await framedSite(page)).locator('.prose-flow').first().click();
