@@ -223,13 +223,6 @@ export function chrome(page: Page): Locator {
   return page.frameLocator(FRAME).locator(FRAME_CHROME);
 }
 
-/** A chrome element's box in the page's coordinates. */
-export async function chromeBoxOf(page: Page, selector: string): Promise<Rect> {
-  const box = await chrome(page).locator(selector).first().boundingBox();
-  if (box === null) throw new Error(`${selector} has no box in the chrome`);
-  return box;
-}
-
 /** The id of the selected item: the selected outline's value, null when none. */
 export async function selectedId(page: Page): Promise<string | null> {
   const outline = chrome(page).locator(SELECTED);
@@ -316,12 +309,6 @@ export async function openProperties(
   await expect(
     page.locator(`${HOST} [data-properties-sheet][data-open]`),
   ).toHaveCount(1);
-}
-
-export async function boxOf(page: Page, selector: string): Promise<Rect> {
-  const box = await page.locator(selector).first().boundingBox();
-  if (box === null) throw new Error(`${selector} has no box in the shell`);
-  return box;
 }
 
 /** A frame element's box in the page's coordinates. */
