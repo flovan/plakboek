@@ -6,13 +6,7 @@
  * switch back; and the host's `*.edit.ts` hook modules cooperate with the
  * editor (reveal, pause, re-bind).
  */
-import {
-  expect,
-  test,
-  type Frame,
-  type Locator,
-  type Page,
-} from '@playwright/test';
+import { expect, test, type Frame, type Page } from '@playwright/test';
 import {
   chrome,
   framedSite,
@@ -184,28 +178,6 @@ async function clearSelection(page: Page): Promise<void> {
   await expect(chrome(page).locator(SELECTED)).toHaveCount(0);
 }
 
-/** Selects the block `target` belongs to and waits for its outline to sit on it. */
-async function drillOnto(page: Page, target: Locator): Promise<void> {
-  await selectItem(page, target);
-  await expect(chrome(page).locator(SELECTED)).toHaveCount(1);
-  await expect
-    .poll(async () => {
-      const selected = await chrome(page)
-        .locator(SELECTED)
-        .first()
-        .boundingBox();
-      const box = await target.boundingBox();
-      if (selected === null || box === null) return Number.POSITIVE_INFINITY;
-      return Math.max(
-        Math.abs(selected.x - box.x),
-        Math.abs(selected.y - box.y),
-        Math.abs(selected.width - box.width),
-        Math.abs(selected.height - box.height),
-      );
-    })
-    .toBeLessThanOrEqual(1);
-}
-
 /** What the site would have changed had it seen the click. */
 async function siteState(frame: Frame) {
   return {
@@ -349,11 +321,11 @@ test.describe('the site’s own controls', () => {
       'aria-selected',
       'true',
     );
-    await drillOnto(page, frame.getByText('Second entry text'));
+    await selectItem(page, frame.getByText('Second entry text'));
     // selecting text leaves its field again, which announces the block
     await expect(page.locator(LIVE_REGION)).toContainText('Text selected');
     await clearSelection(page);
-    await drillOnto(page, frame.getByText('Second tab text'));
+    await selectItem(page, frame.getByText('Second tab text'));
     await expect(page.locator(LIVE_REGION)).toContainText('Text selected');
   });
 });

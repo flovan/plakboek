@@ -78,17 +78,6 @@ async function widthsOf(frame: Frame, sectionIndex = 0): Promise<number[]> {
   );
 }
 
-/** Waits until the sheet has slid in, so a press on its controls lands where they are. */
-async function sheetSettled(page: Page): Promise<void> {
-  await expect
-    .poll(
-      async () =>
-        (await page.locator(`${HOST} [data-properties-sheet]`).boundingBox())
-          ?.x ?? -1,
-    )
-    .toBeGreaterThanOrEqual(0);
-}
-
 /** The group of the open Properties panel, named by its `data-properties-group`. */
 function group(page: Page, name: 'columns' | 'layout' | 'placement') {
   return page.locator(`${HOST} [data-properties-group="${name}"]`);
@@ -109,7 +98,6 @@ async function selectSection(
     frame.locator('section.section').nth(sectionIndex),
   );
   await expect(group(page, 'columns')).toBeVisible();
-  await sheetSettled(page);
 }
 
 /** Reloads the editor and waits until its session runs and the frame's clicks are claimed again. */
@@ -287,6 +275,8 @@ test.describe('removing a column', () => {
       'title',
       'A section needs at least one column.',
     );
+    // a forced click skips the wait for the sliding sheet to stop; a hover keeps it
+    await remove.hover();
     await remove.click({ force: true });
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(columnsIn(frame)).toHaveCount(1);
@@ -398,7 +388,6 @@ test.describe('a block that fills its column', () => {
     });
 
     await openProperties(page, quote);
-    await sheetSettled(page);
     const placement = group(page, 'placement');
     const fill = placement.getByRole('switch', { name: 'Fill column height' });
     await expect(fill).not.toBeChecked();
@@ -427,7 +416,6 @@ test.describe('a block that fills its column', () => {
     expect(Math.abs(after.quote - after.column)).toBeLessThanOrEqual(1);
 
     await openProperties(page, reloaded.locator('blockquote.quote'));
-    await sheetSettled(page);
     await page.getByRole('switch', { name: 'Fill column height' }).click();
     await expect
       .poll(async () => {
@@ -448,7 +436,6 @@ test.describe('a block that fills its column', () => {
     await openOneColumnSection(page);
     const frame = await framedSite(page);
     await openProperties(page, frame.locator('section.section h2').first());
-    await sheetSettled(page);
     await expect(page.locator(`${HOST} [data-properties-panel]`)).toBeVisible();
     await expect(group(page, 'placement')).toHaveCount(0);
   });
