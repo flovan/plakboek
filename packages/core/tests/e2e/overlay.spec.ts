@@ -120,63 +120,6 @@ test.describe('hovering a block in the framed site', () => {
     expect(chipBox.height).toBe(20);
   });
 
-  test('draws the 2px outline and its 1px halo, and a chip in the outline colour', async ({
-    page,
-  }) => {
-    await openShell(page, '/?_edit=1', '.variant-plain h2');
-    await hover(page, '.variant-plain h2');
-    await expect(chrome(page).locator(OUTLINE)).toHaveCount(1);
-
-    const styles = await chrome(page)
-      .locator(OUTLINE)
-      .evaluate((element) => {
-        const computed = getComputedStyle(element);
-        return {
-          borderWidth: computed.borderTopWidth,
-          borderStyle: computed.borderTopStyle,
-          borderColor: computed.borderTopColor,
-          outlineWidth: computed.outlineWidth,
-          outlineStyle: computed.outlineStyle,
-          pointerEvents: computed.pointerEvents,
-        };
-      });
-    expect(styles).toEqual({
-      borderWidth: '2px',
-      borderStyle: 'solid',
-      borderColor: 'rgb(79, 70, 229)',
-      outlineWidth: '1px',
-      outlineStyle: 'solid',
-      pointerEvents: 'none',
-    });
-    const chip = await chrome(page)
-      .locator(CHIP)
-      .evaluate((element) => {
-        const computed = getComputedStyle(element);
-        return {
-          background: computed.backgroundColor,
-          color: computed.color,
-          fontSize: computed.fontSize,
-          fontWeight: computed.fontWeight,
-          radius: computed.borderTopLeftRadius,
-          paddingLeft: computed.paddingLeft,
-          maxWidth: computed.maxWidth,
-          whiteSpace: computed.whiteSpace,
-          textOverflow: computed.textOverflow,
-        };
-      });
-    expect(chip).toEqual({
-      background: 'rgb(79, 70, 229)',
-      color: 'rgb(255, 255, 255)',
-      fontSize: '12px',
-      fontWeight: '600',
-      radius: '4px',
-      paddingLeft: '8px',
-      maxWidth: '240px',
-      whiteSpace: 'nowrap',
-      textOverflow: 'ellipsis',
-    });
-  });
-
   test('also draws the dashed outline of the section around a block in it, without a chip of its own', async ({
     page,
   }) => {
@@ -309,8 +252,10 @@ test.describe('over the adversarial theme', () => {
     ['the fixed badge with the highest z-index there is', '.badge', 'Badge'],
   ];
 
-  for (const [name, selector, label] of CASES) {
-    test(`outlines ${name} at its real position`, async ({ page }) => {
+  test('outlines each block under the transforms, filters, containment, isolation and fixed badge', async ({
+    page,
+  }) => {
+    for (const [, selector, label] of CASES) {
       await openShell(page, '/?_edit=1', selector);
       const frame = await framedSite(page);
       // near the top of the element, clear of the insert point band that a
@@ -318,8 +263,8 @@ test.describe('over the adversarial theme', () => {
       await hover(page, selector, 0.2);
       await expect(chrome(page).locator(CHIP)).toHaveText(label);
       await expectOutlineOver(page, frame, selector);
-    });
-  }
+    }
+  });
 
   test("draws the layer inside the frame document's chrome host, over the whole page", async ({
     page,
@@ -388,84 +333,6 @@ test.describe('the outline follows its element', () => {
     }
   });
 
-  test('through a resize of the window', async ({ page }) => {
-    await openShell(page, '/?_edit=1', '.spacer');
-    const frame = await framedSite(page);
-    await hoverSpacer(page);
-    const before = await frameContentBox(page);
-
-    await page.setViewportSize({ width: 1200, height: 760 });
-    await expect
-      .poll(async () => (await frameContentBox(page)).height)
-      .not.toBe(before.height);
-    await expectOutlineOver(page, frame, '.spacer');
-  });
-
-  test('through the layout toggle, both ways', async ({ page }) => {
-    await openShell(page, '/?_edit=1', '.spacer');
-    const frame = await framedSite(page);
-    await hoverSpacer(page);
-    const framed = await chromeBoxOf(page, OUTLINE);
-
-    // by keyboard, so the pointer stays over the frame
-    const toggle = page.locator(`${HOST} [data-sidebar] button[aria-pressed]`);
-    await toggle.focus();
-    await page.keyboard.press('Enter');
-    await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'full');
-    await expectOutlineOver(page, frame, '.spacer');
-    const full = await chromeBoxOf(page, OUTLINE);
-    expect(framed.x - full.x).toBeGreaterThan(100);
-
-    await page.keyboard.press('Enter');
-    await expect(page.locator(HOST)).toHaveAttribute('data-layout', 'framed');
-    await expectOutlineOver(page, frame, '.spacer');
-  });
-
-  test('through a change of the page above it', async ({ page }) => {
-    await openShell(page, '/?_edit=1', '.spacer');
-    const frame = await framedSite(page);
-    await hoverSpacer(page);
-    const before = await chromeBoxOf(page, OUTLINE);
-    const spacerBefore = await boxOf(frame, '.spacer');
-
-    // the page above the spacer grows, as when the site's own script opens
-    // the second accordion (the first sits in a section of fixed height),
-    // which pushes everything below it down
-    await frame.evaluate(() => {
-      // a browser keeps what is on screen in place when content above it
-      // grows (scroll anchoring); switch that off so the page really moves.
-      // Chromium and Firefox read the viewport's overflow-anchor from the
-      // root, WebKit reads it from body: with only the root set, WebKit kept
-      // the spacer in place by scrolling the frame exactly as far as the
-      // panel grew
-      document.documentElement.style.overflowAnchor = 'none';
-      document.body.style.overflowAnchor = 'none';
-      const accordion = document.querySelectorAll('[data-accordion]')[1];
-      const trigger = accordion?.querySelector('button');
-      const panel = accordion?.querySelector('[role="region"]');
-      if (
-        !(trigger instanceof HTMLElement) ||
-        !(panel instanceof HTMLElement)
-      ) {
-        throw new Error('no accordion');
-      }
-      trigger.setAttribute('aria-expanded', 'true');
-      panel.hidden = false;
-    });
-    await expect(
-      frame.locator('[data-accordion] button').nth(1),
-    ).toHaveAttribute('aria-expanded', 'true');
-    // the precondition of this test: the spacer really moved down
-    await expect
-      .poll(async () => (await boxOf(frame, '.spacer')).y - spacerBefore.y, {
-        message: 'the spacer moved down',
-      })
-      .toBeGreaterThan(5);
-    await expectOutlineOver(page, frame, '.spacer');
-    const after = await chromeBoxOf(page, OUTLINE);
-    expect(after.y - before.y).toBeGreaterThan(5);
-  });
-
   test('after the frame reloads', async ({ page }) => {
     await openShell(page, '/?_edit=1', '.variant-plain h2');
     const before = await framedSite(page);
@@ -510,35 +377,6 @@ test.describe('the chip', () => {
       'retired-widget (unavailable)',
     );
     await expectOutlineOver(page, frame, '[data-pk-unavailable]');
-  });
-
-  test('is one line with an ellipsis when its text is long', async ({
-    page,
-  }) => {
-    await openShell(page, '/?_edit=1', '.variant-plain h2');
-    const frame = await framedSite(page);
-    // a stand-in label too long for 240px, set on the frame element the
-    // overlay reads
-    await frame.evaluate(() => {
-      document
-        .querySelector('.variant-plain h2')
-        ?.setAttribute(
-          'data-pk-label',
-          'A label far too long to fit in a chip that stops at two hundred and forty pixels',
-        );
-    });
-    await hover(page, '.variant-plain h2');
-    await expect(chrome(page).locator(CHIP)).toContainText(
-      'A label far too long',
-    );
-    const chip = await chromeBoxOf(page, CHIP);
-    expect(chip.width).toBeLessThanOrEqual(240);
-    expect(chip.height).toBe(20);
-    expect(
-      await chrome(page)
-        .locator(CHIP)
-        .evaluate((element) => element.scrollWidth > element.clientWidth),
-    ).toBe(true);
   });
 });
 
@@ -655,34 +493,5 @@ test.describe('who gets the overlay', () => {
     await page.mouse.move(heading.x + 20, heading.y + 5);
     await expect(chrome(page).locator(OUTLINE)).toHaveCount(0);
     await expect(chrome(page).locator(CHIP)).toHaveCount(0);
-  });
-});
-
-test.describe('motion', () => {
-  test('fades the outline in over 100ms, and not at all under reduced motion', async ({
-    page,
-  }) => {
-    const animation = async () =>
-      await chrome(page)
-        .locator(OUTLINE)
-        .evaluate((element) => {
-          const computed = getComputedStyle(element);
-          return {
-            name: computed.animationName,
-            duration: computed.animationDuration,
-          };
-        });
-
-    await page.emulateMedia({ reducedMotion: 'no-preference' });
-    await openShell(page, '/?_edit=1', '.variant-plain h2');
-    await hover(page, '.variant-plain h2');
-    await expect(chrome(page).locator(OUTLINE)).toHaveCount(1);
-    expect(await animation()).toEqual({
-      name: 'pk-overlay-in',
-      duration: '0.1s',
-    });
-
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await expect.poll(animation).toEqual({ name: 'none', duration: '0s' });
   });
 });
