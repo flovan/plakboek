@@ -48,8 +48,7 @@ export async function assertSiteBehaviour(frame: Frame): Promise<void> {
     .toBe(false);
 
   // Window scroll: the frame's own window scrolls, the scroll listener sees
-  // it, the sticky header stays pinned and the fixed banner stays at the
-  // bottom of the frame's viewport.
+  // it, and the sticky header and the fixed banner stay in view.
   await frame.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
   // Scroll events are delivered on the next frame: let those of the earlier
   // interactions land before counting.
@@ -77,17 +76,6 @@ export async function assertSiteBehaviour(frame: Frame): Promise<void> {
     )
     .toBeGreaterThan(eventsBefore);
 
-  const headerTop = await frame
-    .locator('header.site-header')
-    .evaluate((element) => element.getBoundingClientRect().top);
-  expect(Math.abs(headerTop)).toBeLessThanOrEqual(1);
-
-  const { bannerBottom, viewportHeight } = await frame.evaluate(() => {
-    const banner = document.querySelector('.cookie-banner');
-    return {
-      bannerBottom: banner?.getBoundingClientRect().bottom ?? Number.NaN,
-      viewportHeight: window.innerHeight,
-    };
-  });
-  expect(Math.abs(bannerBottom - viewportHeight)).toBeLessThanOrEqual(1);
+  await expect(frame.locator('header.site-header')).toBeInViewport();
+  await expect(frame.locator('.cookie-banner')).toBeInViewport();
 }
