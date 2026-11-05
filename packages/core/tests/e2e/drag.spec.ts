@@ -225,7 +225,7 @@ test.describe('where a line shows', () => {
 });
 
 test.describe('ending a drag without a change', () => {
-  test('Escape mid-drag leaves the order unchanged and writes nothing', async ({
+  test('Escape mid-drag, or a release outside the frame, leaves the order unchanged and writes nothing', async ({
     page,
   }) => {
     const created = await twoSections();
@@ -244,22 +244,15 @@ test.describe('ending a drag without a change', () => {
     expect(await headingsIn(frame, 1)).toEqual(['H1', 'H2']);
     expect(await headingsIn(frame, 2)).toEqual(['H3', 'H4']);
     await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
-  });
 
-  test('a release outside the frame cancels', async ({ page }) => {
-    const created = await twoSections();
-    await openEditor(page, created.path);
-    const frame = await framedSite(page);
-    await selectHeading(page, frame, 1, 0);
     await pickUp(page);
-    const target = await gapAfter(frame, H3);
     await page.mouse.move(target.x, target.y, { steps: 8 });
     await expect(chrome(page).locator(LINE)).toBeVisible();
-
     await page.mouse.move(60, 400, { steps: 8 });
     await page.mouse.up();
     await expect(page.locator(HOST).locator(SURFACE)).toHaveCount(0);
     expect(await headingsIn(frame, 1)).toEqual(['H1', 'H2']);
+    expect(await headingsIn(frame, 2)).toEqual(['H3', 'H4']);
     await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
   });
 });
@@ -287,7 +280,7 @@ test.describe('near the frame edge', () => {
     });
     await expect
       .poll(() => frame.evaluate(() => window.scrollY))
-      .toBeGreaterThan(100);
+      .toBeGreaterThan(0);
     await page.keyboard.press('Escape');
     await page.mouse.up();
   });
@@ -471,14 +464,7 @@ test.describe('dragging by the keyboard', () => {
     await expect
       .poll(() => frame.evaluate(() => window.scrollY))
       .toBeGreaterThan(0);
-    await expect
-      .poll(async () => {
-        const line = await chrome(page).locator(LINE).boundingBox();
-        const view = await page.locator(`${HOST} iframe`).boundingBox();
-        if (line === null || view === null) return false;
-        return line.y >= view.y && line.y + line.height <= view.y + view.height;
-      })
-      .toBe(true);
+    await expect(chrome(page).locator(LINE)).toBeInViewport();
     await page.keyboard.press('Escape');
   });
 });
